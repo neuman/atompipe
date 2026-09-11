@@ -1,0 +1,54 @@
+{
+  "name": "fluids-analytic",
+  "version": "0.1.0",
+  "description": "Closed-form hydrostatics, stability, drag and pipe flow: the analytic answer for boats, floats, ducts and piping, before anyone installs a CFD solver.",
+  "settles": [
+    "buoyancy",
+    "displaced volume fraction",
+    "freeboard at load",
+    "reserve buoyancy",
+    "metacentric height",
+    "initial stability",
+    "righting arm at heel",
+    "drag force",
+    "Reynolds number",
+    "flow regime validity",
+    "pipe pressure drop",
+    "head loss",
+    "friction budget against pump head",
+    "duct sizing",
+    "minor losses"
+  ],
+  "claim_classes": [
+    "fluids",
+    "hydrostatics",
+    "stability",
+    "drag",
+    "pipe-flow",
+    "fluid-dynamics"
+  ],
+  "provides_gates": [
+    "fluid.buoyancy",
+    "fluid.freeboard",
+    "fluid.metacentric",
+    "fluid.righting_arm",
+    "fluid.drag",
+    "fluid.pipe_pressure_drop",
+    "fluid.flow_regime"
+  ],
+  "provides_generators": [],
+  "requires_tools": [],
+  "requires_python": [],
+  "max_tier": 0,
+  "lenses": [
+    "loading condition",
+    "free surface",
+    "static vs dynamic stability",
+    "centre of mass migration",
+    "flooding and swamping",
+    "flow regime",
+    "correlation validity"
+  ],
+  "licence": "Apache-2.0",
+  "origin": "built by the extension protocol as the tier-0 answer for fluid claims; every correlation is textbook closed form, every threshold is a stated pack default the project overrides"
+}

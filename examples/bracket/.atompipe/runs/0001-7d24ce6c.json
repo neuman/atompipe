@@ -1,0 +1,136 @@
+{
+  "index": 1,
+  "meta": {
+    "duration_s": 0.0002,
+    "inputs_hash": "e3b0c44298fc",
+    "model_hash": "321107b55616",
+    "spine_version": "0.1.0",
+    "tier": 0,
+    "when": "2026-09-11T23:31:00Z"
+  },
+  "verdicts": [
+    {
+      "claims": [
+        "structural",
+        "stiffness",
+        "deflection"
+      ],
+      "detail": "0.700 mm at 15 N (limit 0.5 mm)",
+      "duration_s": 2.4e-05,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.deflection",
+      "limit": 0.5,
+      "measured": 0.6997,
+      "pack": "",
+      "passed": false,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    },
+    {
+      "claims": [
+        "structural",
+        "strength",
+        "bending-stress"
+      ],
+      "detail": "3.7 MPa vs 15.0 MPa allowable (util 0.24, petg)",
+      "duration_s": 9e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bending_stress",
+      "limit": 1.0,
+      "measured": 0.245,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "utilisation"
+    },
+    {
+      "claims": [
+        "structural",
+        "fastener",
+        "bearing"
+      ],
+      "detail": "0.19 MPa on 77 mm^2 across 2 bolt(s), allowable 15.0 MPa",
+      "duration_s": 6e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bearing",
+      "limit": 15.0,
+      "measured": 0.195,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "MPa"
+    },
+    {
+      "claims": [
+        "structural",
+        "stiffness",
+        "strength",
+        "fastener"
+      ],
+      "detail": "slenderness 8.6 (>= 5.0 for Euler-Bernoulli; below this the deflection gate under-predicts)",
+      "duration_s": 3e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.model_validity",
+      "limit": 5.0,
+      "measured": 8.57,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "L/h"
+    },
+    {
+      "claims": [
+        "manufacturability",
+        "fdm",
+        "bed-fit",
+        "footprint"
+      ],
+      "detail": "74 x 30 x 7 mm vs 204 mm usable (220 bed - 2x8 brim)",
+      "duration_s": 6e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bed_fit",
+      "limit": 204.0,
+      "measured": 73.5,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    },
+    {
+      "claims": [
+        "manufacturability",
+        "fdm",
+        "wall-thickness",
+        "min-wall"
+      ],
+      "detail": "thinnest section 7.0 mm vs 1.2 mm minimum (3 perimeters at a 0.4 mm nozzle)",
+      "duration_s": 4e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.min_wall",
+      "limit": 1.2,
+      "measured": 7.0,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "fdm-print",
+  "version": "0.1.0",
+  "description": "Validates that a part is printable on a filament machine: bed fit with brim, wall thickness, overhang, bridge span, layer-direction loading and print time.",
+  "settles": [
+    "bed fit",
+    "bridge span",
+    "build volume",
+    "cantilever overhang",
+    "filament mass",
+    "layer-normal load alignment",
+    "mesh solidity",
+    "overhang angle",
+    "print time",
+    "process model validity",
+    "support requirement",
+    "unit sanity",
+    "wall thickness"
+  ],
+  "claim_classes": [
+    "manufacturability",
+    "fdm",
+    "additive",
+    "printability",
+    "structural",
+    "cost",
+    "process-validity"
+  ],
+  "provides_gates": [
+    "fdm.bed_fit",
+    "fdm.bridge_span",
+    "fdm.layer_alignment",
+    "fdm.min_wall",
+    "fdm.overhang",
+    "fdm.print_time_est",
+    "fdm.process_model_valid"
+  ],
+  "provides_generators": [],
+  "requires_tools": [],
+  "requires_python": [
+    "trimesh",
+    "numpy"
+  ],
+  "max_tier": 1,
+  "lenses": [
+    "part orientation",
+    "support removal access",
+    "first-layer adhesion and warp",
+    "post-processing",
+    "printable without supports at all"
+  ],
+  "authors": [],
+  "licence": "Apache-2.0",
+  "origin": "written against filament-machine practice; thresholds carry their provenance inline in gates/"
+}

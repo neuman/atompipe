@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- atompipe project state ---
+# The ledger IS a source of truth — claims, evidence, provenance, decisions — so
+# `.atompipe/ledger.json` and `.atompipe/runs/` stay TRACKED in a real project.
+# Only the scratch a gate sweep writes is ignored. (METHOD.md rule 1: generated
+# files are outputs, not sources.)
+.atompipe/out/
+.selftest-out/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*:Zone.Identifier

@@ -1,0 +1,237 @@
+{
+  "_description": "Model projection for a 500-unit production run of a DIN-rail mounted 4-channel analogue signal conditioner: an extruded aluminium housing with moulded end caps, a 6-layer ENIG board carrying one microcontroller and two isolated 4-channel ADCs, two 8-way press-fit pluggable terminal blocks, an LDO, a clip-on rail foot, a label and four M3 screws. Costed in USD from quoted prices, with the end-cap moulding quoted in EUR and converted at the rate recorded in the BOM. Every vendor, part number and price here is invented, but the shape of the document, the quantities and the money are the shape a real 500-off procurement package has: MOQ and order-multiple rounding on every purchased line, per-order minimums on the two smallest vendors, and three one-time charges amortised across the run.",
+
+  "build_quantity": 500,
+  "budget_per_unit": 58.0,
+  "budget_total": 29000.0,
+  "lead_time_budget_weeks": 16,
+  "moq_ratio_limit": 3.0,
+  "moq_excess_limit": 50.0,
+  "moq_idle_limit_fraction": 0.10,
+  "moq_excess_total_limit": null,
+  "single_source_limit": 0,
+
+  "bom": {
+    "schema": "atompipe.bom/1",
+    "product": "DIN-rail 4-channel analogue signal conditioner",
+    "currency": "USD",
+    "fx_rates": {"EUR": 1.08},
+
+    "design": {
+      "surface_finish": "ENIG",
+      "contact_type": "press-fit",
+      "material": "aluminium-6063",
+      "region": "EU",
+      "assembly_tier": "fine-pitch",
+      "min_track_width_mm": 0.15,
+      "min_via_drill_mm": 0.3
+    },
+
+    "process_rules": [
+      {
+        "id": "board-finish-for-press-fit",
+        "scope": "design",
+        "when": {"contact_type": "press-fit"},
+        "require": {"surface_finish": {"in": ["ENIG", "hard-gold"]}},
+        "note": "the assembler will only warrant press-fit insertion into a flat plated barrel; a levelled-solder finish leaves an uneven barrel and the retention force is out of specification on the third insertion"
+      },
+      {
+        "id": "housing-material-stocked-in-region",
+        "scope": "design",
+        "require": {"material": {"not_in": ["titanium-gr5", "magnesium-az91"]}},
+        "note": "the extruder stocks neither alloy in this region at this quantity; an import buy adds roughly 14 weeks and a customs broker to the schedule"
+      },
+      {
+        "id": "assembly-line-tier",
+        "scope": "design",
+        "require": {"assembly_tier": {"in": ["standard", "fine-pitch"]}},
+        "note": "anything below 0.4 mm pitch moves to a different line with its own quote, its own queue and a longer first-article"
+      },
+      {
+        "id": "fab-minimum-track-width",
+        "scope": "design",
+        "require": {"min_track_width_mm": {"min": 0.125}},
+        "note": "standard-class fabrication as quoted holds 0.125 mm track and gap; below that the board moves to the advanced-class price list"
+      },
+      {
+        "id": "fab-minimum-via-drill",
+        "scope": "design",
+        "require": {"min_via_drill_mm": {"min": 0.25}},
+        "note": "0.25 mm is the smallest mechanically drilled via on the quoted line; smaller is laser-drilled, which this fabricator subcontracts"
+      },
+      {
+        "id": "milling-tolerance-capability",
+        "scope": "line",
+        "when": {"process": "cnc-milling"},
+        "require": {"tolerance_mm": {"min": 0.1}},
+        "note": "the shop holds +/-0.10 mm on milled features on the extrusion as quoted; tighter is a secondary operation and a separate price"
+      },
+      {
+        "id": "fab-class-capability",
+        "scope": "line",
+        "when": {"process": "pcb-fab"},
+        "require": {
+          "tolerance_mm": {"min": 0.075},
+          "surface_finish": {"in": ["ENIG", "immersion-tin"]}
+        },
+        "note": "standard-class registration and the two finishes this fabricator runs in-house; anything else is brokered and the lead time doubles"
+      }
+    ],
+
+    "order_minimums": {
+      "Calverton Labelworks": 150.0,
+      "Rowe Polymer": 500.0
+    },
+
+    "charges": [
+      {"id": "housing-work-holding", "vendor": "Kestrel Extrusions", "amount": 950.0, "description": "soft-jaw fixture for the second-operation machining, one time, kept by the shop"},
+      {"id": "assembly-setup", "vendor": "Torrey Circuitworks", "amount": 420.0, "description": "stencil and line setup, charged once per order"},
+      {"id": "test-fixture", "vendor": "in-house", "amount": 1600.0, "description": "bed-of-nails functional test fixture, one time"}
+    ],
+
+    "lines": [
+      {
+        "ref": "HSG-01", "description": "extruded aluminium housing, machined and anodised",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Kestrel Extrusions", "vendor_pn": "KE-3120-ANO",
+        "unit_price": 11.4, "price_currency": "USD",
+        "moq": 100, "order_multiple": 50,
+        "stock": null, "lead_time_weeks": 7, "lifecycle": "active",
+        "sources": ["Kestrel Extrusions", "Bellhaven Metalworks"], "alternate_qualified": true,
+        "attributes": {"process": "cnc-milling", "tolerance_mm": 0.15, "material": "aluminium-6063"}
+      },
+      {
+        "ref": "PCB-01", "description": "6-layer board, 1.6 mm, ENIG",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Torrey Circuitworks", "vendor_pn": "TC-6L-062-ENIG",
+        "unit_price": 8.9, "price_currency": "USD",
+        "moq": 100, "order_multiple": 50,
+        "stock": null, "lead_time_weeks": 3, "lifecycle": "active",
+        "sources": ["Torrey Circuitworks", "Halloway PCB"], "alternate_qualified": true,
+        "attributes": {"process": "pcb-fab", "tolerance_mm": 0.1, "surface_finish": "ENIG", "layers": 6}
+      },
+      {
+        "ref": "U1", "description": "microcontroller, 32-bit, 64-pin",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Brightmoor Components", "vendor_pn": "BC-77401",
+        "manufacturer": "Wexmoor Semiconductor", "mpn": "WM32L-064",
+        "unit_price": 4.15, "price_currency": "USD",
+        "moq": 1, "order_multiple": 100,
+        "stock": 12000, "lead_time_weeks": 22, "lifecycle": "active",
+        "sources": ["Brightmoor Components", "Ardsley Supply"], "alternate_qualified": true,
+        "note": "22-week factory lead, but the whole run is covered from distributor stock; the reserve matters more than the quote does"
+      },
+      {
+        "ref": "U2", "description": "isolated 4-channel delta-sigma ADC, calibrated",
+        "qty_per_unit": 2, "spares_fraction": 0.02,
+        "vendor": "Ardsley Supply", "vendor_pn": "AS-ADC-4410",
+        "manufacturer": "Calder Analogue", "mpn": "CA-4410-B",
+        "unit_price": 6.35, "price_currency": "USD",
+        "moq": 250, "order_multiple": 250,
+        "stock": null, "lead_time_weeks": 12, "lifecycle": "active",
+        "sources": ["Ardsley Supply"], "alternate_qualified": false,
+        "single_source_accepted": true,
+        "acceptance_note": "sole source accepted deliberately: the one alternate part needs a new calibration polynomial and a re-run of the channel-matching test, about three weeks of engineering. The risk is carried on the understanding that stock is reserved before the run is committed.",
+        "attributes": {"package": "qfn-32", "pitch_mm": 0.5}
+      },
+      {
+        "ref": "J1", "description": "pluggable terminal block header, 8 way, press-fit",
+        "qty_per_unit": 2, "spares_fraction": 0.0,
+        "vendor": "Pellworth Interconnect", "vendor_pn": "PI-8W-508-PF",
+        "unit_price": 1.85, "price_currency": "USD",
+        "moq": 500, "order_multiple": 500,
+        "stock": 40000, "lead_time_weeks": 10, "lifecycle": "active",
+        "sources": ["Pellworth Interconnect", "Brightmoor Components"], "alternate_qualified": true,
+        "attributes": {"contact_type": "press-fit", "pitch_mm": 5.08}
+      },
+      {
+        "ref": "CLP-01", "description": "clip-on DIN rail foot, sprung",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Lindow Hardware", "vendor_pn": "LH-DIN-35",
+        "unit_price": 0.62, "price_currency": "USD",
+        "moq": 1000, "order_multiple": 1000,
+        "stock": 15000, "lead_time_weeks": 4, "lifecycle": "active",
+        "sources": ["Lindow Hardware", "Bellhaven Metalworks"], "alternate_qualified": true
+      },
+      {
+        "ref": "CAP-01", "description": "moulded end cap, glass-filled nylon",
+        "qty_per_unit": 2, "spares_fraction": 0.0,
+        "vendor": "Rowe Polymer", "vendor_pn": "RP-EC-3120",
+        "unit_price": 0.31, "price_currency": "EUR",
+        "moq": 1000, "order_multiple": 1000,
+        "stock": null, "lead_time_weeks": 5, "lifecycle": "active",
+        "sources": ["Rowe Polymer", "Tallow Moulding"], "alternate_qualified": true,
+        "note": "quoted in EUR off the moulder's European price list; converted with fx_rates before anything is added up"
+      },
+      {
+        "ref": "FST-01", "description": "M3 x 6 machine screw, stainless",
+        "qty_per_unit": 4, "spares_fraction": 0.0,
+        "vendor": "Lindow Hardware", "vendor_pn": "LH-M30-06",
+        "unit_price": 0.03, "price_currency": "USD",
+        "moq": 2000, "order_multiple": 1000,
+        "stock": 250000, "lead_time_weeks": 2, "lifecycle": "active",
+        "sources": ["Lindow Hardware", "Brightmoor Components"], "alternate_qualified": true
+      },
+      {
+        "ref": "LBL-01", "description": "printed identification and rating label",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Calverton Labelworks", "vendor_pn": "CL-LBL-2280",
+        "unit_price": 0.02, "price_currency": "USD",
+        "moq": 2000, "order_multiple": 2000,
+        "stock": null, "lead_time_weeks": 3, "lifecycle": "active",
+        "sources": ["Calverton Labelworks", "Bellhaven Metalworks"], "alternate_qualified": true,
+        "note": "4x overbuy against the print minimum and nobody should care: 30 USD of spare labels. The ratio is only worth waking someone for when it is attached to money."
+      },
+      {
+        "ref": "REG-01", "description": "low-dropout regulator, 3.3 V, 150 mA",
+        "qty_per_unit": 1, "spares_fraction": 0.0,
+        "vendor": "Brightmoor Components", "vendor_pn": "BC-21908",
+        "manufacturer": "Wexmoor Semiconductor", "mpn": "WM-LDO-33",
+        "unit_price": 0.38, "price_currency": "USD",
+        "moq": 1, "order_multiple": 250,
+        "stock": 8000, "lead_time_weeks": 18, "lifecycle": "nrnd",
+        "sources": ["Brightmoor Components", "Ardsley Supply"], "alternate_qualified": true,
+        "note": "not recommended for new designs: buy-able today, gone within a year. A qualified alternate exists, which is the only reason this is a flag on the report and not a stop."
+      }
+    ]
+  },
+
+  "_notes": {
+    "build_quantity": "units in this production run (count). Cost, MOQ overbuy and stock cover all hang off it.",
+    "budget_per_unit": "target rolled-up cost of one unit (USD/unit). bom.cost fails above it.",
+    "budget_total": "target cost of the whole run (USD/run). Only used when budget_per_unit is absent; kept consistent at budget_per_unit * build_quantity.",
+    "lead_time_budget_weeks": "longest acceptable lead time on any line (weeks). bom.availability fails above it.",
+    "moq_ratio_limit": "purchased/needed above which a line is worth naming (dimensionless). A filter and a reported column, never the whole verdict.",
+    "moq_excess_limit": "money tied up on a single line past that ratio (USD). One reel that idles real money fails on its own, however large the rest of the buy is.",
+    "moq_idle_limit_fraction": "BOM-wide idle capital allowed, as a share of the run's parts spend (dimensionless). bom.moq's headline limit: 0.10 means a tenth of the parts spend may sit in pieces this run will not consume. Here that is 0.10 x 23,257.30 = 2,325.73 USD against 1,800.50 USD actually idle - the reel, tray and sheet rounding on U2, CLP-01 and LBL-01.",
+    "moq_excess_total_limit": "the same limit stated in money instead of as a share (USD), for a project that knows its own tolerance. null means it is not stated and the fraction above is used.",
+    "single_source_limit": "how many sole-sourced lines may go unrecorded (lines). Zero: the fix is a written decision, not a second vendor.",
+    "bom": "the bill of materials document itself, inline. bomlib.resolve finds it here; a project may instead point at a file with bom_path.",
+    "bom.schema": "document shape identifier (string).",
+    "bom.currency": "the currency every rolled-up total is reported in (ISO code).",
+    "bom.fx_rates": "multipliers from a quoted currency to bom.currency (USD per unit of that currency). A line quoted in a currency absent here counts as UNPRICED, not as a number to add up.",
+    "bom.design": "declared design attributes the vendor's process rules are checked against (mixed units; *_mm keys are millimetres).",
+    "bom.process_rules": "the capability set the project was quoted, as rules. scope design|line, when selects what a rule applies to, require states the limit. An attribute a rule requires and the design never declares is a violation.",
+    "bom.order_minimums": "per-order minimum spend by vendor (USD). A short order is billed up to the minimum and the shortfall is real money in the roll-up.",
+    "bom.charges": "one-time non-recurring charges for the run (USD) - tooling, setup, test fixtures. Amortised across build_quantity, which is why a per-unit price is meaningless without a quantity beside it.",
+    "bom.lines": "one row per orderable item.",
+    "line.ref": "designator used in the verdicts and the evidence files (string).",
+    "line.qty_per_unit": "pieces consumed by one finished unit (count).",
+    "line.spares_fraction": "extra fraction bought for attrition and test (dimensionless, 0.02 = 2%).",
+    "line.vendor": "who the order goes to (string). Also the key into order_minimums.",
+    "line.vendor_pn": "the vendor's ordering code (string). Either this or mpn must be present or the line is not orderable.",
+    "line.manufacturer / line.mpn": "who makes it and their part number (string) - what a second source is qualified against.",
+    "line.unit_price": "quoted price of one piece in line.price_currency. null means UNKNOWN, never free.",
+    "line.price_currency": "currency the line was quoted in (ISO code). Defaults to bom.currency.",
+    "line.moq": "smallest quantity the vendor will sell (pieces).",
+    "line.order_multiple": "pack, reel or sheet quantity the order is rounded up to (pieces).",
+    "line.stock": "pieces available now from that vendor (count), or null for none/made-to-order. Stock covering the purchase quantity makes the effective lead time zero.",
+    "line.lead_time_weeks": "quoted lead time for what stock does not cover (weeks).",
+    "line.lifecycle": "active | nrnd | allocation | last-time-buy | eol | obsolete | discontinued. eol and below fail the availability gate; nrnd and allocation are reported, not failed.",
+    "line.sources": "distinct suppliers this exact line can be bought from (list of names).",
+    "line.alternate_qualified": "true when a second part has actually been qualified, not merely found (bool).",
+    "line.single_source_accepted": "true when somebody decided in writing to carry the sole-source risk (bool).",
+    "line.acceptance_note": "what that decision costs if it goes wrong (string). Required alongside single_source_accepted; the flag without the note is not a decision.",
+    "line.attributes": "per-line process attributes the line-scoped rules match on: process, tolerance_mm, surface_finish, pitch_mm, package, material."
+  }
+}

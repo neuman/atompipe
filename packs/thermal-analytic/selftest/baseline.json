@@ -1,0 +1,149 @@
+{
+  "_description": "A 2.4 m2 glazed flat-plate solar thermal preheat installation at 40 N: one aluminium-absorber collector on a 40 deg south-facing roof, and the insulated outdoor plant cabinet under it that carries the pump station. Design point is a clear midsummer noon (day 172, solar noon) with 35 C outdoor air. The collector runs 1157 W useful at 51.7% efficiency from 932 W/m2 plane-of-array and stagnates at 192 C against a 210 C seal-and-glycol ceiling; the selective absorber (eps 0.10) sheds 106 W to a 15 C sky. The cabinet is a 0.42 W/m2K panel enclosure whose internal air sits at 45 C worst case; inside it a brazed-aluminium plate-fin heat exchanger moves the glycol loop into the store (glycol-side h 1100 W/m2K, fin effectiveness 20.5 against a ceiling of 26), and the pump-controller board dissipates 25 W through a junction-case-pad-heatsink path totalling 1.68 K/W to reach 87 C against a 110 C junction limit. The heatsink is a 120 x 80 mm 6061-T6 extrusion in 2.5 m/s of fan air (h 17.7 W/m2K, Bi 1.9e-4, tau 246 s). Every gate here is describing the same installation: the cabinet air the electronics sees (ambient_c, 45 C) and the outdoor air the collector sees (collector_ambient_c, 35 C) are the same day, ten kelvin apart. Units: SI throughout - m, m2, m3, W, K/W, m2K/W, degC at the boundary.",
+
+  "wall_layers": [
+    {"name": "outer steel skin", "thickness_m": 0.0015, "k_w_mk": 50.0},
+    {"name": "insulated core", "thickness_m": 0.080, "parallel": [
+      {"name": "PIR foam", "k_w_mk": 0.023, "area_fraction": 0.95},
+      {"name": "pultruded GRP edge rib", "k_w_mk": 0.30, "area_fraction": 0.05}
+    ]},
+    {"name": "inner ply liner", "thickness_m": 0.006, "k_w_mk": 0.13}
+  ],
+  "wall_area_m2": 8.3,
+  "surface_film_r_m2k_w": 0.17,
+  "wall_u_limit_w_m2k": 0.50,
+
+  "convection_mode": "forced",
+  "convection_geometry": "flat_plate",
+  "char_length_m": 0.12,
+  "velocity_m_s": 2.5,
+  "fluid": "air",
+  "surface_c": 68.0,
+  "ambient_c": 45.0,
+  "h_required_w_m2k": 12.0,
+
+  "rad_surface_c": 75.0,
+  "rad_surround_c": 15.0,
+  "rad_area_m2": 2.4,
+  "emissivity": 0.10,
+  "emissivity_surround": 1.0,
+  "view_factor": 1.0,
+  "rad_sense": "max",
+  "rad_limit_w": 160.0,
+
+  "fin_k_w_mk": 222.0,
+  "fin_thickness_m": 0.0006,
+  "fin_length_m": 0.008,
+  "fin_width_m": 0.30,
+  "fin_h_w_m2k": 1100.0,
+  "fin_effectiveness_min": 2.0,
+
+  "power_w": 25.0,
+  "temp_limit_c": 110.0,
+  "resistance_path_k_w": [
+    {"name": "junction-to-case", "r_k_w": 0.45},
+    {"name": "case-to-heatsink interface pad", "r_k_w": 0.30},
+    {"name": "heatsink-to-cabinet-air", "r_k_w": 0.93}
+  ],
+
+  "body_volume_m3": 1.218e-4,
+  "body_area_m2": 0.068,
+  "body_density_kg_m3": 2700.0,
+  "body_cp_j_kgk": 900.0,
+  "body_k_w_mk": 167.0,
+  "body_h_w_m2k": 17.7,
+  "biot_limit": 0.1,
+  "h_agreement_tol": 0.10,
+  "time_constant_limit_s": 600.0,
+
+  "collector_area_m2": 2.4,
+  "collector_fr": 0.78,
+  "collector_tau_alpha": 0.76,
+  "collector_ul_w_m2k": 4.5,
+  "irradiance_w_m2": 932.0,
+  "collector_inlet_c": 55.0,
+  "collector_ambient_c": 35.0,
+  "collector_output_min_w": 1000.0,
+  "stagnation_limit_c": 210.0,
+
+  "latitude_deg": 40.0,
+  "day_of_year": 172,
+  "solar_hour": 12.0,
+  "surface_tilt_deg": 40.0,
+  "surface_azimuth_deg": 0.0,
+  "ground_albedo": 0.20,
+  "clearness_number": 1.0,
+  "design_irradiance_min_w_m2": 800.0,
+
+  "_notes": {
+    "_units": "SI. Lengths m, areas m2, volumes m3, power W, irradiance W/m2, h and U W/m2K, k W/mK, density kg/m3, cp J/kgK, time s, angles degrees. Every key ending _c is degrees CELSIUS and every key ending _k or _k_w is kelvin or K/W; the pack converts to absolute kelvin internally and radiation is the fourth power of the absolute one.",
+    "_two_ambients": "ambient_c (45 C) is the air INSIDE the plant cabinet, which is what the electronics actually sees. collector_ambient_c (35 C) is outdoor air. They are separate keys on purpose: one shared 'ambient' across an enclosure and its outside is a units-grade error that reads as a perfectly plausible number.",
+    "_two_resistances": "m2K/W is PER UNIT AREA and belongs to wall stacks (surface_film_r_m2k_w, the U-value). K/W is ABSOLUTE and belongs to a component path (resistance_path_k_w). They differ by an area and the unit suffix is the only warning.",
+
+    "wall_layers": "The cabinet wall as a resistance stack, outside to inside. A series layer is {name, thickness_m, k_w_mk} -> R = t/k. A co-planar layer is {name, thickness_m, parallel:[{name, k_w_mk, area_fraction}]} and adds in CONDUCTANCE: the GRP edge ribs are 5% of the area and carry 40.7% of the heat through that plane (PIR 0.95*0.023/0.080 = 0.2731 W/m2K against GRP 0.05*0.30/0.080 = 0.1875, so the ribs are 0.1875/0.4606 of the conductance at a twentieth of the area). Modelling the core as insulation alone gives R = 0.17 + 0.00003 + 0.080/0.023 + 0.04615 = 3.694 m2K/W and would report U=0.27 instead of 0.42 - a 35% understatement of the loss, from the one detail a section drawing shows and a one-dimensional stack does not.",
+    "wall_area_m2": "Envelope area the U-value acts over, m2. 1.2 x 0.8 x 1.6 m cabinet, all six faces.",
+    "surface_film_r_m2k_w": "Combined inside + outside surface film resistance, m2K/W. 0.13 still air inside + 0.04 moving air outside, the standard pair. Omit it and the wall is reported bare, which overstates U by ~7% here.",
+    "wall_u_limit_w_m2k": "Project/code limit on the wall's U-value, W/m2K. The gate FAILS above it. 0.50 keeps the cabinet's fabric loss to 3.5 W/K so the store does not lose overnight what the collector made.",
+
+    "convection_mode": "'natural' or 'forced'. Forced here: a 2.5 m/s board fan over the controller heatsink.",
+    "convection_geometry": "Which correlation to use. Natural: vertical_plate, horizontal_plate_hot_up, horizontal_plate_hot_down, horizontal_cylinder. Forced: flat_plate, cylinder_cross_flow. Each carries the Ra/Re band it was fitted over and the gate FAILS outside it.",
+    "char_length_m": "Characteristic length in the correlation, m, and it is defined PER GEOMETRY - it is not one rule. Flat plate in flow: the STREAMWISE length (120 mm along the airflow here), not the span. Vertical plate: the height. Horizontal plate, either facing: area/perimeter, which for a square plate of side a is a/4 and NOT a - using the side puts Ra out by 64 and h out by 1.41x. Horizontal cylinder and cylinder in cross flow: the diameter. Lumped body, for Biot: volume/surface area. thermal.convection echoes the expected definition for the geometry you chose into its own verdict, so a mismatch is visible in the output rather than only in references/correlations.md.",
+    "velocity_m_s": "Approach velocity of the forced stream, m/s. Forced convection only. Re = V*L/nu = 1.6e4 here, laminar.",
+    "fluid": "Working fluid for the property table: 'air' or 'water'. Properties are evaluated at the film temperature (mean of surface_c and ambient_c) and a film temperature outside the table FAILS rather than extrapolating.",
+    "surface_c": "Temperature of the convecting surface, degC. 68 C = the heatsink at 25 W x 0.93 K/W above 45 C cabinet air - the same number resistance_path_k_w produces.",
+    "ambient_c": "Bulk fluid temperature the surface sits in, degC. Cabinet air at 45 C: outdoor 35 C plus the rise from the electronics, the hot glycol pipework and solar gain on the skin.",
+    "h_required_w_m2k": "The h the design needs, W/m2K; the gate FAILS below it. 12 is what the 1.68 K/W junction path assumes; the surface delivers 17.7. In air, expect 2-25 natural and 10-200 forced - anything outside that is a modelling error, not a result.",
+
+    "rad_surface_c": "Radiating surface temperature, degC. The collector absorber plate at 75 C on the design day.",
+    "rad_surround_c": "Effective temperature of what the surface radiates TO, degC. 15 C is a clear-sky effective temperature about 20 K below the 35 C air - it is not the air temperature and using the air temperature understates the loss.",
+    "rad_area_m2": "Radiating area, m2. The 2.4 m2 absorber aperture.",
+    "emissivity": "Hemispherical emissivity of the radiating surface, 0-1. 0.10 is a selective absorber coating (high solar absorptance, low infrared emittance) - the whole point of the coating, and worth ~850 W of avoided loss here.",
+    "emissivity_surround": "Emissivity of the surround, 0-1. 1.0 (the sky, effectively a black cavity) collapses the two-surface enclosure to eps1*A1*F*sigma*(T1^4-T2^4). Below 1.0 the pack also needs area_surround_m2, because a grey surround has a finite area and the difference is a factor of two in a tight enclosure.",
+    "view_factor": "Fraction of surface 1's radiation that lands on surface 2, 0-1. 1.0 here: the absorber under its glazing sees only the sky. There is no safe default - assuming 1.0 is how a shaded radiator passes.",
+    "rad_sense": "Which way the inequality runs. 'max' = this is LOSS and must stay under rad_limit_w (a solar absorber, as here). 'min' = this is REJECTION and must exceed it (a passively cooled enclosure).",
+    "rad_limit_w": "The radiant power limit, W. 160 W is the share of the collector's loss budget allotted to absorber radiation; at eps 0.10 it spends 106 W of it.",
+
+    "fin_k_w_mk": "Conductivity of the FIN material, W/mK. 222 = aluminium 1100, which is what a brazed plate-fin core is actually made of (references/materials.md). It is the number that decides whether an extended surface is worth fitting at all, and it is deliberately NOT the same value as body_k_w_mk: a brazing sheet and an extrusion are different alloys and a single round 205 for both is a constant with no provenance.",
+    "fin_thickness_m": "Fin thickness, m. 0.6 mm brazed plate-fin stock.",
+    "fin_length_m": "How far the fin PROTRUDES from the base, m (8 mm channel height). The pack adds t/2 as the adiabatic-tip correction.",
+    "fin_width_m": "The fin's span along the base, m - its third dimension (300 mm plate width), not its protrusion.",
+    "fin_h_w_m2k": "Convective coefficient on the fin surface, W/m2K. 1100 on the glycol side of the plate-fin exchanger. High h is what makes fins marginal: it is the denominator of the effectiveness ceiling.",
+    "fin_effectiveness_min": "Minimum acceptable fin effectiveness, dimensionless; defaults to 2.0. Effectiveness (not efficiency) is heat removed with the fin over heat removed by the bare base it covers. Below 1 the fin is a liability. This fin scores 20.5 against a ceiling of 26.0.",
+
+    "power_w": "Steady dissipation into the resistance path, W. 25 W of switching and conduction loss in the pump controller.",
+    "temp_limit_c": "The part's temperature limit, degC - from the datasheet, derated. 110 C junction, not the 150 C absolute maximum.",
+    "resistance_path_k_w": "The series thermal path as named nodes, [{name, r_k_w}], ABSOLUTE K/W. A node may also be {name, parallel:[{name, r_k_w}, ...]}. Naming the nodes is the point: an unnamed total hides which one to attack. Here 0.45 + 0.30 + 0.93 = 1.68 K/W, and the heatsink is 55% of it. total_resistance_k_w is accepted instead when there is genuinely no breakdown.",
+
+    "body_volume_m3": "Volume of the lumped body, m3. The aluminium heatsink: 120 x 80 x 8 mm base plus ten 25 x 1.5 mm fins.",
+    "body_area_m2": "WHOLE wetted surface of that body, m2 - fins included. With the volume it sets L_c = V/A = 1.8 mm, the length in the Biot number.",
+    "body_density_kg_m3": "rho of the body, kg/m3. 2700 = aluminium.",
+    "body_cp_j_kgk": "Specific heat of the body, J/kgK. 900 = aluminium. With rho and V it gives the 296 J/K thermal capacitance.",
+    "body_k_w_mk": "Conductivity of the BODY, W/mK - the Biot DENOMINATOR, not the fluid's k. Getting these two confused is how a polymer part passes a lumped check. 167 = aluminium 6061-T6, the usual heatsink-extrusion alloy (references/materials.md); pure aluminium at 237 and 1100 at 222 are both optimistic for an extrusion.",
+    "body_h_w_m2k": "Convective coefficient on that body, W/m2K. 17.7 is the value thermal.convection computes for this surface (17.67, quoted to three figures), so the two gates are describing one heatsink. thermal.h_agreement enforces that: it recomputes h from convection_mode, convection_geometry, char_length_m, velocity_m_s, surface_c and ambient_c and FAILS if this number has drifted more than h_agreement_tol from it. Edit the velocity without re-deriving this and the pack objects instead of quietly reporting two heatsinks.",
+    "h_agreement_tol": "How far body_h_w_m2k may drift from the h thermal.convection computes for the same surface before thermal.h_agreement refuses, as a fraction; defaults to 0.10. Comfortably inside the correlations' own +-15-20% accuracy on h, and far tighter than any real staleness - a velocity edited without re-deriving h moves it 30% and upward.",
+    "biot_limit": "The Biot ceiling above which the lumped model is void; 0.1 is the textbook licence and the pack's default. It holds the internal temperature difference to roughly 10% of the surface-to-fluid one, which is about where 'the part has a temperature' stops being a sentence.",
+    "time_constant_limit_s": "Optional ceiling on tau, s. 600 s is the control loop's settling budget; this body responds in 246 s (95% in 738 s). Note tau does not depend on body_k_w_mk at all - only Biot does - so the shipped moulded_housing control cannot exercise this limit, and PACK.md says so.",
+
+    "collector_area_m2": "Collector aperture area, m2. Gross area would overstate output by ~10%.",
+    "collector_fr": "Heat removal factor F_R, dimensionless, 0-1. How much of the heat the absorber gains actually reaches the fluid; 0.78 is a decent bonded-fin plate at design flow. Falls with flow rate, so it is a property of the collector AND its pump.",
+    "collector_tau_alpha": "Effective transmittance-absorptance product of glazing and absorber, dimensionless. 0.76 for single low-iron glazing over a selective coating. It is the intercept of the efficiency curve times F_R.",
+    "collector_ul_w_m2k": "Overall collector loss coefficient U_L, W/m2K, referred to aperture area. 4.5 for a glazed, back-insulated plate. It is the slope of the efficiency curve and the denominator of the stagnation temperature - which is why improving it cuts both ways.",
+    "irradiance_w_m2": "Plane-of-array irradiance at the design hour, W/m2. 932 is exactly what solar.irradiance computes for this site, day, hour and orientation, so the two solar gates are describing one roof. poa_irradiance_w_m2 is accepted as a synonym.",
+    "collector_inlet_c": "Fluid temperature ENTERING the collector, degC. 55 C store return late in a summer day - the loss term is U_L*(T_in - T_amb), so inlet temperature, not outlet, is what costs output.",
+    "collector_ambient_c": "OUTDOOR air temperature, degC. Deliberately not the same key as ambient_c (45 C cabinet air) - see _two_ambients.",
+    "collector_output_min_w": "Useful heat the design needs, W. The gate FAILS below it. 1000 W is the preheat duty; the collector delivers 1157 W at eta = 0.517.",
+    "stagnation_limit_c": "What the seals, heat-transfer fluid and absorber coating survive with no flow at all, degC. REQUIRED by solar.stagnation, which refuses to invent it. 210 C is EPDM gaskets with inhibited propylene glycol - the glycol is usually the binding limit, degrading irreversibly around 120-140 C, and 210 assumes an accepted fluid-replacement interval after a stagnation event. T_stag = T_amb + tau_alpha*G/U_L = 192 C here, and it depends on neither area nor flow: the better the collector, the hotter it stagnates. U_L is held constant with absorber temperature, which makes 192 C a CONSERVATIVE bound by an unquantified margin, since a real U_L climbs as the plate gets hot.",
+
+    "latitude_deg": "Site latitude, degrees, NORTH POSITIVE.",
+    "day_of_year": "1-365. 172 = 21 June, the clear midsummer noon this whole projection is written at.",
+    "solar_hour": "SOLAR time, 0-24, noon = sun on the local meridian. NOT clock time: the longitude offset and equation of time belong in the model, not the gate (references/solar-model.md).",
+    "surface_tilt_deg": "Tilt from horizontal, degrees. 0 = flat, 90 = vertical. 40 deg (= latitude) is the year-round compromise for a domestic preheat.",
+    "surface_azimuth_deg": "Surface orientation, degrees: 0 = due SOUTH, +90 = west, -90 = east. In the southern hemisphere the equator-facing value is 180, not 0.",
+    "ground_albedo": "Ground reflectance, 0-1, for the isotropic ground-reflected term. 0.20 = ordinary ground. The pack assumes 0.20 when it is absent and the verdict says when it assumed.",
+    "clearness_number": "ASHRAE clearness number CN, dimensionless, scaling the beam. 1.0 is the model's sea-level reference atmosphere; ~0.95 for humid coastal air, ~1.05 at altitude.",
+    "design_irradiance_min_w_m2": "Plane-of-array irradiance the design assumes is available at the design hour, W/m2. The gate FAILS below it - it is checking the GEOMETRY, not the weather.",
+
+    "_model_is_clear_sky": "solar.irradiance is an ASHRAE clear-day model, roughly +-10% on beam against measured clear-day data at mid-latitudes near sea level. It has no opinion at all about cloud and therefore cannot produce kWh/year. It answers 'is the orientation right?' and nothing else.",
+    "_not_covered": "No humidity, condensation, freezing or any phase change. No transient temperature DISTRIBUTION - one time constant on one lumped body is the whole transient capability. No flow field: recirculation, stalled ducts, fan curves and re-ingested hot air are all outside a Nusselt correlation. Contact resistance is supplied, never predicted. No thermal stress or expansion. No two-stream heat exchangers or pressure drop - fin_h_w_m2k here is an input, not something this pack can compute."
+  }
+}

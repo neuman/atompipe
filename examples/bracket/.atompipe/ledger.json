@@ -1,0 +1,483 @@
+{
+  "claims": [
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": 0.5,
+        "limit_hi": null,
+        "quantity": "tip deflection",
+        "units": "mm"
+      },
+      "critical": true,
+      "gates": [
+        "bracket.deflection",
+        "bracket.model_validity"
+      ],
+      "grounded_by": [],
+      "id": "C1",
+      "kind": "measurable",
+      "note": "",
+      "physical_result": null,
+      "rationale": "past ~0.5 mm the droop is visible against a level shelf edge; this is a product decision, not a physics one",
+      "source": "",
+      "statement": "Tip sags no more than 0.5 mm at rated load",
+      "tags": [
+        "stiffness"
+      ]
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": 1.0,
+        "limit_hi": null,
+        "quantity": "utilisation",
+        "units": ""
+      },
+      "critical": true,
+      "gates": [
+        "bracket.bending_stress",
+        "bracket.model_validity"
+      ],
+      "grounded_by": [],
+      "id": "C2",
+      "kind": "measurable",
+      "note": "",
+      "physical_result": null,
+      "rationale": "",
+      "source": "",
+      "statement": "Root bending stress stays within half of yield",
+      "tags": [
+        "strength"
+      ]
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": 15.0,
+        "limit_hi": null,
+        "quantity": "bearing stress",
+        "units": "MPa"
+      },
+      "critical": true,
+      "gates": [
+        "bracket.bearing"
+      ],
+      "grounded_by": [],
+      "id": "C3",
+      "kind": "measurable",
+      "note": "",
+      "physical_result": null,
+      "rationale": "",
+      "source": "",
+      "statement": "Fastener bearing stress within the design allowable",
+      "tags": [
+        "bearing"
+      ]
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": 204.0,
+        "limit_hi": null,
+        "quantity": "bed fit",
+        "units": "mm"
+      },
+      "critical": true,
+      "gates": [
+        "bracket.bed_fit",
+        "bracket.min_wall"
+      ],
+      "grounded_by": [],
+      "id": "C4",
+      "kind": "measurable",
+      "note": "",
+      "physical_result": null,
+      "rationale": "",
+      "source": "",
+      "statement": "Prints on a 220 mm bed without supports",
+      "tags": [
+        "bed-fit",
+        "wall-thickness"
+      ]
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "critical": true,
+      "gates": [],
+      "grounded_by": [],
+      "id": "C5",
+      "kind": "physical",
+      "note": "",
+      "physical_result": null,
+      "rationale": "no analysis settles polymer weathering; it needs a real part on a real wall for two years",
+      "source": "",
+      "statement": "Survives two winters outdoors without UV embrittlement",
+      "tags": []
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "critical": true,
+      "gates": [],
+      "grounded_by": [],
+      "id": "C6",
+      "kind": "assumption",
+      "note": "",
+      "physical_result": null,
+      "rationale": "this model has no fatigue, impact or eccentricity term — a claim that said otherwise would be lying",
+      "source": "",
+      "statement": "The load is static and centred on the arm",
+      "tags": []
+    },
+    {
+      "acceptance": {
+        "comparator": ">=",
+        "limit": 80.0,
+        "limit_hi": null,
+        "quantity": "first mode",
+        "units": "Hz"
+      },
+      "critical": true,
+      "gates": [],
+      "grounded_by": [],
+      "id": "C7",
+      "kind": "measurable",
+      "note": "",
+      "physical_result": null,
+      "rationale": "the pump runs at 50 Hz; a first mode near it turns a shelf into an amplifier",
+      "source": "",
+      "statement": "First mode is clear of the pump that sits on the shelf",
+      "tags": [
+        "vibration"
+      ]
+    }
+  ],
+  "decisions": [],
+  "inputs": [],
+  "last_run": {
+    "duration_s": 0.0002,
+    "inputs_hash": "e3b0c44298fc",
+    "model_hash": "321107b55616",
+    "spine_version": "0.1.0",
+    "tier": 0,
+    "when": "2026-09-11T23:31:00Z"
+  },
+  "meta": {
+    "created": "2026-09-11T23:31:00Z",
+    "model_entry": "model/bracket.py",
+    "name": "wall-bracket",
+    "packs": [],
+    "revision": "v0.1",
+    "spine_version": "0.1.0",
+    "summary": "Shelf bracket: 1.5 kg static load on a 60 mm arm, printed in PETG"
+  },
+  "needs": [],
+  "params": [
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "name": "arm_length",
+      "rationale": "mm, wall face to the load point. The design's driving dimension: deflection goes as L^3, so a 25% longer arm is very nearly a doubling. 80 was the first number asked for and it put deflection at 1.7mm — over three times the limit — with no thickness that recovered it inside the print time budget.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 60.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "name": "width",
+      "rationale": "mm, across the bracket. Stiffness is linear in width and cubic in thickness, so widening is the expensive way to buy stiffness and thickening is the cheap one — but see `thickness`, which has its own ceiling.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 30.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.min_wall"
+      ],
+      "grounded_by": [],
+      "name": "thickness",
+      "rationale": "mm, and DELIBERATELY still failing the deflection claim in this reference project — it comes out at ~0.70mm against a 0.5mm limit. 8.0 passes at 0.47mm. The default is left marginal so `atompipe check` on a fresh clone shows a real gate catching a real problem, and so the fix is one parameter you can watch turn green. Deflection goes as 1/t^3, which is why thickness is the cheap lever; 4.0 was tried and misses by ~5x.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 7.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "name": "hole_d",
+      "rationale": "mm, clearance for an M5 fastener. M5 free-fit is 5.5; 5.0 would be a line-to-line fit that an FDM hole will not hold to.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 5.5
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.bearing"
+      ],
+      "grounded_by": [],
+      "name": "n_bolts",
+      "rationale": "Two bolts, not one: a single fastener lets the bracket rotate about it under an off-centre load, and nothing in this model would catch that.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 2
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "name": "edge_margin",
+      "rationale": "mm, from the hole EDGE to the nearest free edge (not the hole centre — the distinction is worth stating because getting it wrong silently halves your tear-out margin). The usual minimum against tear-out is one hole diameter of material beyond the hole, and 8.0 against a 5.5mm hole is comfortably past it.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 8.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.deflection"
+      ],
+      "grounded_by": [],
+      "name": "load_n",
+      "rationale": "N at the arm tip, static. ~1.5 kg. Declared static: this model has no fatigue or impact term, and a claim that says otherwise would be lying.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 15.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "name": "safety_factor",
+      "rationale": "Design stress is yield / safety_factor. 2.0 is the conventional floor for a static, non-life-safety load in a ductile material. An FDM part arguably wants 3.0; the example keeps 2.0 so the default configuration is interesting rather than trivially over-built.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 2.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.bending_stress"
+      ],
+      "grounded_by": [],
+      "name": "material",
+      "rationale": "Key into MATERIALS. PETG over PLA because this part lives on a wall and PLA creeps under sustained load at room temperature — a PLA bracket that passes every gate here will still sag over months, and nothing in a static analysis sees that. Swap to alu6061 and the deflection claim passes by a wide margin at triple the mass.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": "petg"
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.min_wall"
+      ],
+      "grounded_by": [],
+      "name": "nozzle_d",
+      "rationale": "mm. Sets the minimum printable wall (see derived `min_wall`).",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 0.4
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.bed_fit"
+      ],
+      "grounded_by": [],
+      "name": "bed_xy",
+      "rationale": "mm, printer bed. The usable figure is smaller — see `usable_bed` below.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 220.0
+    },
+    {
+      "changed_in": "",
+      "derived_from": [],
+      "gates": [
+        "bracket.bed_fit"
+      ],
+      "grounded_by": [],
+      "name": "brim_mm",
+      "rationale": "mm of brim allowance per side. A part sized to the raw bed does not fit a bed once the brim is on it, which is the kind of thing you discover at 11pm.",
+      "rejected": [],
+      "source": "",
+      "tags": [],
+      "units": "",
+      "value": 8.0
+    }
+  ],
+  "verdicts": [
+    {
+      "claims": [
+        "structural",
+        "stiffness",
+        "deflection"
+      ],
+      "detail": "0.700 mm at 15 N (limit 0.5 mm)",
+      "duration_s": 2.4e-05,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.deflection",
+      "limit": 0.5,
+      "measured": 0.6997,
+      "pack": "",
+      "passed": false,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    },
+    {
+      "claims": [
+        "structural",
+        "strength",
+        "bending-stress"
+      ],
+      "detail": "3.7 MPa vs 15.0 MPa allowable (util 0.24, petg)",
+      "duration_s": 9e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bending_stress",
+      "limit": 1.0,
+      "measured": 0.245,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "utilisation"
+    },
+    {
+      "claims": [
+        "structural",
+        "fastener",
+        "bearing"
+      ],
+      "detail": "0.19 MPa on 77 mm^2 across 2 bolt(s), allowable 15.0 MPa",
+      "duration_s": 6e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bearing",
+      "limit": 15.0,
+      "measured": 0.195,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "MPa"
+    },
+    {
+      "claims": [
+        "structural",
+        "stiffness",
+        "strength",
+        "fastener"
+      ],
+      "detail": "slenderness 8.6 (>= 5.0 for Euler-Bernoulli; below this the deflection gate under-predicts)",
+      "duration_s": 3e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.model_validity",
+      "limit": 5.0,
+      "measured": 8.57,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "L/h"
+    },
+    {
+      "claims": [
+        "manufacturability",
+        "fdm",
+        "bed-fit",
+        "footprint"
+      ],
+      "detail": "74 x 30 x 7 mm vs 204 mm usable (220 bed - 2x8 brim)",
+      "duration_s": 6e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.bed_fit",
+      "limit": 204.0,
+      "measured": 73.5,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    },
+    {
+      "claims": [
+        "manufacturability",
+        "fdm",
+        "wall-thickness",
+        "min-wall"
+      ],
+      "detail": "thinnest section 7.0 mm vs 1.2 mm minimum (3 perimeters at a 0.4 mm nozzle)",
+      "duration_s": 4e-06,
+      "error": "",
+      "evidence": [],
+      "gate": "bracket.min_wall",
+      "limit": 1.2,
+      "measured": 7.0,
+      "pack": "",
+      "passed": true,
+      "skip_reason": "",
+      "skipped": false,
+      "tier": 0,
+      "units": "mm"
+    }
+  ]
+}

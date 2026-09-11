@@ -1,0 +1,56 @@
+{
+  "_description": "A 12 x 10 mm rectangular 6061-T6 aluminium bar cantilevered 60 mm out of a machined boss, carrying a 300 N static load at its free end, and taking that load back into structure through one M4 bolt bearing on a 6 mm thick ear. The same bar also stands as a 60 mm cantilevered strut under 400 N of axial compression. Deflection at the tip is 0.31 mm (L/191); bending runs at 65% of yield/2; shear, buckling and bearing are all under 10% utilised; L/h is 6.0 and the omitted shear deflection is 2.2%, so Euler-Bernoulli still applies on both of the validity gate's criteria. Every load is a positive magnitude and every absolute quantity is in the pack's units, so beam.input_sanity is clean. Stiffness is the binding constraint and everything else has room, which is what a competent bracket looks like. Units: mm, N, MPa (N/mm^2), mm^4.",
+
+  "beam_case": "cantilever_end",
+  "span_mm": 60.0,
+  "load_n": 300.0,
+
+  "section": "rect",
+  "width_mm": 12.0,
+  "height_mm": 10.0,
+
+  "material": "al_6061_t6",
+
+  "safety_factor": 2.0,
+  "deflection_limit_mm": 0.5,
+  "deflection_ratio_limit": 180.0,
+
+  "axial_load_n": 400.0,
+  "column_length_mm": 60.0,
+  "column_end_condition": "fixed_free",
+
+  "bolt_dia_mm": 4.0,
+  "plate_thickness_mm": 6.0,
+  "n_bolts": 1.0,
+  "bearing_load_n": 300.0,
+
+  "_notes": {
+    "_units": "mm, N, MPa (= N/mm^2), mm^4, degrees. Nothing in this pack converts: P*L^3/(E*I) comes out in millimetres directly. Metres here are wrong by 10^3 to 10^12 and still look plausible.",
+
+    "beam_case": "How the ends are held, which sets every k coefficient. One of cantilever_end, cantilever_udl, simply_supported_centre, simply_supported_udl, fixed_fixed_centre, fixed_fixed_udl, propped_cantilever_udl (aliases accepted). Policy: defaults to cantilever_end, the most demanding, and the verdict says when it defaulted.",
+    "span_mm": "Free span, mm: support face to support face, or cantilever root to the load. Measure it from the weld, not from the wish.",
+    "load_n": "TOTAL applied transverse load, N, as a POSITIVE magnitude in the direction it bends the member. For the *_udl cases this is the whole distributed load W = w*L, not the intensity w. A negative value is REFUSED, not absolute-valued: the pack cannot tell a downward-negative convention from anything else, so the gates skip and beam.input_sanity fails.",
+
+    "section": "Section shape the pack has a formula for: rect, circle or tube. Omit it and supply I_mm4 + area_mm2 + c_mm instead for a shape it does not know.",
+    "width_mm": "b, mm: the section width ACROSS the bending direction.",
+    "height_mm": "h, mm: the section depth IN the bending direction. Swapping it with width_mm changes I by (b/h)^2 and is the commonest way a correct formula returns a wrong number.",
+
+    "material": "Key into the pack's order-of-magnitude table (al_6061_t6, steel_1018, pla_fdm, plywood_birch, ...). Supplies E, yield, Poisson and — for wood and printed polymer — a real shear allowable. It is a table in a validator, not a mill certificate, and every verdict that reads it says so.",
+
+    "safety_factor": "Policy, dimensionless: allowable = yield / safety_factor. Defaults to 2.0 and the verdict discloses when it defaulted.",
+    "deflection_limit_mm": "Absolute sag this part may have, mm. A product decision — the pack refuses to invent it and beam.deflection skips without it.",
+    "deflection_ratio_limit": "Policy, dimensionless N in a serviceability limit of L/N. 180 is the loosest limit in common use (default), 240 general, 360 for brittle finishes or a long visual reference line.",
+
+    "axial_load_n": "Compressive load down the member's axis, N, POSITIVE IN COMPRESSION. Absent, beam.buckling skips: the pack will not read a missing key as the absence of a load. Negative is refused rather than read as tension — a member in tension does not buckle and this is the wrong gate to close that claim.",
+    "column_length_mm": "Unbraced length in compression, mm. Defaults to span_mm when absent; it is often different, because bracing and bending supports are rarely the same points.",
+    "column_end_condition": "How the strut's ends are restrained: pinned_pinned, fixed_free, fixed_pinned or fixed_fixed. The pack looks up a RECOMMENDED effective-length factor K (1.00 / 2.10 / 0.80 / 0.65), not the theoretical one, because no real bolted or welded joint is a perfect restraint. Give column_k directly instead only if you have a better number than the table.",
+
+    "bolt_dia_mm": "Bolt SHANK diameter, mm. Not the hole diameter, which would overstate the bearing area in the unconservative direction.",
+    "plate_thickness_mm": "Thickness of the material the fastener bears against, mm. Rarely the beam's own section depth — here it is the 6 mm mounting ear.",
+    "n_bolts": "Policy, count: fasteners sharing the joint load. Defaults to 1. The arithmetic assumes the load shares EQUALLY, which a stiff plate on many bolts does not do.",
+    "bearing_load_n": "Load into the joint, N, as a positive magnitude. Defaults to load_n (the whole transverse load assumed into the fastener) when absent.",
+
+    "_alternatives": "modulus_mpa and yield_mpa override the material table (use them once you have a coupon or a cert). allowable_stress_mpa / allowable_shear_mpa / shear_strength_mpa override the yield/SF route. I_mm4 + area_mm2 + c_mm describe a section the pack has no formula for; on that route i_min_mm4 is REQUIRED by beam.buckling (it will not substitute the bending I) and first_moment_mm3 + web_width_mm are required by beam.shear_stress, while alpha_shear or shear_area_mm2 stop beam.model_validity assuming a rectangle's shear shape factor. column_k replaces column_end_condition. poisson, min_slenderness and max_shear_deflection_fraction override beam.model_validity's defaults; e_over_g or shear_modulus_mpa stop it assuming isotropy on a non-metal.",
+    "_not_covered": "Every stress here is NOMINAL: no holes, fillets, notches or steps. Static only, no fatigue. One bending axis, no torsion, no combined loading. Small deflections. Prismatic members only. One bolt failure mode — no shear-out, tear-out, net section, bolt shear or preload. No initial bow or eccentricity in the column. beam.input_sanity checks units and signs, NOT load magnitude: newtons and kilonewtons are indistinguishable."
+  }
+}

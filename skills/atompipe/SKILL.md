@@ -1,0 +1,195 @@
+---
+name: atompipe
+description: Design, validate and fabricate real physical things — hardware, enclosures, PCBs, mechanisms, RC vehicles, solar thermal, chemical processes, printed parts. Use when someone wants to turn a sketch, spec, photo or discussion into something buildable; asks to design, model, simulate, validate, gate, fabricate, 3D print, machine, order boards for, or check the feasibility of a physical object or system; or has an existing CAD/hardware project that needs validation. Also use for "is this design actually going to work", bills of materials, sourcing, manufacturability, tolerance stacks, and readiness reports for physical builds.
+---
+
+# atompipe
+
+Take a sketch or a discussion to a physical thing you can actually build, with an
+honest account of what has been verified and what has not.
+
+**Read `METHOD.md` at the repo root before doing design work.** It is ten rules and
+it is the whole system. Everything below is how to apply it.
+
+## First: make `atompipe` runnable
+
+The spine is **standard library only** — no dependencies, nothing to build. Get a
+working command with the first of these that succeeds:
+
+```sh
+atompipe --version                                    # already on PATH?
+python3 -m atompipe --version                         # already importable?
+PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src" python3 -m atompipe --version    # plugin install
+pip install --user git+https://github.com/neuman/atompipe            # anything else
+```
+
+If you are running from the plugin, export it once for the session rather than
+prefixing every call:
+
+```sh
+export PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src:$PYTHONPATH"
+alias atompipe='python3 -m atompipe'
+```
+
+`atompipe doctor` is the first thing to run whenever something is confusing — it
+checks the environment, the model, determinism, staleness, pack discovery, per-gate
+tool availability and ledger integrity, and says which of those is wrong.
+
+Every read command takes `--json`. Prefer it when you are parsing rather than
+reading: `atompipe check --json` is a few KB where the human output is prose.
+
+## The shape
+
+```
+claims  ->  gates  ->  packs  ->  readiness report
+```
+
+A **claim** is something that must be true for the design to work. A **gate** is an
+executable that settles a claim *and is capable of failing*. A **pack** supplies
+gates for one physical domain. The **readiness report** is the ledger rendered.
+
+Your job is to keep that chain honest. The failure mode you are guarding against is
+not "the design is wrong" — it is "the design looks validated and is not".
+
+## Starting a project
+
+### 1. Intake is evidence, not just conversation
+
+**This is the step agents skip, and it is the one that decides the outcome.** A
+design conversation is the thinnest input a project has. Ask for artifacts, by name,
+early, and keep asking as the design sharpens.
+
+Run `atompipe ask` for the prioritised list of what is still missing. Ask for:
+
+- **A sketch.** Napkin, whiteboard photo, a rectangle with arrows. A bad sketch pins
+  down intent that a paragraph cannot.
+- **A photo of the closest existing product** they'd buy instead, even one they
+  hate — and what it gets right, and the thing it does that they refuse to copy.
+- **Anything they've taken apart** that solves part of this, photographed inside.
+- **Calipers** on everything this must fit, mate with, or sit inside — with the
+  tolerance they actually care about.
+- **Datasheets or vendor part numbers** for parts already chosen. *A part you cannot
+  order is a part you do not have.*
+- **Existing CAD** in any format, even wrong or abandoned.
+- **Screenshots** of the tool they were using, the vendor page, the spec they were
+  reading.
+- **The standard or code** it has to meet, if any.
+
+Then `atompipe ingest <files>` and — this is the half people drop —
+`atompipe extract` each one. An artifact nobody extracted from is decoration.
+Every extraction records *what was read out of it* and *which parameters and claims
+that grounds*. `atompipe inputs --unextracted` lists what arrived and was never read.
+
+Do not stall the project waiting for evidence. Ask for the two highest-value
+artifacts, proceed on stated assumptions, and record those assumptions as
+ASSUMPTION claims so they stay visible.
+
+### 2. Extract the claims
+
+Turn the brief into claims that must be true, each with a **machine-checkable
+acceptance**. "Strong enough" is not a claim. `≤0.5 mm tip deflection at 3 N` is.
+
+Classify each one honestly:
+
+| Kind | Meaning |
+|---|---|
+| `measurable` | A gate can settle it from the model. Only these are ever "proven". |
+| `physical` | Only a real object settles it. Watertightness, feel, RF range, taste. |
+| `assumption` | Taken on faith. Recorded so it stays visible. |
+
+Say the physical ones out loud early: *"C5 can't be validated by any tool — it needs
+a real hull in real water. It goes in the ledger as UNVERIFIED and stays there until
+you test it."* This builds trust and sets expectations correctly.
+
+### 3. Reach first light fast
+
+A user who has not seen a gate go green on their own numbers has no reason to
+continue. Scaffold the model, write the two or three cheapest analytic gates, and
+run `atompipe check` within the first few minutes. Four verdict lines against their
+real numbers is the hook.
+
+Do not build the whole validation suite before showing anything.
+
+## The working loop
+
+```
+atompipe status                # where is this project
+atompipe check                 # tier-0 gates, seconds — run this constantly
+atompipe check --tier 2        # the full sweep, before any spend decision
+atompipe gap --propose         # claims with no gate, and packs that might cover them
+atompipe why <param|claim>     # one thing's full history, instead of the whole log
+atompipe report --write        # the readiness report
+atompipe decide --title ...    # record a decision, including what LOST
+```
+
+Change a parameter, run `atompipe check`, read the verdict lines. That is the loop.
+It must stay fast — if tier 0 is not seconds, something is miscategorised.
+
+## Rules you will be tempted to break
+
+**Never hand-edit a generated file.** If an output is wrong, the model is wrong.
+Fix it there and regenerate. A repo with hand-patched outputs has no source of truth.
+
+**Never write a number without its reason.** Record why this value, what was tried
+and rejected, and what measurement or datasheet it came from. The rejected
+alternatives are the part that pays: without them, every fresh context window
+re-litigates every settled number.
+
+**Never let a validator merely log.** It must refuse. And every gate declares a
+negative control — a known-bad input it must fail on. The registry will not accept
+one without it. Run `atompipe gate selftest` and believe the result.
+
+**Never call a skipped or errored gate a pass.** A missing solver means the claim is
+BLOCKED, not fine. Say so.
+
+**Never simulate a physical claim.** No CFD run makes a printed seam watertight.
+
+## When a claim has no gate
+
+That is a capability gap, and it is how the system grows. **Do not guess at a tool.**
+Read `docs/EXTENSION_PROTOCOL.md` and follow it: name the quantity precisely,
+classify it, try the analytic answer first, choose the standard open tool and record
+why, install pinned with a smoke test, wrap it as a gate **with a negative control
+you actually ran**, record every solver setting as a constant, and emit a pack.
+
+Offer the cheap analytic gate now and defer the heavy solver until the geometry stops
+moving. Say the real cost out loud — install size, run time — and let the human
+choose. Running CFD on a hull that is still being redrawn is a way of feeling
+productive.
+
+## Before an irreversible spend
+
+Ordering boards, buying stock, booking machine time, committing to a mould: run the
+full sweep and read `atompipe report`. `atompipe check` exits non-zero while any
+critical claim is FAIL, STALE, UNCLAIMED, BLOCKED or PENDING.
+
+Then say the honest sentence out loud, in the shape the report uses:
+
+> *Fab-ready: routed, DRC-clean, fab package exported, mechanicals fit-checked. It is
+> unverified in physical hardware.*
+
+The second sentence is why anyone believes the first.
+
+## Adversarial review before building
+
+Run N independent reviews along **different** dimensions — structure,
+manufacturability, sourcing, thermal, usage, cost, safety — each trying to break the
+design on its own terms, and let the findings change the numbers **before** anything
+is generated. Packs ship their domain's lens list; `atompipe packs show <name>` has
+them. The most expensive mistakes are the ones that get built.
+
+## Adopting an existing project
+
+`atompipe init` in the repo, then point the model entry at whatever already exists.
+Infer claims from what the code already asserts, ask about the rest, and write gates
+around the existing behaviour before changing anything. Most people are not starting
+from zero.
+
+## Reference
+
+- `METHOD.md` — the ten rules. Read this.
+- `docs/EXTENSION_PROTOCOL.md` — growing a new validation capability.
+- `docs/PACK_FORMAT.md` — the pack contract.
+- `atompipe packs list` — what is installed; `atompipe packs show <name>` for its
+  PACK.md (tier 2). Load a pack's `references/` only for the specific task at hand.
+- `atompipe doctor` — run this first when something is confusing.

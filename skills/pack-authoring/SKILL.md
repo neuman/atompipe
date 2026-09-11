@@ -1,0 +1,211 @@
+---
+name: pack-authoring
+description: Build a new atompipe pack — a reusable validation capability for a physical domain (CFD, FEA, thermal, chemical, optics, machining, sourcing). Use when a claim has no gate and the extension protocol has been followed, when wrapping a solver or analysis tool as a gate, when extracting existing validation code into a shareable pack, or when someone wants to contribute a capability back to atompipe.
+---
+
+# Authoring an atompipe pack
+
+A pack is how a validation capability stops being a one-off. You built a gate for
+your project; a pack is that gate made reusable, self-testing and contributable.
+
+Read `docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
+
+## Before you start
+
+**Have you followed `docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
+protocol, not step 1. If you have not yet named the physical quantity precisely,
+tried the analytic answer, chosen the tool deliberately and run a negative control,
+you are packaging something you do not trust yet.
+
+**Is this one domain?** A pack that settles both hull drag and battery runtime is two
+packs. The test: can you write the manifest `description` in one line that a person
+would recognise? If not, split.
+
+## Procedure
+
+### 1. Scaffold
+
+```
+atompipe pack new <name>
+```
+
+Names are lowercase, hyphenated, and say the domain and the tool when the tool
+matters: `cfd-openfoam`, `fea-calculix`, `fdm-print`, `pcb-kicad`, `solar-thermal`.
+Bare domain names (`cfd`) claim more territory than one pack can hold.
+
+### 2. Write the manifest first
+
+`pack.json` is tier 1 — it is what every agent sees, always. Get `settles` right: it
+is the vocabulary that matches a capability gap to this pack. Write the phrases a
+person would actually say for the quantity ("bed fit", "overhang angle", "righting
+moment"), not your internal gate ids.
+
+Set `origin` honestly. Extracted from a real project that shipped? Built by the
+protocol against a validation case? Ported from a paper? The next reader calibrates
+their trust on that line.
+
+### 3. Write the cheapest gate first
+
+**Ship at least one tier-0 gate, and write it before the expensive one.** Analytic,
+closed-form, seconds. It is what people will actually run five hundred times, and it
+becomes the sanity check on your solver gate later.
+
+If you genuinely cannot find a tier-0 bound for the domain, say so in `PACK.md`
+under "what this pack cannot settle" — but look hard first. Almost every physical
+claim has an order-of-magnitude answer sitting in a textbook.
+
+### 4. Build the negative control, and run it
+
+This is the step that separates a pack from a plausible-looking directory.
+
+The fixture must be bad **in the specific way the gate claims to detect**. Change one
+physically meaningful thing in the direction the gate cares about:
+
+- watertightness gate → a mesh with one face deleted
+- bed-fit gate → the same part scaled 1.5×
+- clash gate → two bodies overlapped 0.5 mm
+- deflection gate → the same beam at a quarter section depth
+- stability gate → centre of mass moved aft of the centre of pressure
+- interference gate → the same circuit with its protective element removed
+
+A fixture that is bad in some *other* way — a corrupt file, an empty mesh — proves
+your gate handles garbage, not that it measures what it claims.
+
+**Seal the fixture.** State everything the gate reads; never layer your known-bad
+values over the host project's projection. The overriding form looks safe — it wins
+on every key it names — but gates resolve synonym families and derived quantities,
+so a key you never mention can arrive from the project and neutralise the control.
+Observed live: a fixture made a hull top-heavy, the project happened to state a
+waterplane inertia, and the gate passed its own known-bad input. A control whose
+severity depends on the host project is one that passes in some repositories and
+fails in others.
+
+Use the pack's own `selftest/baseline.json` as the base:
+
+```python
+return dataclasses.replace(ctx, params={**_baseline(), "kg_m": 0.62})
+```
+
+Mesh fixtures too: returning a bare `{"meshes": ...}` leaves the gate reading its
+threshold from the project, so it skips instead of failing.
+
+```
+atompipe gate selftest --only <gate-id>
+```
+
+If the gate passes its known-bad fixture, it is broken. Do not proceed. Do not
+rationalise. This is the moment the whole system either earns its credibility or
+quietly loses it.
+
+### 4b. Get the tag vocabulary right
+
+A gate's `claims` list is the set of vocabularies its result is relevant evidence
+for. `beam.deflection` listing `["structural", "stiffness", "deflection"]` is
+correct — a sagging beam really does bear on a claim about structural adequacy.
+
+The failure is on the *claim* side, and it is the one to warn about in `PACK.md`:
+a narrow assertion tagged with a broad vocabulary. "Root stress stays under half of
+yield" tagged `structural` gets covered by every structural gate installed, so a
+deflection failure makes a stress claim read FAIL and whoever reads the report goes
+looking in the wrong place.
+
+**Gates list everything they bear on. Claims carry the narrowest vocabulary that
+describes what they assert.** Publish your pack's tag vocabulary in `PACK.md` so
+someone who has never read your code can write claims that bind correctly.
+
+Ship one **validity guard** — a gate that binds across the whole domain because it
+decides whether the domain's other numbers mean anything at all (slenderness for
+beam theory, Biot for lumped capacitance, Reynolds for a correlation). When it
+trips, dragging every claim in the domain down with it is correct behaviour, and it
+is usually the most valuable gate you will write.
+
+### 5. Write `PACK.md`
+
+~150 lines, tier 2. The section people skip and shouldn't is **"what this pack
+cannot settle"** — the adjacent things a reader will assume are covered. That
+section prevents more damage than the gate list.
+
+State **units and frames** explicitly. Unit confusion is the most common cross-pack
+defect and it is entirely preventable.
+
+Include enough physics that an agent can smell an absurd result. A gate that returns
+a number the agent cannot sanity-check is a gate the agent will trust when it should
+not.
+
+### 6. Push depth into `references/`
+
+Tier 3 costs nothing until it is needed. Meshing guidance, solver settings and their
+rationale, failure-mode catalogues, vendor process tables, worked examples — all of
+it belongs here, not in `PACK.md`.
+
+Every solver setting gets rule-3 treatment: why this value, what was tried, what it
+cost. *"k-omega SST because the flow is wall-bounded with adverse pressure gradient;
+k-epsilon under-predicted separation by ~30% against the validation case"* is the
+sentence that saves the next person a week.
+
+### 7. Write `lenses.md`
+
+The angles an adversarial reviewer should attack this domain from, before anything is
+built. Specific and uncomfortable beats general and polite. Compare:
+
+- *weak:* "consider manufacturability"
+- *strong:* "this part is a cantilever loaded at its tip — what is the free span,
+  measured from the actual weld and not from the wish? And is the root block real
+  material or a fillet you drew?"
+
+### 8. `sourcing.md`, if the domain has real-world procurement
+
+Vendor process rules, MOQs, lead times, finishes that are mandatory for a given
+contact type, stock volatility, assembly tiers, regional availability. This is what
+makes a design orderable rather than merely correct, and it is almost never in a
+datasheet.
+
+### 9. Validate and export
+
+```
+atompipe pack validate <name>
+atompipe gate selftest
+atompipe pack export <name>
+```
+
+Export produces a PR-ready directory with the selftest evidence attached. A pack
+whose gates have never demonstrated failure does not get merged.
+
+## Extracting a pack from an existing project
+
+Most good packs are extractions, not inventions — code that already survived contact
+with reality.
+
+1. **Find the assertions.** Search for `assert`, threshold comparisons, `sys.exit`
+   on a check, DRC gates, anything that already refuses.
+2. **Ask what claim each one was defending.** That is the gate's `claims` and
+   `settles`. Often the original comment tells you, because it was written the day
+   something slipped through.
+3. **Separate project constants from domain constants.** A bed size is a project
+   parameter; a minimum printable wall at a given nozzle is domain knowledge. Only
+   the second belongs in the pack, and it belongs as a documented default the project
+   can override.
+4. **Build the negative control the original never had.** This is where extractions
+   usually break, and it is worth knowing before you ship it to someone else.
+5. **Keep the war stories.** The comment explaining *why* a check exists — the
+   measurement that surprised someone, the assumption that turned out false — is
+   worth more than the check it sits above. Carry it into `PACK.md` or `references/`.
+
+## Anti-patterns
+
+**A pack with no tier-0 gate.** Nobody will run it in the loop, so it will not catch
+anything early, which is where catching things is cheap.
+
+**A gate that returns a number without a threshold.** That is a report. A gate
+compares against the claim's acceptance and refuses.
+
+**A `description` that needs three sentences.** The pack is doing too much.
+
+**Hard-coding one project's constants.** Bed size, material, fab house, mesh density
+— all project parameters with pack-supplied defaults.
+
+**Skipping the negative control because the gate obviously works.** Every validator
+that shipped broken looked obviously working.
+
+**A 900-line `PACK.md`.** That is tier 3 wearing a tier 2 hat, and it will blow a
+context window on a task that never needed it.

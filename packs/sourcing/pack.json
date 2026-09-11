@@ -1,0 +1,62 @@
+{
+  "name": "sourcing",
+  "version": "0.1.0",
+  "description": "Checks a project's BOM offline: every line orderable and priced in one convertible currency, rolled-up cost vs budget, lead times, MOQ overbuy, vendor process rules, single-source risk.",
+  "settles": [
+    "bill of materials completeness",
+    "unpriced line",
+    "build cost per unit",
+    "rolled-up cost",
+    "budget",
+    "tooling and setup charges",
+    "lead time",
+    "longest lead time",
+    "part availability",
+    "stock cover",
+    "end of life",
+    "minimum order quantity",
+    "MOQ overbuy",
+    "vendor process capability",
+    "surface finish requirement",
+    "process tolerance capability",
+    "single source count",
+    "second source",
+    "single manufacturer behind two distributors",
+    "price currency coherence",
+    "mixed currency roll-up",
+    "idle capital",
+    "can this be ordered"
+  ],
+  "claim_classes": [
+    "sourcing",
+    "procurement",
+    "supply-chain",
+    "cost",
+    "availability",
+    "manufacturability"
+  ],
+  "provides_gates": [
+    "bom.complete",
+    "bom.cost",
+    "bom.availability",
+    "bom.moq",
+    "bom.process_rules",
+    "bom.single_source",
+    "bom.currency"
+  ],
+  "provides_generators": [],
+  "requires_tools": [],
+  "requires_python": [],
+  "max_tier": 0,
+  "lenses": [
+    "single point of failure",
+    "10x quantity",
+    "riskiest part gone in six weeks",
+    "what the quote excludes",
+    "who qualifies the alternate",
+    "what the schedule assumes"
+  ],
+  "authors": [],
+  "licence": "Apache-2.0",
+  "origin": "written for atompipe from general hardware procurement practice; thresholds are defaults with stated reasons, not measurements"
+}

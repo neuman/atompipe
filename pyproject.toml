@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atompipe"
+version = "0.1.0"
+description = "Take a sketch or a discussion to a validated physical thing — claims, gates, packs, and an honest readiness report."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Eric Neuman" }]
+keywords = ["hardware", "cad", "simulation", "validation", "agents", "manufacturing", "design"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Manufacturing",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+]
+# The spine is STDLIB ONLY, on purpose: it must never be the reason an install
+# fails. Packs declare their own dependencies and degrade to BLOCKED, visibly,
+# when a solver is absent.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+atompipe = "atompipe.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/neuman/atompipe"
+Source = "https://github.com/neuman/atompipe"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+atompipe = ["py.typed"]

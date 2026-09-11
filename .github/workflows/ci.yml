@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ci
+
+# The spine is standard-library only, so this workflow installs nothing to test it.
+# That is the point: if CI needs a dependency to run the spine, so does a user, and
+# the spine has failed its own constraint.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Spine imports with no third-party packages installed
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          # Parse rather than grep: a string containing "import numpy" is not an import,
+          # and an import inside a function still binds the spine to a dependency.
+          STDLIB = set(sys.stdlib_module_names)
+          bad = []
+          for path in pathlib.Path("src/atompipe").rglob("*.py"):
+              tree = ast.parse(path.read_text(), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      names = [a.name.split(".")[0] for a in node.names]
+                  elif isinstance(node, ast.ImportFrom):
+                      if node.level:          # relative import, always ours
+                          continue
+                      names = [(node.module or "").split(".")[0]]
+                  else:
+                      continue
+                  for name in names:
+                      if name and name not in STDLIB and name != "atompipe":
+                          bad.append(f"{path}: {name}")
+          if bad:
+              raise SystemExit("spine imports non-stdlib modules:\n  " + "\n  ".join(bad))
+          print(f"stdlib-only: clean")
+          PY
+
+      - name: Honesty invariants and pack gates
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
+      - name: Every pack validates
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          import os, sys
+          from atompipe import packs
+          failed = False
+          for name in sorted(os.listdir("packs")):
+              d = os.path.join("packs", name)
+              if not os.path.isfile(os.path.join(d, "pack.json")):
+                  continue
+              problems = packs.validate(d)
+              print(f"{name}: {'ok' if not problems else problems}")
+              failed |= bool(problems)
+          sys.exit(1 if failed else 0)
+          PY
+
+      - name: Reference project runs, and its gates prove they can fail
+        run: |
+          cd examples/bracket
+          PYTHONPATH=../../src python -m atompipe init --name bracket-ci --summary "CI run" || true
+          PYTHONPATH=../../src python -m atompipe model --set-entry model/bracket.py
+          # The default model is deliberately marginal: one gate FAILS, so `check`
+          # exits 1 here and that is the expected result, not a broken build.
+          PYTHONPATH=../../src python -m atompipe check || true
+          # This one must pass. A gate that passes its own known-bad fixture is a
+          # logger, and merging one is the failure this whole project exists to stop.
+          PYTHONPATH=../../src python -m atompipe gate selftest
