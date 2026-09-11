@@ -34,8 +34,26 @@ atompipe = "atompipe.cli:main"
 Homepage = "https://github.com/neuman/atompipe"
 Source = "https://github.com/neuman/atompipe"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The bundled packs live at <repo>/packs for contributors (ordinary directories,
+# no build step) and are mapped onto `atompipe.bundled` so they ALSO ship in the
+# wheel. Without this, `pip install atompipe` produced a working spine with zero
+# gates — a spine that cannot do anything. Packages are listed explicitly because
+# `packages.find` only scans `where`, so the mapped name is never discovered.
+[tool.setuptools]
+packages = ["atompipe", "atompipe.bundled"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"atompipe.bundled" = "packs"
 
 [tool.setuptools.package-data]
 atompipe = ["py.typed"]
+# A pack is an ordinary directory of whatever it needs — gates, helper modules,
+# fixtures, meshes, reference docs, scaffolds. Enumerating a few known shapes is
+# how `bomlib.py` (a pack-root helper) silently failed to ship and every gate in
+# that pack died on import from the wheel. Ship everything a pack contains, by
+# extension, at any depth.
+"atompipe.bundled" = [
+  "**/*.py", "**/*.json", "**/*.md", "**/*.txt",
+  "**/*.stl", "**/*.step", "**/*.csv", "**/*.yaml", "**/*.yml",
+]

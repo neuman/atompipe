@@ -102,10 +102,33 @@ PACK_PATH_ENV = "ATOMPIPE_PACK_PATH"
 #: exist, and ``search_paths`` drops it; the spine still works, it just has no
 #: bundled domains. That is a deliberate degradation, not a failure: the spine
 #: must never need a pack to start.
-BUNDLED_PACKS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "packs",
-)
+def _bundled_packs() -> str:
+    """Where the packs that ship with the spine actually live.
+
+    Two layouts, both real, checked in this order:
+
+    * **a checkout** — ``<repo>/packs``, two levels up from ``src/atompipe/``.
+      This is the contributor-facing home: ordinary directories, no build step.
+    * **an installed wheel** — ``atompipe/bundled/``, where ``pyproject.toml``
+      maps the same directory. Before that mapping existed, ``pip install
+      atompipe`` produced a working spine and zero gates, which is a spine that
+      cannot do anything; the checkout path happened to be the only one anybody
+      tested.
+
+    Returns the first that exists, else the checkout path (so an error message
+    names somewhere a human recognises). A string join and at most two stats — no
+    imports, no I/O beyond ``isdir``.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    checkout = os.path.join(os.path.dirname(os.path.dirname(here)), "packs")
+    installed = os.path.join(here, "bundled")
+    for candidate in (checkout, installed):
+        if os.path.isdir(candidate):
+            return candidate
+    return checkout
+
+
+BUNDLED_PACKS = _bundled_packs()
 
 #: Accepted on the way IN to a lookup. Deliberately permissive about case and
 #: dots (so ``find`` can be used on names the user typed), but it exists to keep
