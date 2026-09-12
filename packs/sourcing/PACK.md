@@ -154,6 +154,54 @@ fires in one repository and passes in another. No fixture hardcodes a magnitude
 either; each reads the limit it has to beat out of the baseline the gate reads it
 from. Run them: `atompipe gate selftest sourcing`.
 
+## 4b. The view, and the rows locators land on
+
+| View | Kind | Payload | Addressed by |
+|---|---|---|---|
+| `bom` | `table` | every line with purchase quantity, unit and extended cost, effective lead time, lifecycle, source count and a risk phrase; the run roll-up in `meta.totals` | **row id = the line's `ref`** |
+
+**The row id is `bomlib.ref(line, i)`** — the string a buyer types on a purchase
+order, which is also what every locator in this pack targets. That pairing is the
+interface, and it lives in `bomlib` (`SITE_VIEW_ID` beside `ref`) so the gates and
+the view cannot end up spelling it two ways.
+
+The table is the lookup a sourcing verdict currently forces on its reader: `2
+unrecorded single-source line(s): U1, REG-01` sends somebody into a JSON file to
+find out what U1 costs, when it ships and who else makes it. Here it is one row,
+highlighted.
+
+Three things it does not do:
+
+- **It does not price anything the gates did not.** The roll-up is
+  `bomlib.rollup`, the same function `bom.cost` reports, so the per-unit number on
+  the page is the per-unit number in the verdict.
+- **It does not fill a blank.** An unpriced line's extended cost is `null`, never
+  0. A zero adds up, looks like money, and makes the total smaller — the direction
+  every error in a BOM goes. `meta.totals.unpriced_lines` names them and the note
+  says the totals are understated by whatever they cost.
+- **It does not sort.** Document order, because that is the order the buyer
+  maintains the file in.
+
+`meta.totals` carries the two things summing the Extended column misses —
+per-order minimum shortfalls and amortised one-time charges — so a reader who adds
+the column up and gets a smaller number can see exactly where the difference went.
+
+### What each gate pins
+
+| Gate | Locator | Why that and not more |
+|---|---|---|
+| `bom.availability` | the EOL lines first, then the lines with no ship date, then — only when the schedule is actually blown — the single line that sets the longest lead | every other line ships sooner, so moving any of them changes nothing. Pinning them would be twenty highlights on parts nobody needs to chase |
+| `bom.single_source` | the **unrecorded** single-source lines only | a line with a qualified alternate or a written acceptance is a decision somebody made. Telling a reader that the thing they already did is still outstanding is how they learn to ignore the highlights |
+| `bom.cost`, `bom.moq`, `bom.currency`, `bom.complete`, `bom.process_rules` | none yet | each of these already names its offending lines in `detail` and its evidence file; they are candidates for the same treatment and simply have not been given it |
+
+At most twelve pins per verdict — a table is read row by row, and past a dozen
+highlights the eye stops picking them out. The counts in `measured` and `detail`
+are always the real ones: the cap trims the drawing, never the measurement.
+
+A BOM line has no geometry and no position, so no locator here carries one.
+Inventing a `position` for a purchase-order line would be the failure the site
+contract names: a confident highlight somewhere nobody measured.
+
 ## 5. Units, currency and frames
 
 - **Money** is in the document's `currency`, one code for the whole document. A

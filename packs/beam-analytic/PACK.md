@@ -167,6 +167,41 @@ says it is in the wrong unit. The other gates SKIP on a signed load, resolving
 their claims BLOCKED; this one puts a red line in the report so six quiet blanks
 are not the only signal.
 
+## 3b. Views
+
+| View | Kind | Payload | Addressed by |
+|---|---|---|---|
+| `deflection_curve` | `chart` | deflection swept across the dimension that drives it, with `deflection_limit_mm` as the limit line and the current design marked | series key `deflection`, or an x value |
+
+A verdict answers at one point: *0.31 mm, under the 0.5 mm limit*. What it cannot
+say in one line is whether that is a design in the flat part of the curve or one
+perched where the next half-millimetre of section costs it everything — and *how
+far inside a limit* is the question every review asks. The chart is that answer.
+
+- **The swept dimension is derived**, and it is the one the design can actually
+  change: the section depth for a rectangle, the diameter for a round bar or tube,
+  and the span for a section this pack has no formula for (an explicit `I_mm4`).
+  `deflection_sweep_param` overrides it; a name the formula does not read is
+  refused rather than swept, because overriding a key nothing looks at draws a flat
+  line and calls it a sensitivity study.
+- **The bracket is ×0.5 to ×2** of the current value, widened once to ×0.25–×4 if
+  the limit is not crossed inside it. A chart with no crossing on it cannot answer
+  the question it exists for.
+- **The limit line** is `deflection_limit_mm`, falling back to the serviceability
+  ratio `L/N` that `beam.deflection_ratio` uses — pack default included and
+  disclosed in the label, exactly as the gate discloses it.
+- **The arithmetic is `_beam_analytic_lib`**, the gates' own. A chart drawn from a
+  second copy of `delta = k·P·L³/(E·I)` can disagree with the verdict beside it,
+  and a reader has no way to tell which is the project's status.
+- **`meta.agreement` checks that it does not.** The curve's value at the design
+  point is compared against the ledger's recorded `beam.deflection` measurement;
+  they came from one formula and one projection, so a disagreement means the site
+  was built from a projection the sweep never saw (method rule 6).
+
+No gate in this pack emits locators. Every one of them measures a scalar over a
+whole member — there is no part to blame and no point to pin, and a marker placed
+at "the root" would be a position nothing here computed.
+
 ## 4. Units and frames
 
 **mm, N, MPa (N/mm^2), mm^4, degrees.** No exceptions, no conversion factors

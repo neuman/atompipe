@@ -27,6 +27,7 @@
     "cad.wall_thickness",
     "cad.clash"
   ],
+  "provides_views": ["assembly"],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": ["trimesh", "numpy"],

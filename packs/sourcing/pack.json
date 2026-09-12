@@ -44,6 +44,9 @@
     "bom.single_source",
     "bom.currency"
   ],
+  "provides_views": [
+    "bom"
+  ],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": [],

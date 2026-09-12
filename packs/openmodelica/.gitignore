@@ -1,0 +1,7 @@
+# Known-bad fixtures that selftest/bad_modelica.py derives from baseline.json at
+# run time. They are meant to be opened and diffed against the originals in
+# selftest/assets/ — and they are meant to be REBUILT, never committed: a checked-in
+# copy silently stops matching the moment a limit in baseline.json moves, and a
+# control computed against a stale limit is a control that no longer falsifies
+# anything while still reporting that it does.
+selftest/.generated/

@@ -166,12 +166,12 @@
   "decisions": [],
   "inputs": [],
   "last_run": {
-    "duration_s": 0.0002,
+    "duration_s": 0.0005,
     "inputs_hash": "e3b0c44298fc",
     "model_hash": "321107b55616",
     "spine_version": "0.1.0",
     "tier": 0,
-    "when": "2026-09-11T23:31:00Z"
+    "when": "2026-09-12T03:15:19Z"
   },
   "meta": {
     "created": "2026-09-11T23:31:00Z",
@@ -363,11 +363,12 @@
         "deflection"
       ],
       "detail": "0.700 mm at 15 N (limit 0.5 mm)",
-      "duration_s": 2.4e-05,
+      "duration_s": 3.5e-05,
       "error": "",
       "evidence": [],
       "gate": "bracket.deflection",
       "limit": 0.5,
+      "locators": [],
       "measured": 0.6997,
       "pack": "",
       "passed": false,
@@ -383,11 +384,12 @@
         "bending-stress"
       ],
       "detail": "3.7 MPa vs 15.0 MPa allowable (util 0.24, petg)",
-      "duration_s": 9e-06,
+      "duration_s": 1e-05,
       "error": "",
       "evidence": [],
       "gate": "bracket.bending_stress",
       "limit": 1.0,
+      "locators": [],
       "measured": 0.245,
       "pack": "",
       "passed": true,
@@ -403,11 +405,12 @@
         "bearing"
       ],
       "detail": "0.19 MPa on 77 mm^2 across 2 bolt(s), allowable 15.0 MPa",
-      "duration_s": 6e-06,
+      "duration_s": 1.1e-05,
       "error": "",
       "evidence": [],
       "gate": "bracket.bearing",
       "limit": 15.0,
+      "locators": [],
       "measured": 0.195,
       "pack": "",
       "passed": true,
@@ -424,11 +427,12 @@
         "fastener"
       ],
       "detail": "slenderness 8.6 (>= 5.0 for Euler-Bernoulli; below this the deflection gate under-predicts)",
-      "duration_s": 3e-06,
+      "duration_s": 8e-06,
       "error": "",
       "evidence": [],
       "gate": "bracket.model_validity",
       "limit": 5.0,
+      "locators": [],
       "measured": 8.57,
       "pack": "",
       "passed": true,
@@ -445,11 +449,12 @@
         "footprint"
       ],
       "detail": "74 x 30 x 7 mm vs 204 mm usable (220 bed - 2x8 brim)",
-      "duration_s": 6e-06,
+      "duration_s": 1.2e-05,
       "error": "",
       "evidence": [],
       "gate": "bracket.bed_fit",
       "limit": 204.0,
+      "locators": [],
       "measured": 73.5,
       "pack": "",
       "passed": true,
@@ -466,11 +471,12 @@
         "min-wall"
       ],
       "detail": "thinnest section 7.0 mm vs 1.2 mm minimum (3 perimeters at a 0.4 mm nozzle)",
-      "duration_s": 4e-06,
+      "duration_s": 1e-05,
       "error": "",
       "evidence": [],
       "gate": "bracket.min_wall",
       "limit": 1.2,
+      "locators": [],
       "measured": 7.0,
       "pack": "",
       "passed": true,
@@ -479,5 +485,6 @@
       "tier": 0,
       "units": "mm"
     }
-  ]
+  ],
+  "views": []
 }

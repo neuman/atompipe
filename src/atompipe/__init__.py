@@ -28,7 +28,7 @@ __version__ = "0.1.0"
 #: this map is for callers and for `atompipe.models.X` style access.
 _SUBMODULES = frozenset({
     "models", "util", "store", "modelio", "gates", "claims",
-    "artifacts", "packs", "decisions", "report", "cli",
+    "artifacts", "packs", "decisions", "report", "site", "cli",
 })
 
 #: names that live in a module other than `models`. AtompipeError is here

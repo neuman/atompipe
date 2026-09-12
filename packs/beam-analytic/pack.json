@@ -46,6 +46,9 @@
     "beam.model_validity",
     "beam.input_sanity"
   ],
+  "provides_views": [
+    "deflection_curve"
+  ],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": [],

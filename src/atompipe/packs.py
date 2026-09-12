@@ -41,7 +41,7 @@ import re
 import sys
 from typing import Any, Iterable, Sequence
 
-from .models import GateSpec, Ledger, Need, PackManifest, Tier
+from .models import GateSpec, KeyCollision, Ledger, Need, PackManifest, Tier
 from .store import ATOMPIPE_DIR, PACKS_NAME, find_root
 from .util import AtompipeError, read_json
 
@@ -73,6 +73,9 @@ __all__ = [
     "score",
     "installed",
     "available",
+    "key_scope",
+    "key_vocabulary",
+    "key_collisions",
 ]
 
 
@@ -90,6 +93,19 @@ BASELINE_NAME = "baseline.json"
 controls can actually be exercised. See docs/PACK_FORMAT.md."""
 LENSES_NAME = "lenses.md"
 SOURCING_NAME = "sourcing.md"
+
+#: Inside ``selftest/baseline.json``: one line per key saying what it is and its
+#: unit. Required by the pack format, and the source of the MEANINGS two packs
+#: are compared on when their key vocabularies overlap.
+BASELINE_NOTES = "_notes"
+
+#: Inside ``selftest/baseline.json``: ``{primary key: [other accepted spellings]}``.
+#: The baseline itself carries only the spelling the pack teaches; a gate usually
+#: accepts more (``part_bbox_mm`` also answers to ``bbox_mm``, ``bbox``,
+#: ``footprint_mm``). Those fallbacks are where two packs collide without either
+#: baseline showing it, so they are declared here rather than living only in the
+#: gate source, where nothing can diff them.
+BASELINE_ALIASES = "_aliases"
 
 #: ``os.pathsep``-separated directories searched BEFORE everything else.
 #: This is how CI tests a pack that is not installed anywhere, and how a
@@ -781,6 +797,52 @@ def _declared_str_list(value: Any) -> list[str]:
     return [str(v) for v in value or []]
 
 
+def _alias_problems(baseline: dict[str, Any]) -> list[str]:
+    """Everything wrong with a baseline's ``_aliases`` map.
+
+    The map is what lets ``atompipe doctor`` diff two packs' key vocabularies —
+    a gate that accepts ``bbox_mm`` as a fallback for ``part_bbox_mm`` collides on
+    the FALLBACK, and the baseline's own keys would never show it. An alias map
+    that is malformed is therefore not cosmetic: it makes a collision invisible
+    while looking like it was declared.
+    """
+    where = f"{SELFTEST_DIR}/{BASELINE_NAME}"
+    aliases = baseline.get(BASELINE_ALIASES)
+    if aliases is None:
+        return []
+    if not isinstance(aliases, dict):
+        return [f"{where}: {BASELINE_ALIASES} must be an object of "
+                f"{{primary key: [other accepted spellings]}}, not a "
+                f"{type(aliases).__name__}"]
+
+    stated = {key for key in baseline if not key.startswith("_")}
+    problems: list[str] = []
+    seen: dict[str, str] = {}
+    for primary, spellings in aliases.items():
+        if primary not in stated:
+            problems.append(
+                f"{where}: {BASELINE_ALIASES} names {primary!r}, which the baseline "
+                f"itself does not state — declare the key (so every gate is proven "
+                f"to read it) or drop the alias")
+        if isinstance(spellings, (str, bytes)) or not isinstance(spellings, Iterable):
+            problems.append(
+                f"{where}: {BASELINE_ALIASES}[{primary!r}] must be a LIST of other "
+                f"spellings, not a {type(spellings).__name__}")
+            continue
+        for spelling in spellings:
+            alias = str(spelling)
+            if alias in stated:
+                problems.append(
+                    f"{where}: {alias!r} is both a baseline key and an alias of "
+                    f"{primary!r} — one spelling cannot be two quantities in one pack")
+            if alias in seen and seen[alias] != primary:
+                problems.append(
+                    f"{where}: {alias!r} is an alias of both {seen[alias]!r} and "
+                    f"{primary!r}; a gate resolving it would read whichever came first")
+            seen[alias] = primary
+    return problems
+
+
 def validate(pack_dir: str) -> list[str]:
     """Every problem with a pack, as specific strings. Empty list = publishable.
 
@@ -949,6 +1011,8 @@ def validate(pack_dir: str) -> list[str]:
                     f"{SELFTEST_DIR}/{BASELINE_NAME} carries no parameters — only "
                     f"metadata keys"
                 )
+            else:
+                problems.extend(_alias_problems(loaded))
         except (OSError, ValueError) as exc:
             problems.append(f"{SELFTEST_DIR}/{BASELINE_NAME} does not parse: {exc}")
 
@@ -1283,3 +1347,165 @@ def available(root: str | None = None) -> list[str]:
     installed and shadowed by a copy earlier on the search path).
     """
     return [manifest.name for manifest in discover(root)]
+
+
+# --------------------------------------------------------------------------- #
+# key vocabularies:  two packs, one word, two meanings
+# --------------------------------------------------------------------------- #
+# Packs share ONE flat namespace — the model's projection — and nothing stops two
+# of them from wanting the same word for different things. It happened in the
+# default set: `cad-solid` reads `bbox_mm` as the ASSEMBLY envelope, `fdm-print`
+# reads it as ONE PART in print orientation. A project with both (every mechanical
+# project has an assembly and printed parts) could satisfy exactly one of them —
+# published as the assembly, the bed-fit gate measured a 480 mm boat against a
+# 220 mm printer bed and FAILED; published as the part, the envelope gate skipped
+# and its claim went unheld. Neither pack was wrong, and neither could see the
+# other.
+#
+# `GateContext.param` fixes the *reading* — `cad.bbox_mm` and `fdm.bbox_mm` resolve
+# before the bare key. What is below fixes the *finding out*: the spine knows which
+# packs are installed and can diff what they read, so the collision is reported by
+# `atompipe doctor` instead of discovered by a verdict about the wrong object.
+def key_scope(manifest: PackManifest) -> str:
+    """The prefix this pack's keys may carry: ``fdm-print`` -> ``fdm``.
+
+    Taken from the manifest's ``key_scope`` when it states one, and otherwise
+    DERIVED from the gate ids it declares, which are already dotted and
+    pack-prefixed (``fdm.bed_fit``, ``fdm.overhang`` -> ``fdm``). Derived rather
+    than duplicated on purpose (rule 2): a pack that renamed its gates and forgot
+    a second declaration would publish a scope nothing answers to.
+
+    A pack whose gate ids do not share one prefix has no scope, and scoping is
+    simply off for it — better than picking one of two prefixes and being right
+    half the time.
+    """
+    explicit = (getattr(manifest, "key_scope", "") or "").strip()
+    if explicit:
+        return explicit
+    prefixes = {gid.split(".", 1)[0].strip()
+                for gid in (manifest.provides_gates or []) if "." in gid}
+    prefixes.discard("")
+    return prefixes.pop() if len(prefixes) == 1 else ""
+
+
+def _read_baseline(pack_dir: str) -> dict[str, Any]:
+    """The pack's baseline projection, or ``{}``. Never raises.
+
+    A broken baseline is already reported by ``validate``; a *diagnostic* that
+    died on it would take out the one command people run when confused.
+    """
+    path = os.path.join(pack_dir, SELFTEST_DIR, BASELINE_NAME)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def key_vocabulary(name: str, root: str | None = None) -> dict[str, dict[str, str]]:
+    """Every projection key this pack reads -> ``{"primary": …, "note": …}``.
+
+    Two sources, and both are already required to exist for other reasons:
+
+    * ``selftest/baseline.json`` — "every key any gate in the pack reads",
+      carrying a ``_notes`` line per key. Those notes ARE the meanings compared
+      when two packs overlap, which is why the pack format asks for them.
+    * its ``_aliases`` map — the other spellings each key answers to. A gate that
+      accepts ``bbox_mm`` as a fallback for ``part_bbox_mm`` collides on the
+      fallback, and the baseline alone would never show it.
+
+    Derived from the pack's own files rather than declared twice: a vocabulary
+    maintained beside the gates is a vocabulary that goes stale silently, and a
+    stale one makes this whole check a decoration.
+    """
+    pack_dir = find(name, root)
+    if not pack_dir:
+        return {}
+    baseline = _read_baseline(pack_dir)
+    notes_raw = baseline.get(BASELINE_NOTES)
+    notes = {str(k): str(v) for k, v in notes_raw.items()} if isinstance(notes_raw, dict) else {}
+
+    vocab: dict[str, dict[str, str]] = {}
+    for key in baseline:
+        if key.startswith("_"):
+            continue
+        vocab[key] = {"primary": key, "note": notes.get(key, "")}
+
+    aliases = baseline.get(BASELINE_ALIASES)
+    if isinstance(aliases, dict):
+        for primary, spellings in aliases.items():
+            if isinstance(spellings, (str, bytes)) or not isinstance(spellings, Iterable):
+                continue
+            for spelling in spellings:
+                alias = str(spelling)
+                if alias.startswith("_") or alias in vocab:
+                    continue        # a key the pack states itself keeps its own meaning
+                vocab[alias] = {"primary": str(primary),
+                                "note": notes.get(str(primary), "")}
+    return vocab
+
+
+def _meaning_fingerprint(note: str) -> str:
+    """A note reduced to what it SAYS, for comparing two packs' definitions.
+
+    Letters, digits and single spaces. Two packs that wrote the same sentence with
+    different punctuation mean the same thing; two that wrote different sentences
+    are assumed to mean different things, which is the safe direction — this
+    produces a WARNING naming both packs, and a spurious one costs a reader ten
+    seconds while a missed one costs them the afternoon the friction log describes.
+    """
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (note or "").lower()).split())
+
+
+def key_collisions(names: Sequence[str], root: str | None = None, *,
+                   projection_keys: Iterable[str] = ()) -> list[KeyCollision]:
+    """Keys two or more of these packs read as DIFFERENT quantities.
+
+    ``names`` is normally ``installed(root)`` — the packs this project actually
+    opted into, because a collision between two packs nobody installed is not this
+    project's problem and a doctor that says so is a doctor people stop reading.
+
+    ``projection_keys`` is the project's own flat projection. A key it publishes
+    bare marks the collision ``live``: one of these two packs is, right now,
+    reading a number that was written for the other.
+
+    Packs that describe a key identically are not reported. The comparison is on
+    the ``_notes`` line each pack wrote for it — a declaration, not an inference —
+    so the report says the packs *declare it differently*, which is exactly what
+    is known.
+    """
+    vocabularies = {name: key_vocabulary(name, root) for name in names}
+    scopes: dict[str, str] = {}
+    for name in names:
+        pack_dir = find(name, root)
+        if not pack_dir:
+            continue
+        try:
+            scopes[name] = key_scope(read_manifest(pack_dir))
+        except AtompipeError:
+            scopes[name] = ""
+
+    published = {str(k) for k in projection_keys or ()}
+    by_key: dict[str, list[str]] = {}
+    for name, vocab in vocabularies.items():
+        for key in vocab:
+            by_key.setdefault(key, []).append(name)
+
+    out: list[KeyCollision] = []
+    for key, owners in sorted(by_key.items()):
+        if len(owners) < 2:
+            continue
+        meanings = {name: vocabularies[name][key]["note"] for name in owners}
+        fingerprints = {_meaning_fingerprint(text) for text in meanings.values()}
+        if len(fingerprints) == 1 and "" not in fingerprints:
+            continue                    # the packs agree; one word, one quantity
+        out.append(KeyCollision(
+            key=key,
+            packs=list(owners),
+            meanings=meanings,
+            scoped={name: f"{scopes[name]}.{key}" for name in owners if scopes.get(name)},
+            primary={name: vocabularies[name][key]["primary"] for name in owners},
+            live=key in published,
+        ))
+    return out

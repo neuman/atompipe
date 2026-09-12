@@ -47,7 +47,13 @@ packages = ["atompipe", "atompipe.bundled"]
 "atompipe.bundled" = "packs"
 
 [tool.setuptools.package-data]
-atompipe = ["py.typed"]
+atompipe = [
+  "py.typed",
+  # The site scaffold `atompipe site init` copies. Shipped by glob, not by
+  # filename: a template that grows a file and does not grow a line here is a
+  # site that scaffolds broken from the wheel and fine from a checkout.
+  "site_template/**/*",
+]
 # A pack is an ordinary directory of whatever it needs — gates, helper modules,
 # fixtures, meshes, reference docs, scaffolds. Enumerating a few known shapes is
 # how `bomlib.py` (a pack-root helper) silently failed to ship and every gate in

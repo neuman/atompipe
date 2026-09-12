@@ -1,0 +1,75 @@
+{
+  "_description": "A stirred tank with a 2.1 kW immersed heater and a 42 W/K loss to 20 degC air, written as Modelica and recorded over a 25000 s run. One state (the bulk temperature), one algebraic variable (the wall loss), one closed-form answer: T(t) = T_amb + Q/UA + (T_start - T_amb - Q/UA)*exp(-t*UA/C), with tau = C/UA = 5000 s and a steady state of 343.15 K. The recorded run reaches 342.813 K (5 tau, 99.3% of the way there) with the wall shedding 2085.8 W; the two claims are that the contents never pass 345 K and that the final wall loss stays under 2100 W. selftest/assets/model/ThermalTank.mo is the Modelica; selftest/assets/mirror/ is an independent implementation of the same equations in closed form, which modelica.mirror_agrees compares the run against variable by variable. Units are SI and ABSOLUTE: kelvin, not celsius, because that is what Modelica's own SI types mean and mixing the two is the single most common unit defect in this domain. Every path here is relative to the project root - point them at your own .mo tree and your own recorded run.",
+
+  "modelica_sources": ["selftest/assets/model"],
+  "modelica_class": "ThermalTank.TankRun",
+  "modelica_load_libraries": [],
+
+  "modelica_max_bad_parameters": 0,
+  "modelica_unitless_ok": [],
+
+  "modelica_result_csv": "selftest/assets/results/ThermalTank.TankRun_res.csv",
+  "modelica_start_time_s": 0.0,
+  "modelica_stop_time_s": 25000.0,
+  "modelica_stop_time_tol_frac": 0.001,
+  "modelica_required_variables": ["tank.T", "tank.qLoss", "der(tank.T)"],
+  "modelica_steady_state_tol": 1.0e-4,
+  "modelica_steady_state_vars": ["der(tank.T)"],
+
+  "modelica_claim_variables": [
+    {"claim": "C1", "variable": "tank.T", "reducer": "max",
+     "comparator": "<=", "limit": 345.0, "units": "K"},
+    {"claim": "C2", "variable": "tank.qLoss", "reducer": "final",
+     "comparator": "<=", "limit": 2100.0, "units": "W"}
+  ],
+
+  "modelica_mirror_csv": "selftest/assets/mirror/thermal_tank_mirror.csv",
+  "modelica_mirror_source": "the closed-form exponential solution of the same ODE, evaluated in Python (selftest/assets/mirror/mirror_reference.py)",
+  "modelica_mirror_variables": {
+    "tank.T":     {"rel_tol": 1.0e-3, "abs_tol": 0.05},
+    "tank.qLoss": {"rel_tol": 1.0e-3, "abs_tol": 1.0}
+  },
+  "modelica_mirror_rel_tol": 1.0e-3,
+  "modelica_mirror_abs_tol": 0.0,
+
+  "modelica_omc_timeout_s": 300.0,
+  "modelica_simulate_timeout_s": 900.0,
+  "modelica_tolerance": 1.0e-6,
+  "modelica_number_of_intervals": 25,
+
+  "_notes": {
+    "_units": "SI throughout, and ABSOLUTE where Modelica's SI types are absolute. Temperature is KELVIN (Modelica.Units.SI.Temperature is kelvin; a degC number in a K slot is 273.15 out and looks entirely plausible). Time is SECONDS everywhere including stopTime, tolerances and reducer times. Power W, energy J, conductance W/K, capacitance J/K. This pack never converts: it compares the number in the result column against the number in the claim, so the two must already be in the same unit and the pack cannot tell you when they are not.",
+    "_paths": "Every path key is resolved against the PROJECT ROOT (ctx.root), not against this file and not against the current directory. An absolute path is used as given. Directories are walked for *.mo; a directory containing package.mo yields the whole tree with package.mo first, which is the order omc needs.",
+    "_result_file_provenance": "selftest/assets/results/ThermalTank.TankRun_res.csv WAS NOT WRITTEN BY omc. omc is not installed on the machine this pack was built on, and faking a compiler's output would be exactly the dishonesty this project exists to prevent. The file is an RK4 integration of the same ODE at a 1000 s step, emitted in OMC's result-CSV format so the tier-0 readers have something real to parse. selftest/assets/results/PROVENANCE.md says so too, at length, and shows the command that regenerates it. Nothing in the pack claims it is a simulator output; the tier-2 gates are the ones that produce those, and they SKIP here.",
+
+    "modelica_sources": "List of .mo files or directories holding the model. Scanned by modelica.source_hygiene and modelica.claims_addressable; loaded by the three tier-2 gates. Point it at your package root, not at one file, or the scanner reports variables as missing because it never saw the class that declares them.",
+    "modelica_class": "The fully qualified class the tier-2 gates check, build and simulate, and the class modelica.claims_addressable resolves dotted variable names from. 'ThermalTank.TankRun' here: the package, then the experiment model inside it. Without it, claims_addressable falls back to a much weaker 'is this name declared anywhere' test and says so in its verdict.",
+    "modelica_load_libraries": "Libraries to loadModel() before the sources, e.g. [\"Modelica\"] for the Modelica Standard Library. EMPTY here on purpose: the example model declares its own SI types as local Real subtypes so it loads into a bare omc. A real project almost always needs [\"Modelica\"], and the load must come first - a source that extends an MSL class fails to instantiate if the library is not in the symbol table yet, and the error then names YOUR class.",
+
+    "modelica_max_bad_parameters": "How many parameter declarations may carry no description or no unit before modelica.source_hygiene FAILS. Zero, and the zero is the argument: the declarations are the only unit checking Modelica has, and an undescribed parameter is a number nobody can defend (method rule 3). A non-zero budget is a budget that fills.",
+    "modelica_unitless_ok": "fnmatch patterns over parameter NAMES that are excused from needing a unit. Empty here, and it should usually stay empty: the right way to declare a genuinely dimensionless parameter is Real x(unit=\"1\"), which is nine characters and is what the example model does for heaterDutyFraction. The verdict always reports how many it excused, because an allowlist nobody can see is an allowlist that grows.",
+
+    "modelica_result_csv": "The recorded run, in OMC's result-CSV format: a quoted header row, 'time' as the first column, derivative columns spelled der(x). This is what the tier-0 half reads, and recording it once on a machine that has OpenModelica is what lets the cheap gates run everywhere else. modelica.solution_valid is what stops that from becoming a lie.",
+    "modelica_start_time_s": "The startTime the run was asked for, seconds. Checked against the first sample: a result that begins somewhere other than startTime is a result from a different experiment than the one you think you are reading.",
+    "modelica_stop_time_s": "The stopTime the run was asked for, seconds. REQUIRED by modelica.solution_valid, which refuses to invent one - without it 'the run finished' is unfalsifiable. 25000 s = 5 tau here, which is where the derivative has fallen far enough for a steady-state claim to mean something.",
+    "modelica_stop_time_tol_frac": "How far short of stopTime a run may stop and still count as finished, as a fraction of the span. 1e-3: omc writes the final sample at exactly stopTime, but a 17-digit CSV round trip is not bit-exact and 24999.9999997 s of a 25000 s run finished. Zero was rejected for that reason; 1e-2 was rejected because 1% of a 24-hour run is fifteen minutes of missing transient.",
+    "modelica_required_variables": "Columns the run MUST contain. This is the check against a variableFilter that quietly excluded something: a result file missing a variable is valid, readable, and useless, and nothing else in the toolchain complains.",
+    "modelica_steady_state_tol": "OPTIONAL, and opt-in. The ceiling on |der(...)| at the final sample, in the derivative's own units per second. Set it and modelica.solution_valid additionally asserts the run settled rather than being cut mid-transient. 1e-4 K/s here = 0.36 K/hour, which is below the resolution of any thermocouple this model would be compared against; the recorded run ends at 6.74e-5 K/s. Leave it out and the gate says, in its verdict, that no steady-state check was requested.",
+    "modelica_steady_state_vars": "Which derivative columns the steady-state check looks at. Defaults to every der(...) column in the result when modelica_steady_state_tol is set and this is empty. Named explicitly here because a model with a fast unimportant state and a slow important one needs to say which one it is waiting for.",
+
+    "modelica_claim_variables": "The bridge from a claim to a number. Each entry is {claim, variable, reducer} plus an acceptance. Reducers: final, initial, min, max, mean, absmax, range, or {\"reducer\": \"at\", \"time\": <seconds>} which interpolates between the bracketing samples and REFUSES to extrapolate past the end of the run. The acceptance comes from the LEDGER's claim when the project has one - the limit then lives in exactly one place (method rule 2) - and the comparator/limit written here is the fallback for a binding made before the claim, and for this baseline, which has no ledger at all. C1 (max tank.T <= 345 K) has 2.19 K of margin against a run that peaks at 342.813; C2 (final tank.qLoss <= 2100 W) has 14.2 W against 2085.85.",
+
+    "modelica_mirror_csv": "An INDEPENDENT implementation of the same equations, as a CSV with a time column and one column per variable - deliberately the same shape as a result file, so it can be exported from a spreadsheet, a notebook or another solver with no adapter. modelica.mirror_agrees interpolates the Modelica result at each mirror time and compares. This is method rule 6, and the failure it guards is specific: when the formal model cannot be run in the environment that needs the numbers, somebody writes a second implementation to get them, it works, it gets used, and the two drift with nothing watching until the mirror is the thing everyone trusts and nobody checked.",
+    "modelica_mirror_source": "One line saying what the mirror IS, echoed into the verdict. 'a spreadsheet', 'the published reference case from <paper>', 'the closed form'. A comparison against an unnamed second file proves the two files agree and nothing else.",
+    "modelica_mirror_variables": "Per-variable tolerances: agreement is |model - mirror| <= abs_tol + rel_tol*|mirror|. The mixed form is the only one that works across variables in different units and through a zero crossing - tank.qLoss starts at exactly 0 W, where a pure relative tolerance admits nothing at all. abs_tol 0.05 K on a temperature is a fifth of a decent sensor's error; abs_tol 1 W on a 2 kW loss is 0.05%. The run agrees with the closed form to 2.9e-4 K at worst, which is 0.1% of its allowance - and that is because this system is LINEAR and first order. On a stiff or event-driven model expect 1e-3 to 1e-2, and set the tolerance from the effect you are claiming, not from this example: a tolerance looser than the effect makes the gate decorative.",
+    "modelica_mirror_rel_tol": "Relative tolerance for any mirror variable with no entry of its own. 1e-3 is a thousand times looser than a default solver tolerance and tight enough that a sign error, a unit slip or a dropped term cannot hide under it.",
+    "modelica_mirror_abs_tol": "Absolute tolerance for any mirror variable with no entry of its own. 0.0, because there is no safe default: the right absolute floor is the smallest difference that would matter physically, and only the project knows it.",
+
+    "modelica_omc_timeout_s": "Wall-clock budget for a checkModel or buildModel invocation, seconds. 300 because omc's FIRST run on a machine loads and indexes the library tree; the second run on the same model is usually a few seconds. A timeout is reported as a SKIP, never a FAIL - a model that did not finish inside the budget has not been shown to be wrong.",
+    "modelica_simulate_timeout_s": "Wall-clock budget for compile-and-simulate, seconds. 900, separate from the above because simulate() includes a C compilation of generated code and a budget that is right for checkModel stops a real simulation half way and reports it as the model's fault.",
+    "modelica_tolerance": "Solver relative tolerance passed to simulate(). 1e-6 is omc's own default and is a CONSTANT with provenance like any other: tighten it and a marginal event may resolve differently, loosen it and a result can become tolerance-dependent. If a claim's margin is within a few multiples of this, the claim is measuring the solver.",
+    "modelica_number_of_intervals": "How many samples the result file gets. A RESOLUTION choice, not an accuracy one - the solver steps where it needs to and interpolates onto this grid. 25 here gives a 1000 s grid over 25000 s, which is enough to see the exponential and small enough to read by eye. A reducer like max or mean is computed over THIS grid, so a peak between two samples is a peak this pack cannot see; raise it when a claim is about an extremum.",
+
+    "_what_this_baseline_does_not_exercise": "The tier-2 gates (modelica.checks, modelica.compiles, modelica.simulates) SKIP wherever omc is absent, which includes the machine this pack was written on. Their fixtures are real .mo files under selftest/assets/bad/ that omc genuinely rejects, so those controls fire wherever omc is installed. Nothing in the tier-0 half proves the model compiles; a green tier-0 sweep says the recorded run is valid and the numbers read off it meet their claims, and says nothing at all about whether today's source still produces that run."
+  }
+}

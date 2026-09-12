@@ -59,6 +59,10 @@ Two more, learned the hard way and enforced in `tests/test_packs.py`:
 - **Every constant carries its provenance** — why this value, and *what was tried and
   rejected*. The rejected alternatives are the field that pays: without them every
   fresh context window re-litigates every settled number.
+- **The site renders the ledger; it never computes truth.** Nothing under `site/`
+  re-derives a measurement or decides whether a claim passes — if a number on the
+  page is wrong, the ledger is wrong. And no build step: plain HTML, CSS and ES
+  modules, for the same reason the spine has no dependencies.
 - **Comments say what slipped through.** Where a rule exists because something got
   past a check, name it. The modules are dense with this on purpose.
 - **No reference to the parent project.** atompipe carries its method and none of its
@@ -69,7 +73,8 @@ Two more, learned the hard way and enforced in `tests/test_packs.py`:
 
 | Path | What |
 |---|---|
-| `src/atompipe/` | the spine — 13 stdlib-only modules; `models.py` is the type contract |
+| `src/atompipe/` | the spine — 14 stdlib-only modules; `models.py` is the type contract |
+| `site/` | a project's site — scaffolded by `atompipe site init` from `src/atompipe/site_template/`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs. Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`atompipe`, `pack-authoring`) |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
@@ -77,6 +82,7 @@ Two more, learned the hard way and enforced in `tests/test_packs.py`:
 | `METHOD.md` | the doctrine |
 | `docs/EXTENSION_PROTOCOL.md` | how an agent grows a capability nobody prebaked |
 | `docs/PACK_FORMAT.md` | the pack contract |
+| `docs/SITE_CONTRACT.md` | the site: view kinds, locators, `state.json` |
 | `docs/SPINE_CONTRACT.md` | internal: each module's public surface |
 
 ## Adding a pack

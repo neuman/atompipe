@@ -16,6 +16,7 @@ packs/<name>/
   references/*.md    # tier 3 — loaded only for the specific task at hand.
   gates/*.py         # validators. Each declares a negative control.
   generators/*.py    # model -> domain artifact (optional)
+  views/*.py         # viewgens: model -> a view the site renders (optional)
   lenses.md          # adversarial review dimensions for this domain
   sourcing.md        # real-world procurement and process constraints (optional)
   scaffold/          # starter model + claims for a new project in this domain (optional)
@@ -50,9 +51,14 @@ hundred lines; it costs nothing until an agent is actually meshing.
   "settles": ["bed fit", "wall thickness", "overhang angle", "bridge span", "print time"],
   "claim_classes": ["manufacturability", "fdm", "additive"],
   "provides_gates": ["fdm.bed_fit", "fdm.wall_thickness", "fdm.overhang", "fdm.bridges"],
+  "provides_views": ["print_part"],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": ["trimesh", "numpy"],
+  "install": {
+    "trimesh": { "version": "4.5", "check": "python3 -c 'import trimesh'",
+                 "methods": [{ "how": "pip", "run": "pip install trimesh==4.5.*", "root": false }] }
+  },
   "max_tier": 1,
   "lenses": ["printability", "part orientation", "assembly order", "material"],
   "licence": "Apache-2.0",
@@ -64,6 +70,11 @@ hundred lines; it costs nothing until an agent is actually meshing.
 gate, it scores every manifest's `settles` and `claim_classes` against the claim's
 quantity to suggest candidates. Write the phrases a person would actually use for
 the quantity, not your internal gate names.
+
+`provides_views` lists the view ids `views/*.py` registers. It is tier 1 for two
+reasons: a reader deciding whether to install a pack wants to know it comes with a
+viewer, and it is the string every `Locator.view` in the pack's verdicts will
+address — declared here, the pair can be checked without importing anything.
 
 `origin` matters. Say where the pack came from — extracted from a real project,
 built by the extension protocol, ported from a paper. It tells the next reader how
@@ -78,12 +89,20 @@ Tier 2. Roughly 150 lines. Cover, in this order:
    it does not. This section prevents more damage than the first one.
 3. **Gates**, each with its tier, what it measures, its threshold source, and the
    known-bad fixture it fails on.
-4. **Units and frames.** State them explicitly. Unit confusion is the most common
-   cross-pack defect and it is entirely preventable.
+4. **Units and frames, and WHICH OBJECT each gate judges.** State them
+   explicitly, in the first paragraph. Unit and frame confusion is the most common
+   cross-pack defect and it is entirely preventable — "one part, in print
+   orientation, bed at z=0" and "the assembly, placed, in the assembly frame" are
+   different enough that a reader who is told neither will get it wrong. List the
+   key families with their primary spelling, their fallbacks and their resolution
+   order; see "Projection keys" below.
 5. **The physics in one paragraph** — enough that an agent can tell whether a result
    is absurd.
 6. **Common failure modes** in this domain, and what they look like in a verdict.
-7. **Where to look next** — which `references/` file covers what.
+7. **Node names**, if the pack emits a `model3d` view — see "Views and locators"
+   below. This is an interface, not an implementation detail, and it has to be
+   published somewhere a gate author will read.
+8. **Where to look next** — which `references/` file covers what.
 
 Write it for an agent that is competent but has never used this domain's tooling.
 
@@ -117,8 +136,11 @@ Rules, all enforced:
 
 - **`negative_control` is mandatory.** The registry raises without it. A gate that
   cannot demonstrate failure is a logger — see rule 5 in `METHOD.md`.
-- **Declare `requires_*` honestly.** A gate whose tool is missing reports SKIPPED and
-  its claim goes BLOCKED, visibly. Silently degrading is how a report starts lying.
+- **Declare `requires_*` honestly, and ship the install recipe.** A gate whose tool is
+  missing reports SKIPPED and its claim goes BLOCKED, visibly — and the skip message
+  names the command that fixes it, from the manifest's `install` block. BLOCKED is a
+  call to action; a pack that leaves the reader to work out how to get its solver has
+  done half a job. Do not design the pack to be comfortable without the tool it wraps.
 - **Declare the real tier.** A fifteen-minute gate is tier 2, however much you wish
   otherwise. Miscategorising it breaks everyone's inner loop.
 - **One dense line in `detail`.** Bulk output goes to `ctx.out_dir` and is cited in
@@ -147,6 +169,118 @@ Rules, all enforced:
   valuable gate in the pack.
 - **Ship at least one tier-0 gate.** A pack of only expensive gates has not finished
   its job.
+
+## Projection keys: scope, meaning, and resolution order
+
+A pack does not own a namespace. Every installed pack reads the same flat
+projection — `{name: value}` — so two packs can want the same word for different
+things, and nothing about either pack is wrong when they do.
+
+It happened in the default set. `cad-solid` read `bbox_mm` as the **assembly**
+envelope; `fdm-print` read it as **one part in print orientation**. A project with
+both installed — an assembly and printed parts, which is every mechanical project —
+could satisfy exactly one of them:
+
+```
+[FAIL] fdm.bed_fit : 480x186x87 mm vs 208x208 usable ...   # the assembly, on a printer bed
+[skip] cad.bounding : bbox_mm is absent                    # the other choice
+```
+
+Three mechanisms keep that from happening again, and a pack should use all three.
+
+### 1. Scope the key
+
+`GateContext.param` resolves a **pack-scoped** spelling before the bare one. The
+scope is the gate id's namespace — the part before the first dot, `fdm` for
+`fdm.bed_fit` — so a project publishes `fdm.bbox_mm` and `cad.bbox_mm` and each
+gate reads the one it means. A single-domain project keeps writing `bbox_mm` and
+nothing changes.
+
+**Resolution order, in full, highest priority first:**
+
+1. `<scope>.<name>` — flat (`params["fdm.bbox_mm"]`) or nested
+   (`params["fdm"]["bbox_mm"]`); a model may group its projection by domain
+2. `<pack name>.<name>` — `fdm-print.bbox_mm`, because people type that too
+3. `<name>` — the bare key
+4. the last dotted segment of `<name>`, so a gate may ask for `config.beam_mm`
+   against a flattened projection
+
+For a family of synonyms (`ctx.first_pack_param`), **every scoped spelling in the
+order declared, then every bare spelling in the order declared.** A scoped key
+always beats an unscoped one, whatever its rank in the family, because it is the
+only one of the two that is an explicit statement about *this* pack.
+
+```python
+bbox = ctx.first_pack_param(("part_bbox_mm", "bbox_mm", "bbox"))   # scoped first
+limit = ctx.pack_param("bed_x_mm")                                 # one key, scoped
+raw = ctx.param("budget_usd", scope=None)                          # deliberately unscoped
+value, key = ctx.first_pack_param_named(FAMILY)                    # and WHICH spelling won
+```
+
+`ctx.param(name)` is scope-aware by default, so a pack written before this existed
+gets the behaviour without an edit; pass `scope=None` for a key that genuinely
+belongs to the project rather than to any pack, or `scope="other"` to read another
+pack's namespace deliberately.
+
+### 2. Name the object in the key
+
+Scoping resolves a collision; it does not tell a reader what the number *is*. So
+the primary spelling of a key says which object it describes, and the bare word
+stays as a documented fallback:
+
+| Pack | Primary | Fallback | Means |
+|---|---|---|---|
+| `cad-solid` | `assembly_bbox_mm` | `bbox_mm` | the assembled product's envelope |
+| `fdm-print` | `part_bbox_mm` | `bbox_mm`, `bbox`, `footprint_mm` | one printed part, in print orientation |
+| `cad-solid` | `process_min_wall_mm` | `min_wall_mm` | the thinnest wall a process ALLOWS (a limit) |
+| `fdm-print` | `part_min_wall_mm` | `min_wall_mm`, … | the thinnest section MEASURED in a part |
+
+**Say the frame and the object in `PACK.md`, in the first paragraph** — which
+object each gate judges, and which coordinate frame it expects the geometry in. It
+is not a detail: `fdm-print`'s gates want the mesh in print orientation with the
+bed at z=0, a project exported parts in assembly coordinates, and a flat panel came
+back as a 201.7 mm unsupported span. True of that pose, useless about the print,
+and nothing in the verdict said which frame it had measured.
+
+### 3. Declare the vocabulary so it can be diffed
+
+`selftest/baseline.json` already carries **every key any gate in the pack reads**,
+with a `_notes` line per key. Add `_aliases` — `{primary key: [other accepted
+spellings]}` — and the declaration is complete, because a fallback spelling is
+where two packs collide without either baseline showing it:
+
+```json
+"_aliases": {
+  "part_bbox_mm": ["bbox_mm", "bbox", "footprint_mm"],
+  "part_min_wall_mm": ["min_wall_mm", "thinnest_wall_mm"]
+},
+"_notes": {
+  "part_bbox_mm": "[x, y, z] extent of ONE PRINTED PART, in its PRINT ORIENTATION with the bed at z=0, mm. ..."
+}
+```
+
+`atompipe doctor` reads those two maps from every **installed** pack and reports
+any key that two of them read with different declared meanings — naming both packs,
+what each means by it, the scoped spellings that separate them, and whether the
+project is publishing the ambiguous bare key right now:
+
+```
+[warn] pack-keys  'min_wall_mm' is read by cad-solid and fdm-print with different meanings
+                  AND THIS PROJECT PUBLISHES IT — publish cad.min_wall_mm, fdm.min_wall_mm
+                  or use each pack's own primary key (cad-solid: process_min_wall_mm,
+                  fdm-print: part_min_wall_mm). cad-solid: Thinnest wall the PROCESS allows,
+                  mm - a limit, not a measurement; fdm-print: Thinnest section MEASURED
+                  anywhere in the part, mm
+```
+
+Two packs that describe a key identically are not reported. The comparison is on
+the `_notes` line each pack wrote — a declaration, not an inference — so the
+warning says the packs *declare it differently*, which is exactly what is known.
+
+`pack.json` may also set `key_scope` explicitly, but should not: it is derived from
+the dotted gate ids (`fdm.bed_fit` → `fdm`), and a scope stated twice is a scope
+that goes out of step with the gates. Set it only when a pack's gate ids do not
+share one prefix.
 
 ## Negative controls
 
@@ -220,15 +354,109 @@ once: a gate declared a negative-control fixture that was never written, and nob
 noticed because the gate was skipping for a missing dependency.
 
 The baseline is also the pack's teaching example. Include a `_description` naming
-the object and a `_notes` map of key → one line on what it is and its unit; an agent
-that reads the baseline should be able to write a model this pack can gate, without
-reading any of its code.
+the object, a `_notes` map of key → one line on what it is and its unit, and an
+`_aliases` map of key → the other spellings its gates accept; an agent that reads
+the baseline should be able to write a model this pack can gate, without reading
+any of its code — and `atompipe doctor` can only diff two packs' vocabularies
+against each other if both of them wrote one down. **State the key under the
+spelling the pack teaches** (`part_bbox_mm`, not `bbox_mm`), so CI proves the
+primary key is the one actually read.
 
 CI asserts three things: every gate passes the baseline, every control fires against
 it, and nothing skips.
 
 `atompipe gate selftest` runs every control and **fails any gate that passes its own
 known-bad input**.
+
+## Views and locators
+
+A pack can also draw what its gates measure. `views/*.py` holds **viewgens**, which
+are to the project site what gates are to the report: same context shape, same
+`requires_*` declarations, same registry. A pack that emits a view in one of the
+kinds the site already knows gets visualisation for free — and, more importantly,
+its gates get somewhere to point.
+
+```python
+from atompipe.site import viewgen, ViewContext, derive_explode
+from atompipe.models import View, ViewKind
+
+@viewgen(id="assembly", kind=ViewKind.MODEL3D, title="Assembly",
+         requires_python=["trimesh"], gates=["cad.clash"])
+def assembly(ctx: ViewContext) -> View | None:
+    """The assembled part, one node per body."""
+    meshes = build_meshes(ctx.model)     # whatever this pack's generator produces
+    if not meshes:
+        return None                      # nothing to draw is not an error
+    src = ctx.write_asset("assembly.glb", export_glb(meshes))
+    return View(id="assembly", kind=ViewKind.MODEL3D, title="Assembly", src=src,
+                meta={"nodes": sorted(meshes),
+                      "explode": derive_explode(bounds_of(meshes))})
+```
+
+The six kinds — `model3d`, `image`, `chart`, `table`, `field`, `diagram` — and what
+each is addressed by are in [`SITE_CONTRACT.md`](SITE_CONTRACT.md). Extensibility is
+in the data, never in shipped code: a pack does not ship JavaScript, because the one
+artifact whose job is to be trusted when a gate says something is wrong must not
+depend on code nobody reviewed.
+
+Rules:
+
+- **Returning `None` is normal.** A CAD viewgen in a project with no geometry has
+  nothing to draw. That is not a failure; `atompipe site build` records it as
+  `empty` and moves on. Do not raise, and do not emit an empty view that renders as
+  a broken box.
+- **Declare `requires_python` / `requires_tools` the way a gate does.** A viewgen
+  whose exporter is missing is reported as *unavailable* with the module named. A
+  view that is absent because trimesh is not installed otherwise looks exactly like
+  a view the project never had.
+- **Write assets through `ctx.write_asset`**, never by hand into `site/assets/`.
+  Only what the context recorded is known to be live, so a file written behind its
+  back either survives forever or gets swept the first time the cleaner is made
+  stricter. `write_asset` returns the site-relative path that goes in `View.src`.
+- **Node names are an interface the pack must publish.** Whatever a `model3d`
+  viewgen calls its nodes is what every gate in that domain must use in its
+  locators, and `PACK.md` is where that scheme belongs. It is an interface between
+  two files written months apart, and interfaces drift.
+- **`derive_explode` is a first draft, not an answer.** It measures the bounding
+  boxes and stacks the parts along the thinnest axis, which saves transcription and
+  nothing else: it does not know that the lid comes off before the board, or that
+  two bodies are one sub-assembly. Assembly order is intent, not geometry. Pass
+  `overrides=` to correct it — they merge per mover, so fixing two parts costs two
+  entries, and nodes group by the `__` in `lid__boss_a` (a double underscore,
+  because single ones are ordinary inside part names like `back_left`).
+
+### Attaching locators to a verdict
+
+A gate that knows *where* the problem is says so, and the site stops being a report
+and starts being a debugger:
+
+```python
+return Verdict(
+    gate="cad.clash", passed=False,
+    detail="1 interfering pair: back_left / grip_lid_left 0.41 mm^3",
+    locators=[
+        Locator(view="assembly", target="back_left",
+                label="0.41 mm^3 into grip_lid_left", value=0.41),
+        Locator(view="assembly", target="grip_lid_left"),
+    ],
+)
+```
+
+`view` is a view id; `target` is the node name (`model3d`, `field`), hotspot id
+(`image`), series key (`chart`) or row id (`table`). An empty `target` means the
+whole view. Severity defaults to the verdict's own outcome.
+
+**Locate only what you genuinely know.** A confident red highlight on the wrong part
+is worse than no highlight: it sends someone to inspect a part that is fine, and
+once that has happened they stop trusting the overlay. An unlocatable failure
+carries no locators, and the page marks the verdict as unanchored rather than
+guessing.
+
+Nothing is dropped for being undrawable, either. `atompipe site build` reports every
+locator naming a view that does not exist or a node the view does not declare —
+in its warnings and in `state.json` — because a gate that thinks it is drawing and
+is not looks exactly like a gate that found nothing, and both ends of that mistake
+are silent.
 
 ## `lenses.md`
 

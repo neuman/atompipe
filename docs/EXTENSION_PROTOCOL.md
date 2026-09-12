@@ -67,7 +67,17 @@ in order:
 Write down what you picked, what you rejected, and why — this is rule 3 of the
 method and it applies to tooling exactly as it applies to constants.
 
-### 4. Install pinned, and smoke-test before any project data touches it
+### 4. Install it — pinned — and smoke-test before any project data touches it
+
+**Just install it.** This step is not optional and it is not somebody else's job. An
+agent that reaches a capability gap, writes a beautiful analysis of which solver would
+settle it, and then leaves the claim BLOCKED has not closed the gap. Install the tool,
+or hand the user the exact command and say what it costs.
+
+Prefer, in order: a pinned container image (no root, reproducible, trivially
+removable), the project's own installer or a distro package at a pinned version, then
+a source build. Record the method that worked in the pack's `install` block so the
+next person runs one command instead of rediscovering this.
 
 Pin an exact version. Record the exact command. Then run the tool's own tutorial or
 a trivial known case and confirm the answer.
@@ -203,6 +213,13 @@ It must compare against the claim's acceptance and refuse.
 
 **Silently degrading when the tool is missing.** Declare `requires_tools` and let the
 claim show as BLOCKED. An invisible skip is how a readiness report starts lying.
+
+**Treating BLOCKED as a resting state.** It is a call to action, not a place to
+settle. If a claim needs the solver, *install the solver* — or tell the user what to
+run and why. Designing a pack to be comfortable without the tool it wraps is the tail
+wagging the dog: you end up with a capability that never actually validates the thing
+it exists to validate, and a report full of honest BLOCKED rows that nobody clears.
+Ship the install recipe with the pack so the fix is one command.
 
 **Simulating a physical claim.** No CFD run makes a hull watertight. If the claim can
 only be settled by a real object, it stays UNVERIFIED — visibly — and the report says

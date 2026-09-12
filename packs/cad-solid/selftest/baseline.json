@@ -1,16 +1,28 @@
 {
   "_description": "Sealed equipment enclosure, four solids in one aluminium alloy, placed in the assembly frame with the housing's outer -X/-Y/-Z corner at the origin. A die-cast open-top housing (96 x 64 x 34 mm, 3 mm walls and floor) carries a 4 mm cover plate bolted flat onto its rim; inside the cavity a carriage slides along X guided by the two side walls with 0.4 mm running clearance per side, and a turned guide roller resting on the cavity floor stops it at the -X end of travel. This is the pack's KNOWN-GOOD projection: every gate must PASS on it, which is what makes each negative control readable as 'the fixture changed one thing and the gate flipped'. The geometry and the derived numbers below both come from selftest/make_baseline_meshes.py, which rebuilds the solids and fails loudly if this file has drifted from them.",
 
+  "_aliases": {
+    "assembly_bbox_mm": ["bbox_mm"],
+    "assembly_bbox_limit_mm": ["bbox_limit_mm"],
+    "assembly_volume_mm3": ["volume_mm3"],
+    "assembly_volume_limit_mm3": ["volume_limit_mm3"],
+    "assembly_com_mm": ["com_mm"],
+    "assembly_com_target_mm": ["com_target_mm"],
+    "assembly_com_tol_mm": ["com_tol_mm"],
+    "process_min_wall_mm": ["min_wall_mm"],
+    "meshes": ["solids", "parts"]
+  },
+
   "_notes": {
     "meshes": "{part name: path to the exported solid, relative to the pack root}. Read by every mesh gate; values may also be in-memory meshes. The solids are already PLACED in the assembly frame - parts booleaned at their own local origins either all clash or none do, and both answers are nonsense.",
-    "bbox_mm": "Overall assembly bounding box [X, Y, Z], mm. Measured off the exported meshes.",
-    "bbox_limit_mm": "Envelope the assembly has to fit in [X, Y, Z], mm - a 100 x 70 x 40 mm mounting bay. cad.bounding fails above 100% utilisation on any axis.",
-    "volume_mm3": "Total material volume of all four solids, mm^3. Measured off the exported meshes.",
-    "volume_limit_mm3": "Material budget for the assembly, mm^3 - the casting shot size the process allows. Optional; cad.bounding reports 'vol not checked' without it.",
-    "com_mm": "Centre of mass of the assembly [X, Y, Z], mm. Volume-weighted centroid, valid here only because all four parts are the same alloy; with mixed materials this would have to be mass-weighted.",
-    "com_target_mm": "Where the centre of mass is supposed to sit [X, Y, Z], mm - the centre of the mounting boss pattern.",
-    "com_tol_mm": "Allowed distance from com_mm to com_target_mm, mm. Optional; cad.bounding reports 'com not checked' without it.",
-    "min_wall_mm": "Thinnest wall the process allows, mm. 2.5 mm is an ordinary die-cast minimum at this size; the thinnest wall actually present is the 3.0 mm housing wall and floor. A process decision the model must carry - cad.wall_thickness refuses to invent one.",
+    "assembly_bbox_mm": "Overall bounding box of the ASSEMBLY - every solid, placed, in the assembly frame - [X, Y, Z], mm. Measured off the exported meshes. NOT one printed part: fdm-print reads a part-sized box, under part_bbox_mm, and while both packs called it bbox_mm a project with an assembly and printed parts could only satisfy one of them. Falls back to bbox_mm; write cad.assembly_bbox_mm when another pack wants the same word.",
+    "assembly_bbox_limit_mm": "Envelope the ASSEMBLY has to fit in [X, Y, Z], mm - a 100 x 70 x 40 mm mounting bay. cad.bounding fails above 100% utilisation on any axis. Falls back to bbox_limit_mm.",
+    "assembly_volume_mm3": "Total material volume of ALL the solids, mm^3. Measured off the exported meshes. fdm-print's volume_mm3 is one part's, which is a different number on any assembly. Falls back to volume_mm3.",
+    "assembly_volume_limit_mm3": "Material budget for the assembly, mm^3 - the casting shot size the process allows. Optional; cad.bounding reports 'vol not checked' without it. Falls back to volume_limit_mm3.",
+    "assembly_com_mm": "Centre of mass of the ASSEMBLY [X, Y, Z], mm. Falls back to com_mm. Volume-weighted centroid, valid here only because all four parts are the same alloy; with mixed materials this would have to be mass-weighted.",
+    "assembly_com_target_mm": "Where the assembly's centre of mass is supposed to sit [X, Y, Z], mm - the centre of the mounting boss pattern. Falls back to com_target_mm.",
+    "assembly_com_tol_mm": "Allowed distance from the measured centre of mass to its target, mm. Optional; cad.bounding reports 'com not checked' without it. Falls back to com_tol_mm.",
+    "process_min_wall_mm": "Thinnest wall the PROCESS allows, mm - a limit, not a measurement. fdm-print's min_wall_mm is the thinnest section actually present in a part, so one bare key cannot be both the rule and the reading: a project that publishes its measured wall under the bare name hands this gate a threshold nobody chose. Falls back to min_wall_mm. 2.5 mm is an ordinary die-cast minimum at this size; the thinnest wall actually present is the 3.0 mm housing wall and floor. A process decision the model must carry - cad.wall_thickness refuses to invent one.",
     "wall_samples": "Ray budget for the wall-thickness sampler, as a count of rays. Past this many faces the gate casts from an evenly spaced, deterministic subset of exactly this many facets instead of every one, so its cost stops scaling with tessellation density. Must be a positive integer; the gate SKIPS rather than silently defaulting if it is anything else.",
     "clash_tolerance_mm3": "Default per-pair intersection volume treated as tessellation noise rather than interference, mm^3. 0.2 is the prismatic default: two planar faces meeting face-to-face resolve to slivers well under this.",
     "clash_tolerances_mm3": "{'a|b': mm^3} per-pair overrides of that tolerance. Empty on purpose - the one curved pair is already covered by organic_parts, and an override invented for a pair that does not need one is how a real interference gets hidden.",
@@ -18,7 +30,8 @@
     "clash_depth_tols_mm": "{'a|b': mm} per-pair overrides of the depth tolerance. Empty for the same reason as clash_tolerances_mm3: the curved pair already gets the larger organic depth (0.05 mm, a tessellated curve's chord height) from organic_parts.",
     "organic_parts": "Parts with a curved or lofted surface. Any pair touching one of these gets the larger organic tolerance (3 mm^3) instead of the prismatic default, because chord error on a tessellated curve is genuinely bigger than boolean noise. Per-pair on purpose: raising the GLOBAL tolerance to silence one curved pair is how a real overlap between two flat plates stays hidden.",
     "sliding_fits": "Pairs that are meant to MOVE relative to each other. cad.clash REFUSES an allowlist entry for one of these - 'they touch' and 'they jam' look identical to a boolean at a single pose, so the pair that must move is the pair that most needs the check.",
-    "clash_allow": "[{pair, reason}] intended contacts that are not interference. Every entry needs a stated reason, may not wildcard either side, and may not name a sliding pair; cad.clash FAILS the whole gate if an entry breaks those rules rather than quietly ignoring it."
+    "clash_allow": "[{pair, reason}] intended contacts that are not interference. Every entry needs a stated reason, may not wildcard either side, and may not name a sliding pair; cad.clash FAILS the whole gate if an entry breaks those rules rather than quietly ignoring it.",
+    "bonded_joints": "[{pair, reason}] joints DESIGNED to be face to face - glued, welded, bonded. The honest middle between 'every contact is a failure' and clash_allow: the VOLUME tolerance is waived for the pair, because shared volume on a bond line is depth times glue area and the glue area is a design quantity that is legitimately large; the DEPTH tolerance is NOT, and a bonded pair deeper than 0.05 mm still FAILS. Same three refusals as clash_allow - no reason, a wildcard, a sliding pair - plus a pair that is also allowlisted, because then which declaration governs is a guess. Empty here: this enclosure is bolted, not bonded, and an entry invented for a joint that does not exist is how the mechanism stops meaning anything."
   },
 
   "meshes": {
@@ -28,15 +41,15 @@
     "guide_roller": "selftest/meshes/guide_roller.stl"
   },
 
-  "bbox_mm": [96.0, 64.0, 38.0],
-  "bbox_limit_mm": [100.0, 70.0, 40.0],
-  "volume_mm3": 94467.0,
-  "volume_limit_mm3": 110000.0,
-  "com_mm": [46.424, 32.0, 17.054],
-  "com_target_mm": [46.0, 32.0, 17.0],
-  "com_tol_mm": 1.5,
+  "assembly_bbox_mm": [96.0, 64.0, 38.0],
+  "assembly_bbox_limit_mm": [100.0, 70.0, 40.0],
+  "assembly_volume_mm3": 94467.0,
+  "assembly_volume_limit_mm3": 110000.0,
+  "assembly_com_mm": [46.424, 32.0, 17.054],
+  "assembly_com_target_mm": [46.0, 32.0, 17.0],
+  "assembly_com_tol_mm": 1.5,
 
-  "min_wall_mm": 2.5,
+  "process_min_wall_mm": 2.5,
   "wall_samples": 4000,
 
   "clash_tolerance_mm3": 0.2,
@@ -50,5 +63,6 @@
       "pair": ["cover", "housing"],
       "reason": "the cover is bolted flat onto the housing rim; that face contact is the gasket seat, not interference"
     }
-  ]
+  ],
+  "bonded_joints": []
 }

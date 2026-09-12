@@ -45,6 +45,9 @@
     "solar.irradiance",
     "thermal.h_agreement"
   ],
+  "provides_views": [
+    "collector_curve"
+  ],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": [],

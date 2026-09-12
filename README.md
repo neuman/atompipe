@@ -155,6 +155,34 @@ See [`docs/PACK_FORMAT.md`](docs/PACK_FORMAT.md) to write one, and
 [`docs/EXTENSION_PROTOCOL.md`](docs/EXTENSION_PROTOCOL.md) for how an agent grows a
 capability that nobody prebaked.
 
+## The project site
+
+Every project can build a static site, and the reason to build one is not the
+presentation. It is that **gate verdicts are anchored to the geometry they are
+about.** `cad.clash: back_left interferes with grip_lid_left by 0.41 mm³` is a
+sentence you have to go and act on. The same verdict carrying locators lights both
+parts up in the viewer, at the pose where it happens, and you are looking at the
+problem instead of reading about it.
+
+```sh
+atompipe site init      # scaffold site/ — index.html is yours, never regenerated
+atompipe site build     # run the viewgens, write site/data/ and site/assets/
+atompipe site serve     # python3 -m http.server. No build step, no npm, ever.
+```
+
+`site build` never runs gates. It renders the verdicts already in the ledger and
+stamps each with its own age, because a page that re-ran the cheap gates and not the
+expensive ones would show a mixed-age picture under one timestamp. It also reports
+every locator naming a view or a part that does not exist — a gate that thinks it is
+highlighting something and is not looks exactly like a gate that found nothing.
+
+Everything the page shows is in `site/data/state.json`, so `curl` answers "what is
+the status of this project?" with no browser. And 3D is one view kind of six: a
+project with no geometry still gets claims, verdicts, evidence, provenance and the
+readiness sentence. `atompipe site vendor` pulls three.js local for offline use.
+
+See [`docs/SITE_CONTRACT.md`](docs/SITE_CONTRACT.md).
+
 ## Commands
 
 ```
@@ -167,6 +195,7 @@ atompipe gap [--propose]       claims with no gate, and packs that might cover t
 atompipe why <param|claim>     one thing's full history, instead of the whole log
 atompipe gate selftest         every negative control; fails any gate that can't fail
 atompipe report [--write]      the readiness report
+atompipe site build|serve      the project site: the ledger, rendered and clickable
 atompipe doctor                run this first when something is confusing
 ```
 

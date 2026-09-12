@@ -87,6 +87,14 @@ silent coercion is how a model and its projection drift apart.
 class GateContext:
     root: str; ledger: Ledger; model: Any | None; params: dict
     out_dir: str; tier: int; log: Callable[[str], None]; extra: dict
+    pack: str; key_scope: str                           # stamped by run_gate from the spec
+    def param(self, name, default=None, *, scope=...) -> Any   # PACK-SCOPED first: see below
+    def pack_param(self, name, default=None) -> Any
+    def first_pack_param(self, names, default=None) -> Any
+    def first_pack_param_named(self, names, default=None) -> tuple[Any, str]
+    def require_param(self, name) -> Any                # raises rather than compare with None
+def scope_of(gate_id: str) -> str                       # "fdm.bed_fit" -> "fdm"
+SCOPE_SEP = "."
 class Registry:
     def register(self, spec: GateSpec, fn) -> None      # raises if no negative_control
     def get(self, gate_id) -> tuple[GateSpec, Callable] | None
@@ -107,6 +115,15 @@ A gate function receives `GateContext` and returns `Verdict` **or** a plain
 `(bool, detail)` / dict, which `run_gate` normalises. `run_gate` always fills in
 `gate`, `tier`, `pack`, `claims`, `duration_s` from the spec — a gate cannot lie
 about its own identity.
+
+**Parameter lookup is PACK-SCOPED.** `ctx.param("bbox_mm")` inside `fdm.bed_fit`
+resolves `fdm.bbox_mm` (flat or nested), then `fdm-print.bbox_mm`, then the bare
+`bbox_mm`, then the last dotted segment. For a synonym family
+(`first_pack_param`): every scoped spelling in declared order, then every bare one.
+That is what lets `cad-solid` and `fdm-print` both read a `bbox_mm` from one
+projection and mean different objects — see `docs/PACK_FORMAT.md`. `run_gate`
+stamps `pack` and `key_scope` from the spec, so a caller cannot hand a gate
+somebody else's namespace.
 
 **`Registry.register` raises `AtompipeError` if `negative_control is None`.**
 This is rule 5 of the method made mechanical: a gate that cannot demonstrate
@@ -184,7 +201,15 @@ def pack_doc(name, root=None) -> str                       # PACK.md  (tier 2)
 def reference_doc(name, ref, root=None) -> str             # references/<ref>.md (tier 3)
 def validate(pack_dir) -> list[str]                        # problems; empty = ok
 def match(need: Need, manifests) -> list[PackManifest]      # gap -> candidate packs, by `settles`
+def key_scope(manifest) -> str                             # "fdm-print" -> "fdm" (from its gate ids)
+def key_vocabulary(name, root=None) -> dict[str, dict]     # every projection key the pack reads
+def key_collisions(names, root=None, *, projection_keys=()) -> list[KeyCollision]
 ```
+`key_collisions` is what makes two packs wanting one word DETECTABLE rather than
+discoverable: it diffs the installed packs' vocabularies (from each
+`selftest/baseline.json`'s keys, `_notes` and `_aliases`) and reports any key two
+of them declare differently. `atompipe doctor` renders it as a warning naming both
+packs. See `docs/PACK_FORMAT.md`.
 Pack layout (also documented in the pack-authoring skill):
 ```
 packs/<name>/pack.json  PACK.md  references/*.md  gates/*.py  generators/*.py

@@ -52,15 +52,17 @@ import importlib.util
 import json
 import os
 import platform
+import posixpath
 import shutil
 import sys
+import tempfile
 import textwrap
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 from . import __version__
-from . import artifacts, claims, decisions, gates, modelio, packs, report, store
+from . import artifacts, claims, decisions, gates, modelio, packs, report, site, store
 from .models import (
     Acceptance,
     ArtifactKind,
@@ -80,6 +82,7 @@ from .util import (
     FileLock,
     human_bytes,
     human_duration,
+    read_json,
     rel,
     short_hash,
     utcnow_iso,
@@ -91,6 +94,22 @@ __all__ = ["main", "build_parser"]
 #: with no manifest and no pack name. The reference project uses this and so does
 #: every project before it has a pack worth extracting.
 PROJECT_GATES_DIR = "gates"
+
+#: A pack's viewgens and a project's own, symmetrically with `gates/`:
+#: `packs/<name>/views/*.py` and `<root>/views/*.py`. Same name in both places
+#: for the same reason `PROJECT_GATES_DIR` exists — a project that had to
+#: publish a pack before it could draw its own assembly would never draw it.
+VIEWGEN_DIR = "views"
+
+#: Default bind address for `site serve`. LOOPBACK, deliberately: the page
+#: carries an unreleased design, its rejected alternatives and its failing
+#: claims, and a default of 0.0.0.0 hands all of that to whatever network the
+#: laptop happens to be on. `--host 0.0.0.0` is one flag away when it is wanted.
+SERVE_HOST = "127.0.0.1"
+
+#: `python3 -m http.server`'s own default, because `site serve` IS that server
+#: and a different number would be a gratuitous thing to have to remember.
+SERVE_PORT = 8000
 
 #: The lock every write-side command takes, for the whole operation. Two
 #: `atompipe check` runs in one project would otherwise interleave their
@@ -803,6 +822,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     undefended = [p.name for p in ledger.params if not (p.rationale or "").strip()]
     summary = claims.summarise(ledger, registry, stale=stale)
     resolved = claims.statuses(ledger, stale=stale, registry=registry)
+    site_info = _site_state(root)
 
     if args.json:
         _dump({
@@ -827,6 +847,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             },
             "last_run": ledger.last_run.to_dict(),
             "last_run_age": _age(ledger.last_run.when),
+            "site": _site_brief(site_info),
             "problems": problems,
         })
         return 0
@@ -854,6 +875,12 @@ def cmd_status(args: argparse.Namespace) -> int:
              f"{human_duration(ledger.last_run.duration_s)}")
     else:
         _say("last sweep: never — `atompipe check`")
+
+    # Mentioned only when the project has one: a line telling every project
+    # without a site that it does not have a site is noise in the one command
+    # that has to stay readable at a glance.
+    if site_info["present"]:
+        _say(_site_line(site_info))
 
     if unread:
         names = ", ".join(a.id for a in unread[:5])
@@ -2160,8 +2187,729 @@ def cmd_model(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# site
+# --------------------------------------------------------------------------- #
+def _load_viewgens(directory: str, registry: Any, *,
+                   pack: str, root: str) -> list[Any]:
+    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
+
+    Deliberately the same shape as `_load_project_gates`, because a viewgen is a
+    gate's twin: same directory convention, same `sys.path` handling, same
+    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
+    problem and must not print as a spine traceback". A pack author who has
+    written `gates/clash.py` writes `views/assembly.py` with nothing new to
+    learn, which is the whole reason `site.py` mirrors `gates.py` field for
+    field.
+
+    Two details carry weight:
+
+    * **Module names are salted with a hash of the file's absolute path**, so a
+      pack's `views/assembly.py` and a project's `views/assembly.py` are
+      different modules. Without the salt the second one to load silently reuses
+      the first one's code while every message names the second file.
+    * **Already-imported modules are re-registered from `fn.view_spec`**, not
+      re-executed. Python will not run a module twice, so a second build in one
+      process (a test, an agent that builds after every edit, `site status`
+      after `site build`) would decorate nothing and find an EMPTY registry —
+      reporting "this project has no views" about a project with six. The
+      decorator attaches `view_spec` to the function precisely so a loader can
+      recover the registration without re-running the module.
+
+    Registering the same function under the same id twice is a no-op in
+    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
+    the two paths stay one path rather than two that can drift.
+    """
+    if not os.path.isdir(directory):
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        raise AtompipeError(f"cannot read {rel(directory, root)}: {exc}") from exc
+    files = [os.path.join(directory, name) for name in names
+             if name.endswith(".py") and not name.startswith("_")]
+    if not files:
+        return []
+
+    where = f"pack {pack!r}: " if pack else ""
+    before = set(registry.ids())
+    # The directory ABOVE views/ — the pack root, or the project root. On
+    # sys.path so a viewgen can `import _geom` and share the helper the gate
+    # next door already uses, and set as PACK_DIR so pack-relative fixtures
+    # resolve the same way they do for gates.
+    base = os.path.dirname(directory)
+    sys.path.insert(0, base)
+    try:
+        with site.use_view_registry(registry):
+            for path in files:
+                module = _import_viewgen_module(
+                    path, pack=pack, base=base, root=root, where=where)
+                # The attribute walk, always — see the docstring. On a fresh
+                # import it re-registers what the decorator just registered
+                # (a no-op); on a reused one it is the only thing that registers
+                # anything at all.
+                for value in list(vars(module).values()):
+                    spec = getattr(value, "view_spec", None)
+                    if not isinstance(spec, site.ViewSpec) or not callable(value):
+                        continue
+                    try:
+                        registry.register(spec, value)
+                    except AtompipeError as exc:
+                        raise AtompipeError(
+                            f"{where}{rel(path, root)}: {exc}") from exc
+    finally:
+        try:
+            sys.path.remove(base)       # removes OUR insertion (the first match)
+        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
+            pass
+    return [spec for spec in registry.specs() if spec.id not in before]
+
+
+def _import_viewgen_module(path: str, *, pack: str, base: str,
+                           root: str, where: str) -> Any:
+    """Import one `views/*.py`, or raise an AtompipeError naming the file."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    module_name = f"atompipe_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing                 # ordinary import semantics; see _load_viewgens
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:         # pragma: no cover - defensive
+        raise AtompipeError(f"{where}{rel(path, root)}: no import machinery accepted this file")
+    module = importlib.util.module_from_spec(spec)
+    # Set BEFORE execution, which `module_from_spec` makes possible by handing
+    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
+    # defining module at decoration time so twenty decorators do not each retype
+    # the pack name — a mistyped one orphans a view in the site's grouping with
+    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
+    # that has to find a template or a material table shipped beside it; for a
+    # project's `views/` it is the project root, which is where those things are.
+    module.PACK = pack
+    module.PACK_DIR = base
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except AtompipeError as exc:
+        # A registry refusal (duplicate view id, unknown kind) is already phrased
+        # for a human. Keep the phrasing and add the location.
+        sys.modules.pop(module_name, None)
+        raise AtompipeError(f"{where}{rel(path, root)}: {exc}") from exc
+    except KeyboardInterrupt:
+        sys.modules.pop(module_name, None)
+        raise
+    except BaseException as exc:
+        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
+        # module whose exporter guards its own absence with `sys.exit()` at
+        # import time must not be able to end the command with that exit code.
+        sys.modules.pop(module_name, None)
+        raise AtompipeError(
+            f"{where}{rel(path, root)} failed to import: {type(exc).__name__}: {exc}"
+        ) from exc
+    return module
+
+
+def _view_registry(root: str, ledger: Ledger, *,
+                   strict: bool = True) -> tuple[Any, list[str]]:
+    """Load every viewgen this project can see. Returns `(registry, problems)`.
+
+    A FRESH registry per call, where `_registry` reuses the module-level gate
+    one. The asymmetry is deliberate: gates are swept once per process, but a
+    site gets built, then inspected by `site status`, then built again after an
+    edit, and a shared registry would carry one project's views into the next
+    build in the same process. A view leaking across projects is not a tidiness
+    problem — every `Locator` addresses a view by a bare string, so an inherited
+    `assembly` silently answers another project's locators.
+
+    `strict=False` turns a broken view module into a reported problem instead of
+    an exception, for `site status`, which is what you run when the site is
+    already wrong.
+    """
+    registry = site.ViewRegistry()
+    problems: list[str] = []
+    sources: list[tuple[str, str, str]] = []
+    for name in packs.installed(root, ledger=ledger):
+        pack_dir = packs.find(name, root)
+        if pack_dir:
+            sources.append((f"pack {name}", os.path.join(pack_dir, VIEWGEN_DIR), name))
+        # A pack in meta.packs that is not on any search path is already a FAIL
+        # row in `status` and `doctor`; repeating it here would be a second
+        # opinion about the same fact.
+    sources.append(("project views", os.path.join(root, VIEWGEN_DIR), ""))
+
+    for label, directory, pack in sources:
+        try:
+            _load_viewgens(directory, registry, pack=pack, root=root)
+        except AtompipeError as exc:
+            if strict:
+                raise
+            problems.append(f"{label} did not load: {exc}")
+    return registry, problems
+
+
+def _site_state(root: str) -> dict:
+    """What is on disk under `site/`, read-only and running nothing.
+
+    Shared by `site status`, `status` and `doctor` so the three cannot drift
+    into three opinions about whether the site is current — which is the
+    property the site itself exists to have.
+
+    Staleness here is the SITE's staleness (was the ledger written after
+    `state.json`?), which is a different question from the verdicts' staleness
+    (has the model moved since the sweep?). Both are reported, separately,
+    because the fixes are different commands: `atompipe site build` for the
+    first and `atompipe check` for the second. Collapsing them into one "stale"
+    flag sends half the readers to the wrong one.
+    """
+    site_dir = os.path.join(root, site.SITE_DIR)
+    state_path = os.path.join(site_dir, site.DATA_DIR, site.STATE_NAME)
+    vendor_dir = os.path.join(site_dir, site.VENDOR_DIR)
+    assets_dir = os.path.join(site_dir, site.ASSETS_DIR)
+
+    info: dict[str, Any] = {
+        "present": os.path.isdir(site_dir),
+        "dir": site.SITE_DIR,
+        "built": False,
+        "state": rel(state_path, root),
+        "built_at": "",
+        "age": "",
+        "error": "",
+        "views": [],
+        "locator_problems": [],
+        "stale": False,
+        "stale_reason": "",
+        "verdicts_stale": False,
+        "verdicts_stale_reason": "",
+        "assets": 0,
+        "asset_bytes": 0,
+        "vendored": False,
+        "vendor_files": 0,
+        "three_version": site.THREE_VERSION,
+    }
+    if not info["present"]:
+        info["stale_reason"] = "no site/ directory — `atompipe site init`"
+        return info
+
+    total = size = 0
+    for walk_dir, _dirnames, filenames in os.walk(assets_dir):
+        for name in filenames:
+            total += 1
+            try:
+                size += os.path.getsize(os.path.join(walk_dir, name))
+            except OSError:             # raced a rebuild; a byte count is not worth failing
+                pass
+    info["assets"], info["asset_bytes"] = total, size
+
+    if os.path.isdir(vendor_dir):
+        vendored = [p for p in site.vendor_urls()
+                    if os.path.isfile(os.path.join(site_dir, p.replace("/", os.sep)))]
+        info["vendor_files"] = len(vendored)
+        # Partially vendored is NOT vendored. A vendor/ holding three of four
+        # files shadows the CDN import map and 404s on the fourth, offline and
+        # online alike, which reads as "three.js is broken" rather than as "the
+        # download was interrupted".
+        info["vendored"] = len(vendored) == len(site.vendor_urls())
+
+    if not os.path.isfile(state_path):
+        info["stale_reason"] = "never built — `atompipe site build`"
+        return info
+
+    try:
+        payload = read_json(state_path, None)
+    except AtompipeError as exc:
+        info["error"] = str(exc)
+        return info
+    if not isinstance(payload, dict):
+        info["error"] = f"{rel(state_path, root)} is not a state document"
+        return info
+
+    meta = payload.get("meta") or {}
+    info["built"] = True
+    info["built_at"] = str(meta.get("built") or "")
+    info["age"] = _age(info["built_at"])
+    info["views"] = [{"id": v.get("id", ""), "kind": v.get("kind", ""),
+                      "src": v.get("src", ""), "pack": v.get("pack", "")}
+                     for v in (payload.get("views") or [])]
+    info["locator_problems"] = list(payload.get("locator_problems") or [])
+    info["verdicts_stale"] = bool(meta.get("stale"))
+    info["verdicts_stale_reason"] = str(meta.get("stale_reason") or "")
+    info["claims"] = len(payload.get("claims") or [])
+    info["verdicts"] = len(payload.get("verdicts") or [])
+
+    # mtime, not the two timestamps: `built` is when the build ran and the
+    # ledger carries no "written at" field at all, so comparing the files
+    # themselves is the only comparison that is a fact rather than an inference.
+    ledger_path = store.ledger_path(root)
+    try:
+        if os.path.getmtime(ledger_path) > os.path.getmtime(state_path):
+            info["stale"] = True
+            info["stale_reason"] = ("the ledger has changed since the site was built "
+                                    "— `atompipe site build`")
+    except OSError:                     # pragma: no cover - the ledger was just read
+        pass
+    if not info["stale"]:
+        info["stale_reason"] = "current with the ledger"
+    return info
+
+
+def _site_brief(info: dict) -> dict:
+    """The handful of site fields `status --json` and `doctor` carry.
+
+    Trimmed rather than embedded whole: `atompipe status --json` is read by
+    agents with a context budget, and a site's full view list and locator
+    problem records belong to `atompipe site status`, which is the command that
+    was asked about them.
+    """
+    return {
+        "present": info["present"], "built": info["built"],
+        "built_at": info["built_at"], "stale": info["stale"],
+        "views": len(info["views"]), "dangling_locators": len(info["locator_problems"]),
+        "vendored": info["vendored"], "error": info["error"],
+    }
+
+
+def _site_line(info: dict) -> str:
+    """One line about the site for `atompipe status`. Leads with what is wrong."""
+    if info["error"]:
+        return f"site: {info['state']} is unreadable — {info['error']}"
+    if not info["built"]:
+        return "site: scaffolded, never built — `atompipe site build`"
+    dangling = len(info["locator_problems"])
+    bits = [f"{len(info['views'])} view(s)"]
+    if dangling:
+        bits.append(f"{dangling} dangling locator(s)")
+    if info["stale"]:
+        bits.append("STALE: the ledger has moved — `atompipe site build`")
+    elif info["age"]:
+        bits.append(f"built {info['age']}")
+    return f"site: {', '.join(bits)}"
+
+
+def cmd_site_init(args: argparse.Namespace) -> int:
+    """Scaffold `site/`, refusing to overwrite the shell.
+
+    `index.html` is the one file this will not replace without `--force`: the
+    contract calls it *hackable, yours, never regenerated after init*, and
+    someone who spent an afternoon on their project's page must not lose it to
+    the command they ran to pick up a renderer fix. Everything else in the
+    template IS refreshed, because `app.js` and `style.css` are ours and a
+    project that could never receive a fix would be stuck with the bugs of the
+    day it was created.
+    """
+    root = _root(args)
+    with _lock(root):
+        written = site.scaffold(root, force=bool(args.force))
+
+    if args.json:
+        _dump({"root": root, "site": site.SITE_DIR, "wrote": written,
+               "next": ["atompipe site build", "atompipe site serve"]})
+        return 0
+    _say(f"scaffolded {site.SITE_DIR}/ in {root}")
+    for path in written:
+        _say(f"  {path}")
+    _say("")
+    _say(f"  {site.SITE_DIR}/index.html is yours — edit it; "
+         f"`site init` will not overwrite it again")
+    _say("next: atompipe site build   (writes data/ and assets/), then "
+         "atompipe site serve")
+    return 0
+
+
+def cmd_site_build(args: argparse.Namespace) -> int:
+    """Run the viewgens, collect the ledger, and write `site/data/` + `site/assets/`.
+
+    **This never runs gates.** It reads the verdicts already recorded and stamps
+    each with its own age. A build that re-ran the cheap gates on the way past
+    would publish a page whose tier-0 numbers are ten seconds old beside tier-2
+    numbers from last week, under one "built at" stamp, with nothing on the page
+    saying which is which. If the results are stale the honest fix is
+    `atompipe check`, and the page's job is to make that impossible to miss.
+
+    The gate registry is loaded STRICTLY, unlike `status` and `doctor`. Claim
+    coverage and the readiness sentence are resolved against it, so a pack that
+    failed to import produces a page full of UNCLAIMED rows that are an artefact
+    of an import error rather than a statement about the design — published, in
+    the one artifact whose entire job is to be trusted when a gate says
+    something is wrong.
+
+    Dangling locators never fail the build and are never silent. A verdict
+    addressing a view that does not exist is a gate that believes it is drawing
+    and is not, which from the outside looks exactly like a gate that found
+    nothing; it is a warning line here and a flag in `--json`, and it rides in
+    `state.json` so the page can say it too.
+    """
+    root = _root(args)
+    # Everything under one lock, the way `check` sweeps under one lock, and for
+    # two reasons. `clean_assets` deletes every file under site/assets/ that THIS
+    # run did not write or reference, so two concurrent builds would each delete
+    # the other's output and both would report success. And the ledger is read
+    # inside it, so the verdicts that reach the page are the ones on disk at the
+    # moment of the build rather than the ones from before a `check` that landed
+    # while the viewgens were still importing.
+    with _lock(root):
+        ledger = store.load(root)
+        registry, _ = _registry(root, ledger)
+        view_registry, _ = _view_registry(root, ledger)
+        model, projection = _projection(root, ledger)
+        summary = site.build(root, ledger, registry, view_registry,
+                             model=model, projection=projection, now=utcnow_iso())
+
+    problems = summary.get("locator_problems") or []
+    counts = summary.get("counts") or {}
+    if args.json:
+        _dump({**summary, "has_dangling_locators": bool(problems)})
+        return 0
+
+    for row in summary["views"]:
+        where = row.get("src") or row.get("data_url") or "(inline)"
+        _say(f"{_tag('ok')} {row['id']:<20} {row['kind']:<9} {where}")
+    for note in summary["viewgens"]:
+        # `empty` is not a warning and never appears in summary["warnings"]: a
+        # CAD viewgen in a project with no geometry has nothing to draw, and
+        # that is a normal outcome rather than a fault. It is still printed,
+        # because "why is there no assembly view?" must be answerable here.
+        if note["status"] == "empty":
+            _say(f"{_tag('none')} {note['view']:<20} {note['kind']:<9} {note['note']}")
+    for warning in summary["warnings"]:
+        # Unavailable dependencies (named), crashed viewgens, ledger/viewgen id
+        # collisions and every dangling locator, in one place. Never filtered:
+        # the whole failure mode this list covers is silence.
+        _say(f"{_tag('warn')} {warning}")
+
+    if not summary["views"]:
+        if not summary["viewgens"]:
+            _say("no viewgens are registered — nothing in this project draws anything "
+                 "yet. Add one at views/<name>.py, or install a pack that ships them.")
+        else:
+            _say("no views: every viewgen ran and had nothing to draw.")
+        _say("That is not a broken build. The page still carries the claims, the "
+             "verdicts, the evidence, the provenance and the readiness sentence — "
+             "3D is one view kind, not the point.")
+    _say(f"{counts.get('claims', 0)} claim(s), {counts.get('verdicts', 0)} verdict(s), "
+         f"{counts.get('views', 0)} view(s), {counts.get('assets', 0)} asset(s) from "
+         f"viewgens")
+    _say(f"wrote {len(summary['wrote'])} file(s), removed {len(summary['removed'])} "
+         f"stale file(s) -> {summary['state']}")
+    if problems:
+        _say(f"{len(problems)} locator(s) point at something that does not exist. A gate "
+             f"that thinks it is drawing and is not looks exactly like a gate that found "
+             f"nothing — fix the gate's locator or the view's node names.")
+    if summary["stale"]:
+        _say(f"verdicts are STALE: {summary['stale_reason']} — `atompipe check`")
+    return 0
+
+
+def cmd_site_serve(args: argparse.Namespace) -> int:
+    """Serve `site/` with the standard library and nothing else.
+
+    This is `python3 -m http.server` with three fixes it does not have, each for
+    a failure that otherwise looks like a bug in the page:
+
+    * **`Cache-Control: no-store`** — without it a rebuilt `state.json` is served
+      from the browser cache and the page shows yesterday's verdicts with
+      today's confidence. A site whose entire job is to be current must not have
+      a caching layer that makes it silently not be.
+    * **an explicit MIME map for `.js` / `.mjs`** — `mimetypes` reads the Windows
+      registry, where `.js` is frequently `text/plain`, and a module script
+      served as `text/plain` is refused by every browser. The page then renders
+      as an unstyled "Loading data/state.json…" with one console line.
+    * **threading**, so one slow asset fetch does not block the page that is
+      waiting to draw it.
+
+    Binds loopback by default: the page carries an unreleased design, its
+    rejected alternatives and its failing claims.
+    """
+    # Deferred: `http.server` pulls in socketserver, email, html and mimetypes —
+    # ~40 ms measured — and every `atompipe check` in an inner loop would pay it
+    # to not start a server.
+    import errno
+    import http.server
+    import webbrowser
+
+    root = _root(args)
+    site_dir = os.path.join(root, site.SITE_DIR)
+    if not os.path.isdir(site_dir):
+        raise AtompipeError(
+            f"no {site.SITE_DIR}/ directory at {root} — `atompipe site init` first")
+    state_path = os.path.join(site_dir, site.DATA_DIR, site.STATE_NAME)
+    built = os.path.isfile(state_path)
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        # A class attribute, not an instance one: SimpleHTTPRequestHandler reads
+        # `extensions_map` through the instance but the mapping is shared, and
+        # copying the module's dict rather than mutating it keeps this process's
+        # fix out of anything else that imports mimetypes.
+        extensions_map = {
+            **http.server.SimpleHTTPRequestHandler.extensions_map,
+            ".js": "text/javascript", ".mjs": "text/javascript",
+            ".json": "application/json", ".css": "text/css",
+            ".svg": "image/svg+xml", ".glb": "model/gltf-binary",
+            ".gltf": "model/gltf+json", ".wasm": "application/wasm",
+        }
+
+        def __init__(self, *a: Any, **kw: Any) -> None:
+            super().__init__(*a, directory=site_dir, **kw)
+
+        def end_headers(self) -> None:
+            self.send_header("Cache-Control", "no-store, max-age=0")
+            super().end_headers()
+
+        def log_message(self, fmt: str, *a: Any) -> None:
+            # stderr, so `--json` output and a piped stdout stay clean. Kept
+            # rather than silenced: a 404 on an asset is the single most common
+            # thing to debug here and the log line names it.
+            _warn(f"  {self.address_string()} {fmt % a}")
+
+    try:
+        server = http.server.ThreadingHTTPServer((args.host, int(args.port)), Handler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            raise AtompipeError(
+                f"port {args.port} on {args.host} is already in use — something else is "
+                f"listening there (another `atompipe site serve`, or any other server). "
+                f"Use `-p <other port>`, or `-p 0` to let the OS pick a free one."
+            ) from exc
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            raise AtompipeError(
+                f"not allowed to bind {args.host}:{args.port} — ports below 1024 need "
+                f"root on most systems. Use `-p 8000` or any port above 1024."
+            ) from exc
+        raise AtompipeError(
+            f"cannot serve on {args.host}:{args.port}: {exc.strerror or exc}") from exc
+
+    host, port = server.server_address[0], server.server_address[1]
+    # The bound port, not the requested one: `-p 0` means "any free port", and
+    # printing the 0 back would be a URL that goes nowhere.
+    url = f"http://{host}:{port}/"
+
+    if args.json:
+        _dump({"url": url, "host": host, "port": port, "root": root,
+               "serving": rel(site_dir, root), "built": built})
+    else:
+        _say(f"serving {rel(site_dir, root)} at {url}")
+        if not built:
+            _say(f"{_tag('warn')} {rel(state_path, root)} does not exist yet — the page "
+                 f"will load with no data. Run `atompipe site build`.")
+        _say("Ctrl-C to stop")
+
+    if not args.no_browser:
+        # Safe to open now: the socket is bound and listening from the
+        # constructor, so a request that arrives before `serve_forever` queues
+        # rather than being refused.
+        try:
+            webbrowser.open(url)
+        except Exception as exc:        # noqa: BLE001 - a headless box is not an error
+            _warn(f"  could not open a browser ({exc}); open {url} yourself")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        # Exit 0: Ctrl-C is how a server is meant to be stopped, and a non-zero
+        # code here would fail every script that starts one and stops it.
+        if not args.json:
+            _say("")
+            _say("stopped")
+    finally:
+        server.server_close()
+    return 0
+
+
+def cmd_site_vendor(args: argparse.Namespace) -> int:
+    """Download three.js into `site/vendor/` so the site works offline.
+
+    **All or nothing.** Every file lands in a staging directory first and moves
+    into place only once all of them have arrived. A half-written `vendor/`
+    shadows the CDN through the import map and then 404s on whatever is missing,
+    so an interrupted download would turn a working online site into a broken
+    one — and the breakage shows up as "three.js is broken", offline, which is
+    the one situation vendoring exists for and the one nobody tests before
+    archiving a project.
+
+    A network failure therefore writes nothing, says so, and leaves the CDN path
+    exactly as it was. There is no partial success worth keeping.
+    """
+    root = _root(args)
+    site_dir = os.path.join(root, site.SITE_DIR)
+    if not os.path.isdir(site_dir):
+        raise AtompipeError(
+            f"no {site.SITE_DIR}/ directory at {root} — `atompipe site init` first")
+
+    urls = site.vendor_urls()
+    staging = tempfile.mkdtemp(dir=site_dir, prefix=".atompipe-vendor-")
+    fetched: list[dict] = []
+    try:
+        for relative, url in sorted(urls.items()):
+            if not url.startswith("https://"):
+                # Guards a future edit to `vendor_urls`, not today's list: these
+                # files are executed by the page, and a plaintext fetch of code
+                # the site will run is a rewrite waiting for a coffee shop.
+                raise AtompipeError(f"refusing to vendor {relative} over a non-https URL: {url}")
+            payload = _fetch_vendor_file(url)
+            target = os.path.join(staging, relative.replace("/", os.sep))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as fh:
+                fh.write(payload)
+            fetched.append({"path": posixpath.join(site.SITE_DIR, relative),
+                            "url": url, "bytes": len(payload)})
+
+        moved: list[str] = []
+        for relative in sorted(urls):
+            source = os.path.join(staging, relative.replace("/", os.sep))
+            target = os.path.join(site_dir, relative.replace("/", os.sep))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            os.replace(source, target)
+            moved.append(posixpath.join(site.SITE_DIR, relative))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    total = sum(row["bytes"] for row in fetched)
+    if args.json:
+        _dump({"version": site.THREE_VERSION, "vendor": site.VENDOR_DIR,
+               "files": fetched, "bytes": total, "wrote": moved})
+        return 0
+    _say(f"vendored three.js {site.THREE_VERSION} ({human_bytes(total)})")
+    for row in fetched:
+        _say(f"  {row['path']:<44} {human_bytes(row['bytes']):>10}")
+    _say(f"the import map in {site.SITE_DIR}/index.html now resolves against these "
+         f"files instead of the CDN; delete {site.SITE_DIR}/{site.VENDOR_DIR}/ to go back")
+    return 0
+
+
+def _fetch_vendor_file(url: str) -> bytes:
+    """One vendored file's bytes, or an AtompipeError that says what to do instead.
+
+    The content sniff is not paranoia. A captive portal or a corporate proxy
+    answers 200 with an HTML login page, and an HTML file saved as
+    `three.module.js` vendors cleanly, shadows the CDN and then fails at parse
+    time in the browser with a syntax error on line 1 of a file the user never
+    wrote. Refusing here costs one comparison and turns that into a sentence.
+    """
+    # Deferred for the same reason as `http.server` in `serve`: no other command
+    # opens a socket, and none of them should pay urllib's import to not.
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            status = getattr(response, "status", 200)
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            payload = response.read()
+    except urllib.error.HTTPError as exc:
+        raise AtompipeError(
+            f"{url} returned HTTP {exc.code} ({exc.reason}). Nothing was written; the "
+            f"site still loads three.js from the CDN."
+        ) from exc
+    except (urllib.error.URLError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        raise AtompipeError(
+            f"cannot reach {url}: {reason}. Nothing was written — the site keeps loading "
+            f"three.js from the CDN, which is the working path. Re-run `atompipe site "
+            f"vendor` when the network is back."
+        ) from exc
+
+    if status != 200 or not payload:
+        raise AtompipeError(
+            f"{url} returned HTTP {status} and {len(payload)} bytes. Nothing was written; "
+            f"the CDN path still works.")
+    head = payload.lstrip()[:14].lower()
+    if "text/html" in content_type or head.startswith((b"<!doctype", b"<html")):
+        raise AtompipeError(
+            f"{url} answered with HTML, not JavaScript — that is a captive portal or a "
+            f"proxy interception page, not three.js. Nothing was written; vendoring it "
+            f"would have shadowed the working CDN copy with a login screen.")
+    return payload
+
+
+def cmd_site_status(args: argparse.Namespace) -> int:
+    """What is built, how stale it is, and which locators point at nothing.
+
+    Reads `state.json` and the filesystem; it never runs a viewgen and never
+    writes. It does load the viewgen modules, with `strict=False`, because the
+    question this command exists to answer is usually "why is there no assembly
+    view in my site?" and the answer is usually a dependency that is named in
+    the registration and missing on this machine.
+    """
+    root = _root(args)
+    ledger = store.load(root)
+    info = _site_state(root)
+    view_registry, problems = _view_registry(root, ledger, strict=False)
+
+    builtin = {row["id"] for row in info["views"]}
+    viewgens = []
+    for spec in view_registry.specs():
+        ok, reason = site.availability(spec)
+        viewgens.append({"id": spec.id, "kind": str(spec.kind), "pack": spec.pack,
+                         "available": ok, "reason": "" if ok else reason,
+                         "in_site": spec.id in builtin})
+
+    if args.json:
+        _dump({**info, "root": root, "viewgens": viewgens, "problems": problems,
+               "has_dangling_locators": bool(info["locator_problems"])})
+        return 0
+
+    if not info["present"]:
+        _say(f"no {site.SITE_DIR}/ directory — `atompipe site init`")
+        return 0
+    if info["error"]:
+        _say(f"{_tag('FAIL')} {info['state']}: {info['error']}")
+        return 0
+    if not info["built"]:
+        _say(f"{site.SITE_DIR}/ is scaffolded but never built — `atompipe site build`")
+    else:
+        _say(f"built {info['built_at'] or '(no timestamp)'}"
+             f"{' (' + info['age'] + ')' if info['age'] else ''} — "
+             f"{info.get('claims', 0)} claim(s), {info.get('verdicts', 0)} verdict(s), "
+             f"{len(info['views'])} view(s)")
+        for row in info["views"]:
+            _say(f"  {row['id']:<20} {row['kind']:<9} {row['src'] or '(inline)'}")
+
+    for row in viewgens:
+        if row["in_site"]:
+            continue
+        # A viewgen that registered and is not in the built site: either the
+        # site predates it, or its dependency is missing here. Both are worth a
+        # line, because a view that is absent because trimesh is not installed
+        # looks exactly like a view the project never had.
+        why = row["reason"] or "registered, but produced nothing in the last build"
+        _say(f"{_tag('warn')} viewgen {row['id']}: {why}")
+
+    _say(f"{'STALE' if info['stale'] else 'current'}: {info['stale_reason']}")
+    if info["verdicts_stale"]:
+        _say(f"{_tag('warn')} the verdicts on the page are stale: "
+             f"{info['verdicts_stale_reason']} — `atompipe check`, then rebuild")
+    if info["locator_problems"]:
+        _say(f"{_tag('warn')} {len(info['locator_problems'])} dangling locator(s):")
+        for problem in info["locator_problems"][:6]:
+            target = f"/{problem.get('target')}" if problem.get("target") else ""
+            _say(f"    {problem.get('gate', '?')} -> {problem.get('view', '')}{target}: "
+                 f"{problem.get('problem', '')}")
+        if len(info["locator_problems"]) > 6:
+            _say(f"    (+{len(info['locator_problems']) - 6} more — `--json` for all)")
+    _say(f"assets: {info['assets']} file(s), {human_bytes(info['asset_bytes'])}; "
+         f"three.js {site.THREE_VERSION} "
+         f"{'vendored' if info['vendored'] else 'from the CDN (`atompipe site vendor`)'}")
+    for problem in problems:
+        _say(f"{_tag('FAIL')} {problem}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # doctor
 # --------------------------------------------------------------------------- #
+def _first_sentence(text: str | None, limit: int = 100) -> str:
+    """The first sentence of a pack's own note about a key, for a doctor row.
+
+    A doctor row is one line and the whole point of this one is the CONTRAST
+    between two definitions, which is carried by their first sentences. Cutting at
+    a fixed character count instead put "Measured of" at the end of a line and made
+    a reader distrust the rest of it.
+    """
+    flat = " ".join(str(text or "").split())
+    if not flat:
+        return "(the pack wrote no note for this key)"
+    head = flat.split(". ", 1)[0].rstrip(".")
+    return head if len(head) <= limit else head[:limit - 3].rstrip() + "..."
+
+
 def _check(results: list[dict], name: str, status: str, detail: str) -> None:
     """Append one doctor row. `status` is one of ok / warn / FAIL."""
     results.append({"check": name, "status": status, "detail": detail})
@@ -2337,6 +3085,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                f"{', '.join(orphans[:6])} — renamed, or removed and still grounded"
                if orphans else f"{len(declared)} param(s), all still in the model")
 
+    # Two packs, one word, two meanings. The spine knows which packs are installed
+    # and what each of them reads, so a collision between their key vocabularies is
+    # something it can DIFF rather than something a user discovers from a verdict
+    # about the wrong object. The case this exists for: `cad-solid` reads `bbox_mm`
+    # as the assembly envelope and `fdm-print` reads it as one part in print
+    # orientation, so a project with both — every mechanical project — got a 480 mm
+    # boat measured against a 220 mm printer bed, or an envelope claim that
+    # silently went unheld. A warning, not a failure: the collision is latent until
+    # the project publishes the bare key, and `live` says when it has.
+    flat_keys, _conflicts = _flat_params(projection)
+    for collision in packs.key_collisions(installed, root, projection_keys=flat_keys):
+        meanings = "; ".join(
+            f"{name}: {_first_sentence(collision.meanings.get(name))}"
+            for name in collision.packs)
+        _check(results, "pack-keys", "warn",
+               f"{collision.key!r} is read by {' and '.join(collision.packs)} with "
+               f"different meanings"
+               + (" AND THIS PROJECT PUBLISHES IT" if collision.live else
+                  " (this project does not publish it yet)")
+               + f" — {collision.fix()}. {meanings}")
+
     stale, why = _staleness(ledger, projection)
     _check(results, "staleness", "warn" if stale else "ok",
            why + (" — verdicts describe a model that no longer exists; `atompipe check`"
@@ -2346,6 +3115,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     _check(results, "ledger-integrity", "FAIL" if problems else "ok",
            "; ".join(problems[:4]) + (f" (+{len(problems) - 4} more)" if len(problems) > 4 else "")
            if problems else "records all resolve")
+
+    site_info = _site_state(root)
+    if site_info["present"]:
+        # Only when there is a site. A doctor row about a surface the project
+        # never opted into is a row that is always there and never actionable,
+        # and the ones that are actionable get read less for it.
+        if site_info["error"]:
+            _check(results, "site", "FAIL",
+                   f"{site_info['state']}: {site_info['error']} — "
+                   f"`atompipe site build` rewrites it")
+        elif not site_info["built"]:
+            _check(results, "site", "warn",
+                   "scaffolded but never built — `atompipe site build`")
+        else:
+            dangling = len(site_info["locator_problems"])
+            # Dangling locators are a WARNING, not a failure: the verdicts and
+            # claims on the page are still true, and the overlay is the part
+            # that is wrong. But never silent — a gate that believes it is
+            # drawing and is not looks exactly like a gate that found nothing.
+            status = "warn" if (site_info["stale"] or dangling) else "ok"
+            detail = (f"{len(site_info['views'])} view(s), built {site_info['built_at']}"
+                      f"{' (' + site_info['age'] + ')' if site_info['age'] else ''}, "
+                      f"{site_info['stale_reason']}")
+            if dangling:
+                detail += (f" — {dangling} locator(s) point at a view or node that does "
+                           f"not exist (`atompipe site status`)")
+            _check(results, "site", status, detail)
 
     lock = _lock(root)
     age = lock.age()
@@ -2648,6 +3444,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--set-entry", default="", metavar="PATH",
                    help="record this file as the project's model")
     p.set_defaults(func=cmd_model)
+
+    # -- site ------------------------------------------------------------- #
+    # The site has two jobs and the second one is why it is worth building: it
+    # explains the project to someone who did not build it, AND it is a
+    # debugging tool — spin the thing, pull it apart, and see the latest gate
+    # results anchored to the geometry they are about.
+    site_p = sub.add_parser("site", help="build, serve and inspect the project site")
+    site_sub = site_p.add_subparsers(dest="site_command", metavar="<sub>")
+    site_p.set_defaults(func=lambda args: _needs_subcommand(site_p))
+
+    p = site_sub.add_parser("init", parents=[common],
+                            help="scaffold site/ (refuses to clobber index.html)")
+    p.add_argument("--force", action="store_true",
+                   help="replace index.html too — your edits to it are not recoverable")
+    p.set_defaults(func=cmd_site_init)
+
+    p = site_sub.add_parser("build", parents=[common],
+                            help="run the viewgens and write data/ and assets/; runs no gates")
+    p.set_defaults(func=cmd_site_build)
+
+    p = site_sub.add_parser("serve", parents=[common],
+                            help="serve site/ from the standard library, on loopback")
+    p.add_argument("-p", "--port", type=int, default=SERVE_PORT,
+                   help=f"port to listen on (default {SERVE_PORT}; 0 picks a free one)")
+    p.add_argument("--host", default=SERVE_HOST,
+                   help=f"bind address (default {SERVE_HOST} — loopback on purpose)")
+    p.add_argument("--no-browser", action="store_true",
+                   help="do not open a browser window")
+    p.set_defaults(func=cmd_site_serve)
+
+    p = site_sub.add_parser("vendor", parents=[common],
+                            help="pull three.js into site/vendor/ so the site works offline")
+    p.set_defaults(func=cmd_site_vendor)
+
+    p = site_sub.add_parser("status", parents=[common],
+                            help="what is built, how stale it is, what locators dangle")
+    p.set_defaults(func=cmd_site_status)
 
     p = sub.add_parser("doctor", parents=[common],
                        help="environment, model, packs, gates and ledger integrity")

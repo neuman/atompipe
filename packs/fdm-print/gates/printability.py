@@ -27,8 +27,8 @@ import os as _os
 import sys as _sys
 from typing import Any, Iterable, Sequence
 
-from atompipe.gates import gate, GateContext
-from atompipe.models import NegativeControl, Tier, Verdict
+from atompipe.gates import gate, GateContext, SCOPE_SEP
+from atompipe.models import Locator, NegativeControl, Tier, Verdict
 
 
 def _sibling_module(name: str, filename: str):
@@ -55,6 +55,16 @@ def _sibling_module(name: str, filename: str):
 
 
 _pm = _sibling_module("atompipe_pack_fdm_print__process_model", "_process_model.py")
+
+# What the part is called once ``views/part.py`` has drawn it. Loaded the same way
+# and for the same reason as the arithmetic above: the node name a locator carries
+# is an interface, and an interface in two copies drifts.
+_PARTS = _sibling_module("atompipe_pack_fdm_print__parts",
+                         _os.path.join(_os.pardir, "fdm_print_parts.py"))
+
+# One verdict over a set of parts. Loaded the same way, under the same module
+# name ``gates/mesh.py`` uses, so both gate modules share one copy of the fold.
+_FOLD = _sibling_module("atompipe_pack_fdm_print__fold", "fdm_print_fold.py")
 
 # --------------------------------------------------------------------------- #
 # domain constants — properties of the process, not of any project
@@ -175,33 +185,78 @@ _MISSING = object()
 # --------------------------------------------------------------------------- #
 # parameter access
 # --------------------------------------------------------------------------- #
+# The key families this pack reads, primary spelling FIRST.
+#
+# Every one of these describes ONE PRINTED PART in its print orientation. That is
+# the distinction the pack ecosystem lost: `cad-solid` reads `bbox_mm` for the
+# ASSEMBLY, this pack read it for the part, and a project with both — every
+# mechanical project — could only satisfy one of them. It measured a 480 mm boat
+# against a 220 mm bed and called it a failure, which is true of the assembly and
+# useless about any part of it.
+#
+# So each family now leads with a key that says WHICH OBJECT it is
+# (`part_bbox_mm`), keeps the bare spelling as a documented fallback, and is
+# resolved pack-scoped first (`fdm.part_bbox_mm`) by GateContext.param. Resolution
+# order, in full: every scoped spelling in this order, then every bare spelling in
+# this order. Written down here, in PACK.md, and in docs/PACK_FORMAT.md — the old
+# order (`bbox_mm` before `bbox`) was discoverable only by experiment, and a user
+# who guessed wrong got a confident verdict about the wrong object.
+BBOX_KEYS = ("part_bbox_mm", "bbox_mm", "bbox", "footprint_mm")
+VOLUME_KEYS = ("part_volume_mm3", "volume_mm3", "solid_volume_mm3")
+MIN_WALL_KEYS = ("part_min_wall_mm", "min_wall_mm", "thinnest_wall_mm",
+                 "min_feature_mm", "min_section_mm")
+LOAD_AXIS_KEYS = ("load_axis", "primary_load_axis", "load_direction")
+BUILD_AXIS_KEYS = ("build_axis", "layer_normal", "print_axis")
+
+
 def _look(ctx: GateContext, names: Sequence[str], default: Any = _MISSING) -> Any:
     """First of ``names`` present in the projection, else ``default``.
 
-    Several spellings are accepted because a model written for one pack should not
-    have to be renamed for another: ``nozzle_d_mm`` and ``nozzle_d`` are the same
-    physical quantity and refusing the second spelling helps nobody. What is NOT
-    accepted is inventing the value — see :func:`_skip`.
+    Delegates to :meth:`GateContext.first_pack_param`, so the resolution order is
+    the spine's and is documented once: **every pack-scoped spelling
+    (``fdm.<name>``) in the order given, then every bare spelling in the order
+    given.** A scoped key always wins, because it is the only one of the two that
+    is an explicit statement about this pack.
+
+    Several bare spellings are accepted because a model written for one pack
+    should not have to be renamed for another: ``nozzle_d_mm`` and ``nozzle_d``
+    are the same physical quantity and refusing the second helps nobody. What is
+    NOT accepted is inventing the value — see :func:`_skip`.
     """
-    for name in names:
-        value = ctx.param(name, _MISSING)
-        if value is not _MISSING and value is not None:
-            return value
-    return default
+    return ctx.first_pack_param(names, default)
 
 
-def _skip(gate_id: str, names: Sequence[str], what: str) -> Verdict:
+def _spellings(ctx: GateContext, names: Sequence[str], limit: int = 3) -> str:
+    """The spellings this gate would have accepted, best first, for a skip line.
+
+    A skip that names only the bare key teaches the wrong lesson on a project
+    that has two packs fighting over it. Naming the scoped spelling first is how
+    a reader learns the namespace exists at the moment they need it.
+    """
+    scope = (ctx.key_scope or "").strip()
+    best = list(names)[:limit]
+    out = [f"{scope}{SCOPE_SEP}{best[0]}"] if (scope and best) else []
+    return " / ".join(out + best)
+
+
+def _skip(gate_id: str, names: Sequence[str], what: str,
+          ctx: GateContext | None = None) -> Verdict:
     """A SKIPPED verdict that names the key the model did not provide.
 
     The claim resolves BLOCKED and stays visible. The alternative — substituting a
     plausible number — produces a green verdict about a part nobody described,
     which is the precise way a readiness report starts lying (rule 4).
+
+    ``ctx`` is optional so an older call site still reads correctly; with it the
+    message also carries the pack-scoped spelling, which is the one to use on a
+    project where another pack wants the same bare key.
     """
+    spelled = _spellings(ctx, names) if ctx is not None else " / ".join(names)
     return Verdict(
         gate=gate_id,
         passed=False,
         skipped=True,
-        skip_reason=f"the projection has no {' / '.join(names)} ({what}); "
+        skip_reason=f"the projection has no {spelled} ({what}); "
                     f"add it to the model and re-run",
     )
 
@@ -211,13 +266,11 @@ def _look_named(ctx: GateContext, names: Sequence[str]) -> tuple[Any, str]:
 
     ``fdm.layer_alignment`` needs it: ``deflection_utilisation`` and
     ``stress_utilisation`` are not the same physical quantity and must not get
-    the same knockdown, so the key name is evidence, not decoration.
+    the same knockdown, so the key name is evidence, not decoration. The name
+    that comes back is the FULL spelling that matched, scope included, so a
+    verdict can say `fdm.stress_utilisation` and be audited against the model.
     """
-    for name in names:
-        value = ctx.param(name, _MISSING)
-        if value is not _MISSING and value is not None:
-            return value, name
-    return _MISSING, ""
+    return ctx.first_pack_param_named(names, _MISSING)
 
 
 def _directional_knockdown(phi_deg: float, ratio: float) -> float:
@@ -270,6 +323,50 @@ def _floats(value: Any, n: int) -> list[float] | None:
     return out if len(out) == n else None
 
 
+#: Axis NAMES this pack accepts wherever it wants a direction. Both gates that
+#: read a direction take a vector; a name is the spelling everybody reaches for
+#: first, and refusing it silently is the failure below.
+AXIS_NAMES: dict[str, list[float]] = {
+    "x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0], "z": [0.0, 0.0, 1.0],
+}
+
+
+def _direction(value: Any) -> list[float] | None:
+    """A direction from an ``[x, y, z]`` vector OR an axis name, else None.
+
+    Accepted: ``[0, 0, 1]``, ``"z"``, ``"+Z"``, ``"-y"``, ``"z_axis"``.
+
+    The string form is here because the vector-only version produced the worst
+    kind of message. A project set ``load_axis: "z"``, which is what a person
+    writes, and the gate reported *"the projection has no load_axis /
+    primary_load_axis"* — which reads as "you did not set it" to the one reader
+    who knows they did, and sends them looking in the model for a key that is
+    already there. A value the gate cannot read and a value that is absent are
+    different findings and must not share a sentence. See :func:`_direction_problem`
+    for what the unreadable case says now.
+    """
+    if isinstance(value, str):
+        text = value.strip().lower().replace(" ", "").replace("-axis", "").replace("_axis", "")
+        sign = 1.0
+        if text[:1] in "+-":
+            sign = -1.0 if text[0] == "-" else 1.0
+            text = text[1:]
+        if text[-1:] in "+-" and len(text) == 2:      # "z-" as well as "-z"
+            sign = -1.0 if text[-1] == "-" else sign
+            text = text[:-1]
+        base = AXIS_NAMES.get(text)
+        return [sign * c for c in base] if base else None
+    return _floats(value, 3)
+
+
+def _direction_problem(name: str, value: Any) -> str:
+    """Why a direction was rejected, in the words needed to fix it in one edit."""
+    return (f"{name} is {value!r}, which is not a direction this gate can read — "
+            f"give an [x, y, z] vector in the part's print orientation "
+            f"(e.g. [0, 0, 1]) or an axis name ('z', '-y'). It was READ, not "
+            f"missing, so nothing here says the key is absent")
+
+
 # --------------------------------------------------------------------------- #
 # fdm.bed_fit
 # --------------------------------------------------------------------------- #
@@ -300,41 +397,65 @@ def bed_fit(ctx: GateContext) -> Verdict:
     overhang, bridge and layer-alignment answers — so this gate does not consider
     it.
     """
-    bbox = _floats(_look(ctx, ("bbox_mm", "bbox", "footprint_mm"), None), 3)
+    # Many parts, one verdict — but ONLY when the set states per-part extents.
+    # A project that names thirteen meshes and one bounding box has told this
+    # gate about one part, and skipping thirteen times would be a worse answer
+    # than the one it can actually give. The fall-through says so in the verdict
+    # rather than letting the subject change silently, which is the complaint
+    # this whole multi-part mode exists to answer.
+    parts = _PARTS.part_set(ctx)
+    if parts.problem:
+        return Verdict(gate="fdm.bed_fit", passed=False, skipped=True,
+                       skip_reason=parts.problem)
+    boxed = [p for p in parts if p.bbox is not None]
+    if boxed:
+        return _bed_fit_over_set(ctx, parts)
+    set_note = ""
+    if parts:
+        set_note = (f"; the {len(parts)} part(s) in `{parts.source}` state no "
+                    f"per-part extent, so this verdict is about the one box above "
+                    f"and not about them")
+
+    bbox = _floats(_look(ctx, BBOX_KEYS, None), 3)
     if bbox is None:
-        return _skip("fdm.bed_fit", ("bbox_mm", "bbox"),
-                     "the part's [x, y, z] extent in its print orientation, mm")
+        return _skip("fdm.bed_fit", BBOX_KEYS,
+                     "the [x, y, z] extent of ONE PRINTED PART in its print "
+                     "orientation, mm — not the assembly envelope, which is what "
+                     "cad-solid reads from cad.assembly_bbox_mm", ctx)
 
-    bed_x = _look(ctx, ("bed_x_mm", "bed_xy_mm", "bed_xy", "bed_x"), _MISSING)
-    if bed_x is _MISSING:
-        return _skip("fdm.bed_fit", ("bed_x_mm", "bed_xy_mm"),
-                     "the machine's usable bed X, mm")
-    bed_y = _look(ctx, ("bed_y_mm", "bed_xy_mm", "bed_xy", "bed_y"), bed_x)
-    bed_z = _look(ctx, ("bed_z_mm", "build_height_mm", "bed_z"), _MISSING)
-    if bed_z is _MISSING:
-        return _skip("fdm.bed_fit", ("bed_z_mm", "build_height_mm"),
-                     "the machine's Z travel, mm")
-
-    brim = float(_look(ctx, ("brim_mm", "brim_allowance_mm"), BRIM_MM_DEFAULT))
-    bed_x, bed_y, bed_z = float(bed_x), float(bed_y), float(bed_z)
+    machine = _machine(ctx)
+    if isinstance(machine, Verdict):
+        return machine
+    bed_x, bed_y, bed_z, brim = machine
     fx, fy, fz = bbox
 
-    usable_x, usable_y = bed_x - 2.0 * brim, bed_y - 2.0 * brim
-    if usable_x <= 0 or usable_y <= 0:
-        return Verdict(
-            gate="fdm.bed_fit", passed=False, measured=round(brim, 2),
-            limit=round(min(bed_x, bed_y) / 2.0, 2), units="mm",
-            detail=f"brim allowance {brim:.1f} mm per side consumes the whole "
-                   f"{bed_x:.0f}x{bed_y:.0f} mm bed — check brim_mm",
-        )
+    usable = _usable(bed_x, bed_y, brim)
+    if isinstance(usable, Verdict):
+        return usable
+    usable_x, usable_y = usable
 
-    as_modelled = max(fx / usable_x, fy / usable_y)
-    rotated = max(fy / usable_x, fx / usable_y)
-    plan_util = min(as_modelled, rotated)
-    how = "as modelled" if as_modelled <= rotated else "rotated 90 deg in XY"
-    z_util = fz / bed_z if bed_z > 0 else float("inf")
-    util = max(plan_util, z_util)
-    driver = "XY" if plan_util >= z_util else "Z"
+    util, plan_util, z_util, how, driver = _bed_utilisation(
+        fx, fy, fz, usable_x, usable_y, bed_z)
+
+    # Locate the part that busts the envelope — the WHOLE part, because that is
+    # what is too big. There is no face to blame and no point to pin: the bbox is
+    # a property of the part, and a pin on the largest face would be a guess
+    # dressed up as a measurement.
+    #
+    # Only when there is a mesh to draw. This is a tier-0 gate that runs on three
+    # numbers, so it fires happily on a project that has stated a bounding box and
+    # exported nothing — and a locator is a promise that something is drawn. One
+    # aimed at a view that does not exist is reported by `site build` as a dangling
+    # anchor, which would make an ordinary bbox-only project look like a broken
+    # pack.
+    locators = []
+    if util > 1.0 and _PARTS.mesh_path(ctx):
+        locators = [Locator(
+            view=_PARTS.VIEW_ID, target=_PARTS.node(_PARTS.mover(ctx)), kind="part",
+            value=round(util, 3),
+            label=f"{util:.2f}x the usable build volume in {driver} "
+                  f"({fx:.0f}x{fy:.0f}x{fz:.0f} mm {how})",
+        )]
 
     return Verdict(
         gate="fdm.bed_fit",
@@ -344,8 +465,122 @@ def bed_fit(ctx: GateContext) -> Verdict:
         units="utilisation",
         detail=f"{fx:.0f}x{fy:.0f}x{fz:.0f} mm vs {usable_x:.0f}x{usable_y:.0f} usable "
                f"({bed_x:.0f}x{bed_y:.0f} bed - 2x{brim:.1f} brim) x {bed_z:.0f} Z; "
-               f"{how}, worst util {util:.2f} in {driver}",
+               f"{how}, worst util {util:.2f} in {driver}" + set_note,
+        locators=locators,
     )
+
+
+def _machine(ctx: GateContext):
+    """``(bed_x, bed_y, bed_z, brim)`` or a SKIPPED verdict naming what is missing.
+
+    The machine is a project parameter — it is the printer you own — and the brim
+    allowance is domain knowledge with a documented default. Shared by the
+    one-part and many-part paths so the two cannot come to judge parts against
+    different beds (rule 2).
+    """
+    bed_x = _look(ctx, ("bed_x_mm", "bed_xy_mm", "bed_xy", "bed_x"), _MISSING)
+    if bed_x is _MISSING:
+        return _skip("fdm.bed_fit", ("bed_x_mm", "bed_xy_mm"),
+                     "the machine's usable bed X, mm")
+    bed_y = _look(ctx, ("bed_y_mm", "bed_xy_mm", "bed_xy", "bed_y"), bed_x)
+    bed_z = _look(ctx, ("bed_z_mm", "build_height_mm", "bed_z"), _MISSING)
+    if bed_z is _MISSING:
+        return _skip("fdm.bed_fit", ("bed_z_mm", "build_height_mm"),
+                     "the machine's Z travel, mm")
+    brim = float(_look(ctx, ("brim_mm", "brim_allowance_mm"), BRIM_MM_DEFAULT))
+    return float(bed_x), float(bed_y), float(bed_z), brim
+
+
+def _usable(bed_x: float, bed_y: float, brim: float):
+    """The bed minus its brim on each side, or a verdict refusing the brim."""
+    usable_x, usable_y = bed_x - 2.0 * brim, bed_y - 2.0 * brim
+    if usable_x <= 0 or usable_y <= 0:
+        return Verdict(
+            gate="fdm.bed_fit", passed=False, measured=round(brim, 2),
+            limit=round(min(bed_x, bed_y) / 2.0, 2), units="mm",
+            detail=f"brim allowance {brim:.1f} mm per side consumes the whole "
+                   f"{bed_x:.0f}x{bed_y:.0f} mm bed — check brim_mm",
+        )
+    return usable_x, usable_y
+
+
+def _bed_utilisation(fx: float, fy: float, fz: float, usable_x: float,
+                     usable_y: float, bed_z: float):
+    """``(util, plan_util, z_util, how, driver)`` for one box on one machine.
+
+    Both square rotations are tried, because that is a free change a slicer makes
+    for you. Rotation about X or Y is NOT free — it changes the overhang, bridge
+    and layer-alignment answers — so it is not considered here.
+    """
+    as_modelled = max(fx / usable_x, fy / usable_y)
+    rotated = max(fy / usable_x, fx / usable_y)
+    plan_util = min(as_modelled, rotated)
+    how = "as modelled" if as_modelled <= rotated else "rotated 90 deg in XY"
+    z_util = fz / bed_z if bed_z > 0 else float("inf")
+    util = max(plan_util, z_util)
+    driver = "XY" if plan_util >= z_util else "Z"
+    return util, plan_util, z_util, how, driver
+
+
+def _bed_fit_over_set(ctx: GateContext, parts) -> Verdict:
+    """Every part in the set against the machine, one verdict, the worst named.
+
+    A part named by the set with no extent of its own is reported as unmeasured
+    and stays in the denominator — ``worst of 12`` on a thirteen-part project is
+    the same lie the single-part workaround told, arrived at from the other side.
+    """
+    machine = _machine(ctx)
+    if isinstance(machine, Verdict):
+        return machine
+    bed_x, bed_y, bed_z, brim = machine
+    usable = _usable(bed_x, bed_y, brim)
+    if isinstance(usable, Verdict):
+        return usable
+    usable_x, usable_y = usable
+
+    outcomes = []
+    for part in parts:
+        if part.bbox is None:
+            outcomes.append(_FOLD.skipped_part(
+                part.name,
+                "the set states no [x, y, z] extent for this part — add it to "
+                "bbox_by_part_mm, or to this part's entry",
+                path=part.raw))
+            continue
+        fx, fy, fz = part.bbox
+        util, _plan, _z, how, driver = _bed_utilisation(
+            fx, fy, fz, usable_x, usable_y, bed_z)
+        # Same rule as the single-part path: a locator is a promise that something
+        # is drawn, so only a part with a mesh behind it gets one.
+        locators = []
+        if util > 1.0 and part.raw:
+            locators = [Locator(
+                view=_PARTS.VIEW_ID, target=part.node, kind="part",
+                value=round(util, 3),
+                label=f"{util:.2f}x the usable build volume in {driver} "
+                      f"({fx:.0f}x{fy:.0f}x{fz:.0f} mm {how})")]
+        outcomes.append(_FOLD.measured_part(
+            part.name, score=util, measured=round(util, 3), limit=1.0,
+            note=f"at {util:.2f}x the usable build volume in {driver} "
+                 f"({fx:.0f}x{fy:.0f}x{fz:.0f} mm {how})",
+            path=part.raw,
+            row=f"{fx:.1f}\t{fy:.1f}\t{fz:.1f}\t{how}\t{driver}",
+            locators=locators))
+
+    summary = _FOLD.write_table(
+        ctx, "fdm-bed-fit-parts.txt", "fdm.bed_fit", parts.source, outcomes,
+        header_lines=[
+            f"{usable_x:.0f}x{usable_y:.0f} mm usable ({bed_x:.0f}x{bed_y:.0f} bed "
+            f"- 2x{brim:.1f} brim) x {bed_z:.0f} mm Z",
+            "score is the utilisation: the worst of footprint/usable and height/Z, "
+            "after trying both square rotations",
+        ],
+        columns="x_mm\ty_mm\tz_mm\torientation\tdriver")
+    return _FOLD.fold(
+        "fdm.bed_fit", outcomes, source=parts.source, units="utilisation",
+        quantity="build-volume fit", evidence=[summary],
+        extra_detail=f"{usable_x:.0f}x{usable_y:.0f} usable ({bed_x:.0f}x{bed_y:.0f} "
+                     f"bed - 2x{brim:.1f} brim) x {bed_z:.0f} Z")
 
 
 # --------------------------------------------------------------------------- #
@@ -378,11 +613,12 @@ def min_wall(ctx: GateContext) -> Verdict:
     load path failing it is a broken part. The gate cannot tell them apart, and
     a project that wants that distinction should carry two parameters.
     """
-    thin = _look(ctx, ("min_wall_mm", "thinnest_wall_mm", "min_feature_mm",
-                       "min_section_mm"), _MISSING)
+    thin = _look(ctx, MIN_WALL_KEYS, _MISSING)
     if thin is _MISSING:
-        return _skip("fdm.min_wall", ("min_wall_mm", "thinnest_wall_mm"),
-                     "the thinnest section anywhere in the part, mm")
+        return _skip("fdm.min_wall", MIN_WALL_KEYS,
+                     "the thinnest section MEASURED anywhere in the part, mm — "
+                     "cad-solid's min_wall_mm is the opposite kind of number, the "
+                     "thinnest wall a PROCESS allows", ctx)
 
     nozzle = _look(ctx, ("nozzle_d_mm", "nozzle_diameter_mm", "nozzle_d"), _MISSING)
     if nozzle is _MISSING:
@@ -468,14 +704,28 @@ def layer_alignment(ctx: GateContext) -> Verdict:
     ``ADVERSE_LAYER_ANGLE_DEG`` and says so in the verdict. That is a weaker check
     and it is labelled as one; it is not a substitute for knowing the margin.
     """
-    load = _floats(_look(ctx, ("load_axis", "primary_load_axis", "load_direction"),
-                         None), 3)
+    raw_load, load_axis_key = _look_named(ctx, LOAD_AXIS_KEYS)
+    if raw_load is _MISSING:
+        return _skip("fdm.layer_alignment", LOAD_AXIS_KEYS,
+                     "the primary load direction in the part's print orientation, "
+                     "as an [x, y, z] vector or an axis name ('z', '-y')", ctx)
+    load = _direction(raw_load)
     if load is None:
-        return _skip("fdm.layer_alignment", ("load_axis", "primary_load_axis"),
-                     "the primary load direction as an [x, y, z] vector in the "
-                     "part's print orientation")
+        # Present and unreadable is NOT absent, and the two must not share a
+        # sentence: a project that stated `load_axis: "z"` was told the key was
+        # missing and went looking in the model for something already there.
+        return Verdict(
+            gate="fdm.layer_alignment", passed=False, skipped=True,
+            skip_reason=_direction_problem(load_axis_key or "load_axis", raw_load),
+        )
 
-    build = _floats(_look(ctx, ("build_axis", "layer_normal", "print_axis"), None), 3)
+    raw_build = _look(ctx, BUILD_AXIS_KEYS, _MISSING)
+    build = None if raw_build is _MISSING else _direction(raw_build)
+    if raw_build is not _MISSING and build is None:
+        return Verdict(
+            gate="fdm.layer_alignment", passed=False, skipped=True,
+            skip_reason=_direction_problem("build_axis", raw_build),
+        )
     if build is None:
         build = [0.0, 0.0, 1.0]
         build_note = "build axis assumed +Z"
@@ -508,7 +758,12 @@ def layer_alignment(ctx: GateContext) -> Verdict:
     # taken at its word, and anything else it cannot classify makes it skip.
     kind = _look(ctx, ("utilisation_kind", "utilization_kind"), _MISSING)
     if kind is _MISSING:
-        kind = "deflection" if util_key.startswith(("deflection", "stiffness")) else "stress"
+        # The scope, if the project wrote one, is not part of the key's meaning:
+        # `fdm.deflection_utilisation` is a deflection utilisation exactly as
+        # `deflection_utilisation` is, and reading the prefix as part of the name
+        # would silently apply the STRENGTH knockdown to a stiffness margin.
+        bare_util_key = util_key.rsplit(SCOPE_SEP, 1)[-1]
+        kind = "deflection" if bare_util_key.startswith(("deflection", "stiffness")) else "stress"
     kind = str(kind).strip().lower()
     if kind in ("stress", "strength"):
         ratio = float(_look(ctx, ("layer_normal_strength_ratio",),
@@ -593,7 +848,7 @@ def print_time_est(ctx: GateContext) -> Verdict:
     mistake — the part that is a three-day print, the part that will not fit on
     one spool — not to schedule a farm. When the number matters, slice it.
     """
-    vol = _look(ctx, ("volume_mm3", "solid_volume_mm3", "part_volume_mm3"), _MISSING)
+    vol = _look(ctx, VOLUME_KEYS, _MISSING)
     if vol is _MISSING:
         return _skip("fdm.print_time_est", ("volume_mm3", "solid_volume_mm3"),
                      "the part's solid volume, mm^3")
@@ -768,13 +1023,13 @@ def process_model_valid(ctx: GateContext) -> Verdict:
     problems: list[str] = []
     notes: list[str] = []
 
-    bbox = _floats(_look(ctx, ("bbox_mm", "bbox", "footprint_mm"), None), 3)
+    bbox = _floats(_look(ctx, BBOX_KEYS, None), 3)
     if bbox is None:
         # Not a pass. An absolute bound on one length is the anchor every other
         # check here hangs off, and with no extent to measure, no unit has been
         # verified — reporting "process model applies" for a projection nothing
         # was checked against is precisely the lie this gate exists to prevent.
-        return _skip("fdm.process_model_valid", ("bbox_mm", "bbox"),
+        return _skip("fdm.process_model_valid", BBOX_KEYS,
                      "the part's [x, y, z] extent in mm — with no length in the "
                      "projection no unit can be verified, and every other gate "
                      "here is standing on the assumption that it is millimetres")
@@ -801,7 +1056,7 @@ def process_model_valid(ctx: GateContext) -> Verdict:
     # stated volume no longer fits inside its own bounding box, or its thinnest
     # section is narrower than one bead of the nozzle printing it.
     box_vol = abs(bbox[0] * bbox[1] * bbox[2])
-    vol = _look(ctx, ("volume_mm3", "solid_volume_mm3", "part_volume_mm3"), _MISSING)
+    vol = _look(ctx, VOLUME_KEYS, _MISSING)
     if vol is not _MISSING and box_vol > 0:
         vol = float(vol)
         fill = vol / box_vol
@@ -870,8 +1125,7 @@ def process_model_valid(ctx: GateContext) -> Verdict:
         # narrower than one bead of the nozzle printing it. A model in cm reports
         # a 3.2 mm wall as 0.32; in inches, as 0.126. Both are below any nozzle in
         # the table and neither is below the absolute metres floor.
-        thin = _look(ctx, ("min_wall_mm", "thinnest_wall_mm", "min_feature_mm",
-                           "min_section_mm"), _MISSING)
+        thin = _look(ctx, MIN_WALL_KEYS, _MISSING)
         if thin is not _MISSING and nozzle > 0:
             thin = float(thin)
             if thin <= 0:

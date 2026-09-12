@@ -97,6 +97,43 @@ friction factor cannot physically leave. Because it binds broadly, its *ability
 to reach a verdict* matters as much as its verdict: an external-only project (a
 strut, a float, a hull with no piping) must get a **valid** from it, not a skip.
 
+## Views
+
+| View | Kind | Payload | Addressed by |
+|---|---|---|---|
+| `righting_arm_curve` | `chart` | GZ from upright to the small-angle ceiling, with the required arm as the limit line and the design heel marked | series key `gz`, or an x value |
+
+Stability is a question about a curve and `fluid.righting_arm` answers it at one
+angle. GZ climbs with heel here, so a hull that clears its demand at 8° may be
+under it at 4°, and a verdict about 8° says nothing at all about 4°.
+
+**The curve stops at `SMALL_ANGLE_MAX_DEG` (10°), and the chart says so in
+`meta.validity`.** GZ = GM·sin(θ) is the initial slope of the real righting-arm
+curve; past ten degrees the immersed shape has moved, the deck edge may be in the
+water, and the closed form over-predicts. The gate SKIPS there. A chart drawn to
+forty degrees from the same formula would commit the identical over-prediction in
+a picture — and a picture is the more persuasive of the two, so it would be the
+worse lie. Past that angle you need a full hydrostatic GZ curve at each angle,
+which is tier 2 and is not in this pack.
+
+The limit line resolves in the same order the gate resolves it — stated
+`min_righting_arm_m`, else the arm a stated heeling moment demands, else a
+fraction of beam — so the chart and the verdict draw one line. With none of the
+three there is no chart: a GZ curve with nothing across it invites the reader to
+decide for themselves whether the arm is enough, which is the judgement the ledger
+is supposed to be carrying. Every approximation that produced GM (a wall-sided
+draft, a rectangular waterplane, which is OPTIMISTIC for a finer hull) rides in
+`meta.approximations`, because a curve is exactly where an optimistic assumption
+stops being visible.
+
+The design point is marked only when the model states a heel inside the ceiling —
+the two cases where `fluid.righting_arm` skips get no marker, because a marked
+point on a chart whose gate settled nothing would show a number the ledger does
+not carry.
+
+No gate in this pack emits locators: a hull's buoyancy, freeboard, GM and GZ are
+properties of the whole body, and this pack never sees geometry it could point at.
+
 ## Units and frames
 
 **SI only, and unprefixed.** Metres, kilograms, seconds, m², m³, m⁴, kg/m³,

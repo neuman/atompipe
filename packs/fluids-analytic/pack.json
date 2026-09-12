@@ -36,6 +36,9 @@
     "fluid.pipe_pressure_drop",
     "fluid.flow_regime"
   ],
+  "provides_views": [
+    "righting_arm_curve"
+  ],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": [],

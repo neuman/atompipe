@@ -26,6 +26,13 @@ from atompipe.models import NegativeControl, Tier, Verdict
 from gates._fluids_analytic import (
     G, hydro, gm as resolve_gm, missing, number, skip,
     AWP_KEYS, BEAM_KEYS, DEPTH_KEYS, HULL_VOLUME_KEYS,
+    # Three stability constants that used to be defined below and now live in the
+    # shared module. `views/curves.py` has to stop the GZ chart at exactly the
+    # angle this gate stops answering at, and draw exactly the acceptance line
+    # this gate compares against — and a view module that imported a GATE module
+    # to reach them would register this pack's gates a second time. So they live
+    # beside the arithmetic, and both sides read one copy (rule 2).
+    HEEL_KEYS, MIN_GZ_BEAM_FRACTION, SMALL_ANGLE_MAX_DEG,
 )
 
 # --------------------------------------------------------------------------- #
@@ -60,30 +67,6 @@ MIN_FREEBOARD_FRACTION = 0.15
 #: not known to a millimetre, free surface has not been subtracted, and the crew
 #: moves. Override with `min_gm_m`.
 MIN_GM_BEAM_FRACTION = 0.05
-
-#: There is deliberately NO default heel angle.
-#:
-#: The default used to be 10.0 — which is also SMALL_ANGLE_MAX_DEG below, and the
-#: guard is `heel > SMALL_ANGLE_MAX_DEG`. So a project that said nothing was
-#: silently evaluated at the exact ceiling where GZ = GM.sin(theta) is least
-#: valid AND where it returns the largest arm the gate will ever produce: on this
-#: pack's own worked hull, 0.2707 m at the default against 0.2170 m at the 8 deg
-#: the example actually uses — 25% more righting arm, out of a number nobody
-#: stated. Defaulting to 5 or 8 deg was considered and rejected too: it is still
-#: the gate inventing the load case, and this pack's rule is that a model
-#: quantity is stated or the gate SKIPS and names the key. Only acceptance
-#: MARGINS carry defaults, because those are the pack's opinion and this is not.
-HEEL_KEYS = ("heel_angle_deg", "design_heel_deg", "heel_deg")
-
-#: Beyond this heel, GZ = GM.sin(theta) is void — the waterplane has moved, the
-#: deck edge may be immersed, and the small-angle line over-predicts the real
-#: righting arm. This is the ceiling on the whole small-angle stability story,
-#: and the righting-arm gate SKIPS rather than answering past it.
-SMALL_ANGLE_MAX_DEG = 10.0
-
-#: Minimum righting arm as a fraction of waterline beam, when neither an
-#: absolute minimum nor a heeling moment is stated.
-MIN_GZ_BEAM_FRACTION = 0.01
 
 
 @gate(

@@ -128,14 +128,14 @@ def brim_overflow(ctx):
     base = _baseline()
     bed_x = float(base.get("bed_x_mm", base.get("bed_xy_mm", 220.0)))
     bed_y = float(base.get("bed_y_mm", bed_x))
-    height = list(base.get("bbox_mm", base.get("bbox", [100.0, 100.0, 40.0])))[2]
+    height = list(base.get("part_bbox_mm", base.get("bbox_mm", [100.0, 100.0, 40.0])))[2]
     brim = float(base.get("brim_mm", base.get("brim_allowance_mm", 5.0)))
 
     def overflowing(bed: float) -> float:
         usable = bed - 2.0 * brim
         return 0.5 * (usable + bed) if usable < bed else 1.05 * bed
 
-    return _with(ctx, bbox_mm=[overflowing(bed_x), overflowing(bed_y), height])
+    return _with(ctx, part_bbox_mm=[overflowing(bed_x), overflowing(bed_y), height])
 
 
 def two_perimeter_wall(ctx):
@@ -154,7 +154,7 @@ def two_perimeter_wall(ctx):
     base = _baseline()
     bead = float(base.get("extrusion_width_mm",
                           base.get("line_width_mm", base.get("nozzle_d_mm", 0.4))))
-    return _with(ctx, min_wall_mm=round(2.0 * bead, 3))
+    return _with(ctx, part_min_wall_mm=round(2.0 * bead, 3))
 
 
 def load_across_layers(ctx):
@@ -201,7 +201,7 @@ def crawling_speed(ctx):
     layer_h = float(base.get("layer_height_mm", 0.2))
     area = base.get("surface_area_mm2")
     extruded, _note = pm.extruded_volume_mm3(
-        float(base.get("volume_mm3", 40000.0)),
+        float(base.get("part_volume_mm3", 40000.0)),
         infill=float(base.get("infill_fraction", 0.20)),
         perimeters=int(base.get("perimeters", 3)),
         width=width,
@@ -232,13 +232,14 @@ def metres_not_millimetres(ctx):
     base = _baseline()
     # exponent on the 1/1000 factor: 1 for a length, 2 for an area, 3 for a volume
     dimension = {
-        "bbox_mm": 1, "bbox": 1, "footprint_mm": 1,
-        "min_wall_mm": 1, "nozzle_d_mm": 1, "extrusion_width_mm": 1,
+        "part_bbox_mm": 1, "bbox_mm": 1, "bbox": 1, "footprint_mm": 1,
+        "part_min_wall_mm": 1, "min_wall_mm": 1,
+        "nozzle_d_mm": 1, "extrusion_width_mm": 1,
         "layer_height_mm": 1, "brim_mm": 1, "max_bridge_mm": 1,
         "max_cantilever_mm": 1, "bed_x_mm": 1, "bed_y_mm": 1, "bed_z_mm": 1,
         "print_speed_mm_s": 1,
         "surface_area_mm2": 2,
-        "volume_mm3": 3,
+        "part_volume_mm3": 3, "volume_mm3": 3,
     }
     shrunk: dict = {}
     for key, power in dimension.items():

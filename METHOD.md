@@ -178,6 +178,14 @@ And the honesty extends to what a green build actually means. A clean compile is
 a working product; a clean rule check is not a correct circuit; a converged solve is
 not a validated design. Say so, in the report, every time.
 
+*In public* is where the project site comes in — `atompipe site build` renders the
+same ledger as a page, and the separation stops being a section heading and becomes
+a thing you look at: the headline verdict above the fold, the physical and assumed
+claims never blurred into the proven ones, how old each result is, and the failing
+part lit up in the viewer rather than described in coordinates. It renders the
+ledger and never computes truth; if a number on the page is wrong, the ledger is
+wrong. Contract in [`docs/SITE_CONTRACT.md`](docs/SITE_CONTRACT.md).
+
 ## 10. Cheap inner loops, or there is no loop
 
 Iteration speed is a design requirement, not a nicety. If validating a change costs

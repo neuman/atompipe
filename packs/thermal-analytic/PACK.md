@@ -136,6 +136,43 @@ temperature, so the single-node result from `thermal.steady_state_temp` and the
 time constant are both describing a fiction. When it trips, stop trusting those
 numbers rather than tuning them.
 
+## 3b. Views
+
+| View | Kind | Payload | Addressed by |
+|---|---|---|---|
+| `collector_curve` | `chart` | Hottel-Whillier useful output against `T_inlet − T_ambient`, with `collector_output_min_w` as the limit line, the design point marked, and the stagnation crossing where the line reaches zero | series key `useful`, or an x value |
+
+Hottel-Whillier is a straight line and everything a flat-plate collector does sits
+on it. The intercept is the optics, the slope is the losses, and **the point where
+the line reaches zero is stagnation** — `dT = tau_alpha·G/U_L`, which is exactly
+the rise `solar.stagnation` measures. Two gates read the one line from opposite
+ends: `solar.collector_output` wants the design point high enough,
+`solar.stagnation` wants the zero crossing low enough. A table of numbers keeps
+that relationship invisible; on the chart it is the same line, and the inversion
+this pack keeps warning about — *the better the collector, the hotter it
+stagnates* — becomes something you can see, because better insulation is a
+shallower slope and a shallower slope reaches zero further right.
+
+Three markers: the design point (with its efficiency and its share of the required
+output), the stagnation crossing (with the absorber temperature), and
+`stagnation_limit_c` on the same axis when the model states one, so the headroom
+between "where it stagnates" and "what the seals and the glycol survive" is a
+distance rather than a subtraction.
+
+The series stops at the crossing rather than running into negative output: past
+stagnation the formula describes a collector being fed fluid hotter than it can
+reach, which is a real thing and a different question, and a plunging negative
+tail invites a reader to read a loss rate off a model fitted to gains.
+`meta.validity` says the rest — one irradiance, one constant `U_L`, and real
+`U_L` climbs with absorber temperature, so the crossing shown is a conservative
+bound.
+
+No gate in this pack emits locators. Every one measures a scalar over a named path
+or surface that has no geometry in the projection — a resistance node, a wall
+stack, an aperture. `resistance_path_k_w` names its nodes, and when this pack
+grows a `diagram` view of that network those names are where its locators will
+land; until there is something drawn, a locator would point at nothing.
+
 ## 4. Units and frames
 
 SI throughout, with three places where people get hurt:

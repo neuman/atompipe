@@ -129,6 +129,43 @@ EXT_KIND_HINTS: dict[str, ArtifactKind] = {
 }
 
 
+class ViewKind(StrEnum):
+    """How a view is rendered. The site knows these and nothing else.
+
+    Extensibility lives in the DATA, not in shipped code: a pack that emits one of
+    these kinds gets visualisation for free, and the renderer stays fixed, small
+    and auditable. A pack shipping its own JavaScript would make the site's
+    behaviour depend on code nobody reviewed, in the one artifact whose whole job
+    is to be trusted when a gate says something is wrong.
+    """
+
+    MODEL3D = "model3d"
+    """A glTF/GLB assembly whose nodes are addressable by name, plus an explode
+    manifest. This is the one that turns the site into a debugging tool: a gate
+    that knows WHERE a problem is names the part, and the viewer shows you."""
+
+    IMAGE = "image"
+    """A raster or SVG render, optionally with hotspots in normalised coordinates
+    (0..1 of width/height, so the overlay survives a re-render at another size)."""
+
+    CHART = "chart"
+    """Series the site plots, with the acceptance limit drawn as a line. A margin
+    you can see is worth more than a margin you have to compute: the shape of the
+    curve near the limit is what tells you whether a design is robust or lucky."""
+
+    TABLE = "table"
+    """Rows. A bill of materials, a stack-up, a per-part result sweep."""
+
+    FIELD = "field"
+    """A scalar field sampled over a mesh — pressure, temperature, stress, von
+    Mises. Rendered as a colour map on the geometry. This is where a solver pack's
+    output lands, and it is why MODEL3D carries node names rather than an opaque
+    blob."""
+
+    DIAGRAM = "diagram"
+    """A schematic or graph (SVG, or mermaid source the site renders)."""
+
+
 class NeedStatus(StrEnum):
     """Lifecycle of a capability gap."""
 
@@ -367,6 +404,9 @@ class Verdict(Record):
     skip_reason: str = ""            # "requires openfoam (not installed)"
     error: str = ""                  # gate crashed; NOT the same as failing
     pack: str = ""
+    locators: list[Locator] = field(default_factory=list)
+    """WHERE this verdict applies, for the site to highlight. Optional and often
+    empty: a gate attaches one only when it genuinely knows the position."""
 
     @property
     def ok(self) -> bool:
@@ -391,6 +431,8 @@ class Verdict(Record):
         kw = {k: v for k, v in (data or {}).items() if k in names}
         if "tier" in kw and kw["tier"] is not None:
             kw["tier"] = Tier(int(kw["tier"]))
+        kw["locators"] = [Locator.from_dict(l) if isinstance(l, dict) else l
+                          for l in (kw.get("locators") or [])]
         return cls(**kw)
 
 
@@ -534,6 +576,94 @@ class InputArtifact(Record):
 
 
 # --------------------------------------------------------------------------- #
+# views: the project site, and the debugging surface
+# --------------------------------------------------------------------------- #
+@dataclass
+class Locator(Record):
+    """WHERE a verdict applies, so the site can show you instead of telling you.
+
+    This is the mechanism that turns a project page into a debugging tool. A clash
+    gate that reports "back_left interferes with grip_lid_left by 0.41 mm^3" is a
+    sentence you have to go and act on by hand. The same verdict carrying two
+    locators lights both parts up in the assembly viewer, at the pose where it
+    happens, and the reader is looking at the problem a second later.
+
+    A gate attaches locators only when it genuinely knows the position. Inventing
+    one puts a confident red highlight on the wrong part, which is worse than no
+    highlight at all, so an unlocatable failure carries none and the site says the
+    verdict has no anchor.
+    """
+
+    view: str
+    """View id this addresses. A locator naming a view that does not exist is
+    reported by `atompipe site build` rather than silently dropped — a gate that
+    thinks it is drawing and is not looks identical to a gate that found nothing."""
+
+    target: str = ""
+    """Node name (model3d), hotspot id (image), series key (chart), row id (table).
+    Empty means the whole view."""
+
+    kind: str = "part"
+    """part | point | region | series | row | face"""
+
+    label: str = ""
+    """What to show on the pin. One line — the measured value and the limit."""
+
+    severity: str = ""
+    """Defaults to the verdict's own outcome. Set it only to mark one locator of a
+    passing verdict as a warning, or the worst offender among many."""
+
+    position: list[float] | None = None
+    """Explicit xyz in the view's own space, when the target is not a named node
+    (a contact point, a hot spot, a stress peak)."""
+
+    value: float | None = None
+    """The measured quantity at this location, when it varies per-locator — the
+    per-pair overlap volume, the per-face overhang angle."""
+
+
+@dataclass
+class View(Record):
+    """One visual artifact the site can render, and address verdicts onto.
+
+    Views are produced by packs (a CAD pack emits the assembly; an analytic pack
+    emits the curve its gate measures a point on) and by the project itself. The
+    site composes whatever it is given — it has no idea what domain it is looking
+    at, which is what lets the same site serve a boat, a bracket and a collector.
+    """
+
+    id: str
+    kind: ViewKind = ViewKind.IMAGE
+    title: str = ""
+    src: str = ""
+    """Asset path relative to the site's data directory. Empty for a view whose
+    content is entirely in `data` (a small chart or table)."""
+
+    description: str = ""
+    gates: list[str] = field(default_factory=list)
+    """Gates whose locators address this view. Lets the site offer 'show me the
+    gates that touch this' without scanning every verdict."""
+
+    data: dict[str, Any] = field(default_factory=dict)
+    """Inline content for small views: chart series, table rows, hotspot lists."""
+
+    meta: dict[str, Any] = field(default_factory=dict)
+    """Kind-specific: explode manifest path and node list for model3d; axis labels
+    and units for chart; natural size for image."""
+
+    pack: str = ""
+    order: int = 100
+    """Display order. Lower first; the assembly usually wants to be first."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "View":
+        names = {f.name for f in dataclasses.fields(cls)}
+        kw = {k: v for k, v in (data or {}).items() if k in names}
+        kw["kind"] = ViewKind(kw.get("kind") or ViewKind.IMAGE)
+        return cls(**kw)
+
+
+# --------------------------------------------------------------------------- #
 # decisions
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -578,7 +708,19 @@ class PackManifest(Record):
     settles: list[str] = field(default_factory=list)     # quantity vocabulary for gap matching
     claim_classes: list[str] = field(default_factory=list)
     provides_gates: list[str] = field(default_factory=list)
+    provides_views: list[str] = field(default_factory=list)
+    """View ids this pack's `views/*.py` register. Tier 1 because a reader
+    deciding whether to install a pack wants to know it comes with a viewer, and
+    because it is what `Locator.view` in this pack's verdicts will address:
+    declared here, the pair can be checked without importing anything."""
     provides_generators: list[str] = field(default_factory=list)
+    key_scope: str = ""
+    """Prefix this pack's projection keys may carry, so two packs that want the
+    same word can both be satisfied: a project publishes `fdm.bbox_mm` and
+    `cad.bbox_mm` and each gate reads the one it means. Usually EMPTY — it is
+    derived from the dotted gate ids (`fdm.bed_fit` -> `fdm`) by
+    `packs.key_scope`, and stating it twice is how the two go out of step. Set it
+    only when a pack's gate ids do not share one prefix."""
     requires_tools: list[str] = field(default_factory=list)
     requires_python: list[str] = field(default_factory=list)
     max_tier: Tier = Tier.INSTANT
@@ -595,6 +737,48 @@ class PackManifest(Record):
         if "max_tier" in kw and kw["max_tier"] is not None:
             kw["max_tier"] = Tier(int(kw["max_tier"]))
         return cls(**kw)
+
+
+@dataclass
+class KeyCollision(Record):
+    """One projection key that two installed packs read as different quantities.
+
+    Packs share one flat namespace — the model's projection — and nothing stops
+    two of them from wanting the same word for different things. The observed
+    case: `cad-solid` reads `bbox_mm` as the ASSEMBLY envelope, `fdm-print` reads
+    it as ONE PART in print orientation, and a project with both (every
+    mechanical project) can only satisfy one. Published as the assembly it
+    measured a 480 mm boat against a 220 mm printer bed and FAILED; published as
+    the part, the envelope gate skipped and the claim went unheld. Neither pack
+    was wrong and neither could detect the other.
+
+    This record is what makes that detectable instead of discoverable: `atompipe
+    doctor` diffs the installed packs' key vocabularies and reports the overlaps,
+    naming both packs, what each means by the key, and the unambiguous spelling
+    to publish instead.
+
+    `live` is the difference between a latent clash and one that is happening
+    here: it is True when the project's own projection actually publishes the
+    bare key, so one of these two packs is reading a number that was written for
+    the other.
+    """
+
+    key: str
+    packs: list[str] = field(default_factory=list)
+    meanings: dict[str, str] = field(default_factory=dict)   # pack -> its own one-liner
+    scoped: dict[str, str] = field(default_factory=dict)     # pack -> "fdm.bbox_mm"
+    primary: dict[str, str] = field(default_factory=dict)    # pack -> "part_bbox_mm"
+    live: bool = False
+
+    def fix(self) -> str:
+        """The one sentence that resolves it, naming both spellings."""
+        scoped = ", ".join(self.scoped[p] for p in self.packs if p in self.scoped)
+        primary = ", ".join(f"{p}: {self.primary[p]}" for p in self.packs
+                            if self.primary.get(p) and self.primary[p] != self.key)
+        parts = [f"publish {scoped}"] if scoped else []
+        if primary:
+            parts.append(f"or use each pack's own primary key ({primary})")
+        return " ".join(parts) or "scope the key per pack"
 
 
 # --------------------------------------------------------------------------- #
@@ -638,6 +822,7 @@ class Ledger(Record):
     needs: list[Need] = field(default_factory=list)
     decisions: list[Decision] = field(default_factory=list)
     verdicts: list[Verdict] = field(default_factory=list)   # latest per gate
+    views: list[View] = field(default_factory=list)
     last_run: RunMeta = field(default_factory=RunMeta)
 
     # -- lookups ---------------------------------------------------------- #
@@ -677,16 +862,18 @@ class Ledger(Record):
             needs=[Need.from_dict(n) for n in data.get("needs") or []],
             decisions=[Decision.from_dict(d) for d in data.get("decisions") or []],
             verdicts=[Verdict.from_dict(v) for v in data.get("verdicts") or []],
+            views=[View.from_dict(v) for v in data.get("views") or []],
             last_run=RunMeta.from_dict(data.get("last_run") or {}),
         )
 
 
 __all__ = [
-    "StrEnum", "ClaimKind", "ClaimStatus", "BLOCKING_STATUSES", "Tier",
+    "StrEnum", "ClaimKind", "ClaimStatus", "BLOCKING_STATUSES", "Tier", "ViewKind",
     "ArtifactKind", "EXT_KIND_HINTS", "NeedStatus", "Comparator",
     "Record", "slugify", "sha256_file",
     "Rejected", "Param", "Acceptance", "PhysicalResult", "Claim",
     "Verdict", "NegativeControl", "GateSpec",
     "ToolCandidate", "Need", "Extraction", "InputArtifact", "Decision",
-    "PackManifest", "ProjectMeta", "RunMeta", "Ledger",
+    "Locator", "View", "PackManifest", "KeyCollision", "ProjectMeta",
+    "RunMeta", "Ledger",
 ]

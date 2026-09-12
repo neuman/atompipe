@@ -28,7 +28,7 @@ import os
 import sys
 
 from atompipe.gates import gate, GateContext
-from atompipe.models import NegativeControl, Tier, Verdict
+from atompipe.models import Locator, NegativeControl, Tier, Verdict
 
 _PACK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PACK_DIR not in sys.path:                    # also true under load_gates; harmless
@@ -41,9 +41,31 @@ import bomlib  # noqa: E402
 # overridable per project from the BOM document or the model projection, and every
 # one states, at its definition, why that value and what was rejected.
 
+#: How many offending lines get a pin before a gate stops drawing them. A BOM is a
+#: table and a table is read row by row: past a dozen highlights the eye stops
+#: picking them out and starts reading the table again, which is what the pins were
+#: for. The counts in `measured` and `detail` are always the real ones — the cap
+#: trims the drawing, never the measurement.
+_MAX_LOCATORS = 12
+
+
 def _skip(gate_id: str, reason: str) -> Verdict:
     """A visible non-answer. Never a pass — the claim goes BLOCKED, on purpose."""
     return Verdict(gate=gate_id, passed=False, skipped=True, skip_reason=reason)
+
+
+def _row(ref: str, label: str, value: float | None = None, severity: str = "") -> Locator:
+    """One locator onto a ROW of the BOM table.
+
+    A BOM line has no geometry and no position, and inventing one would be the
+    failure the contract names: a confident highlight somewhere nobody measured.
+    What it has is an identity — the `ref` the buyer types on the purchase order —
+    and that is what the table publishes as its row id and what these gates target.
+    """
+    return Locator(view=bomlib.SITE_VIEW_ID, target=str(ref), kind="row",
+                   label=label, severity=severity,
+                   value=(float(value) if isinstance(value, (int, float))
+                          and not isinstance(value, bool) else None))
 
 
 def _load(ctx: GateContext, gate_id: str):
@@ -282,6 +304,11 @@ def availability(ctx: GateContext) -> Verdict:
         return _skip("bom.availability", str(exc))
 
     unknown: list[str] = []
+    # The same lines again as (ref, why) pairs, for the locators. Kept beside
+    # `unknown` rather than parsed back out of its formatted strings: a part number
+    # with a bracket in it would turn a locator into a target that matches no row,
+    # and a locator that matches nothing is silent by construction.
+    unknown_rows: list[tuple[str, str]] = []
     dead: list[str] = []
     warned: list[str] = []
     longest: float | None = None
@@ -313,6 +340,7 @@ def availability(ctx: GateContext) -> Verdict:
             elif stock is not None:
                 why = f"stock {stock:g} < {buy:g}, {why}"
             unknown.append(f"{ref}({why})")
+            unknown_rows.append((ref, why))
         else:
             effective = lead
 
@@ -342,6 +370,27 @@ def availability(ctx: GateContext) -> Verdict:
                      f"schedule nobody has written down, so there is nothing to compare it "
                      f"against and this gate settles nothing")
 
+    # Pin the rows that are actually the problem, in the order somebody has to deal
+    # with them: dead parts first (a redesign, not a phone call), then the lines
+    # with no ship date, then — only when the schedule is actually blown — the one
+    # line that sets the longest lead. That last one is the ONLY line worth pinning
+    # for a lead-time overrun: every other line ships sooner and moving any of them
+    # changes nothing, so highlighting them would be twenty pins pointing at parts
+    # nobody needs to chase.
+    locators: list[Locator] = []
+    by_ref = {r["ref"]: r for r in rows}
+    for ref in dead:
+        row = by_ref.get(ref, {})
+        locators.append(_row(ref, f"lifecycle {row.get('lifecycle', 'eol')} — this part "
+                                  f"has a last order date, not a lead time"))
+    for ref, why in unknown_rows:
+        locators.append(_row(ref, f"no ship date: {why}"))
+    if over and longest is not None:
+        locators.append(_row(longest_ref,
+                             f"{longest:g} wk lead sets the ship date, vs a "
+                             f"{float(budget):g} wk budget",
+                             value=longest))
+
     bits = [f"longest lead {'unknown' if longest is None else f'{longest:g}'} wk ({longest_ref})"]
     bits.append(f"vs {float(budget):g} wk budget" if budget is not None
                 else "no lead-time budget set (nothing to compare against)")
@@ -360,6 +409,7 @@ def availability(ctx: GateContext) -> Verdict:
         measured=(None if longest is None else round(longest, 2)),
         limit=(round(float(budget), 2) if budget is not None else None),
         units="weeks", detail="; ".join(bits), evidence=evidence,
+        locators=locators[:_MAX_LOCATORS],
     )
 
 
@@ -644,10 +694,20 @@ def single_source(ctx: GateContext) -> Verdict:
         detail += (f"; {unstated} line(s) record no manufacturer, so their sources are "
                    f"counted by supplier — two distributors of one factory's part would "
                    f"read as two there")
+    # The UNRECORDED lines only. A line behind one source with a qualified
+    # alternate, or with a written acceptance, is a decision somebody made — it is
+    # in the evidence file and it is not a finding. Pinning it would tell a reader
+    # that the thing they already did is still outstanding, and the second time
+    # that happens they stop reading the highlights.
+    locators = [
+        _row(u["ref"], f"single source ({u['basis']} {u['source']}) — {u['why']}")
+        for u in unrecorded[:_MAX_LOCATORS]
+    ]
+
     return Verdict(
         gate="bom.single_source", passed=float(len(unrecorded)) <= limit,
         measured=float(len(unrecorded)), limit=limit, units="lines",
-        detail=detail, evidence=evidence,
+        detail=detail, evidence=evidence, locators=locators,
     )
 
 

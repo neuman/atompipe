@@ -97,7 +97,54 @@ If the gate passes its known-bad fixture, it is broken. Do not proceed. Do not
 rationalise. This is the moment the whole system either earns its credibility or
 quietly loses it.
 
-### 4b. Get the tag vocabulary right
+### 4b. Draw what the gate measured, and point at it
+
+A verdict says *what* is wrong. A **view** plus a **locator** says *where*, and that
+is the difference between a page someone reads and a page someone debugs.
+
+Put viewgens in `views/*.py`. They mirror gates — one context argument, the same
+`requires_*` declarations, registered by a decorator — so there is no second API to
+learn:
+
+```python
+@viewgen(id="assembly", kind=ViewKind.MODEL3D, title="Assembly",
+         requires_python=["trimesh"], gates=["cad.clash"])
+def assembly(ctx: ViewContext) -> View | None:
+    meshes = build_meshes(ctx.model)
+    if not meshes:
+        return None                  # nothing to draw is not an error
+    src = ctx.write_asset("assembly.glb", export_glb(meshes))
+    return View(id="assembly", kind=ViewKind.MODEL3D, src=src,
+                meta={"nodes": sorted(meshes)})
+```
+
+Then give the gate somewhere to point:
+
+```python
+locators=[Locator(view="assembly", target="back_left",
+                  label="0.41 mm^3 into grip_lid_left", value=0.41)]
+```
+
+Three things to get right:
+
+- **Publish the node names in `PACK.md`.** They are the interface between your
+  viewgen and every gate that will ever locate into it, including gates you did not
+  write. An unpublished naming scheme is one somebody has to reverse-engineer from a
+  GLB.
+- **Locate only what you genuinely know.** A confident highlight on the wrong part
+  is worse than none — it sends a reader to inspect a part that is fine, and after
+  that they ignore the overlay. A failure you cannot place carries no locators and
+  the site says so.
+- **Run `atompipe site build` and read the warnings.** It reports every locator
+  naming a view or a node that does not exist. That is the check that catches the
+  rename you did on one side of the interface and not the other.
+
+A pack with no view still works; the site degrades all the way down to claims,
+verdicts and provenance. But if your domain has geometry and you skip this, every
+failure it finds stays a sentence about coordinates. Contract:
+`docs/SITE_CONTRACT.md`.
+
+### 4c. Get the tag vocabulary right
 
 A gate's `claims` list is the set of vocabularies its result is relevant evidence
 for. `beam.deflection` listing `["structural", "stiffness", "deflection"]` is

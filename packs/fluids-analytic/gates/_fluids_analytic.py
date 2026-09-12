@@ -43,6 +43,40 @@ from atompipe.models import Verdict
 #: Standard gravity. Not a design choice; the value is the SI definition.
 G = 9.80665
 
+# --------------------------------------------------------------------------- #
+# small-angle stability: the ceiling, the load case, and the fallback margin
+#
+# These live in the shared module rather than in `gates/hydrostatics.py` because
+# `views/curves.py` needs the same three numbers: a GZ chart must stop at exactly
+# the angle the gate stops answering at, and draw exactly the line the gate
+# compares against. A chart drawn to 40 deg from GZ = GM.sin(theta) would commit,
+# in a picture, the precise over-prediction the gate refuses to commit in a
+# number — and a picture is the more persuasive of the two.
+# --------------------------------------------------------------------------- #
+#: There is deliberately NO default heel angle.
+#:
+#: The default used to be 10.0 — which is also SMALL_ANGLE_MAX_DEG below, and the
+#: guard is `heel > SMALL_ANGLE_MAX_DEG`. So a project that said nothing was
+#: silently evaluated at the exact ceiling where GZ = GM.sin(theta) is least
+#: valid AND where it returns the largest arm the gate will ever produce: on this
+#: pack's own worked hull, 0.2707 m at the default against 0.2170 m at the 8 deg
+#: the example actually uses — 25% more righting arm, out of a number nobody
+#: stated. Defaulting to 5 or 8 deg was considered and rejected too: it is still
+#: the gate inventing the load case, and this pack's rule is that a model
+#: quantity is stated or the gate SKIPS and names the key. Only acceptance
+#: MARGINS carry defaults, because those are the pack's opinion and this is not.
+HEEL_KEYS = ("heel_angle_deg", "design_heel_deg", "heel_deg")
+
+#: Beyond this heel, GZ = GM.sin(theta) is void — the waterplane has moved, the
+#: deck edge may be immersed, and the small-angle line over-predicts the real
+#: righting arm. This is the ceiling on the whole small-angle stability story,
+#: and the righting-arm gate SKIPS rather than answering past it.
+SMALL_ANGLE_MAX_DEG = 10.0
+
+#: Minimum righting arm as a fraction of waterline beam, when neither an
+#: absolute minimum nor a heeling moment is stated.
+MIN_GZ_BEAM_FRACTION = 0.01
+
 _MISSING = object()
 
 #: This pack's own baseline projection, on disk next to its fixtures.

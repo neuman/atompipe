@@ -35,6 +35,9 @@
     "fdm.print_time_est",
     "fdm.process_model_valid"
   ],
+  "provides_views": [
+    "print_part"
+  ],
   "provides_generators": [],
   "requires_tools": [],
   "requires_python": [

@@ -169,6 +169,18 @@ def _assert_solid(mesh, what: str) -> None:
 _BASELINE_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                                "baseline.json")
 
+#: The good solid the baseline points at, absolute so a staged plate can mix it
+#: with meshes written into the run's output directory.
+_BASELINE_PART = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                               "baseline_part.stl")
+
+#: Every spelling of "here is the whole print set". A fixture that means to
+#: describe ONE part has to remove all of them, not the one it happens to
+#: remember, because the resolver takes the first it finds.
+_SET_KEYS = ("mesh_paths", "parts", "part_meshes", "mesh_path_by_part",
+             "bbox_by_part_mm", "print_bbox_by_part_mm", "bbox_mm_by_part",
+             "bboxes_mm")
+
 
 def _baseline() -> dict:
     """The pack's own plausible-good projection, documentation keys stripped."""
@@ -181,11 +193,52 @@ def _baseline() -> dict:
 
 
 def _stage(ctx, mesh, name: str):
-    """Write the solid beside the run's other evidence and point the model at it."""
+    """One part. Write the solid beside the run's other evidence and point at it.
+
+    The baseline states a ``mesh_paths`` SET as well as a single ``mesh_path``,
+    and a set wins, so this **removes the set** rather than leaving the fixture
+    describing two different things. Without the pop the gate would go on
+    measuring two copies of the good baseline clamp and pass its own known-bad
+    input — a control defused by a key it never mentioned, which is the exact
+    failure the sealing rule exists to stop, arriving through the new door.
+    """
     path = ctx.out_path("selftest", name)
     mesh.export(path)
     params = _baseline()
+    for key in _SET_KEYS:
+        params.pop(key, None)
     params["mesh_path"] = path
+    return dataclasses.replace(ctx, params=params)
+
+
+def _stage_set(ctx, staged, name_of_bad: str):
+    """Many parts. ``staged`` is ``[(name, mesh_or_None), ...]`` in plate order.
+
+    A ``None`` mesh means "the pack's own baseline part", which is the good solid
+    every gate here passes — so the plate is a real print set with one bad member
+    and the gate has to FIND it. The bad part is deliberately neither first nor
+    last: a fold that reported the first part, the last part, or the mean instead
+    of the worst would pass this fixture, and passing a known-bad fixture is the
+    definition of a logger.
+
+    ``mesh_path`` is removed for the same reason ``_stage`` removes the set: a
+    fixture that states both is a fixture testing two things, and whichever one
+    the resolution order happened to pick is the one it would really be proving.
+    """
+    params = _baseline()
+    params.pop("mesh_path", None)
+    for key in _SET_KEYS:
+        params.pop(key, None)
+    paths: dict[str, str] = {}
+    for part_name, mesh in staged:
+        if mesh is None:
+            paths[part_name] = _BASELINE_PART
+            continue
+        path = ctx.out_path("selftest", f"{part_name}.stl")
+        mesh.export(path)
+        paths[part_name] = path
+    assert name_of_bad in paths, "the bad part is not in the plate"
+    params["mesh_paths"] = paths
     return dataclasses.replace(ctx, params=params)
 
 
@@ -203,12 +256,19 @@ def steep_cone(ctx):
     The height is deliberately small. A tall cone would also be a bed-adhesion and
     a bridge question, and a control that trips three gates cannot tell you which
     one is working.
+
+    This one stays a SINGLE part. It is the control on the one-part path — the
+    path a project with one printed part runs, and the one this pack shipped with
+    — while ``long_bridge`` next door is a plate of three and controls the
+    many-part fold. Between them both paths are proven able to fail, and neither
+    of them can be defused by the other's keys: ``_stage`` removes the baseline's
+    part set, ``_stage_set`` removes its ``mesh_path``.
     """
     return _stage(ctx, _cone(70.0, 12.0, apex_down=True), "steep_cone.stl")
 
 
 def long_bridge(ctx):
-    """fdm.bridge_span — a flat ceiling spanning 90 mm between two legs.
+    """fdm.bridge_span — a PLATE of three parts, the middle one a 90 mm bridge.
 
     Three times the default 30 mm maximum. The ceiling is anchored properly at
     both ends, so the gate has to measure the span rather than notice that
@@ -222,8 +282,28 @@ def long_bridge(ctx):
     ``ctx.param`` for that number before, which took it from the host project
     while the rest of the projection came from the baseline: two different
     machines describing one fixture.)
+
+    **Why a plate and not a part.** This is the pack's control on the MANY-PART
+    path, which is the code a real project runs: it prints a set, and one verdict
+    has to be honest about the whole set. The arch is the second of three parts,
+    between two copies of the good baseline clamp, so a fold that reported the
+    first part, the last part, or an average would report a clamp at roughly 0.6
+    of its allowance and PASS — while a genuine 90 mm bridge sat on the plate.
+    That is the failure worth controlling for here, and it is invisible to any
+    fixture holding a single part.
+
+    ``steep_cone`` deliberately stays a single part, so between the two of them
+    both paths are proven to be able to fail. ``fdm_print_fold.fold`` is one
+    function shared by every multi-part gate in this pack, so this fixture is
+    what stands behind ``fdm.overhang``'s and ``fdm.bed_fit``'s set mode too —
+    said out loud because a reader is entitled to know which of their greens
+    rests on which control.
     """
     base = _baseline()
     limit = float(base.get("max_bridge_mm", base.get("bridge_limit_mm", 30.0)))
     gap = 3.0 * limit
-    return _stage(ctx, _arch(gap, width=gap + 50.0), f"arch_gap_{gap:.0f}mm.stl")
+    arch = _arch(gap, width=gap + 50.0)
+    return _stage_set(ctx, [("clamp_fore", None),
+                            (f"arch_gap_{gap:.0f}mm", arch),
+                            ("clamp_aft", None)],
+                      f"arch_gap_{gap:.0f}mm")

@@ -2,6 +2,12 @@
 
 Solid-geometry validation for exported mechanical parts. It answers two questions:
 **is this file actually a solid**, and **do the placed solids share material**.
+**Everything here is about the ASSEMBLY: solids already placed in the assembly
+frame, and an envelope that is the assembled product's, not any one part's.** That
+is the opposite of what `fdm-print` means by the same words — it judges ONE PART in
+its print orientation — so the two packs' keys are named for the object they
+describe: `assembly_bbox_mm` here, `part_bbox_mm` there. See
+[Keys, frames and resolution order](#keys-frames-and-resolution-order).
 
 Everything in here runs on a triangle mesh. That is a deliberate choice — the mesh
 is the representation every downstream process actually consumes (slicer, mesher,
@@ -28,7 +34,7 @@ assume, and the assumptions are expensive.
   a rule. A part that is watertight, valid, clash-free and correctly sized can still
   be the wrong part.
 - **`cad.bounding` does not open the geometry.** It is arithmetic on numbers the
-  projection supplies. If `bbox_mm` was written by hand, or was computed before the
+  projection supplies. If `assembly_bbox_mm` was written by hand, or was computed before the
   last model change, this gate will cheerfully certify a stale number. Proving the
   projection still agrees with the exported mesh is a *cross-representation* claim
   (method rule 6) and needs its own gate.
@@ -38,6 +44,17 @@ assume, and the assumptions are expensive.
 - **`cad.clash` does not measure clearance.** It reports shared material. Two parts
   0.01 mm apart and two parts 8 mm apart are both "clear". A minimum-gap claim
   needs a distance query, which this pack does not ship.
+- **`cad.clash` does not say that two parts touching is wrong** — and it will not be
+  talked into it by a boolean kernel. A pair whose bounding boxes meet without
+  overlapping on some axis is reported as `contact`, not as a clash, and no boolean
+  is run on it: two solids can only share material inside the intersection of their
+  bounding boxes, so a degenerate box holds none and there is nothing to measure.
+  That inequality is exact, which is why this can never hide an overlap — a pair
+  sharing any volume has a positive overlap on all three axes and reaches the
+  kernel. What it *does* rule out is the failure that cost a reader an afternoon:
+  `worst reported 31277.200 mm³ ... inf mm equivalent depth over 0.00 mm²` on a
+  bulkhead and a deck panel that shared one face exactly. Every digit of that was a
+  kernel shrugging at a coplanar contact, and the gate printed it as a headline.
 - **`cad.clash`'s volume tolerances have a size regime, and its depth tolerances are
   what make the verdict scale-free.** A volume tolerance forgives a fixed volume, so
   on its own it forgives a penetration *depth* that grows without bound as the
@@ -93,12 +110,38 @@ assume, and the assumptions are expensive.
 
 | Gate | Tier | Measures | Limit from | Known-bad fixture |
 |---|---|---|---|---|
-| `cad.bounding` | 0 | worst of bbox / volume / CoM utilisation | the model's own `*_limit_*` params | `selftest/bad_bounds.py:tall_part` — 15% over the Z envelope, nothing else changed |
+| `cad.bounding` | 0 | worst of assembly bbox / volume / CoM utilisation | the model's own `*_limit_*` params | `selftest/bad_bounds.py:tall_part` — 15% over the Z envelope, nothing else changed |
 | `cad.watertight` | 1 | open + non-manifold edges | 0, by definition of a solid | `selftest/bad_meshes.py:holed_box` — +Z facet deleted, 4 open edges |
 | `cad.is_volume` | 1 | parts that are not volumes | 0, by definition | `selftest/bad_meshes.py:flipped_facet` — one triangle wound backwards, still watertight |
 | `cad.degenerate_faces` | 1 | repairs needed (welds + drops) | 0 | `selftest/bad_meshes.py:sliver_pair` — one corner of a closed box emitted twice 1e-6 mm apart, a subset of its faces repointed at the copy, one face spanning the two |
-| `cad.wall_thickness` | 1 | thinnest sampled wall, mm | `min_wall_mm` in the projection | `selftest/bad_meshes.py:thin_plate` — a plate at a quarter of that limit |
+| `cad.wall_thickness` | 1 | thinnest sampled wall, mm | `process_min_wall_mm` (or `min_wall_mm`) in the projection | `selftest/bad_meshes.py:thin_plate` — a plate at a quarter of that limit |
 | `cad.clash` | 1 | interfering pairs | 0 pairs; per-pair volume **and** depth tolerance | `selftest/bad_meshes.py:overlapping_pair` — two valid boxes sharing 800 mm³ |
+
+`cad.clash` is the one gate here whose other direction needs proving too. A negative
+control can only require a FAILURE, and half of this gate's job is to come out clear
+on a pair that *touches* — without anyone writing an allowlist entry for it. A gate
+hardened against false negatives loses that quietly, and the symptom is a page of red
+on a correctly built assembly, which is the moment somebody reaches for a wildcard.
+So the pack ships four more fixtures and a script that asserts the whole matrix:
+
+```
+python3 packs/cad-solid/selftest/check_clash_contact.py
+```
+
+| Fixture | Must |
+|---|---|
+| `bad_meshes.py:coplanar_touch_pair` | **PASS** — two boxes sharing one face exactly, no allowlist entry |
+| `bad_meshes.py:overlapping_pair` | FAIL — the same boxes 2 mm into each other |
+| `bad_meshes.py:bonded_over_interference` | FAIL — that 2 mm overlap with a well-formed `bonded_joints` entry over it |
+| `bad_meshes.py:bonded_wildcard` | FAIL — `"block_a"` vs `"*"`, on the declaration, with nothing wrong in the geometry |
+| `bad_meshes.py:bonded_sliding_fit` | FAIL — the baseline's own sliding pair declared bonded |
+
+The script also checks the pair that decides whether `bonded_joints` is honest at
+all: a 0.01 mm overlap over a 20 × 20 mm face is 4 mm³, twenty times the prismatic
+volume tolerance and a fifth of the bonded depth tolerance. It must **fail
+undeclared and pass declared** — the first half proves the declaration is doing
+something, the second proves it is doing the right thing. It reports NOT EXERCISED,
+never a pass, on a machine with no boolean engine.
 
 `cad.wall_thickness` casts its own rays. trimesh's ray engines are not dependencies
 of trimesh: the pure-python one culls candidates with an `rtree` index and the fast
@@ -154,19 +197,85 @@ without raising — so a corrupt part reads as colliding with nothing, which is 
 most dangerous available false negative because it is the answer everyone wanted.
 If `cad.watertight` fails, treat every later verdict on that part as void.
 
+## Views, and the node names that are an interface
+
+| View | Kind | Asset | Built from | Addressed by |
+|---|---|---|---|---|
+| `assembly` | `model3d` | `assets/assembly.glb` + explode manifest | the same mesh map the gates read | node name, or mover name |
+
+`views/assembly.py` exports every placed solid into one GLB, **in the model frame,
+untransformed**: no recentring, no Z-up/Y-up rebasing, no node matrices. A
+millimetre in the projection is a millimetre in the GLB, which is what lets
+`cad.wall_thickness` pin the thin spot at the coordinates it measured it at. It
+returns `None` — not an error, not an empty view — when the projection carries no
+meshes.
+
+### The node naming scheme
+
+```
+part "guide roller"  ->  mover "guide_roller"  ->  node "guide_roller__0"
+                                                        ^part^   ^body^
+```
+
+- **A node is `<part>__<body>`**, one per solid body, numbered from 0 in sorted
+  order. A part that is one solid today and two after somebody splits it for
+  printing keeps its name and its locators; only the body count changes.
+- **A mover is the part** — everything before `__`. `atompipe.site.derive_explode`
+  groups nodes by that prefix, so all of a part's bodies travel together, and the
+  site accepts a mover name as a locator target.
+- **Part names are sanitised** to letters, digits, `-`, `.` and `_`, with runs of
+  `_` collapsed. The collapse is load-bearing: `__` is the mover separator, so a
+  part called `lid  left` would otherwise become a *body of the mover* `lid`,
+  silently merging two parts into one exploded group. A collision after
+  sanitisation takes a visible `-2` suffix rather than sharing a node.
+- Both sides compute this from `cad_solid_parts.py`, never from two copies of the
+  convention. **This is an interface**: change it there or not at all.
+
+### What each gate pins, and what it refuses to pin
+
+| Gate | Locator | Why that and not more |
+|---|---|---|
+| `cad.clash` | two per interfering pair — each part, labelled with the shared volume, the equivalent depth and the *other* part | the pair is what interferes; pinning one of the two leaves the part that usually moves dark |
+| `cad.watertight` | the parts with open or non-manifold edges, worst first | it knows which part leaks; the edge indices it counted are not a position |
+| `cad.is_volume` | the parts that are not volumes, labelled with *why* | "winding inconsistent" and "volume ≤ 0, inside-out" send you to two different fixes |
+| `cad.degenerate_faces` | the parts needing repairs, worst first | same: duplicate vertices and needle triangles are fixed at different points in the export chain |
+| `cad.wall_thickness` | one `point` at the thin spot, in model coordinates | the sampler genuinely knows where the thinnest ray started. Only the worst one: pinning runners-up would suggest a thickness map this gate did not produce |
+| `cad.bounding` | none | the envelope is a property of the whole assembly; there is no part to blame |
+| `cad.clash`, allowlist refused | none | that failure is about the allowlist *document*. Pinning the parts an unusable entry names would light up two parts that may fit perfectly |
+
+At most twelve pins per verdict — so at most six interfering pairs, since a pair
+takes two. The count in `detail` is always the real one —
+the cap trims the drawing, never the measurement — because a model exported at the
+wrong scale clashes on every pair at once, and a hundred pins is a red model rather
+than a finding.
+
+Where a gate does not know, it attaches nothing and the site says the verdict has
+no anchor. A confident highlight on the wrong part is worse than no highlight: it
+sends someone to inspect a part that is fine, and the second time that happens they
+stop trusting the overlay.
+
+`site/explode.json` is read by this viewgen and merged per mover over the derived
+manifest. A file that will not parse, or an override naming a mover that no longer
+exists, costs the override and never the model — the problem lands in the view's
+`meta` instead, because somebody hand-wrote that file and the one thing they must
+not get is a missing model with no explanation.
+
 ## What the projection must provide
 
 ```python
 params = {
     # every mesh gate
     "meshes": {"housing": "build/housing.stl", "lid": "build/lid.stl"},   # or trimesh objects
-    # cad.bounding (tier 0)
-    "bbox_mm": [78.0, 52.0, 23.5],  "bbox_limit_mm": [80.0, 60.0, 25.0],
-    "volume_mm3": 41200.0,          "volume_limit_mm3": 60000.0,     # optional
-    "com_mm": [39.0, 26.0, 9.2],    "com_target_mm": [39.0, 26.0, 9.0],
-    "com_tol_mm": 1.5,                                               # optional
-    # cad.wall_thickness
-    "min_wall_mm": 1.2,
+    # cad.bounding (tier 0) - the ASSEMBLY's envelope, not a part's
+    "assembly_bbox_mm": [78.0, 52.0, 23.5],
+    "assembly_bbox_limit_mm": [80.0, 60.0, 25.0],
+    "assembly_volume_mm3": 41200.0,
+    "assembly_volume_limit_mm3": 60000.0,                            # optional
+    "assembly_com_mm": [39.0, 26.0, 9.2],
+    "assembly_com_target_mm": [39.0, 26.0, 9.0],
+    "assembly_com_tol_mm": 1.5,                                      # optional
+    # cad.wall_thickness - the thinnest wall the PROCESS allows, a limit
+    "process_min_wall_mm": 1.2,
     "wall_samples": 4000,                                            # optional
     # cad.clash
     "clash_tolerance_mm3": 0.2,                                      # optional override
@@ -176,6 +285,8 @@ params = {
     "organic_parts": ["grip"],                                       # optional
     "sliding_fits": [["rail", "carriage"]],                          # optional
     "clash_allow": [{"pair": ["housing", "lid"], "reason": "0.1 mm press fit, intended"}],
+    "bonded_joints": [{"pair": ["girder", "floor"],                  # optional
+                       "reason": "epoxy fillet down both sides of the girder foot"}],
 }
 ```
 
@@ -190,11 +301,11 @@ identity to preserve — see "cannot settle" above.
 say which keys they looked for. **They never guess a filename**, because a gate that
 guesses is a gate that can check the wrong file and pass.
 
-The same refusal applies to geometry written short. `bbox_mm`, `com_mm` and
-`com_target_mm` are *measurements* and must be 3-lists — a single number there is not
+The same refusal applies to geometry written short. `assembly_bbox_mm`,
+`assembly_com_mm` and `assembly_com_target_mm` are *measurements* and must be 3-lists — a single number there is not
 a compact spelling, it is two missing axes, and expanding it into a cube would hand
 back a confident PASS on a Y and Z the gate invented. `cad.bounding` SKIPS and names
-the key instead. `bbox_limit_mm` is the one place a scalar is accepted, because "the
+the key instead. `assembly_bbox_limit_mm` is the one place a scalar is accepted, because "the
 same in every axis" is a real envelope somebody might mean. `wall_samples`, likewise,
 must be a positive integer if it is present at all: `0` used to become the default
 4000, and a projection that asks for no sampling should be told it will get none, not
@@ -213,10 +324,14 @@ The object is a generic sealed equipment enclosure in one alloy — a die-cast
 open-top housing with 3 mm walls, a bolted 4 mm cover plate, a carriage that slides
 along X on 0.4 mm running clearance, and a turned guide roller resting on the cavity
 floor. It is deliberately not minimal: it carries a real wall thickness, a real
-intended face contact (`clash_allow`), a real sliding fit (`sliding_fits`, which the
-allowlist must refuse to cover) and one curved part (`organic_parts`), so every key
-the gates read has a value a practitioner would recognise rather than a placeholder.
-The `_notes` block in the file names each key and its unit.
+intended face contact (`clash_allow`), a real sliding fit (`sliding_fits`, which both
+the allowlist and the bonded declaration must refuse to cover) and one curved part
+(`organic_parts`), so every key the gates read has a value a practitioner would
+recognise rather than a placeholder. The `_notes` block in the file names each key
+and its unit. `bonded_joints` is present and **empty**: this enclosure is bolted, not
+bonded, and a declaration invented for a joint that does not exist is how a
+mechanism stops meaning anything. The bonded paths are exercised by the three
+fixtures above instead, on geometry built for them.
 
 Geometry and numbers come from one place. `selftest/make_baseline_meshes.py` builds
 the four solids as explicit vertex/face lists — never by a boolean, because a
@@ -234,6 +349,52 @@ It exits non-zero and names the drift if the projection and the geometry have co
 apart. STL is deliberate: it is the soup format the pack has to weld on load, so the
 baseline exercises that path rather than avoiding it.
 
+## Keys, frames and resolution order
+
+Every measurement this pack reads is of the **assembly**: every solid, placed, in
+the assembly frame. Every limit is the assembly's or the process's. `fdm-print`
+reads part-sized numbers under names that used to be identical, and on a project
+with both packs installed — an assembly and printed parts, which is every
+mechanical project — one word had to mean two things. Published as the assembly,
+`fdm.bed_fit` measured a 480 mm boat against a 220 mm printer bed and FAILED.
+Published as the part, `cad.bounding` skipped and its envelope claim went unheld.
+
+Two things fix it, and a project may use either:
+
+* **Name the object.** `assembly_bbox_mm` is unambiguous everywhere; so is
+  `part_bbox_mm` in the other pack. The bare spellings still work as fallbacks.
+* **Scope the key.** Prefix it with this pack's scope — `cad.` — and this pack's
+  gates take it first: `cad.bbox_mm` for the assembly, `fdm.bbox_mm` for the part,
+  from one projection. Also accepted as a nested group:
+  `"cad": {"bbox_mm": [...]}`.
+
+**Resolution order, in full, highest first**, written down because the old one
+(`bbox_mm` before `bbox`, undocumented) cost a user an afternoon:
+
+1. `cad.<key>` — this pack's scoped spelling
+2. `cad-solid.<key>` — the pack's full name
+3. the bare key, trying the spellings below in the order given
+
+A scoped key always beats an unscoped one.
+
+| Quantity | Primary key | Also accepted | What it is |
+|---|---|---|---|
+| Assembly envelope | `assembly_bbox_mm` | `bbox_mm` | `[X, Y, Z]` of the whole assembled product, mm |
+| Envelope limit | `assembly_bbox_limit_mm` | `bbox_limit_mm` | where it has to fit, mm (a scalar means a cube) |
+| Material volume | `assembly_volume_mm3` | `volume_mm3` | every solid's volume summed, mm³ |
+| Volume budget | `assembly_volume_limit_mm3` | `volume_limit_mm3` | optional |
+| Centre of mass | `assembly_com_mm` | `com_mm` | `[X, Y, Z]`, assembly frame |
+| CoM target / tolerance | `assembly_com_target_mm`, `assembly_com_tol_mm` | `com_target_mm`, `com_tol_mm` | optional pair |
+| Minimum wall | `process_min_wall_mm` | `min_wall_mm` | the thinnest wall the PROCESS allows — a limit. `fdm-print`'s `min_wall_mm` is the thinnest section MEASURED in a part, which is the opposite kind of number: publish a measurement under this name and the gate compares the geometry against a threshold nobody chose |
+| Placed solids | `meshes` | `solids`, `parts` | `{name: path}`, already placed in the assembly frame |
+
+The full list, with a unit and a sentence per key, is `selftest/baseline.json` —
+every key any gate here reads, on an assembly they all pass, with the fallback
+spellings in its `_aliases` map.
+
+`atompipe doctor` diffs this vocabulary against every other installed pack's and
+warns when two of them read one key differently, naming both packs.
+
 ## Units and frames
 
 - **Lengths mm, areas mm², volumes mm³, angles degrees.** Everything. A mesh
@@ -246,6 +407,9 @@ baseline exercises that path rather than avoiding it.
 - **Z up**, right-handed, matching the model. This pack never re-orients anything.
 - `cad.bounding` compares the projection's numbers in the projection's frame. It
   cannot tell an X/Y swap from a part that fits.
+- **The envelope is the ASSEMBLY's.** If the number you have is one printed part's,
+  it belongs to `fdm-print` under `part_bbox_mm`, and handing it to this gate
+  proves the wrong thing quietly.
 
 ## The physics in one paragraph
 
@@ -267,7 +431,12 @@ largest face of the two parts' overlapping bounding boxes to give a mean penetra
 depth and compared against 0.01 mm prismatic / 0.05 mm curved — the exporter's planar
 deviation and a tessellated curve's chord height respectively. Volume answers "how
 much material is shared"; depth answers "how far in", and only the second stays the
-same statement on a 5 mm pin and a 200 mm flange.
+same statement on a 5 mm pin and a 200 mm flange. That asymmetry is also why a
+bonded joint is judged on depth alone: shared volume on a bond line is depth times
+glue area, and the glue area is how big the joint was designed to be. One more
+consequence of the same measure-theoretic fact: the intersection of two solids lies
+inside the intersection of their bounding boxes, so when that box is flat the shared
+volume is zero exactly — no tolerance and no kernel involved.
 
 ## Common failure modes, and what they look like
 
@@ -279,23 +448,71 @@ same statement on a 5 mm pin and a 200 mm flange.
 | `cad.degenerate_faces` passes but the mesher still chokes | slivers with non-zero area — outside this pack's claim, see "cannot settle" |
 | `cad.bounding` passes and the part does not fit | the projection's numbers are stale; nothing here re-derives them from the mesh |
 | Clash volumes of a few mm³ on a curved mating face | tessellation noise. Set a **per-pair** tolerance. Raising the global one hides the flat-plate interference you actually care about |
+| Clash volumes of tens of mm³ at a hundredth of a millimetre of depth, on a joint you glued | a bond line. The volume is big because the *joint* is big; declare the pair in `bonded_joints` and read the depth |
+| A huge shared volume reported with `inf` depth or a `0.00 mm²` contact patch | it should be impossible now — the pair is reported as `contact` and never booleaned. If you see it, the two bounding boxes DO overlap on all three axes and the kernel is genuinely confused: check `cad.watertight` and `cad.is_volume` first |
 | An allowlist grows until the gate never fails | that is the designed-in risk; see below |
+| A glued assembly opens with a page of red | see below — that is the moment `bonded_joints` exists for, and the moment a wildcard is most tempting |
 
-## The allowlist, and how it goes wrong
+## The allowlist, the bonded declaration, and how they go wrong
 
-`clash_allow` exists because some contacts are intended: a press fit, an interference
-snap, a gasket crushed on assembly. Each entry needs a stated `reason`, and the gate
-**fails outright** on three kinds of entry rather than honouring them:
+Three levels, and the middle one exists because the gap between the other two is
+where wildcards get written.
+
+**Nothing declared** is the default, and it is right for most pairs. Note that
+*touching is already not a failure*: a pair whose bounding boxes meet without
+overlapping is `contact` and passes. Nothing has to be declared for a butt joint,
+two hull sections end to end, or a panel sitting on a rim.
+
+**`bonded_joints`** is for a joint DESIGNED to be face to face — glued, welded,
+bonded. On a correctly modelled one the two faces are two tessellations of *one*
+nominal surface, so the pair reports a shared volume of depth × glue area, and the
+glue area is a design quantity that is legitimately large: a 2400 mm² epoxy fillet
+at 0.011 mm of tessellation overlap is 26 mm³, a hundred times the prismatic volume
+tolerance, with nothing wrong. So the declaration **waives the volume tolerance and
+keeps a depth one** (0.05 mm — the same chord-height figure as the organic depth
+tolerance, for the same reason, and not a new licence). A bonded pair deeper than
+that still **FAILS**: depth does not move with the size of the joint, so "this part
+is 2 mm into that one" is still sayable about a glued pair. A kernel that raised, a
+part that is not a volume, a negative or non-finite intersection — all still clashes
+for a bonded pair too. The declaration says the contact is intended; it says nothing
+about the boolean being trustworthy.
+
+**`clash_allow`** waives the pair entirely, and is for a contact that is genuinely
+supposed to share material: a press fit, an interference snap, a gasket crushed on
+assembly.
+
+Every entry in either list needs a stated `reason`, and the gate **fails outright**
+rather than honouring these:
 
 1. **An entry with no reason.** Nobody will ever dare delete an unexplained
-   permission to interfere, so it outlives the design decision that justified it.
+   permission to share material, so it outlives the design decision that justified it.
 2. **A blanket entry** — a `"*"` on either side, "part X vs anything". One line
-   switches interference checking off for a part and the report stays green forever.
-   This is how real interference actually gets hidden in practice.
-3. **A pair listed in `sliding_fits`.** A pair whose job is to *move* relative to the
-   other is the pair that most needs this check — "they touch" and "they jam" look
-   identical to a boolean at a single pose. An intended contact is allowlistable; an
-   intended motion is not.
+   switches the check off for every pair that part is in and the report stays green
+   forever. This is how real interference actually gets hidden in practice, and a
+   bonded declaration is a statement about *one joint*.
+3. **A pair listed in `sliding_fits`.** See below.
+4. **A pair in BOTH lists.** One waives it and the other keeps it under a depth
+   check, so which one governs is a guess, and a green report nobody can defend is
+   the thing this pack exists to prevent. Delete one.
+
+### Why a sliding fit can never be declared bonded
+
+The two statements contradict each other in physics before they contradict each
+other in the parser. **A bond is a joint that has been given zero degrees of
+freedom; a sliding fit is a joint whose entire purpose is one.** A pair cannot be
+both glued and free to move, so an entry claiming both is not a permission — it is a
+description of a part that does not exist, and the gate should not be asked to act
+on it.
+
+The consequence if it were accepted is worse than the contradiction. `cad.clash`
+sees exactly one pose, and at one pose "they touch" and "they jam" are the same
+picture; the pair that must move is therefore the pair whose failure this gate is
+least able to see, and the declaration would waive its volume tolerance — the half
+that would have caught a running clearance closed up to nothing. A sliding fit that
+reports contact is not a case for a declaration. It is a case for
+`references/travel_sweeps.md`, which is where a pose-dependent claim belongs.
+
+`clash_allow` refuses a sliding pair for the same reason, and always has.
 
 ## Claim vocabulary
 

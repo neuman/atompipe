@@ -66,8 +66,8 @@ def tall_part(ctx):
     nonsense.
     """
     base = _baseline()
-    limit = base.get("bbox_limit_mm")
+    limit = base.get("assembly_bbox_limit_mm", base.get("bbox_limit_mm"))
     z_limit = float(limit[2]) if isinstance(limit, (list, tuple)) else float(limit or 0.0)
-    bbox = list(base.get("bbox_mm") or [0.0, 0.0, 0.0])
+    bbox = list(base.get("assembly_bbox_mm") or base.get("bbox_mm") or [0.0, 0.0, 0.0])
     bbox[2] = round(z_limit * 1.15, 3)
-    return _with_params(ctx, bbox_mm=bbox)
+    return _with_params(ctx, assembly_bbox_mm=bbox)

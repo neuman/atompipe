@@ -38,6 +38,25 @@ Three rules are mechanical here, not advisory:
    is the one thing still allowed through: Ctrl-C during a twenty-minute solver
    gate must stop the run, not be filed as a verdict.
 
+A fourth rule is mechanical here for a different reason — it is about packs
+colliding rather than about a single gate lying:
+
+4. **A projection key belongs to a pack, and a gate says which.**
+   :meth:`GateContext.param` resolves ``<scope>.<name>`` before the bare
+   ``<name>``, where ``scope`` is the running gate's own namespace — the part of
+   its dotted id before the first dot, ``fdm`` for ``fdm.bed_fit``. Without it,
+   two packs that both want ``bbox_mm`` are in a fight only one can win: the
+   observed case is ``cad-solid`` reading it as the ASSEMBLY envelope while
+   ``fdm-print`` reads it as ONE PART in print orientation, which measured a
+   480 mm boat against a 220 mm printer bed and called it a failure. Both packs
+   ship in the default set, and every mechanical project has an assembly and
+   printed parts, so this was not an exotic combination. A project now publishes
+   ``cad.bbox_mm`` and ``fdm.bbox_mm`` and each gate reads the one it means;
+   a single-domain project keeps writing ``bbox_mm`` and nothing changes.
+   The resolution order is documented in ``docs/PACK_FORMAT.md`` and in
+   :meth:`GateContext.param`, because the previous order (``bbox_mm`` before
+   ``bbox``) was something a user had to discover by experiment.
+
 The gate function itself stays an ordinary function: :func:`gate` registers it
 and returns it **unchanged**, so it is directly callable and directly testable
 without the registry in the way.
@@ -66,6 +85,8 @@ from .models import GateSpec, Ledger, NegativeControl, Tier, Verdict
 from .util import AtompipeError, ensure_dir, short_hash
 
 __all__ = [
+    "SCOPE_SEP",
+    "scope_of",
     "GateContext",
     "Registry",
     "REGISTRY",
@@ -80,6 +101,30 @@ __all__ = [
     "describe",
     "registry_summary",
 ]
+
+
+#: Separator between a pack's key scope and a key name in a projection:
+#: ``fdm.bbox_mm``. The same character the gate ids already use, on purpose —
+#: the scope of ``fdm.bed_fit`` is ``fdm``, so a reader who can name the gate can
+#: name the key without looking anything up.
+SCOPE_SEP = "."
+
+#: Internal "nothing was found" marker. Distinct from ``None`` because a
+#: projection is allowed to carry ``None`` (a model that computed nothing says so
+#: explicitly), and a lookup that could not tell the two apart would fall through
+#: to the next spelling and read a DIFFERENT quantity.
+_UNSET: Any = object()
+
+
+def scope_of(gate_id: str) -> str:
+    """The key scope a gate id implies: ``fdm.bed_fit`` -> ``fdm``.
+
+    Undotted ids (a project's own one-off gate called ``envelope``) have no
+    scope, and scoping is simply off for them — better than inventing a namespace
+    a project never wrote down.
+    """
+    head, sep, _tail = (gate_id or "").partition(SCOPE_SEP)
+    return head.strip() if sep else ""
 
 
 #: A verdict is ONE LINE of context. A whole sweep should cost tens of lines,
@@ -165,10 +210,15 @@ class GateContext:
                  dict in here, and a caller may put ``pack_dirs`` /``pack_dir``
                  here to say where a pack's fixtures live (see
                  :func:`_fixture_root`).
+    ``pack``     the pack the running gate came from (``"fdm-print"``), stamped
+                 by :func:`run_gate`. Empty for a project's own gates.
+    ``key_scope`` that gate's key namespace (``"fdm"``), stamped by
+                 :func:`run_gate` from the gate id. See :meth:`param`.
 
     Every field has a default so a test can build a context with the one thing
     it cares about. That is additive to the contract's declaration, not a change
     to it: field order is unchanged and positional construction still works.
+    New fields go on the END for that reason.
     """
 
     root: str = ""
@@ -179,23 +229,151 @@ class GateContext:
     tier: int = 0
     log: Callable[[str], None] = _noop_log
     extra: dict[str, Any] = field(default_factory=dict)
+    pack: str = ""
+    key_scope: str = ""
 
     # -- parameter access -------------------------------------------------- #
-    def param(self, name: str, default: Any = None) -> Any:
+    def scopes(self) -> list[str]:
+        """The pack-qualified prefixes this gate's keys may carry, best first.
+
+        The gate's own namespace (``fdm``) first, then the pack's directory name
+        (``fdm-print``) — people type both, and the two can never mean different
+        things because one pack owns both strings. Empty when neither is known,
+        which turns scoping off rather than guessing a namespace.
+        """
+        out: list[str] = []
+        for candidate in (self.key_scope, self.pack):
+            text = (candidate or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+
+    def param(self, name: str, default: Any = None, *,
+              scope: Any = _UNSET) -> Any:
         """Read one projected parameter, or ``default``.
 
-        Accepts a dotted spelling (``config.beam_mm``) as well as the flat one,
-        because half the callers are looking at ``model.json`` — which is
-        ``{"config": {...}, "derived": {...}}`` — while ``params`` here is
-        flattened. Tolerating both spellings costs two lines and removes a
-        class of "the gate read None and passed" bug.
+        **Resolution order, in full, highest priority first.** It is written down
+        here and in ``docs/PACK_FORMAT.md`` because the previous order was
+        discoverable only by experiment, and a user who guessed wrong got a
+        confident verdict about the wrong object:
+
+        1. ``<scope>.<name>`` for each scope in :meth:`scopes` — the flat key
+           ``"fdm.bbox_mm"``, then the nested spelling ``{"fdm": {"bbox_mm": …}}``
+           for a model that groups its projection by domain.
+        2. ``<name>`` — the bare, unscoped key. This is what a single-domain
+           project writes, and it keeps working untouched.
+        3. the last dotted segment of ``name`` — so a gate may ask for
+           ``config.beam_mm`` while the flattened projection holds ``beam_mm``.
+
+        A pack-scoped key therefore always beats an unscoped one, because it is
+        the only one of the two that is an explicit statement about THIS pack.
+        That is the whole mechanism: ``cad-solid`` reads the assembly's envelope
+        from ``cad.bbox_mm`` and ``fdm-print`` reads one printed part's from
+        ``fdm.bbox_mm``, on a project that has both — which is every mechanical
+        project, and which used to be unrepresentable.
+
+        ``scope`` overrides the automatic one: pass a string, a sequence of
+        strings, or ``None``/``""`` for a deliberately unscoped read (a key that
+        genuinely belongs to the project rather than to any pack). Omit it and
+        the gate's own scopes are used.
+
+        ``None`` stored under a key counts as present and is returned, since a
+        model that projected ``None`` said something; only an absent key falls
+        through to the next spelling.
         """
-        if name in self.params:
-            return self.params[name]
-        tail = name.rsplit(".", 1)[-1]
-        if tail in self.params:
-            return self.params[tail]
+        if scope is _UNSET:
+            prefixes = self.scopes()
+        elif scope is None or scope == "":
+            prefixes = []
+        elif isinstance(scope, str):
+            prefixes = [scope]
+        else:
+            prefixes = [str(s) for s in scope if str(s).strip()]
+
+        for prefix in prefixes:
+            value = self._exact(f"{prefix}{SCOPE_SEP}{name}")
+            if value is not _UNSET:
+                return value
+        value = self._exact(name)
+        if value is not _UNSET:
+            return value
+        tail = name.rsplit(SCOPE_SEP, 1)[-1]
+        if tail != name:
+            value = self._exact(tail)
+            if value is not _UNSET:
+                return value
         return default
+
+    def _exact(self, key: str) -> Any:
+        """The value stored under exactly ``key``, or ``_UNSET``.
+
+        Two spellings of the same thing are accepted for a dotted key: the flat
+        ``params["fdm.bbox_mm"]`` and the nested ``params["fdm"]["bbox_mm"]``. A
+        model that groups its projection by domain is writing the more readable
+        of the two, and refusing it would make the scoping mechanism cost a
+        rewrite of the model's ``build()``.
+        """
+        if key in self.params:
+            return self.params[key]
+        head, sep, tail = key.partition(SCOPE_SEP)
+        if sep:
+            container = self.params.get(head)
+            if isinstance(container, dict) and tail in container:
+                return container[tail]
+        return _UNSET
+
+    def pack_param(self, name: str, default: Any = None) -> Any:
+        """:meth:`param` with this gate's own scopes, spelled out.
+
+        Identical to ``ctx.param(name)``; it exists so a pack author can say in
+        the code that the key is this pack's, and so a reader grepping for
+        scope-aware reads finds them.
+        """
+        return self.param(name, default)
+
+    def first_pack_param(self, names: Iterable[str], default: Any = None) -> Any:
+        """First of a synonym family to be present, scoped spellings first.
+
+        **Order:** every pack-scoped spelling, in the order ``names`` declares
+        them, then every bare spelling in that same order. So a project that
+        publishes ``fdm.bbox_mm`` beats one that publishes bare ``bbox`` even
+        though ``bbox`` might be listed first, and a project that publishes
+        neither scoped key falls back to the family exactly as before.
+
+        The declared order inside each sweep is the pack's statement about which
+        spelling is the primary one — put the key that says WHAT THE OBJECT IS
+        (``part_bbox_mm``) ahead of the bare legacy one (``bbox_mm``), and say so
+        in ``PACK.md``.
+        """
+        value, _key = self.first_pack_param_named(names, default)
+        return value
+
+    def first_pack_param_named(self, names: Iterable[str],
+                               default: Any = None) -> tuple[Any, str]:
+        """:meth:`first_pack_param`, plus the spelling that supplied the value.
+
+        The key name is evidence, not decoration: ``fdm.layer_alignment`` derates
+        a ``deflection_utilisation`` by a different ratio than a
+        ``stress_utilisation``, and a verdict that cannot name which key it read
+        cannot be audited. Returns ``(default, "")`` when nothing matched.
+
+        A key whose value is ``None`` is skipped here, unlike in :meth:`param`:
+        inside a synonym family a ``None`` is a model that mentioned a spelling
+        without filling it in, and stopping there would hide the sibling key that
+        does carry the number. On a single key there is no sibling to hide, so
+        ``param`` returns the ``None`` and the gate sees what the model said.
+        """
+        family = [str(n) for n in names]
+        for prefix in self.scopes():
+            for name in family:
+                value = self._exact(f"{prefix}{SCOPE_SEP}{name}")
+                if value is not _UNSET and value is not None:
+                    return value, f"{prefix}{SCOPE_SEP}{name}"
+        for name in family:
+            value = self.param(name, _UNSET, scope=None)
+            if value is not _UNSET and value is not None:
+                return value, name
+        return default, ""
 
     def require_param(self, name: str) -> Any:
         """Read a parameter that MUST exist, or raise ``AtompipeError``.
@@ -849,6 +1027,14 @@ def run_gate(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext)
             spec,
             0.0,
         )
+
+    # Which pack is asking. Stamped HERE rather than left to the caller because
+    # the answer is a property of the gate about to run, not of the sweep: one
+    # context is handed to forty gates from five packs, and `ctx.param` has to
+    # resolve `cad.bbox_mm` for one of them and `fdm.bbox_mm` for the next. A
+    # caller's own value is overwritten for the same reason — the running gate
+    # defines its own namespace, and nobody else can.
+    ctx = dataclasses.replace(ctx, pack=spec.pack, key_scope=scope_of(spec.id))
 
     started = time.perf_counter()
     try:

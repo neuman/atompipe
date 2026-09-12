@@ -123,6 +123,15 @@ MAX_SPARES_FRACTION = 1.0
 #: in writing, that the risk is being carried and what re-qualifying would cost.
 DEFAULT_SINGLE_SOURCE_LIMIT = 0
 
+#: The view id ``views/bom.py`` registers, and therefore the string every
+#: ``Locator.view`` in this pack carries. It lives here, beside :func:`ref` — which
+#: is the ROW id a locator targets — because the pair is an interface between the
+#: gates and the view, and an interface in two copies drifts. A gate whose locator
+#: names a view that is not built is reported by ``site build`` as a dangling
+#: anchor; one whose target is not a row in the table is reported the same way, and
+#: both look from the inside exactly like a gate that found nothing.
+SITE_VIEW_ID = "bom"
+
 _NUM_FIELDS = ("qty_per_unit", "spares_fraction", "unit_price", "moq",
                "order_multiple", "stock", "lead_time_weeks")
 _BOOL_FIELDS = ("alternate_qualified", "single_source_accepted", "critical")

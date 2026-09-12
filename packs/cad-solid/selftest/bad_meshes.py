@@ -15,6 +15,15 @@ selftest machinery declines to load a fixture at all when the gate's tooling is
 missing, and a module-level import would make this file unreadable on the very
 machine where the honest answer is SKIPPED.
 
+Two kinds of fixture live here, and the second kind is newer. Most are known-BAD:
+the unittest harness runs them and requires the gate to fail. ``coplanar_touch_pair``
+is the other direction — geometry the gate must come out CLEAR on, with no allowlist
+entry — because ``cad.clash`` had a false positive (a bulkhead and a deck sharing one
+face reported as 31277.200 mm^3) and a gate hardened against a false positive can
+lose its true negatives quietly. The harness has no way to require a pass, so
+``selftest/check_clash_contact.py`` runs the whole matrix and is the thing to run
+after touching that gate.
+
 Where a fixture necessarily trips a second gate as well, its docstring says so.
 ``sliver_pair`` duplicates one corner of a closed box and repoints a subset of the
 faces meeting there, which is what a tessellator does when it emits a rim vertex
@@ -180,6 +189,101 @@ def overlapping_pair(ctx):
     return _sealed(ctx, {"block_a": a, "block_b": b})
 
 
+def coplanar_touch_pair(ctx):
+    """cad.clash — the POSITIVE control: two solids that touch and must PASS.
+
+    Two clean 20 mm boxes placed exactly 20 mm apart along X: one face is shared,
+    to the last bit, and no material is. This is the opposite of
+    :func:`overlapping_pair` and it is a control in the same sense — it proves the
+    gate can still say "clear", which a gate that has been hardened against false
+    negatives can quietly lose.
+
+    It exists because of a real false positive. A bulkhead and a deck panel sharing
+    one face exactly were reported as ``worst reported 31277.200 mm^3 ... inf mm
+    equivalent depth over 0.00 mm^2``: a boolean kernel asked about a coplanar
+    contact returns noise, and the gate printed the noise as a headline. The verdict
+    line said so — an infinite depth over zero area is a kernel shrugging — but 31
+    cm^3 reads as real interference, and somebody went looking for geometry that was
+    not there.
+
+    Run by ``selftest/check_clash_contact.py``, which asserts PASS. The unittest
+    harness only knows how to require a FAILURE, so a fixture the gate must pass
+    cannot be the declared negative control — but it is the same kind of evidence
+    and it lives with the others.
+    """
+    a = _box((BOX_MM, BOX_MM, BOX_MM))
+    b = _box((BOX_MM, BOX_MM, BOX_MM), translate=(BOX_MM, 0.0, 0.0))
+    return _sealed(ctx, {"block_a": a, "block_b": b})
+
+
+def bonded_over_interference(ctx):
+    """cad.clash — a REAL interference declared as a bonded joint. Must still FAIL.
+
+    The same 2 mm overlap as :func:`overlapping_pair`, with a properly formed
+    ``bonded_joints`` entry over it: a named pair and a plausible reason, nothing a
+    reviewer would blink at. The declaration waives the VOLUME tolerance, so the
+    800 mm^3 no longer counts against the pair — and the gate must fail it anyway,
+    on the 2 mm of equivalent depth against the 0.05 mm a bond line allows.
+
+    This is the fixture that decides whether ``bonded_joints`` is an honest middle
+    or a second allowlist. If the gate passes this, the declaration has become a
+    way to switch the check off for a pair, which is what ``clash_allow`` already
+    is and is refused from being spelled with a wildcard.
+    """
+    a = _box((BOX_MM, BOX_MM, BOX_MM))
+    b = _box((BOX_MM, BOX_MM, BOX_MM), translate=(BOX_MM - 2.0, 0.0, 0.0))
+    ctx = _sealed(ctx, {"block_a": a, "block_b": b})
+    ctx.params["bonded_joints"] = [
+        {"pair": ["block_a", "block_b"],
+         "reason": "the two blocks are epoxy-bonded across their mating face"},
+    ]
+    return ctx
+
+
+def bonded_wildcard(ctx):
+    """cad.clash — a wildcard in ``bonded_joints``. Must FAIL on the declaration.
+
+    Geometry identical to the pack's own baseline, so nothing here interferes: the
+    only bad thing is the entry. ``"block_a" vs "*"`` waives the volume check for
+    every pair that part is ever in, which is the mechanism by which a real
+    interference gets hidden — one line, and the report stays green as the design
+    moves underneath it. The gate must refuse the entry and fail, rather than
+    honour it or drop it quietly.
+
+    The gate fails on the DOCUMENT here, not on geometry, which is why this fixture
+    does not need a clashing pair to be known-bad.
+    """
+    a = _box((BOX_MM, BOX_MM, BOX_MM))
+    b = _box((BOX_MM, BOX_MM, BOX_MM), translate=(BOX_MM, 0.0, 0.0))
+    ctx = _sealed(ctx, {"block_a": a, "block_b": b})
+    ctx.params["bonded_joints"] = [{"pair": ["block_a", "*"], "reason": "bonded assembly"}]
+    return ctx
+
+
+def bonded_sliding_fit(ctx):
+    """cad.clash — a sliding pair declared bonded. Must FAIL on the declaration.
+
+    A bond has zero degrees of freedom; a sliding fit has one. The two statements
+    cannot both be true of one pair, and the gate refuses the entry for the same
+    reason the allowlist refuses it: at the one pose this gate sees, "they touch"
+    and "they jam" are the same picture, so the pair that must move is the pair
+    that most needs the check — and waiving its volume tolerance is exactly the
+    wrong move.
+
+    The baseline already declares ``carriage``/``housing`` as a sliding fit, so the
+    fixture changes one thing: it declares that same pair bonded.
+    """
+    # An EMPTY mesh override, so the gate falls through to the baseline's own four
+    # solids: `mesh_sources` skips an empty map in `extra`. The geometry is the
+    # known-good assembly and only the declaration is bad, which is the whole point.
+    ctx = _sealed(ctx, {})
+    ctx.params["bonded_joints"] = [
+        {"pair": ["carriage", "housing"],
+         "reason": "the carriage is bonded into the housing cavity"},
+    ]
+    return ctx
+
+
 def thin_plate(ctx):
     """cad.wall_thickness — a plate at a quarter of the project's own minimum wall.
 
@@ -188,6 +292,7 @@ def thin_plate(ctx):
     project is actually using. Thickness enters deflection as a cube and wall
     failures as a threshold; a quarter is unambiguous without being a caricature.
     """
-    limit = _baseline().get("min_wall_mm")
+    base = _baseline()
+    limit = base.get("process_min_wall_mm", base.get("min_wall_mm"))
     limit = float(limit) if isinstance(limit, (int, float)) and limit > 0 else 1.2
     return _sealed(ctx, {"thin_plate": _box((30.0, 30.0, limit / 4.0))})

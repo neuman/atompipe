@@ -112,18 +112,63 @@ Do not build the whole validation suite before showing anything.
 
 ## The working loop
 
+**A discoverable pack contributes nothing until you add it.** `atompipe packs list`
+shows every pack it can see; only the ones marked `*` are live in this project. Reading
+a pack's `PACK.md` does not install it. Check `atompipe gate list` before you believe
+you have coverage — a tester spent twenty minutes designing against a gate set that was
+empty, which is this tool's own headline failure reproduced one level up.
+
 ```
+atompipe packs list            # what exists; * = live in this project
+atompipe packs add <name>...   # make them live
+atompipe gate list             # what will ACTUALLY run — check this early
 atompipe status                # where is this project
 atompipe check                 # tier-0 gates, seconds — run this constantly
 atompipe check --tier 2        # the full sweep, before any spend decision
 atompipe gap --propose         # claims with no gate, and packs that might cover them
 atompipe why <param|claim>     # one thing's full history, instead of the whole log
 atompipe report --write        # the readiness report
+atompipe site build            # rebuild the page after a sweep
 atompipe decide --title ...    # record a decision, including what LOST
 ```
 
 Change a parameter, run `atompipe check`, read the verdict lines. That is the loop.
 It must stay fast — if tier 0 is not seconds, something is miscategorised.
+
+## The project site: how the human sees what you are doing
+
+```sh
+atompipe site init      # once, early
+atompipe site build     # after every check sweep
+atompipe site serve     # python3 -m http.server; no build step, no npm
+```
+
+**Build it early, not as a finishing touch.** You are working in a text channel on a
+physical object, and a page with the claims, the verdicts and the geometry on it is
+how the human sees what you have done without reading a transcript. The cost is one
+command.
+
+**Rebuild it after a check sweep.** `site build` does not run gates — it renders the
+verdicts already in the ledger and marks how old each one is — so a page you forgot
+to rebuild shows the last sweep, honestly labelled but not the one you just ran.
+
+**Use it to explain a failure instead of describing coordinates in prose.** When a
+gate fails somewhere specific, attach `Locator`s to the verdict and say *"open the
+site, the clash view, back_left is lit"*. Three sentences of coordinates are a
+worse answer than a link to the thing, and you will be wrong about one of the
+numbers. Attach a locator only where you genuinely know the position: a confident
+highlight on the wrong part sends someone to inspect a part that is fine, and after
+that they stop trusting the overlay.
+
+`atompipe site status` lists **dangling locators** — verdicts pointing at a view or
+a part name that no view publishes. Check it after renaming anything in the model.
+A gate that thinks it is highlighting something and is not looks exactly like a gate
+that found nothing, from both ends.
+
+The site never computes truth; it renders the ledger. Everything on the page is in
+`site/data/state.json`, so read that rather than the HTML when you want the state
+back. A project with no geometry still gets a useful site — claims, verdicts,
+evidence, provenance, readiness. Contract: `docs/SITE_CONTRACT.md`.
 
 ## Rules you will be tempted to break
 
@@ -140,7 +185,10 @@ negative control — a known-bad input it must fail on. The registry will not ac
 one without it. Run `atompipe gate selftest` and believe the result.
 
 **Never call a skipped or errored gate a pass.** A missing solver means the claim is
-BLOCKED, not fine. Say so.
+BLOCKED, not fine. Say so — and then **clear it**: BLOCKED is a call to action, not a
+resting state. Run `atompipe packs show <pack>` for the install recipe, install the tool,
+and re-run. If it is heavy or needs root, say what it costs and ask. What you must not
+do is leave the claim BLOCKED and move on as though the design were validated.
 
 **Never simulate a physical claim.** No CFD run makes a printed seam watertight.
 
@@ -190,6 +238,7 @@ from zero.
 - `METHOD.md` — the ten rules. Read this.
 - `docs/EXTENSION_PROTOCOL.md` — growing a new validation capability.
 - `docs/PACK_FORMAT.md` — the pack contract.
+- `docs/SITE_CONTRACT.md` — the project site: view kinds, locators, `state.json`.
 - `atompipe packs list` — what is installed; `atompipe packs show <name>` for its
   PACK.md (tier 2). Load a pack's `references/` only for the specific task at hand.
 - `atompipe doctor` — run this first when something is confusing.
