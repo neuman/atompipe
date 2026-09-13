@@ -54,6 +54,7 @@ __all__ = [
     "REFERENCES_DIR",
     "SELFTEST_DIR",
     "BASELINE_NAME",
+    "origin_of",
     "LENSES_NAME",
     "SOURCING_NAME",
     "PACK_PATH_ENV",
@@ -232,6 +233,32 @@ def search_paths(root: str | None = None, *, existing_only: bool = True) -> list
 # --------------------------------------------------------------------------- #
 # tier 1: discovery
 # --------------------------------------------------------------------------- #
+
+def origin_of(pack_dir: str, root: str | None = None) -> str:
+    """Which search root a pack was resolved from: project, user, env or bundled.
+
+    Surfaced everywhere a pack is listed, because a pack that is not the one you
+    are editing looks exactly like a pack that is. A tester pulled a fix, watched
+    the gate fail to appear, and lost ten minutes before discovering the live copy
+    was the one inside the installed wheel — "packs list and doctor both showed me
+    a stale pack with a straight face". The path was always available internally
+    and never printed.
+    """
+    pack_dir = os.path.abspath(pack_dir)
+    project = root if root is not None else find_root()
+    if project:
+        local = os.path.abspath(os.path.join(project, ATOMPIPE_DIR, PACKS_NAME))
+        if pack_dir.startswith(local + os.sep):
+            return "project"
+    home = os.path.expanduser("~")
+    if home and home != "~":
+        user = os.path.abspath(os.path.join(home, ATOMPIPE_DIR, PACKS_NAME))
+        if pack_dir.startswith(user + os.sep):
+            return "user"
+    if pack_dir.startswith(os.path.abspath(BUNDLED_PACKS) + os.sep):
+        return "bundled"
+    return "path"
+
 def read_manifest(pack_dir: str) -> PackManifest:
     """Parse one pack's ``pack.json``. Tier 1, and the only file read here.
 

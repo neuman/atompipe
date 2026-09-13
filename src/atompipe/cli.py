@@ -1976,13 +1976,26 @@ def cmd_packs_list(args: argparse.Namespace) -> int:
         return 0
     for directory, manifest in found:
         mark = "*" if manifest.name in installed else " "
+        # WHERE a pack came from, always. A pack that is not the one you are editing
+        # looks exactly like a pack that is: a tester pulled a fix, watched the gate
+        # fail to appear, and lost ten minutes before finding that the live copy was
+        # the one inside the installed wheel. Both this command and `doctor` showed
+        # the stale pack without a hint that a second copy existed.
+        origin = packs.origin_of(directory, root)
         _say(f"{mark} {manifest.name:<18} {manifest.version:<8} "
-             f"t{int(manifest.max_tier)}  {manifest.description}")
+             f"t{int(manifest.max_tier)}  [{origin}]  {manifest.description}")
         if args.verbose:
             _say(f"    {directory}")
             _say(f"    settles: {', '.join(manifest.settles) or '(nothing declared)'}")
     missing = [name for name in installed if not packs.find(name, root)]
     _say(f"* = installed in this project ({len(installed)} of {len(found)} discoverable)")
+    origins = sorted({packs.origin_of(d, root) for d, _m in found})
+    if origins:
+        _say(f"  loaded from: {', '.join(origins)}"
+             + ("   (`--verbose` for the exact path of each)" if not args.verbose else ""))
+    if "bundled" in origins:
+        _say(f"  bundled packs live in {packs.BUNDLED_PACKS} — editing a checkout "
+             f"elsewhere will not change them until you reinstall")
     for name in missing:
         _say(f"{_tag('FAIL')} {name} is in meta.packs but was not found on any search path")
     return 0
@@ -3024,10 +3037,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     installed = packs.installed(root, ledger=ledger)
     available = packs.available(root)
     unfound = [name for name in installed if not packs.find(name, root)]
+    # Say WHERE the installed packs resolved from. A stale copy is indistinguishable
+    # from a current one until something prints the path: a tester pulled a pack fix,
+    # the new gate did not appear, and `doctor` reported the pack as present and fine
+    # because the live copy was the one inside the installed wheel.
+    origins: dict[str, list[str]] = {}
+    for name in installed:
+        directory = packs.find(name, root)
+        if directory:
+            origins.setdefault(packs.origin_of(directory, root), []).append(name)
+    where = "; ".join(f"{origin}: {', '.join(sorted(names))}"
+                      for origin, names in sorted(origins.items()))
     _check(results, "packs", "FAIL" if unfound else "ok",
            f"{len(installed)} installed ({', '.join(installed) or 'none'}), "
            f"{len(available)} discoverable"
+           + (f" — from {where}" if where else "")
            + (f" — NOT FOUND: {', '.join(unfound)}" if unfound else ""))
+    if origins.get("bundled"):
+        _check(results, "pack-source", "ok",
+               f"bundled packs load from {packs.BUNDLED_PACKS} — a checkout edited "
+               f"elsewhere does not take effect until it is reinstalled")
     if not pack_problems and not available:
         _check(results, "pack-search", "warn",
                "no packs on any search path: "

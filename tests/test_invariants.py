@@ -130,6 +130,52 @@ class ErrorIsNotPass(unittest.TestCase):
         self.assertFalse(v.passed)
 
 
+class CouldNotMeasureIsNeverANumber(unittest.TestCase):
+    """(e) A gate that could not measure must not report a number.
+
+    NaN is the most dangerous value a gate can return: it satisfies NOTHING, because
+    ``nan <= limit`` and ``nan > limit`` are BOTH False. A claim resting on one can
+    neither pass nor fail, so it sits in the report looking checked while being
+    unfalsifiable — this project's own failure mode, arriving as a number instead of
+    a skip.
+
+    Observed in the wild: a gate wrapped its measurement in ``except: return nan``.
+    Its dependency was present only on its author's machine, so it returned NaN for
+    everyone else and was inert from the day it was written. It never hid a specific
+    defect; it would have hidden any defect, for anyone else.
+    """
+
+    def _run(self, value):
+        reg = gates_mod.Registry()
+
+        @gates_mod.gate(id="g.measure", claims=["C1"], registry=reg,
+                        negative_control=NegativeControl(fixture="x:y"))
+        def measure(ctx):
+            return Verdict(gate="g.measure", passed=True, measured=value, limit=1.0,
+                           detail="could not measure, but here is a number anyway")
+
+        ctx = gates_mod.GateContext(root=".", ledger=_ledger(_claim()), model=None,
+                                    params={}, out_dir=".", tier=0,
+                                    log=lambda _m: None, extra={})
+        return gates_mod.run_gate(*reg.get("g.measure"), ctx)
+
+    def test_nan_measured_cannot_pass(self):
+        v = self._run(float("nan"))
+        self.assertFalse(v.ok, "a NaN measurement was reported as a pass")
+        self.assertFalse(v.passed)
+        self.assertIn("non-finite", (v.error or "").lower())
+
+    def test_infinite_measured_cannot_pass(self):
+        self.assertFalse(self._run(float("inf")).ok)
+        self.assertFalse(self._run(float("-inf")).ok)
+
+    def test_a_real_measurement_still_passes(self):
+        """The guard must not eat healthy verdicts."""
+        v = self._run(0.42)
+        self.assertTrue(v.ok)
+        self.assertEqual(v.measured, 0.42)
+
+
 class RegistryRefusesLoggers(unittest.TestCase):
     """(c) A gate that cannot demonstrate failure is a logger. Rule 5, mechanical."""
 

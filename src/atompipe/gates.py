@@ -68,6 +68,8 @@ from the CLI edge.
 """
 from __future__ import annotations
 
+import math
+
 import contextlib
 import dataclasses
 import fnmatch
@@ -985,6 +987,47 @@ def _normalise(result: Any, spec: GateSpec) -> Verdict:
     )
 
 
+def _reject_non_finite(verdict: Verdict, spec: GateSpec) -> Verdict:
+    """A gate that could not measure must not report a number.
+
+    ``float("nan")`` is the most dangerous value a gate can return, because a NaN
+    satisfies NOTHING: ``nan <= limit`` and ``nan > limit`` are BOTH False. A claim
+    resting on one can neither pass nor fail, so it sits in the report looking
+    checked while being unfalsifiable — the exact shape of the failure this project
+    exists to prevent, arriving through a number instead of a skip.
+
+    It is not hypothetical. A gate wrapped its measurement in ``except: return nan``
+    and shipped; its dependency was missing on every machine but its author's, so it
+    returned NaN for everyone else and was inert from the day it was written. It
+    never hid a specific defect. It would have hidden any defect, for anyone else.
+
+    So: "I could not measure" is a SKIP with a reason, or an error. It is never a
+    number. Infinity is refused on the same grounds — it compares, but it is what a
+    division by zero returns, and a gate that divided by zero has not measured
+    anything either.
+    """
+    for field in ("measured", "limit"):
+        value = getattr(verdict, field, None)
+        if value is None:
+            continue
+        try:
+            finite = math.isfinite(float(value))
+        except (TypeError, ValueError):
+            continue
+        if finite:
+            continue
+        return dataclasses.replace(
+            verdict,
+            passed=False,
+            error=f"gate reported a non-finite {field} ({value!r})",
+            detail=(f"{verdict.detail} | " if verdict.detail else "")
+                   + f"a non-finite {field} can neither pass nor fail its acceptance "
+                     f"(nan <= x and nan > x are both False), so nothing was measured. "
+                     f"If the quantity could not be obtained, SKIP with a reason "
+                     f"instead of returning a number.",
+        )
+    return verdict
+
 def run_gate(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext) -> Verdict:
     """Run one gate and return a verdict that is honest about what happened.
 
@@ -1075,7 +1118,7 @@ def run_gate(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext)
             elapsed,
         )
     elapsed = time.perf_counter() - started
-    return _stamp(_normalise(result, spec), spec, elapsed)
+    return _stamp(_reject_non_finite(_normalise(result, spec), spec), spec, elapsed)
 
 
 # --------------------------------------------------------------------------- #
