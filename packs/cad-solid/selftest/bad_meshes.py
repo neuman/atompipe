@@ -296,3 +296,259 @@ def thin_plate(ctx):
     limit = base.get("process_min_wall_mm", base.get("min_wall_mm"))
     limit = float(limit) if isinstance(limit, (int, float)) and limit > 0 else 1.2
     return _sealed(ctx, {"thin_plate": _box((30.0, 30.0, limit / 4.0))})
+
+
+# --------------------------------------------------------------------------- #
+# cad.assembly_connected — the gate that asserts an ABSENCE, of a gap
+# --------------------------------------------------------------------------- #
+# These fixtures are shaped differently from the ones above, and the difference is
+# the point. Every other fixture here plants a defect IN a part: a hole, a reversed
+# facet, a duplicated vertex, a plate that is too thin. A disconnected part has none
+# of those — its mesh is perfect, it is inside the envelope, it interferes with
+# nothing — so the only way to build known-bad input for a connectivity gate is to
+# MOVE a good part away from the good part it is supposed to be touching.
+
+
+def _baseline_mesh(name: str):
+    """One of the pack's own baseline solids, loaded and welded like the gate does.
+
+    STL is a soup format with no vertex identity, so a mesh loaded from one is not a
+    volume until somebody welds it — and a part that is not a volume cannot be asked
+    what is inside it, which is half of how this gate decides a pair is connected.
+    The gate welds on load (``_load_one``); a fixture that hands it an unwelded
+    in-memory mesh would be quietly testing a different code path.
+    """
+    import trimesh
+
+    path = _os.path.join(_os.path.dirname(_BASELINE_PATH), "meshes", f"{name}.stl")
+    mesh = trimesh.load_mesh(path, process=False)
+    try:
+        mesh.merge_vertices(digits_vertex=4)           # 1e-4 mm, the pack's weld
+    except TypeError:                                  # older trimesh signature
+        mesh.merge_vertices()
+    return mesh
+
+
+def _baseline_assembly(**moved):
+    """The baseline's four solids, with named parts replaced by moved copies.
+
+    ``_baseline_assembly(carriage=(0, 0, 3.0))`` lifts the carriage 3 mm and leaves
+    everything else exactly as the known-good projection has it.
+    """
+    parts = {}
+    for name in ("housing", "cover", "carriage", "guide_roller"):
+        mesh = _baseline_mesh(name)
+        if name in moved:
+            mesh.apply_translation(list(moved[name]))
+        parts[name] = mesh
+    return parts
+
+
+def broken_chain(ctx):
+    """cad.assembly_connected — the cover lifted 3 mm off the rim it seats on.
+
+    ONE physically meaningful change, in the direction the gate measures: the
+    baseline declares the chain ``cover -> housing -> carriage``, and the cover now
+    floats 3 mm above the housing rim that is supposed to carry it — fifteen times
+    the 0.2 mm mating tolerance the projection states. A lid that is not on the box.
+
+    What makes this the right control is everything that does NOT change. The cover
+    is still a closed, consistently wound, correctly sized solid; the assembly's
+    stated envelope, volume and centre of mass are untouched; nothing interferes
+    with anything — `cad.clash` is *happier* than before, because the part now
+    touches nothing at all. Every other gate in this pack passes this fixture. That
+    is exactly the hole this gate was written for: on a real boat the same
+    arithmetic gave 34 of 37 gates green on an assembly whose steering was not
+    connected.
+
+    3 mm rather than 0.3 mm because a part that has come off its seat is a binary
+    mistake, not a marginal one, and a control sitting just past the threshold tests
+    the threshold rather than the gate.
+
+    **Why the COVER and not the carriage**, which was the first attempt: lift the
+    carriage 3 mm off the cavity floor and this gate reports the pair 0.40 mm apart,
+    not 3 mm, because the carriage is still 0.40 mm from the cavity side walls that
+    guide it and the measurement is the least distance between the two SOLIDS. It
+    fires — 0.40 mm is past the 0.2 mm tolerance — but it fires on a number that has
+    nothing to do with the 3 mm lift, and a control whose severity is not the
+    severity it planted is a control that can pass for the wrong reason after any
+    innocent change to the clearance. The limit that showed up there is real and is
+    written down in PACK.md: this gate proves a declared pair is not adrift, not
+    that it is mating on the faces you meant.
+    """
+    return _sealed(ctx, _baseline_assembly(cover=(0.0, 0.0, 3.0)))
+
+
+def lifted_stop(ctx):
+    """cad.assembly_connected — the guide roller lifted 2 mm off the cavity floor.
+
+    The other declaration form: this pair comes from ``mating_pairs`` rather than
+    from a chain, so it exercises the same measurement through the other door. The
+    roller is the carriage's end stop and it is located by the floor it sits on; a
+    stop floating 2 mm above that floor stops the carriage 2 mm late, or not at all
+    if it is free to rotate out of the way.
+
+    Run by ``selftest/check_connectivity.py``. A gate can only declare one negative
+    control and the chain form is the more informative of the two, so this one lives
+    in the matrix.
+    """
+    return _sealed(ctx, _baseline_assembly(guide_roller=(0.0, 0.0, 2.0)))
+
+
+def orphaned_part(ctx):
+    """cad.assembly_connected — a part moved off everything, with NOTHING declared.
+
+    **The control for coverage, and the one that answers the question the first
+    version of this gate could not.** The guide roller is lifted 12 mm off the cavity
+    floor it is located by, into clear air inside the housing: it touches no wall, no
+    carriage and no cover, and the projection's `clash_allow`, `mating_pairs` and
+    `assembly_chains` are all emptied, so not one word says this pair — or any pair —
+    was ever meant to touch.
+
+    The old gate SKIPPED on exactly this input, and that is not a hypothetical about
+    a fixture: on the real 30-body assembly this pack was hardened against, the
+    projection declared no required contacts and the gate reported "the projection
+    declares no required contacts" while a rudder hung 42.9 mm below its bracket.
+    Catching that depended on somebody having declared the pair that broke, and a
+    project that knew to declare it would probably not have broken it.
+
+    So the gate must FAIL here on the geometry alone and name the roller. Everything
+    else about the fixture is the baseline: every other part is where it was, every
+    other gate in this pack still passes, and `cad.clash` is happier than before
+    because the roller now interferes with even less.
+
+    12 mm rather than 2 mm — which `lifted_stop` already covers, with declarations —
+    because this control is about the absence of a contact, not about the threshold:
+    at 12 mm the roller is unambiguously in free space and the finding cannot be an
+    argument about tessellation. It stays inside the housing's bounding box on
+    purpose, so the containment branch is exercised too: a part in the cavity is
+    inside the box and not inside the material.
+    """
+    ctx = _sealed(ctx, _baseline_assembly(guide_roller=(0.0, 0.0, 12.0)))
+    ctx.params["clash_allow"] = []
+    ctx.params["mating_pairs"] = []
+    ctx.params["assembly_chains"] = {}
+    return ctx
+
+
+def free_standing_silencer(ctx):
+    """cad.assembly_connected — a free-standing declaration with no reason. Must FAIL.
+
+    The counterpart of `mating_no_reason`, on the other list. `free_standing_parts`
+    is how a project says "this one is meant to be attached to nothing" — a loose
+    tool, a part shown for context — and it is the only thing that can switch the
+    coverage finding off, so an entry with no stated reason is a silencer rather than
+    a declaration. The geometry is `orphaned_part`'s, so the gate has a real finding
+    to be silenced; only the entry is wrong.
+    """
+    ctx = orphaned_part(ctx)
+    ctx.params["free_standing_parts"] = [{"part": "guide_roller", "reason": ""}]
+    return ctx
+
+
+def missing_member(ctx):
+    """cad.assembly_connected — a declared contact whose member was never modelled.
+
+    The completest way for a joint to be open, and the one that actually happened:
+    the boat's steering declared ``pushrod -> rudder``, and for a whole revision
+    there was no rudder stock and no tiller arm in the assembly at all. Nothing
+    interfered, nothing was thin, nothing was open — the parts were not there.
+
+    Here the guide roller is simply absent from the mesh map while the projection
+    still declares that it rests on the housing floor. The gate must FAIL and name
+    the missing part, never skip: a contact that cannot be measured because one end
+    of it does not exist has not been proven, and a skip would read as 'no evidence'
+    when the evidence is conclusive.
+    """
+    parts = _baseline_assembly()
+    parts.pop("guide_roller")
+    return _sealed(ctx, parts)
+
+
+def mating_wildcard(ctx):
+    """cad.assembly_connected — a wildcard required contact. Must FAIL on the entry.
+
+    Geometry identical to the baseline, so every declared contact is closed: the only
+    bad thing is the declaration. ``"carriage" vs "*"`` says the carriage must touch
+    *something*, which is a claim that cannot be false — a required contact that
+    cannot fail is not a requirement, and it is a permanent green tick on the one
+    gate that exists to notice an absence.
+    """
+    ctx = _sealed(ctx, _baseline_assembly())
+    ctx.params["mating_pairs"] = [
+        {"pair": ["carriage", "*"], "reason": "the carriage is located by the housing"},
+    ]
+    return ctx
+
+
+def mating_no_reason(ctx):
+    """cad.assembly_connected — a required contact with no reason. Must FAIL.
+
+    The same refusal ``clash_allow`` makes, for the same reason one step further on:
+    an unexplained permission to share material is one nobody dares delete, and an
+    unexplained requirement to touch is one nobody can check, defend or remove when
+    the design moves. Geometry is the baseline's, so only the entry is wrong.
+    """
+    ctx = _sealed(ctx, _baseline_assembly())
+    ctx.params["mating_pairs"] = [{"pair": ["carriage", "housing"], "reason": "   "}]
+    return ctx
+
+
+def mating_unknown_role(ctx):
+    """cad.assembly_connected — a misspelled role on a clash_allow entry. Must FAIL.
+
+    ``"role": "requird"`` on the cover/housing entry. This one matters more than it
+    looks: if an unrecognised role were treated as "not a required contact", the typo
+    would silently remove the pair from this gate's list and the report would stay
+    green — which is this gate's own failure mode, an absence nobody notices,
+    reappearing inside its own declaration. So the gate refuses the entry instead.
+    """
+    ctx = _sealed(ctx, _baseline_assembly())
+    ctx.params["clash_allow"] = [
+        {"pair": ["cover", "housing"], "role": "requird",
+         "reason": "the cover is bolted flat onto the housing rim"},
+    ]
+    return ctx
+
+
+def shaft_in_bore(ctx):
+    """cad.assembly_connected — the POSITIVE control, and the more valuable one.
+
+    A 6 mm shaft running through a bearing boss whose bore is not modelled: two
+    solids that share material by design, which is how a boss and the shaft in it
+    are drawn when the bore is a hole you drill rather than a feature you model. The
+    gate must report this pair CONNECTED, with a gap of exactly 0.
+
+    **This fixture falsifies the wrong implementation rather than the wrong design,
+    which is why it is worth more than the known-bad ones.** Measure this pair at its
+    VERTICES and it reads as 11.14 mm apart (nearest vertex to the other surface) or
+    36.73 mm (nearest vertex pair): a tessellated cylinder has vertices only at its
+    two end rings, 40 mm clear of the boss at either end, and the boss's own vertices
+    are its eight corners, out at the block's edges. Nothing either solid stores as a
+    point is anywhere near the place where they actually meet. A gate written that
+    way would have reported the one correctly assembled joint on the boat as broken
+    and passed the two that were not connected at all — exactly inverted, and
+    confident. ``selftest/check_connectivity.py`` measures all three numbers and
+    prints them side by side.
+
+    Also: interpenetration is CONTACT here. This is the opposite question from
+    `cad.clash`, asked about a different set of pairs, and the pair is declared in
+    `clash_allow` as well — one list, read from both ends.
+    """
+    import numpy as np
+    import trimesh
+
+    boss = _box((20.0, 10.0, 20.0))
+    axis_to_y = trimesh.transformations.rotation_matrix(np.pi / 2.0, (1.0, 0.0, 0.0))
+    shaft = trimesh.creation.cylinder(radius=3.0, height=80.0, sections=32,
+                                      transform=axis_to_y)
+    ctx = _sealed(ctx, {"bearing_boss": boss, "shaft": shaft})
+    ctx.params["clash_allow"] = [
+        {"pair": ["bearing_boss", "shaft"], "role": "required",
+         "reason": "the shaft turns in the boss's bore. The bore is drilled, not "
+                   "modelled, so the only way to say the shaft runs in it is to let "
+                   "the two interpenetrate"},
+    ]
+    ctx.params["mating_pairs"] = []
+    ctx.params["assembly_chains"] = {}
+    return ctx

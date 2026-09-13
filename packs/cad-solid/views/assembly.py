@@ -123,8 +123,8 @@ def _overrides(root: str, log) -> tuple[dict | None, str]:
                 "explodable along the stack axis.",
     requires_python=["trimesh", "numpy"],
     order=10,
-    gates=["cad.clash", "cad.watertight", "cad.is_volume", "cad.degenerate_faces",
-           "cad.wall_thickness", "cad.bounding"],
+    gates=["cad.clash", "cad.assembly_connected", "cad.watertight", "cad.is_volume",
+           "cad.degenerate_faces", "cad.wall_thickness", "cad.bounding"],
 )
 def assembly(ctx: ViewContext) -> View | None:
     """The placed solids as a GLB, with a derived explode manifest.

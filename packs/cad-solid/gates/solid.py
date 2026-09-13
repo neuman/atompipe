@@ -1670,3 +1670,1720 @@ def clash(ctx: GateContext) -> Verdict:
                  f"{BONDED_CONTACT_DEPTH_TOL_MM:g} mm of penetration" if bonded else ""))
     return Verdict(gate="cad.clash", passed=True, measured=0.0, limit=0.0,
                    units="pairs", detail=detail, evidence=evidence)
+
+
+# --------------------------------------------------------------------------- #
+# tier 1 — connectivity: the one gate in this pack that asserts an ABSENCE
+# --------------------------------------------------------------------------- #
+# Every other gate here asserts a PRESENCE: this thing exists and is too big, too
+# thin, too close, too steep. None of them can express an absence, and a part that
+# is attached to nothing has a perfectly good mesh that passes every check ABOUT
+# ITSELF. `cad.clash` is the most cheerful of all about it, because a part that
+# touches nothing is interfering with nothing.
+#
+# That is not a hypothetical. On a real assembly a rudder blade hung 42.9 mm below
+# its own bracket, attached to nothing, and a pushrod stopped 11.0 mm short of the
+# thing it was supposed to push. Every geometry gate was green: 34 of 37. The boat's
+# steering was not connected and the report said it was fine.
+#
+# THE FIRST VERSION OF THIS GATE WOULD NOT HAVE CAUGHT THAT, and the reason is worth
+# more than the gate. It asked only about pairs the projection DECLARED, so on the
+# very project whose rudder was hanging in space it reported
+#
+#     [skip] cad.assembly_connected : the projection declares no required contacts
+#
+# — an absence of evidence rendered as an absence of problems, which is the failure
+# mode of the whole method reproduced inside a gate meant to prevent it. Catching the
+# defect depended on the project remembering to declare the exact pair that was
+# broken, and a project that knew to declare it would probably not have broken it.
+#
+# So the DEFAULT question here needs no foresight:
+#
+#     EVERY PART MUST BE HELD BY SOMETHING.
+#
+# The contact graph is built from the geometry — two parts whose surfaces come within
+# the mating tolerance are an edge — and the gate reports any part in no contact at
+# all, and any connected COMPONENT of that graph that is not joined to the rest of
+# the assembly. A floating rudder is then caught by construction, with nothing
+# declared. A project may still declare a part free-standing ON PURPOSE, with a
+# stated reason, exactly as `clash_allow` declares an intended overlap — but the
+# default is that an unattached part is a finding, not silence.
+#
+# The declared pairs and chains are KEPT, because they carry intent the geometry
+# cannot express: WHICH contacts matter, and in what order. Coverage says the rudder
+# is attached to something; only a declaration says it must be attached to the
+# BRACKET, and only a chain says the steering runs servo -> pushrod -> rudder.
+#
+# The gate skips on one condition and no other: fewer than two parts, where there is
+# genuinely nothing to measure.
+
+#: How far two parts that are DECLARED to be in contact may be apart before the
+#: joint is not a joint, mm. A project decision, exactly like the minimum wall: it is
+#: the assembly slop the design intends to absorb. It is also the threshold the
+#: coverage graph uses for "these two parts touch", because that is the same physical
+#: question asked without a name attached.
+MATING_TOL_KEYS = ("max_mating_gap_mm", "mating_tolerance_mm")
+
+#: Where a project declares a part that is attached to nothing ON PURPOSE — a loose
+#: tool, a part shown for context, a component that is cable-tied rather than
+#: fastened. Same shape and same three refusals as `clash_allow`: a stated reason, no
+#: wildcards, and the gate FAILS on a bad entry rather than honouring or dropping it.
+#: An undeclared free-standing part is a FINDING; this is how a project says "yes,
+#: and here is why", and the reason is what a reviewer argues with later.
+FREE_STANDING_KEYS = ("free_standing_parts", "unattached_parts", "context_parts")
+
+#: Contact tolerance used when the projection states none, mm.
+#:
+#: The gate will still not invent a tolerance for a DECLARED contact — that is an
+#: assembly decision and a declared requirement measured against a made-up number is
+#: a verdict nobody chose. But the coverage question ("is this part touching anything
+#: at all?") has to be answerable on a project that declared nothing, or the gate is
+#: back to skipping for want of a declaration.
+#:
+#: So the fallback is not an assembly slop figure at all: it is the linear deviation
+#: between two surfaces that are NOMINALLY THE SAME SURFACE after tessellation, which
+#: is :data:`ORGANIC_CLASH_DEPTH_TOL_MM` and is derived from it rather than retyped.
+#: Two parts closer than that are as coincident as an exported mesh can express.
+#:
+#: The error is one-signed: a tolerance this tight reports MORE parts as held by
+#: nothing, never fewer, so the fallback cries wolf and cannot hide a floating part.
+#: Rejected: a millimetre-scale default, which would quietly call a part resting
+#: 0.8 mm above its seat "attached"; and skipping, which is the defect this whole
+#: gate exists to remove.
+CONTACT_FALLBACK_TOL_MM = ORGANIC_CLASH_DEPTH_TOL_MM
+
+#: Surface sample points per part, per side of a pair, ON TOP OF every vertex. See
+#: :func:`_surface_points` for why sampling the faces at all is the whole gate.
+#:
+#: This budget only sets how good the FIRST answer is. It is no longer the last word
+#: on any pair: :func:`_pair_contact` refines a pair that comes out apart on a
+#: deterministic barycentric lattice over exactly the triangles that could still hold
+#: a contact, and reports that lattice's covering radius as the error bound.
+#:
+#: The calibration case is two 40 mm tessellated cylinders crossing at right angles
+#: 0.500 mm apart, because a cylinder has vertices ONLY at its two end rings and the
+#: closest approach therefore lands in the middle of a 200 mm facet with no vertex
+#: within 100 mm of it — the one shape where a sampled distance is genuinely hard.
+#: Measured (`selftest/check_connectivity.py` section 7):
+#:
+#:     50 samples -> 4.272 mm     200 -> 0.761 mm     2000 -> 0.797 mm     20000 -> 0.605 mm
+#:
+#: The coarse pass is still +0.30 mm at this budget and does not converge usefully at
+#: ten times it, which is the measured reason the refinement exists rather than a
+#: larger number here: refined, the same pair reads 0.5000 mm.
+#:
+#: 2000 is therefore chosen as the point where the coarse pass is close enough to
+#: seed the refinement cheaply on every pair in a real assembly, not as an answer.
+#: Rejected: 50, where the coarse pass is out by 3.8 mm and the refinement's near-face
+#: selection has to do all the work; and 20000, which costs ten times as much for
+#: 0.19 mm and still needs refining.
+#:
+#: Rejected outright: a ball on a plate, which was the old calibration case. Its
+#: closest point is always its lowest VERTEX, so now that no vertex is thinned away
+#: it reads 0.500 mm at every budget from 50 up — a check that cannot fail, measuring
+#: the thinning that used to happen rather than the sampling.
+CONTACT_SAMPLES = 2000
+
+#: Points actually tested for being INSIDE the other solid, per direction. The
+#: containment test only has to answer yes/no — one sample inside is
+#: interpenetration — so it runs on an evenly spaced subset of the samples rather
+#: than all of them.
+CONTACT_PROBES = 256
+
+#: Probes used when the pair has already been PROVEN further apart than the
+#: tolerance and the only question left is whether one part is wholly inside the
+#: other. One probe would very nearly do: two closed surfaces that do not meet leave
+#: the whole of one either inside the other's material or outside it, with no mixed
+#: case to sample for, so the answer does not depend on WHICH sample is asked. The
+#: budget is 16 rather than 1 because a "part" may be several disjoint shells in one
+#: mesh (a pair of screws exported as one body), and each shell is independently in
+#: or out. Rejected: the full 256, which is what made this branch cost 89% of the
+#: gate on a 30-body assembly — ten small components nested inside a hull's bounding
+#: box, each asking a 12,000-triangle winding number 256 times to re-answer a
+#: question one probe had already settled.
+NESTED_PROBES = 16
+
+#: Points used to seed :func:`_directed_gap`'s ceiling before any exact distance is
+#: computed. Eight is enough because they are the eight the bounding-box bound
+#: already ranks best, and the seed only has to be a VALID upper bound, not a good
+#: one — every point and every triangle it fails to exclude is still measured.
+_SEED_POINTS = 8
+
+#: Sample points per branch-and-bound block in :func:`_directed_gap`. Small on
+#: purpose: the block's own bounding box is what culls the other part's triangles, so
+#: a tight block culls hard. Rejected: one block for every candidate point, which
+#: culls nothing on a part whose samples are spread over a whole hull.
+_GAP_BLOCK = 64
+
+#: Target covering radius of the refinement lattice, as a FRACTION of the contact
+#: tolerance. A pair is only refined when the coarse pass puts it further apart than
+#: the tolerance, and the refinement's job is to settle that: at a tenth of the
+#: tolerance the answer is either under the limit (contact) or over it by more than
+#: the lattice could possibly be wrong (proven apart).
+DENSE_TARGET_FRACTION = 0.1
+
+#: Ceiling on the refinement lattice, in points per part per pair. Reached only where
+#: a pair's near-contact region is both large and coarsely tessellated; the verdict
+#: and the evidence then carry the covering radius that WAS achieved, and a pair the
+#: lattice could not settle is reported as undecided rather than as either answer.
+DENSE_POINT_CAP = 60_000
+
+#: Chunk size for the (points x triangles) arrays below, as a PRODUCT. The same
+#: reasoning as `_CAST_CHUNK_RT`: 256 probes against a 12-triangle box and 256
+#: probes against a 200k-triangle hull are three orders of magnitude apart in
+#: memory and identical in point count, so the budget has to be set on the product.
+_NEAR_CHUNK_PT = 2_000_000
+
+#: Generalised winding number above which a point counts as INSIDE a closed solid.
+#: It is 1 strictly inside and 0 strictly outside for a watertight, consistently
+#: wound mesh, and 0.5 for a point lying exactly ON the surface — so the threshold
+#: has to sit between 0.5 and 1, not at 0.5. Two parts mating face to face have
+#: samples sitting exactly on each other's boundary, and that is not a rare case,
+#: it is what a flat joint IS. 0.75 is the midpoint of the two values that can
+#: occur away from the boundary; nothing real lands between them.
+#:
+#: The threshold alone does not settle the boundary case and is not asked to: the
+#: sum for a coincident face came back as 1.0 rather than 0.5 in this pack's own
+#: baseline, because `atan2` on a numerically-zero numerator with a negative
+#: denominator returns +-pi. What settles it is the weld-tolerance margin in
+#: :func:`_interpenetrates`; this constant is what keeps a point that DOES evaluate
+#: to 0.5 from being called inside.
+#:
+#: The winding number is used instead of a parity ray cast for the same kind of
+#: reason: a ray that clips an edge or passes exactly through a vertex is counted
+#: twice and flips that point's answer, and "are these two parts assembled into
+#: each other or have they come apart" is not a question to settle on a coin toss.
+_WINDING_INSIDE = 0.75
+
+#: Words a `clash_allow` entry's `role` may carry. The pack's own spelling is
+#: "required"; the rest are accepted because people write them and no two of them
+#: could mean anything else. Anything NOT in one of these two sets is REFUSED
+#: rather than ignored — an unrecognised role (a typo, `"requird"`) would otherwise
+#: mean the entry silently stops being a required contact, which is this gate's own
+#: failure mode reappearing inside its own declaration.
+REQUIRED_ROLES = frozenset({"required", "required_contact", "must_touch", "mating",
+                            "contact", "joint"})
+#: Roles that explicitly say "allowed to interfere, NOT required to touch".
+PERMITTED_ROLES = frozenset({"permitted", "allowed", "optional", "clearance",
+                             "interference", "none"})
+
+#: How many parts a coverage finding names in one verdict line before it stops
+#: listing them. The count in `detail` is always the real one.
+_MAX_NAMED = 4
+
+
+def _halton(count: int, base: int):
+    """The first ``count`` terms of the radical-inverse sequence in ``base``.
+
+    Deterministic, and that is the point rather than the low discrepancy: a gate
+    whose number moves between two runs on the same geometry cannot be cited in a
+    readiness report. `mesh.sample` draws from the global numpy RNG, so two sweeps
+    of the same model would report two different gaps and neither would be wrong.
+    """
+    import numpy as np
+
+    index = np.arange(1, int(count) + 1, dtype=np.int64)
+    out = np.zeros(int(count), dtype=float)
+    fraction = 1.0
+    while index.any():
+        fraction /= base
+        out += fraction * (index % base)
+        index //= base
+    return out
+
+
+def _surface_points(mesh: Any, budget: int):
+    """EVERY vertex AND area-weighted points ON THE FACES, as one (n, 3) array.
+
+    **Sampling the faces is the trap, and it is a measured fact about how this gate
+    goes wrong, not a style preference.** A tessellated cylinder has vertices only at
+    its two end rings — there is not one vertex anywhere along its length. A rudder
+    stock passing CLEAN THROUGH a bracket's bore therefore has no vertex anywhere
+    near the bracket, and a vertex-only distance reported that pair **5.5 mm apart**
+    while they interpenetrate. Run that way, this gate would have flagged the one
+    correctly assembled joint on the boat and passed the two that were not connected
+    at all: exactly inverted, and confident.
+
+    So the surfaces are sampled as well: stratified over the cumulative face area,
+    so a big triangle gets proportionally many samples and a sliver gets none, with
+    barycentric coordinates from a Halton sequence so the same mesh gives the same
+    points every run.
+
+    **No vertex is dropped.** An earlier version thinned the vertex list to the
+    budget, which was an optimisation for a cloud-to-cloud stage that no longer
+    exists — :func:`_directed_gap` culls by bounding box now, so a long vertex list
+    costs one subtraction per point. Dropping vertices also dropped the FEATURES they
+    sit on (a rim, a boss, a screw head), which are exactly the places two parts
+    touch.
+    """
+    import numpy as np
+
+    verts = np.asarray(mesh.vertices, dtype=float)
+    tri = np.asarray(mesh.triangles, dtype=float)
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    total = float(areas.sum())
+    if len(tri) == 0 or not math.isfinite(total) or total <= 0.0 or budget <= 0:
+        return verts
+
+    cumulative = np.cumsum(areas) / total
+    strata = (np.arange(budget, dtype=float) + 0.5) / float(budget)
+    faces = np.clip(np.searchsorted(cumulative, strata), 0, len(tri) - 1)
+    r1 = _halton(budget, 2)
+    r2 = _halton(budget, 3)
+    root = np.sqrt(r1)
+    v0, v1, v2 = tri[faces, 0, :], tri[faces, 1, :], tri[faces, 2, :]
+    samples = (v0 * (1.0 - root)[:, None]
+               + v1 * (root * (1.0 - r2))[:, None]
+               + v2 * (root * r2)[:, None])
+    return np.vstack([verts, samples])
+
+
+def _point_triangle_min(points: Any, tri: Any) -> Any:
+    """Least distance from each point to the closest point of ANY triangle.
+
+    The textbook closest-point-on-triangle (Ericson, *Real-Time Collision
+    Detection* 5.1.5), vectorised over triangles and chunked over points on the
+    (points x triangles) product. Written here rather than called from
+    ``trimesh.proximity`` for the same reason ``_cast_first_hit`` carries its own
+    Moller-Trumbore: ``trimesh.proximity.closest_point`` culls candidates with an
+    ``rtree`` index, ``rtree`` is not a dependency of trimesh, and on a machine
+    carrying exactly what this gate declares (``trimesh``, ``numpy``) it raises
+    ``ModuleNotFoundError`` from inside the call. A crash reads as "the design is
+    wrong" rather than "the tool is missing".
+    """
+    import numpy as np
+
+    if len(points) == 0 or len(tri) == 0:
+        return np.zeros(len(points))
+
+    a = tri[:, 0, :]
+    ab = tri[:, 1, :] - a
+    ac = tri[:, 2, :] - a
+    out = np.empty(len(points), dtype=float)
+    chunk = max(1, int(_NEAR_CHUNK_PT // max(1, len(tri))))
+    for start in range(0, len(points), chunk):
+        p = points[start:start + chunk]
+        ap = p[:, None, :] - a[None, :, :]
+        d1 = np.einsum("fj,rfj->rf", ab, ap)
+        d2 = np.einsum("fj,rfj->rf", ac, ap)
+        bp = ap - ab[None, :, :]
+        d3 = np.einsum("fj,rfj->rf", ab, bp)
+        d4 = np.einsum("fj,rfj->rf", ac, bp)
+        cp = ap - ac[None, :, :]
+        d5 = np.einsum("fj,rfj->rf", ab, cp)
+        d6 = np.einsum("fj,rfj->rf", ac, cp)
+        vc = d1 * d4 - d3 * d2
+        vb = d5 * d2 - d1 * d6
+        va = d3 * d6 - d5 * d4
+
+        def _safe(numerator, denominator):
+            """``numerator/denominator`` with the zero-denominator case pinned to 0.
+
+            Every use below is inside a region test that has already decided the
+            denominator is positive; the guard is for the degenerate triangle that
+            reaches here anyway, where any barycentric coordinate is as good as
+            another and NaN is not."""
+            live = np.abs(denominator) > 0.0
+            return np.where(live, numerator / np.where(live, denominator, 1.0), 0.0)
+
+        # Barycentric (v, w) of the closest point, by region. Order matters: the
+        # vertex regions are tested first, then the three edges, then the interior.
+        interior_denominator = va + vb + vc
+        v = _safe(vb, interior_denominator)
+        w = _safe(vc, interior_denominator)
+
+        edge_ab = (vc <= 0.0) & (d1 >= 0.0) & (d3 <= 0.0)
+        v = np.where(edge_ab, _safe(d1, d1 - d3), v)
+        w = np.where(edge_ab, 0.0, w)
+
+        edge_ac = (vb <= 0.0) & (d2 >= 0.0) & (d6 <= 0.0)
+        v = np.where(edge_ac, 0.0, v)
+        w = np.where(edge_ac, _safe(d2, d2 - d6), w)
+
+        edge_bc = (va <= 0.0) & ((d4 - d3) >= 0.0) & ((d5 - d6) >= 0.0)
+        t_bc = _safe(d4 - d3, (d4 - d3) + (d5 - d6))
+        v = np.where(edge_bc, 1.0 - t_bc, v)
+        w = np.where(edge_bc, t_bc, w)
+
+        corner_a = (d1 <= 0.0) & (d2 <= 0.0)
+        v = np.where(corner_a, 0.0, v)
+        w = np.where(corner_a, 0.0, w)
+        corner_b = (d3 >= 0.0) & (d4 <= d3)
+        v = np.where(corner_b, 1.0, v)
+        w = np.where(corner_b, 0.0, w)
+        corner_c = (d6 >= 0.0) & (d5 <= d6)
+        v = np.where(corner_c, 0.0, v)
+        w = np.where(corner_c, 1.0, w)
+
+        closest = a[None, :, :] + ab[None, :, :] * v[:, :, None] + ac[None, :, :] * w[:, :, None]
+        out[start:start + chunk] = np.sqrt(((p[:, None, :] - closest) ** 2).sum(axis=2)).min(axis=1)
+    return out
+
+
+def _box_gap(lo_a: Any, hi_a: Any, lo_b: Any, hi_b: Any) -> float:
+    """Least distance between two axis-aligned boxes. An EXACT lower bound on the
+    distance between anything inside one and anything inside the other."""
+    import numpy as np
+
+    separation = np.maximum(np.maximum(lo_a - hi_b, lo_b - hi_a), 0.0)
+    return float(np.linalg.norm(separation))
+
+
+def _point_box_distance(points: Any, lo: Any, hi: Any):
+    """Distance from each point to a box. A lower bound on its distance to any
+    surface inside that box, which is what makes it safe to prune on."""
+    import numpy as np
+
+    outside = np.maximum(np.maximum(lo - points, points - hi), 0.0)
+    return np.sqrt((outside ** 2).sum(axis=1))
+
+
+def _triangle_cover(tri: Any, areas: Any):
+    """Per triangle, how far a point inside it can be from its NEAREST VERTEX.
+
+    This is the covering radius of the three corners over the triangle, and it is
+    what turns a barycentric lattice into a stated error bound: subdividing a
+    triangle into ``k^2`` similar sub-triangles divides this number by ``k``.
+
+    It is the circumradius for an acute triangle and half the longest edge for an
+    obtuse one; ``min(circumradius, longest edge)`` bounds both and stays finite on
+    the degenerate triangle whose area is zero, where the circumradius is not.
+    """
+    import numpy as np
+
+    e0 = np.linalg.norm(tri[:, 1, :] - tri[:, 0, :], axis=1)
+    e1 = np.linalg.norm(tri[:, 2, :] - tri[:, 1, :], axis=1)
+    e2 = np.linalg.norm(tri[:, 0, :] - tri[:, 2, :], axis=1)
+    longest = np.maximum(np.maximum(e0, e1), e2)
+    area = np.asarray(areas, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        circum = np.where(area > 0.0, e0 * e1 * e2 / (4.0 * np.where(area > 0.0, area, 1.0)),
+                          np.inf)
+    return np.minimum(circum, longest)
+
+
+def _lattice(tri: Any, order: int):
+    """A deterministic barycentric lattice of the given order on every triangle.
+
+    Order ``k`` places the ``(k+1)(k+2)/2`` points ``(i/k, j/k)`` on each triangle —
+    the three corners included — which splits it into ``k^2`` sub-triangles each
+    similar to the original at ``1/k`` scale. Every point of the triangle is
+    therefore within ``cover(T)/k`` of a lattice point, and THAT is the error bound
+    the verdict quotes. Nothing here is random: the same mesh gives the same points
+    on every run, which is the same requirement the Halton sampler above exists for.
+    """
+    import numpy as np
+
+    order = max(1, int(order))
+    i, j = np.meshgrid(np.arange(order + 1), np.arange(order + 1), indexing="ij")
+    keep = (i + j) <= order
+    u = (i[keep] / float(order)).astype(float)
+    v = (j[keep] / float(order)).astype(float)
+    w = 1.0 - u - v
+    a, b, c = tri[:, 0, :], tri[:, 1, :], tri[:, 2, :]
+    pts = (a[:, None, :] * w[None, :, None]
+           + b[:, None, :] * u[None, :, None]
+           + c[:, None, :] * v[None, :, None])
+    return pts.reshape(-1, 3)
+
+
+class _Solid:
+    """One part, with the derived arrays every pair test wants, computed ONCE.
+
+    A 30-body assembly is 435 pairs. Rebuilding a part's triangle table and its
+    per-triangle bounding boxes inside the pair loop is how a gate that measures
+    435 cheap things becomes a gate nobody runs (method rule 10) — so the arrays
+    live here, per part, for the life of one gate call.
+    """
+
+    __slots__ = ("name", "mesh", "tri", "areas", "tlo", "thi", "lo", "hi",
+                 "is_volume", "centroids", "_points", "_cover")
+
+    def __init__(self, name: str, mesh: Any) -> None:
+        import numpy as np
+
+        self.name = name
+        self.mesh = mesh
+        self.tri = np.asarray(mesh.triangles, dtype=float)
+        self.areas = np.asarray(mesh.area_faces, dtype=float)
+        if len(self.tri):
+            self.tlo = self.tri.min(axis=1)
+            self.thi = self.tri.max(axis=1)
+            self.centroids = self.tri.mean(axis=1)
+        else:                                          # a part with no surface
+            self.tlo = self.thi = np.zeros((0, 3), dtype=float)
+            self.centroids = np.zeros((0, 3), dtype=float)
+        bounds = getattr(mesh, "bounds", None)
+        if bounds is None:                             # a mesh with no geometry at all
+            self.lo = self.hi = np.zeros(3, dtype=float)
+        else:
+            bounds = np.asarray(bounds, dtype=float)
+            self.lo, self.hi = bounds[0], bounds[1]
+        self.is_volume = bool(getattr(mesh, "is_volume", False))
+        self._points = None
+        self._cover = None
+
+    def points(self, budget: int):
+        """This part's coarse sample cloud, built once however many pairs it is in."""
+        if self._points is None:
+            self._points = _surface_points(self.mesh, budget)
+        return self._points
+
+    def cover(self):
+        """Per-triangle covering radius of its own corners. See :func:`_triangle_cover`."""
+        if self._cover is None:
+            self._cover = _triangle_cover(self.tri, self.areas)
+        return self._cover
+
+    def near_faces(self, lo: Any, hi: Any, radius: float):
+        """Indices of the triangles whose bounding box is within ``radius`` of a box.
+
+        Exact as a FILTER: a triangle further than ``radius`` from that box cannot
+        contain a point within ``radius`` of anything inside it, so nothing that
+        could matter is dropped.
+        """
+        import numpy as np
+
+        if len(self.tri) == 0:
+            return np.zeros(0, dtype=int)
+        outside = np.maximum(np.maximum(self.tlo - hi, lo - self.thi), 0.0)
+        return np.nonzero(np.sqrt((outside ** 2).sum(axis=1)) <= radius)[0]
+
+
+def _directed_gap(points: Any, other: "_Solid", ceiling: float) -> float:
+    """Least distance from ``points`` to ``other``'s SURFACE — exactly, or > ceiling.
+
+    **This is the function the old one got wrong, and the way it was wrong is the
+    kind that reads as a measurement.** It ran a cloud-to-cloud pass, took the 256
+    candidates with the smallest cloud-to-cloud distance and refined only those
+    against the triangles. Nearest-point-in-the-other-cloud does not rank
+    nearest-to-the-other-SURFACE — a sample facing the middle of a large triangle is
+    far from every vertex of it and zero distance from the face — so on a curved
+    contact at the default budget the 256 that survived were not the 256 that held
+    the answer, and the refined number was a confident value with no bound under it.
+
+    What replaces it is a branch and bound with no arbitrary cut anywhere in it:
+
+    * every point's distance to ``other``'s BOUNDING BOX is a rigorous lower bound on
+      its distance to ``other``'s surface, because the surface is inside the box;
+    * so the points are sorted by that bound and walked in blocks, and the walk STOPS
+      at the first block whose bound is already worse than the best exact distance
+      found — those points cannot improve on it, whatever their cloud rank;
+    * inside a block, ``other``'s triangles are culled to those whose own bounding
+      box is within the current best of the block's bounding box, by the same
+      argument in the other direction.
+
+    The result is exactly ``min(d(p, surface) for p in points)``, capped at
+    ``ceiling`` (the caller only cares whether a pair is closer than the tolerance,
+    and walking past that is work with nothing to buy). It is therefore an UPPER
+    bound on the true surface-to-surface distance whose only error is that the truly
+    closest point of the other part may lie BETWEEN two samples — which is what
+    :func:`_pair_contact`'s lattice refinement measures and bounds, rather than
+    leaving to luck.
+    """
+    import numpy as np
+
+    if len(points) == 0 or len(other.tri) == 0:
+        return math.inf
+
+    bound = _point_box_distance(points, other.lo, other.hi)
+    keep = np.nonzero(bound <= ceiling)[0]
+    if len(keep) == 0:
+        return math.inf
+    order = keep[np.argsort(bound[keep], kind="stable")]
+    ordered = points[order]
+    bound = bound[order]
+
+    # A cheap CEILING before any exact work, from the handful of points the lower
+    # bound already likes. The distance from a point to a triangle's CENTROID is an
+    # upper bound on its distance to that triangle, so the smallest such distance is
+    # an upper bound on the answer — and one pass of that over the triangle list
+    # collapses both the point list and the triangle list before the expensive kernel
+    # runs even once. Without it the block loop walks every point whose lower bound
+    # happens to be under a large answer, and re-culls the whole triangle table each
+    # time: on a 30-body assembly that was two thirds of the distance measurement.
+    head = ordered[:_SEED_POINTS]
+    seed = math.inf
+    if len(other.centroids):
+        deltas = head[:, None, :] - other.centroids[None, :, :]
+        seed = float(np.sqrt((deltas ** 2).sum(axis=2)).min())
+    limit = min(ceiling, seed)
+    if not math.isfinite(limit):
+        limit = ceiling
+    within = np.nonzero(bound <= limit)[0]
+    if len(within) == 0:                               # pragma: no cover - head is in it
+        within = np.array([0])
+    ordered = ordered[within]
+    bound = bound[within]
+    faces = other.near_faces(ordered.min(axis=0), ordered.max(axis=0), limit)
+    if len(faces) == 0:
+        return math.inf
+    tri = other.tri[faces]
+    tlo, thi = other.tlo[faces], other.thi[faces]
+
+    best = math.inf
+    for start in range(0, len(ordered), _GAP_BLOCK):
+        reach = min(best, limit)
+        if bound[start] >= reach:
+            break                                # nothing further can improve on it
+        block = ordered[start:start + _GAP_BLOCK]
+        outside = np.maximum(np.maximum(tlo - block.max(axis=0),
+                                        block.min(axis=0) - thi), 0.0)
+        near = np.nonzero(np.sqrt((outside ** 2).sum(axis=1)) <= reach)[0]
+        if len(near) == 0:
+            continue
+        best = min(best, float(_point_triangle_min(block, tri[near]).min()))
+    return best
+
+
+def _coarse_gap(a: "_Solid", b: "_Solid", budget: int, ceiling: float) -> float:
+    """The two-directional sampled distance, exact over the samples."""
+    gap = _directed_gap(a.points(budget), b, ceiling)
+    return min(gap, _directed_gap(b.points(budget), a, min(gap, ceiling)))
+
+
+def _refine_gap(a: "_Solid", b: "_Solid", tol: float, budget: int) -> tuple:
+    """``(gap_mm, error_bound_mm, lattice_points)`` for a pair the coarse pass put apart.
+
+    ``(inf, None, 0)`` means PROVEN apart before any arithmetic, by the filter
+    described below. The error is ``None`` rather than 0 there on purpose: the
+    conclusion is exact, the DISTANCE is still whatever the coarse sampled pass said,
+    which is an upper bound and nothing tighter.
+
+    **The error bound is the point of this function**, and it is what lets the gate
+    say a pair is apart rather than merely report a number that came out large.
+
+    Only triangles within ``tol`` of the other part's bounding box can hold a contact
+    at all, so those are the only ones refined — usually a handful even on a hull. If
+    either side has none, the pair is PROVEN apart with no arithmetic: no point of
+    one surface is within ``tol`` of the other's box, let alone its surface.
+
+    Otherwise each of those triangles gets a barycentric lattice of order ``k``
+    (:func:`_lattice`), which puts every point of the triangle within ``cover(T)/k``
+    of a lattice point. Write that worst case ``d``. Then for the true closest point
+    ``x*`` of one surface there is a lattice point within ``d`` of it, so
+
+        measured <= true + d      and therefore      true >= measured - d
+
+    and ``measured - d > tol`` PROVES the pair is further apart than the tolerance.
+    The error is one-signed in the safe direction throughout: a sampled distance is
+    an upper bound on the true one, so a thin lattice cries wolf and cannot hide a
+    contact.
+
+    ``k`` is chosen to reach a tenth of the tolerance and capped at
+    :data:`DENSE_POINT_CAP` points per side; when the cap binds, the bound that WAS
+    achieved is returned and the caller reports the pair as undecided rather than
+    picking whichever answer it prefers.
+    """
+    import numpy as np
+
+    target = max(tol * DENSE_TARGET_FRACTION, WELD_TOL_MM)
+
+    def box_of(solid, faces):
+        block = solid.tri[faces]
+        return block.min(axis=(0, 1)), block.max(axis=(0, 1))
+
+    # Narrow each side against the OTHER SIDE'S NEAR REGION rather than against its
+    # whole bounding box, three rounds, and the sets collapse. Each round is exact as
+    # a filter: a point of one surface within `tol` of the other has its closest
+    # partner inside the region the previous round kept, so it survives every round.
+    # A wire lying inside a hull's bounding box otherwise gets a lattice over every
+    # one of its triangles to settle a contact that is confined to one end of it.
+    faces_a = a.near_faces(b.lo, b.hi, tol)
+    if len(faces_a) == 0:
+        return math.inf, None, 0                     # proven apart, nothing measured
+    faces_b = b.near_faces(*box_of(a, faces_a), tol)
+    if len(faces_b) == 0:
+        return math.inf, None, 0
+    faces_a = a.near_faces(*box_of(b, faces_b), tol)
+    if len(faces_a) == 0:                            # pragma: no cover - monotone
+        return math.inf, None, 0
+
+    def sweep(aim: float, cap: int, ceiling: float) -> tuple:
+        """One pass at a stated covering radius. The FINER side goes first: its
+        lattice is the one that can carry a small error bound, and once
+        ``measured - bound > tol`` the pair is settled and the coarser side's lattice
+        is work with nothing left to buy."""
+        plan = []
+        for side, faces, other in ((a, faces_a, b), (b, faces_b, a)):
+            cover = side.cover()[faces]
+            finite = cover[np.isfinite(cover)]
+            span = float(finite.max()) if len(finite) else 0.0
+            order = 1 if span <= aim else int(math.ceil(span / aim))
+            if len(faces) * ((order + 1) * (order + 2) // 2) > cap:
+                # Largest order that fits: (k+1)(k+2)/2 <= cap/len(faces).
+                allowance = max(1.0, cap / float(len(faces)))
+                order = max(1, int(math.floor(math.sqrt(2.0 * allowance)) - 1))
+            plan.append((span / float(order), side, faces, order, other))
+        plan.sort(key=lambda item: item[0])
+
+        gap, bound, spent = ceiling, math.inf, 0                # noqa: F841
+        for achieved, side, faces, order, other in plan:
+            points = _lattice(side.tri[faces], order)
+            spent += len(points)
+            gap = min(gap, _directed_gap(points, other, gap))
+            bound = min(bound, achieved)
+            if gap <= tol or (gap - bound) > tol:
+                break                                # settled, either way
+        return gap, (0.0 if math.isinf(bound) else bound), spent
+
+    gap, best_cover, total = sweep(target, DENSE_POINT_CAP, math.inf)
+    if math.isfinite(gap) and tol < gap <= tol + best_cover:
+        # Marginal: further apart than the tolerance, but by less than the lattice
+        # can vouch for. Aim the second pass at the margin that is actually in
+        # dispute rather than at a fixed fraction of the tolerance, and pay for it —
+        # this runs for one pair in an assembly, not for every pair.
+        aim = max((gap - tol) / 3.0, WELD_TOL_MM)
+        if aim < target:
+            again, cover, spent = sweep(aim, 4 * DENSE_POINT_CAP, gap)
+            total += spent
+            if cover < best_cover or again < gap:
+                gap, best_cover = min(gap, again), min(best_cover, cover)
+    return gap, best_cover, total
+
+
+def _any_inside(points: Any, mesh: Any) -> bool:
+    """Is ANY of ``points`` inside the closed solid ``mesh``?
+
+    Generalised winding number (Van Oosterom & Strackee's solid angle, summed over
+    the faces): +-1 inside a closed consistently wound mesh and 0 outside. Chosen
+    over a parity ray cast because a ray that clips an edge or passes exactly
+    through a vertex is counted twice and flips the answer for that point, and this
+    decision is what separates "these two parts are assembled into each other" from
+    "these two parts have come apart" — a coin-flip there is worse than no test.
+    """
+    import numpy as np
+
+    tri = np.asarray(mesh.triangles, dtype=float)
+    if len(points) == 0 or len(tri) == 0:
+        return False
+    chunk = max(1, int(_NEAR_CHUNK_PT // max(1, len(tri))))
+    for start in range(0, len(points), chunk):
+        p = points[start:start + chunk]
+        a = tri[None, :, 0, :] - p[:, None, :]
+        b = tri[None, :, 1, :] - p[:, None, :]
+        c = tri[None, :, 2, :] - p[:, None, :]
+        la = np.linalg.norm(a, axis=2)
+        lb = np.linalg.norm(b, axis=2)
+        lc = np.linalg.norm(c, axis=2)
+        numerator = np.einsum("rfj,rfj->rf", a, np.cross(b, c))
+        denominator = (la * lb * lc
+                       + np.einsum("rfj,rfj->rf", a, b) * lc
+                       + np.einsum("rfj,rfj->rf", a, c) * lb
+                       + np.einsum("rfj,rfj->rf", b, c) * la)
+        winding = np.arctan2(numerator, denominator).sum(axis=1) / (2.0 * math.pi)
+        if bool((np.abs(winding) > _WINDING_INSIDE).any()):
+            return True
+    return False
+
+
+def _probe_subset(points: Any, mesh: Any, budget: int = CONTACT_PROBES):
+    """The samples worth asking the containment question about: those inside
+    ``mesh``'s bounding box, thinned to ``budget``, evenly spaced.
+
+    A point outside the box cannot be inside the solid, so the filter is exact and
+    free. The thinning is not exact and does not need to be: one sample inside is
+    enough to say the pair shares material, and the case a thin probe set could
+    miss — two surfaces crossing over a sliver of each other — has a
+    surface-to-surface distance of ~0 anyway, so it comes out CONNECTED by the
+    distance instead.
+    """
+    import numpy as np
+
+    if len(points) == 0:
+        return points
+    lo, hi = np.asarray(mesh.bounds, dtype=float)
+    inside_box = np.all((points >= lo) & (points <= hi), axis=1)
+    kept = points[inside_box]
+    if len(kept) > budget:
+        idx = np.unique(np.linspace(0, len(kept) - 1, int(budget)).round().astype(int))
+        kept = kept[idx]
+    return kept
+
+
+def _probe_budget(mesh: Any) -> int:
+    """How many points the containment test may ask about, for THIS mesh.
+
+    The winding number costs one solid angle per (probe x triangle), so 256 probes
+    against a 12-triangle box and 256 against a 12,000-triangle hull are three orders
+    of magnitude apart in work and identical in probe count. The budget is therefore
+    set on the PRODUCT, the same way every other chunk in this file is, and floors at
+    16 so the test never degenerates into a single lucky sample.
+
+    This is the constant that used to make this gate unaffordable. Containment ran
+    first, at a flat 256 probes, on every pair whose boxes overlapped — 89% of the
+    gate's run time on a 30-body assembly, spent deciding pairs the distance test was
+    about to call connected anyway.
+    """
+    try:
+        faces = max(1, int(len(mesh.faces)))
+    except (AttributeError, TypeError):                # pragma: no cover - not a mesh
+        faces = 1
+    return int(max(16, min(CONTACT_PROBES, _NEAR_CHUNK_PT // (8 * faces))))
+
+
+def _interpenetrates(points: Any, mesh: Any, probes: int = CONTACT_PROBES) -> bool:
+    """Does any of ``points`` sit INSIDE ``mesh``, by more than a weld tolerance?
+
+    The margin is what makes the answer stable, and it was put here by a measured
+    misclassification rather than by caution. Two parts mating face to face have
+    samples lying EXACTLY on each other's boundary, where the winding number is 0.5
+    in exact arithmetic — and where `atan2` on a near-zero numerator with a negative
+    denominator returns +-pi rather than 0, so the sum lands on 1.0 and a flat
+    contact reads as interpenetration. The baseline's carriage sitting on the
+    cavity floor did exactly that: every one of its bottom-face samples, at z = 3.0
+    against a floor at z = 3.0, came back "inside the housing".
+
+    So a point is only inside if it is inside AND further from the surface than
+    :data:`WELD_TOL_MM` — the distance at which this pack already says two points
+    are the same point. Below that a sample is ON the surface, not in the material.
+    A real press fit is orders of magnitude deeper than the weld tolerance and is
+    unaffected; the gap that the pair reports is 0 either way, so this changes what
+    the evidence CALLS the pair, never whether it passes.
+    """
+    import numpy as np
+
+    probes = _probe_subset(points, mesh, probes)
+    if len(probes) == 0:
+        return False
+    depth = _point_triangle_min(probes, np.asarray(mesh.triangles, dtype=float))
+    deep = probes[depth > WELD_TOL_MM]
+    if len(deep) == 0:
+        return False
+    return _any_inside(deep, mesh)
+
+
+def _nested(inner: "_Solid", outer: "_Solid") -> bool:
+    """Is ``inner``'s bounding box entirely within ``outer``'s?"""
+    import numpy as np
+
+    return bool(np.all(inner.lo >= outer.lo) and np.all(inner.hi <= outer.hi))
+
+
+def _pair_contact(a: "_Solid", b: "_Solid", tol: float, budget: int,
+                  label: bool = False) -> dict:
+    """``{gap_mm, error_mm, touching, interpenetrating, decidable, why}`` for one pair.
+
+    **Interpenetration is connection, and its gap is 0.** A shaft in a coupler, a
+    screw in an insert and a stock in a bearing all overlap by design, so shared
+    material is the HEALTHY answer here and only a GAP is a finding: a rod modelled
+    inside a solid tube has two surfaces that never touch, and an unsigned distance
+    would report the annulus between them as a gap and call an assembled driveline
+    broken.
+
+    The ORDER of the two tests is the cost of this gate, and the old order was
+    backwards. Containment ran first, on every pair whose boxes overlapped, and cost
+    **89% of the gate's run time** on a 30-body assembly — a winding number over
+    every triangle of a 12,000-triangle hull, for pairs that the distance test was
+    about to call connected anyway. Reversed, it is nearly free, and the answer is
+    identical: if the surfaces are within the tolerance the pair is connected and
+    containment cannot change that; only a pair that is measurably APART can still
+    be sharing material.
+
+    And once a pair is PROVEN apart by more than the tolerance, containment is
+    almost always ruled out by arithmetic instead of by a winding number. Two closed
+    solids whose boundaries do not meet are either disjoint or one is wholly inside
+    the other, and wholly inside means its bounding box is inside too. So the
+    containment test runs only where a box is nested in a box, and only in the
+    direction that nesting allows.
+
+    ``decidable`` is that reasoning made explicit, and it is an AND, not an OR. Only
+    a VOLUME can be asked what is inside it. If both nesting directions are
+    geometrically possible then BOTH parts must be volumes before "they do not share
+    material" is a conclusion rather than a hope — one direction tested and one
+    untested rules out nothing. Where no nesting is possible, nothing needs to be a
+    volume: the geometry has already answered.
+
+    ``label`` asks for the extra question a CONNECTED pair can still be asked: are
+    these two touching face to face, or driven into each other? It changes no
+    verdict — both are contact — so it is asked only for the pairs a project
+    DECLARED, where the evidence row saying "interpenetrating by design" is what
+    tells a reader the press fit is still a press fit. A coverage edge is not asked,
+    because paying a winding number per edge to improve a sentence is how this gate
+    stopped being runnable the first time.
+    """
+    gap = _coarse_gap(a, b, budget, math.inf)
+    error: float | None = 0.0
+    lattice = 0
+    filtered = False
+    if gap > tol and math.isfinite(gap):
+        refined, error, lattice = _refine_gap(a, b, tol, budget)
+        if math.isinf(refined):
+            filtered = True                          # proven apart without measuring
+        else:
+            gap = min(gap, refined)
+
+    if gap <= tol:
+        shared = False
+        if label and _box_gap(a.lo, a.hi, b.lo, b.hi) <= 0.0:
+            for inner, outer in ((a, b), (b, a)):
+                if outer.is_volume and _interpenetrates(inner.points(budget), outer.mesh,
+                                                        _probe_budget(outer.mesh)):
+                    shared = True
+                    break
+        return {"gap_mm": 0.0 if shared else float(gap), "error_mm": 0.0,
+                "touching": True, "interpenetrating": shared, "decidable": True,
+                "lattice_points": lattice,
+                "why": ("the parts share material — interpenetration is contact" if shared
+                        else f"{gap:.4f} mm between the nearest surfaces, "
+                             f"within {tol:g} mm")}
+
+    proven_apart = (filtered or math.isinf(gap)
+                    or (error is not None and (gap - error) > tol))
+    directions = []
+    if _nested(a, b):
+        directions.append((a, b))
+    if _nested(b, a):
+        directions.append((b, a))
+    if not proven_apart:
+        # The lattice could not settle it, so the nesting shortcut is not available
+        # either: fall back to asking the containment question in both directions.
+        directions = [(a, b), (b, a)]
+
+    decidable = True
+    probes = NESTED_PROBES if proven_apart else CONTACT_PROBES
+    for inner, outer in directions:
+        if not outer.is_volume:
+            decidable = False                   # cannot ask a non-solid what is in it
+            continue
+        if _interpenetrates(inner.points(budget), outer.mesh, probes):
+            return {"gap_mm": 0.0, "error_mm": 0.0, "touching": True,
+                    "interpenetrating": True, "decidable": True,
+                    "lattice_points": lattice,
+                    "why": "the parts share material — interpenetration is contact"}
+
+    shown = "unmeasurable" if math.isinf(gap) else f"{gap:.4f} mm"
+    why = f"{shown} between the nearest surfaces"
+    if filtered:
+        why += (f"; proven more than {tol:g} mm apart by the bounding-box filter — no "
+                f"triangle of either part comes within the tolerance of the other, so "
+                f"no lattice was needed and the figure is a sampled UPPER bound")
+    elif error:
+        why += f" (+-{error:.4f} mm, the refinement lattice's covering radius)"
+    if not proven_apart:
+        why += ("; the refinement lattice hit its point cap before it could separate "
+                "this from the tolerance, so the pair is UNDECIDED")
+    if not decidable:
+        why += ("; one part is inside the other's bounding box and the enclosing part "
+                "is not a volume, so interpenetration could not be tested — settle "
+                "cad.is_volume first")
+    return {"gap_mm": float(gap) if math.isfinite(gap) else None,
+            "error_mm": None if error is None else float(error),
+            "touching": False, "interpenetrating": False,
+            "decidable": bool(decidable and proven_apart), "lattice_points": lattice,
+            "why": why}
+
+
+#: Where a project says which pairs MUST touch, primary spelling first.
+#:
+#: Three spellings, one requirement, and the first one is not new: a project that
+#: has written `clash_allow` has already listed most of these pairs, each with the
+#: stated reason this gate needs, and making it write them a second time under
+#: another key is how the two lists go out of step. So a `clash_allow` entry may
+#: carry `"role": "required"` and it becomes a required contact as well as a
+#: permitted interference. `mating_pairs` is for the contacts that never interfere
+#: and therefore never needed an allowlist entry — a foot on a floor, a flange on a
+#: rim. `assembly_chains` is the ordered form.
+#:
+#: None of these is required for the gate to say something useful. They add the
+#: intent the geometry cannot express — WHICH contacts matter, and in what order —
+#: on top of the coverage question, which needs no declaration at all.
+MATING_PAIR_KEYS = ("mating_pairs", "assembly_joints")
+MATING_CHAIN_KEYS = ("assembly_chains", "mating_chains", "linkages")
+MATING_SAMPLE_KEYS = ("mating_samples",)
+
+
+def _pair_text(entry: Any) -> str:
+    """``'a' vs 'b'`` for a message, or the raw entry when it is unreadable."""
+    pair = _normalise_pair(entry)
+    if pair is None:
+        return json.dumps(entry, default=str)[:80]
+    return f"{pair[0]!r} vs {pair[1]!r}"
+
+
+def _entry_tolerance(entry: Any, label: str, refusals: list) -> float | None:
+    """A per-entry mating tolerance in mm, or ``None`` to inherit the project's.
+
+    A tolerance that is present and unusable is refused rather than ignored, for
+    the same reason `wall_samples` is: a projection that states a number means it,
+    and silently replacing it with a default is a gate measuring against a limit
+    nobody chose.
+    """
+    if not isinstance(entry, dict):
+        return None
+    for key in ("tol_mm", "max_gap_mm", "gap_tol_mm"):
+        if key not in entry:
+            continue
+        value = entry.get(key)
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(float(value)) and float(value) >= 0.0):
+            return float(value)
+        refusals.append(
+            f"{label}: {key} is {value!r}; a mating tolerance is a non-negative number "
+            f"of mm, and this gate will not substitute a default for a stated one")
+        return None
+    return None
+
+
+def _contact_from(entry: Any, source: str, refusals: list) -> tuple | None:
+    """``(pair, reason, tol)`` from one declared contact, or ``None`` + a refusal.
+
+    The refusals mirror :func:`_read_allowlist` key for key, and deliberately: a
+    project should not have to learn two sets of rules for two lists that are the
+    same document. A wildcard here is worse than a wildcard there, in fact — "this
+    part must touch anything" is not a claim that can be false, so it is a
+    permanent green tick on the one gate that exists to notice an absence.
+    """
+    pair = _normalise_pair(entry)
+    text = json.dumps(entry, default=str)[:80]
+    if pair is None:
+        refusals.append(f"unreadable {source} entry {text}")
+        return None
+    label = f"{source} entry {pair[0]!r} vs {pair[1]!r}"
+    if any(p in ("*", "any", "anything", "") for p in pair):
+        refusals.append(
+            f"blanket {label} refused — 'must touch anything' is a claim that cannot "
+            f"be false, and a required contact that cannot fail is not a requirement")
+        return None
+    if pair[0] == pair[1]:
+        refusals.append(
+            f"{label} names one part twice — a part is always in contact with itself")
+        return None
+    reason = str((entry or {}).get("reason", "")).strip() if isinstance(entry, dict) else ""
+    if not reason:
+        refusals.append(
+            f"{label} has no reason — an undeclared requirement to touch is one "
+            f"nobody can check, delete or defend when the design moves")
+        return None
+    return pair, reason, _entry_tolerance(entry, label, refusals)
+
+
+def _read_required_contacts(ctx: GateContext) -> tuple[list, list, dict]:
+    """``(contacts, refusals, chains)``. A refused entry is a gate FAILURE.
+
+    One pair may be declared from more than one place — a `clash_allow` entry
+    marked required and a chain step naming the same two parts is the ordinary
+    case, not a mistake — so the sources are merged into one row and **the
+    tightest stated tolerance wins**. That is a rule, not a guess: two
+    declarations of a required contact do not contradict each other the way
+    `clash_allow` and `bonded_joints` do (one waives the pair, the other keeps it
+    under a depth check, so which governs would be a coin toss); they both say
+    "these must touch", and the stricter of two compatible statements is the one
+    that has to hold.
+    """
+    contacts: dict[tuple[str, str], dict] = {}
+    refusals: list[str] = []
+    chains: dict[str, list] = {}
+
+    def add(pair, reason, tol, source, chain="", index=0, arrow=""):
+        row = contacts.setdefault(pair, {"pair": pair, "reasons": [], "sources": [],
+                                         "chains": [], "steps": [], "tol_mm": None})
+        if reason not in row["reasons"]:
+            row["reasons"].append(reason)
+        if source not in row["sources"]:
+            row["sources"].append(source)
+        if chain and chain not in row["chains"]:
+            row["chains"].append(chain)
+        if chain:
+            row["steps"].append({"chain": chain, "index": index, "step": arrow})
+        if tol is not None:
+            row["tol_mm"] = tol if row["tol_mm"] is None else min(row["tol_mm"], tol)
+
+    # -- 1. the list the project already wrote ----------------------------- #
+    raw_allow = ctx.param("clash_allow") or []
+    if isinstance(raw_allow, dict):
+        raw_allow = [dict(v or {}, pair=k) for k, v in raw_allow.items()]
+    for entry in raw_allow if isinstance(raw_allow, (list, tuple)) else []:
+        if not isinstance(entry, dict):
+            continue                      # cad.clash refuses it; not this gate's job
+        stated = entry.get("role", entry.get("contact"))
+        must = entry.get("must_touch")
+        if stated is None and must is None:
+            continue                      # a plain permission, and that is fine
+        word = str(stated).strip().lower() if stated is not None else ""
+        if must is True:
+            word = word or "required"
+        elif must is False:
+            continue
+        elif must is not None:
+            refusals.append(
+                f"clash_allow entry {_pair_text(entry)}: must_touch is {must!r}, "
+                f"which is neither true nor false")
+            continue
+        if word in PERMITTED_ROLES:
+            continue
+        if word not in REQUIRED_ROLES:
+            refusals.append(
+                f"clash_allow entry {_pair_text(entry)} has role {stated!r}, which "
+                f"this gate does not recognise. Use one of "
+                f"{', '.join(sorted(REQUIRED_ROLES))} for a pair that MUST touch, or one "
+                f"of {', '.join(sorted(PERMITTED_ROLES))} for one that merely may — an "
+                f"unrecognised role would silently mean 'not required', which is this "
+                f"gate's own failure mode hiding inside its own declaration")
+            continue
+        parsed = _contact_from(entry, "clash_allow", refusals)
+        if parsed is not None:
+            add(parsed[0], parsed[1], parsed[2], f"clash_allow(role={word})")
+
+    # -- 2. the contacts that never interfere, so never needed an allowlist -- #
+    raw_pairs, pair_key = ctx.first_pack_param_named(MATING_PAIR_KEYS)
+    if isinstance(raw_pairs, dict):
+        raw_pairs = [dict(v or {}, pair=k) for k, v in raw_pairs.items()]
+    for entry in raw_pairs if isinstance(raw_pairs, (list, tuple)) else []:
+        parsed = _contact_from(entry, pair_key or MATING_PAIR_KEYS[0], refusals)
+        if parsed is not None:
+            add(parsed[0], parsed[1], parsed[2], pair_key or MATING_PAIR_KEYS[0])
+
+    # -- 3. ordered chains ------------------------------------------------- #
+    raw_chains, chain_key = ctx.first_pack_param_named(MATING_CHAIN_KEYS)
+    chain_key = chain_key or MATING_CHAIN_KEYS[0]
+    entries: list[tuple[str, Any]] = []
+    if isinstance(raw_chains, dict):
+        entries = [(str(k), v) for k, v in raw_chains.items()]
+    elif isinstance(raw_chains, (list, tuple)):
+        entries = [(str((e or {}).get("name", f"chain{i + 1}"))
+                    if isinstance(e, dict) else f"chain{i + 1}", e)
+                   for i, e in enumerate(raw_chains)]
+    for name, entry in entries:
+        body = (entry.get("chain", entry.get("members", entry.get("parts")))
+                if isinstance(entry, dict) else entry)
+        reason = str((entry or {}).get("reason", "")).strip() if isinstance(entry, dict) else ""
+        label = f"{chain_key} {name!r}"
+        tol = _entry_tolerance(entry, label, refusals)
+        if not isinstance(body, (list, tuple)) or len(body) < 2:
+            refusals.append(
+                f"{label} is not an ordered list of at least two parts ({body!r}) — a "
+                f"chain of one member states nothing")
+            continue
+        members = [str(m).strip() for m in body]
+        if not reason:
+            refusals.append(
+                f"{label} has no reason — a chain is the most load-bearing declaration "
+                f"here (it says what the assembly is FOR) and an unexplained one is the "
+                f"first thing deleted when it starts failing")
+            continue
+        if any(p in ("*", "any", "anything", "") for p in members):
+            refusals.append(f"{label} contains a wildcard member — refused for the same "
+                            f"reason a wildcard pair is")
+            continue
+        chains[name] = members
+        for index, (a, b) in enumerate(zip(members[:-1], members[1:])):
+            if a == b:
+                refusals.append(f"{label} repeats {a!r} consecutively")
+                continue
+            add(_pair_key(a, b), reason, tol, chain_key, chain=name,
+                index=index + 1, arrow=f"{a} -> {b}")
+
+    ordered = sorted(contacts.values(), key=lambda r: r["pair"])
+    return ordered, refusals, chains
+
+
+def _read_free_standing(ctx: GateContext) -> tuple[dict, list, str]:
+    """``({part: reason}, refusals, key)`` — the parts declared to touch nothing.
+
+    The counterpart of `clash_allow` for the opposite finding. Coverage's default is
+    that an unattached part is a defect, because on the assembly this gate was
+    written for the unattached part WAS the defect and nobody had declared anything.
+    But a loose tool, a part shown for context and a component held by a cable tie
+    that is not modelled are all real, so a project may say so — with a stated
+    reason, which is the whole difference between a declaration and a silencer.
+
+    Refused, not ignored, for the same three things `clash_allow` refuses: an
+    unreadable entry, a wildcard (``"everything is free-standing"`` is not a claim
+    that can be false) and a missing reason.
+    """
+    raw, key = ctx.first_pack_param_named(FREE_STANDING_KEYS)
+    key = key or FREE_STANDING_KEYS[0]
+    refusals: list[str] = []
+    out: dict[str, str] = {}
+    if raw is None:
+        return out, refusals, key
+
+    entries: list[tuple[Any, Any]] = []
+    if isinstance(raw, dict):
+        entries = list(raw.items())
+    elif isinstance(raw, (list, tuple)):
+        for item in raw:
+            if isinstance(item, dict):
+                name = item.get("part", item.get("name", item.get("id")))
+                entries.append((name, item))
+            else:
+                entries.append((item, None))
+    else:
+        refusals.append(
+            f"{key} is {type(raw).__name__} {raw!r}; it is a list of "
+            f"{{part, reason}} or a {{part: reason}} map")
+        return out, refusals, key
+
+    for name, body in entries:
+        label = f"{key} entry {json.dumps(name, default=str)[:40]}"
+        if not isinstance(name, str) or not name.strip():
+            refusals.append(f"unreadable {label} — a free-standing declaration names "
+                            f"one part")
+            continue
+        part = name.strip()
+        if part in ("*", "any", "anything"):
+            refusals.append(
+                f"blanket {key} entry {part!r} refused — 'everything is free-standing' "
+                f"switches off the one check here that needs no foresight, and a "
+                f"declaration that cannot be wrong is not a declaration")
+            continue
+        if isinstance(body, dict):
+            reason = str(body.get("reason", "")).strip()
+        elif body is None:
+            reason = ""
+        else:
+            reason = str(body).strip()
+        if not reason:
+            refusals.append(
+                f"{key} entry {part!r} has no reason — an undeclared free-standing "
+                f"part is indistinguishable from a part somebody forgot to attach, "
+                f"which is the defect this gate exists to find")
+            continue
+        out[part] = reason
+    return out, refusals, key
+
+
+def _components(names: list, edges: dict) -> list:
+    """Connected components of the contact graph, largest first, each sorted.
+
+    Plain union-find rather than a library: the graph has one edge per touching pair
+    and the answer has to be reproducible in a report, not fast.
+    """
+    parent = {name: name for name in names}
+
+    def find(item):
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    for (a, b), row in edges.items():
+        if not row["touching"]:
+            continue
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    groups: dict[str, list] = {}
+    for name in names:
+        groups.setdefault(find(name), []).append(name)
+    return sorted((sorted(g) for g in groups.values()),
+                  key=lambda g: (-len(g), g[0]))
+
+
+def _nearest(solid: "_Solid", others: list, budget: int, cap: int = 24) -> tuple:
+    """``(name, gap_mm)`` — the closest other part, and how far away it is.
+
+    Only ever asked about a part that is already known to be touching nothing, so
+    the number is a description of the finding rather than the finding itself: "the
+    rudder is 42.9 mm from the nearest thing in the assembly" is the sentence that
+    makes a reader go and look.
+
+    The search is ordered by bounding-box distance, which is an exact lower bound, so
+    the running best is a ceiling for every pair after it and most candidates are
+    rejected on arithmetic. ``cap`` bounds the work on an assembly where everything
+    is adrift; the answer is then the nearest of the ones examined, which is an upper
+    bound and still true as "no further than".
+    """
+    ranked = sorted(others, key=lambda other: _box_gap(solid.lo, solid.hi,
+                                                       other.lo, other.hi))
+    best_name, best = "", math.inf
+    for other in ranked[:cap]:
+        if _box_gap(solid.lo, solid.hi, other.lo, other.hi) >= best:
+            break
+        gap = _coarse_gap(solid, other, budget, best)
+        if gap < best:
+            best, best_name = gap, other.name
+    return best_name, best
+
+
+def _gap_text(gap: Any) -> str:
+    """One number, or the honest word for not having one."""
+    if isinstance(gap, (int, float)) and math.isfinite(gap):
+        return f"{float(gap):.2f} mm"
+    return "an unmeasurable distance"
+
+
+@gate(
+    id="cad.assembly_connected",
+    title="Every part is held by something, and every declared contact still closed",
+    claims=["geometry", "fit", "assembly", "connectivity", "linkage", "mechanical", "cad"],
+    tier=Tier.BUILD,
+    settles="assembly connectivity",
+    requires_python=["trimesh", "numpy"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_meshes.py:broken_chain",
+        note="the baseline assembly with the cover lifted 3 mm off the housing rim "
+             "it is declared to seat on — a lid that is not on the box. One member "
+             "of one declared chain moved, in the direction this gate measures, and "
+             "nothing else: the cover is still a valid watertight solid, still "
+             "inside the envelope, still the right thickness, and now interferes "
+             "with even less than before. Every other gate in this pack passes it, "
+             "which is the whole reason this gate exists. The cover is also then "
+             "attached to nothing at all, so the fixture fires the coverage check "
+             "and the declared-contact check at once — which is the relationship "
+             "between the two: the declaration says WHICH contact, coverage says "
+             "there has to be one",
+    ),
+)
+def assembly_connected(ctx: GateContext) -> Verdict:
+    """Every part held by something, and every pair declared to touch still touching.
+
+    **This is the only gate in the pack that asserts an ABSENCE — of a gap.** Every
+    other one asserts a presence: this thing exists and is too big, too thin, too
+    close, too steep. A part that is attached to nothing passes all of them, because
+    its own mesh is fine and it is interfering with nobody; `cad.clash` is happiest
+    of all about a part that touches nothing. On a real boat that arithmetic gave 34
+    of 37 gates green on an assembly whose steering was not connected: a rudder blade
+    hanging 42.9 mm below its own bracket and a pushrod stopping 11.0 mm short of the
+    tiller it was supposed to push.
+
+    **The default question is coverage, and it needs no declaration.** The contact
+    graph is built from the geometry — two parts whose surfaces come within the
+    mating tolerance are an edge — and a part in no contact at all, or a group of
+    parts joined to each other but not to the rest of the assembly, is a finding. The
+    first version of this gate asked only about DECLARED pairs and therefore skipped
+    on the very project the defect came from, which is an absence of evidence
+    rendered as an absence of problems. Coverage is what makes the answer independent
+    of whether anybody thought of the pair that broke.
+
+    **The declarations are kept, because they carry what geometry cannot.** Coverage
+    can say the rudder is touching something; only `clash_allow` with
+    ``"role": "required"``, `mating_pairs` or `assembly_chains` can say it must be
+    touching the BRACKET, and only a chain can say the steering runs servo ->
+    pushrod -> rudder and name the step that broke.
+
+    Four things about the measurement, each of which is a way this gate can be
+    written wrong:
+
+    * **It samples the FACES, not just the vertices.** A tessellated cylinder has
+      vertices only at its two end rings, so a stock passing clean through a bearing
+      bore has no vertex anywhere near it and a vertex-only distance called that pair
+      5.5 mm apart. Written that way this gate would have failed the one joint that
+      was assembled and passed the two that were not. See :func:`_surface_points`.
+    * **A pair that comes out APART is refined until the answer has a bound under
+      it.** The sampled distance is an upper bound on the true one; a pair further
+      apart than the tolerance is re-measured on a barycentric lattice over exactly
+      the triangles that could still hold a contact, and the lattice's covering
+      radius is reported as the error. ``measured - error > tolerance`` is a proof,
+      not an impression. See :func:`_refine_gap`.
+    * **Interpenetration is contact and its gap is 0.** A screw in its insert, a
+      stock in its bearing and a shaft in its tube overlap by design, and a rod
+      modelled inside a solid tube has two surfaces that never meet at all. This gate
+      is asking the opposite question from `cad.clash`, about a different set of
+      pairs, and the two never disagree: one bounds how much material a pair may
+      share, the other bounds how far apart it may be.
+    * **A declared member that is not in the assembly is a failure, not a skip.**
+      The most complete way for a contact to be open is for one end of it never to
+      have been modelled — which is exactly what happened to the rudder stock and
+      the tiller arm that the pushrod was measured against.
+
+    The gate skips on one condition: fewer than two parts, where there is genuinely
+    nothing to measure.
+    """
+    contacts, refusals, chains = _read_required_contacts(ctx)
+    free_standing, free_refusals, free_key = _read_free_standing(ctx)
+    refusals = refusals + free_refusals
+
+    def refused(items: list) -> Verdict:
+        # No locators: this failure is about the DOCUMENT, not the geometry, and
+        # pinning the parts named in a refused entry would light up two parts that
+        # may be perfectly assembled. The same choice cad.clash makes.
+        return Verdict(
+            gate="cad.assembly_connected", passed=False, measured=float(len(items)),
+            limit=0.0, units="refused entries",
+            detail=f"{len(items)} connectivity declaration(s) refused, so the list this "
+                   f"gate would check is not trustworthy: {items[0]}"
+                   + (f" (+{len(items) - 1} more)" if len(items) > 1 else ""),
+            evidence=[_write(ctx, "assembly_connected.json", {"refused_entries": items})])
+
+    if refusals:
+        return refused(refusals)
+
+    meshes, welded, skip = _load_all(ctx, "cad.assembly_connected")
+    if skip is not None:
+        return skip
+
+    names = sorted(meshes)
+    if len(names) < 2:
+        # The ONLY skip. Connectivity is a statement about parts holding each other,
+        # and one part cannot hold itself. Everything else this gate might not know
+        # is reported, never skipped.
+        return _skipped(
+            "cad.assembly_connected",
+            f"the assembly has {len(names)} part(s); connectivity is a relation "
+            f"between parts and there is nothing to measure below two of them. Export "
+            f"every placed solid into the projection's mesh map, not just the one "
+            f"being worked on")
+
+    unknown = sorted(p for p in free_standing if p not in meshes)
+    if unknown:
+        return refused([
+            f"{free_key} names {p!r}, which is not in the assembly — a part that is "
+            f"not modelled cannot be declared free-standing, and the entry is more "
+            f"likely a stale name than a decision" for p in unknown])
+
+    # -- the tolerance ------------------------------------------------------ #
+    declared_tol, tol_key = ctx.first_pack_param_named(MATING_TOL_KEYS)
+    stated = (isinstance(declared_tol, (int, float)) and not isinstance(declared_tol, bool)
+              and math.isfinite(float(declared_tol)) and float(declared_tol) >= 0.0)
+    if stated:
+        tol = float(declared_tol)
+        tol_source = f"{tol_key or MATING_TOL_KEYS[0]}={tol:g} mm"
+    else:
+        tol = float(CONTACT_FALLBACK_TOL_MM)
+        tol_source = (f"{_spellings(ctx, MATING_TOL_KEYS)} is not stated, so contact "
+                      f"is measured at this pack's tessellation floor, {tol:g} mm")
+        if any(row["tol_mm"] is None for row in contacts):
+            return refused([
+                f"{len(contacts)} required contact(s) are declared but no mating "
+                f"tolerance is: {_spellings(ctx, MATING_TOL_KEYS)} is {declared_tol!r} "
+                f"and at least one entry states no tol_mm. How far apart two parts that "
+                f"are DECLARED to touch may be before the joint is not a joint is an "
+                f"assembly decision the model must carry, and this gate will not invent "
+                f"one for a requirement somebody wrote down. (Coverage needs no "
+                f"declaration and would have run at {tol:g} mm; delete the declarations "
+                f"or state the tolerance.)"])
+
+    raw_budget = ctx.first_pack_param(MATING_SAMPLE_KEYS)
+    if raw_budget is None:
+        budget = CONTACT_SAMPLES
+    else:
+        try:
+            budget = int(raw_budget)
+        except (TypeError, ValueError):
+            budget = 0
+        if budget <= 0:
+            return refused([
+                f"'{MATING_SAMPLE_KEYS[0]}' is {raw_budget!r}; it must be a positive "
+                f"number of surface samples per part (omit it for the default "
+                f"{CONTACT_SAMPLES}) — sampling nothing would measure the vertices "
+                f"alone, which is the one way this gate is known to be wrong"])
+
+    solids = {name: _Solid(name, meshes[name]) for name in names}
+    measured: dict[tuple[str, str], dict] = {}
+
+    def measure(a: str, b: str, pair_tol: float, label: bool = False) -> dict:
+        """One pair, measured once. The DECLARED pairs are measured first, so a pair
+        that is both declared and a coverage candidate is judged at the tolerance its
+        own declaration states — which is the stricter of the two whenever they
+        differ, since a per-entry `tol_mm` exists to tighten a joint rather than to
+        loosen it. Conservative either way: a tighter tolerance can only move a pair
+        OUT of the contact graph, which is a finding, never a silence."""
+        key = _pair_key(a, b)
+        if key not in measured:
+            measured[key] = _pair_contact(solids[key[0]], solids[key[1]],
+                                          pair_tol, budget, label=label)
+            measured[key]["tolerance_mm"] = float(pair_tol)
+        return measured[key]
+
+    # -- 1. the declared contacts, at the tolerance the project stated ------ #
+    rows: list[dict[str, Any]] = []
+    for row in contacts:
+        a, b = row["pair"]
+        pair_tol = row["tol_mm"] if row["tol_mm"] is not None else tol
+        record: dict[str, Any] = {
+            "a": a, "b": b, "tolerance_mm": pair_tol, "sources": row["sources"],
+            "chains": row["chains"], "steps": row["steps"],
+            "reason": row["reasons"][0] if row["reasons"] else "",
+        }
+        missing = [name for name in (a, b) if name not in meshes]
+        if missing:
+            record.update(gap_mm=None, error_mm=None, closed=False,
+                          interpenetrating=False, decidable=False, missing=missing,
+                          why=f"{' and '.join(missing)} is not in the assembly at all — "
+                              f"a contact whose member was never modelled is the most "
+                              f"complete way for a joint to be open")
+            rows.append(record)
+            continue
+        result = measure(a, b, pair_tol, label=True)
+        gap = result["gap_mm"]
+        record.update(
+            gap_mm=round(gap, 4) if isinstance(gap, float) else None,
+            error_mm=(None if result["error_mm"] is None
+                      else round(result["error_mm"], 4)), missing=[],
+            interpenetrating=result["interpenetrating"], decidable=result["decidable"],
+            closed=bool(result["touching"]), why=result["why"])
+        rows.append(record)
+
+    # -- 2. coverage: every part must be held by something ------------------ #
+    #
+    # The broad phase is exact as a filter — two parts whose bounding boxes are
+    # further apart than the tolerance cannot have surfaces closer than it — so the
+    # pairs it drops are dropped on arithmetic, not on a budget. On a 30-body boat it
+    # takes 435 pairs down to 61.
+    pairs_total = len(names) * (len(names) - 1) // 2
+    candidates = []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            box = _box_gap(solids[a].lo, solids[a].hi, solids[b].lo, solids[b].hi)
+            if box <= tol:
+                candidates.append((box, a, b))
+    candidates.sort()
+    for _box, a, b in candidates:
+        measure(a, b, tol)
+
+    edges = {key: value for key, value in measured.items() if value["touching"]}
+    degree: dict[str, int] = {name: 0 for name in names}
+    closest: dict[str, tuple] = {}
+    for (a, b), value in edges.items():
+        degree[a] += 1
+        degree[b] += 1
+        gap = value["gap_mm"] if isinstance(value["gap_mm"], float) else 0.0
+        for near, far in ((a, b), (b, a)):
+            if near not in closest or gap < closest[near][1]:
+                closest[near] = (far, gap)
+
+    groups = _components(names, measured)
+    held = [name for name in names if degree[name]]
+    unheld = [name for name in names if not degree[name] and name not in free_standing]
+    detached = [group for group in groups[1:]
+                if len(group) > 1 and not all(m in free_standing for m in group)]
+
+    coverage = {
+        "parts": len(names), "pairs_total": pairs_total,
+        "pairs_within_reach": len(candidates), "pairs_measured": len(measured),
+        "contacts_found": len(edges), "parts_held": len(held),
+        "components": groups, "unheld": unheld,
+        "detached_groups": detached,
+        "free_standing": free_standing, "free_standing_key": free_key,
+        "contact_tolerance_mm": tol, "tolerance_source": tol_source,
+    }
+
+    # -- 3. one headline row, and every number in the verdict comes FROM it -- #
+    #
+    # `measured`, `limit` and the pair named in `detail` used to be taken from
+    # DIFFERENT rows: the worst gap in the assembly, the tolerance of the worst
+    # OPEN pair, and the name of a third. On a pass it could print a measurement
+    # larger than the limit it was compared against. A verdict that misattributes
+    # its own number is the exact thing this project exists to prevent, so the
+    # headline is built once, here, and nothing below reads anything else.
+    headline: dict[str, Any] = {}
+
+    def head(kind, a, b, value, limit, note):
+        return {"kind": kind, "a": a, "b": b, "measured_mm": value,
+                "limit_mm": limit, "note": note}
+
+    if unheld:
+        scanned = unheld[:_MAX_NAMED]
+        for name in scanned:
+            others = [solids[o] for o in names if o != name]
+            near, gap = _nearest(solids[name], others, budget)
+            coverage.setdefault("nearest", {})[name] = {
+                "part": near, "gap_mm": round(gap, 4) if math.isfinite(gap) else None}
+        worst = max(scanned,
+                    key=lambda n: (coverage["nearest"][n]["gap_mm"] is None,
+                                   coverage["nearest"][n]["gap_mm"] or 0.0))
+        near = coverage["nearest"][worst]
+        headline = head("unattached part", worst, near["part"] or "",
+                        near["gap_mm"], round(tol, 4),
+                        "held by nothing: no other part comes within the contact "
+                        "tolerance of it")
+    elif detached:
+        group = detached[0]
+        main = set(groups[0])
+        best = ("", "", math.inf)
+        for name in group:
+            others = [solids[o] for o in sorted(main)]
+            near, gap = _nearest(solids[name], others, budget)
+            if gap < best[2]:
+                best = (name, near, gap)
+        coverage["detachment"] = {
+            "group": group, "part": best[0], "nearest_in_assembly": best[1],
+            "gap_mm": round(best[2], 4) if math.isfinite(best[2]) else None}
+        headline = head("detached group", best[0], best[1],
+                        round(best[2], 4) if math.isfinite(best[2]) else None,
+                        round(tol, 4),
+                        f"a group of {len(group)} part(s) joined to each other and to "
+                        f"nothing else in the assembly")
+
+    open_rows = [r for r in rows if not r["closed"]]
+    # Worst first, and a member that does not exist outranks any measured gap: "the
+    # part is not there" is a bigger statement than "the part is 3 mm away".
+    open_rows.sort(key=lambda r: (r["gap_mm"] is not None,
+                                  -((r["gap_mm"] or 0.0) - (r["tolerance_mm"] or 0.0))))
+    closed = len(rows) - len(open_rows)
+    sharing = sum(1 for r in rows if r["interpenetrating"])
+
+    if not headline and open_rows:
+        first = open_rows[0]
+        headline = head("open declared contact", first["a"], first["b"],
+                        first["gap_mm"], first["tolerance_mm"],
+                        "a declared member is not in the assembly" if first["missing"]
+                        else "declared to be in contact and measurably apart")
+
+    # WHERE a chain breaks, not just which pairs are open. A chain reported as
+    # "servo -> pushrod closed, pushrod -> rudder OPEN 11.0 mm" is a sentence a
+    # reader can act on; the same fact as a set of unordered pairs is a puzzle.
+    breaks = []
+    for name in sorted(chains):
+        steps = sorted(((step["index"], step["step"], row)
+                        for row in rows for step in row["steps"]
+                        if step["chain"] == name), key=lambda item: item[0])
+        for index, arrow, row in steps:
+            if row["closed"]:
+                continue
+            gap = row["gap_mm"]
+            breaks.append(f"chain {name!r} breaks at step {index}, {arrow} "
+                          + (f"({gap:.1f} mm apart)" if isinstance(gap, float)
+                             else "(member missing)"))
+            break
+
+    # How much of the assembly was actually looked at. The old pass line read
+    # "N of N declared contact(s) closed", whose denominator is the DECLARATION —
+    # a statement about the document that reads as a statement about the assembly.
+    examined = (f"{len(names)} of {len(names)} parts examined; {pairs_total} part "
+                f"pair(s), {len(candidates)} within contact reach, {len(measured)} "
+                f"measured in all at {tol:g} mm ({tol_source})")
+
+    failed = bool(unheld or detached or open_rows)
+    if not headline:
+        # -- a pass. The headline is the most LOOSELY held part in the graph --- #
+        if closest:
+            loosest = max(names, key=lambda n: closest.get(n, ("", 0.0))[1])
+            partner, slack = closest[loosest]
+            headline = head("loosest contact", loosest, partner,
+                            round(float(slack), 4), round(tol, 4),
+                            "the part whose closest contact is the widest of any "
+                            "part's")
+        else:
+            # Reachable only when every part is declared free-standing: nothing
+            # touches anything and every absence is accounted for. There is no
+            # contact to quote, so the verdict quotes that rather than inventing a
+            # distance for a pair that does not exist.
+            headline = head("no contacts", "", "", 0.0, 0.0,
+                            "every part in the assembly is declared free-standing")
+
+    movers = PARTS.movers(meshes)
+    undecided = sorted(f"{a}/{b}" for (a, b), v in measured.items()
+                       if not v["touching"] and not v["decidable"])
+    caveat = (f"; {len(undecided)} pair(s) UNDECIDED ({', '.join(undecided[:2])}"
+              + ("..." if len(undecided) > 2 else "") + ")") if undecided else ""
+
+    evidence = [_write(ctx, "assembly_connected.json", {
+        "contacts": rows, "chains": chains, "coverage": coverage,
+        "headline": headline, "default_tolerance_mm": tol if stated else None,
+        "tolerance_key": tol_key or MATING_TOL_KEYS[0],
+        "samples_per_part": budget, "refused_entries": [],
+        "pairs": [dict(value, a=a, b=b) for (a, b), value in sorted(measured.items())],
+    })]
+
+    if failed:
+        locators: list[Locator] = []
+        if headline["kind"] == "unattached part":
+            for name in unheld[:_MAX_LOCATORS]:
+                near = (coverage.get("nearest") or {}).get(name, {})
+                gap = near.get("gap_mm")
+                label = ("held in place by nothing — nearest part "
+                         + (f"{near.get('part')} {_gap_text(gap)} away"
+                            if near.get("part") else "unknown")
+                         + f", and contact is {tol:g} mm")
+                locators.append(_locate(movers, name, label=label, value=gap))
+            detail = (f"{len(unheld)} part(s) HELD BY NOTHING — worst "
+                      f"{headline['a']} {_gap_text(headline['measured_mm'])} from "
+                      f"{headline['b']}, the nearest part in the assembly, vs "
+                      f"{tol:g} mm contact"
+                      + (f" ({', '.join(unheld[:_MAX_NAMED])}"
+                         + (f" +{len(unheld) - _MAX_NAMED} more" if len(unheld) > _MAX_NAMED else "")
+                         + ")" if len(unheld) > 1 else "")
+                      + (f"; {len(detached)} detached group(s)" if detached else "")
+                      + (f"; {len(open_rows)} of {len(rows)} declared contact(s) open"
+                         if rows else "; nothing declared")
+                      + (f"; {breaks[0]}" if breaks else "")
+                      + f"; {examined}" + caveat + _welded_note(welded))
+        elif headline["kind"] == "detached group":
+            group = coverage["detachment"]["group"]
+            for name in group[:_MAX_LOCATORS]:
+                locators.append(_locate(
+                    movers, name,
+                    label=f"in a {len(group)}-part group joined to nothing else in the "
+                          f"assembly; nearest is {headline['b']} "
+                          f"{_gap_text(headline['measured_mm'])} away"))
+            detail = (f"the assembly is in {len(groups)} disconnected piece(s) — "
+                      f"{len(group)} part(s) ({', '.join(group[:_MAX_NAMED])}"
+                      + (f" +{len(group) - _MAX_NAMED} more" if len(group) > _MAX_NAMED else "")
+                      + f") joined to each other and to nothing else; closest approach "
+                      f"{headline['a']} to {headline['b']} "
+                      f"{_gap_text(headline['measured_mm'])} vs {tol:g} mm contact"
+                      + (f"; {len(open_rows)} of {len(rows)} declared contact(s) open"
+                         if rows else "; nothing declared")
+                      + (f"; {breaks[0]}" if breaks else "")
+                      + f"; {examined}" + caveat + _welded_note(welded))
+        else:
+            first = open_rows[0]
+            shown = (f"{first['gap_mm']:.2f} mm apart"
+                     if isinstance(first["gap_mm"], float)
+                     else (f"{' and '.join(first['missing'])} missing from the assembly"
+                           if first["missing"] else "unmeasurable"))
+            detail = (f"{len(open_rows)} of {len(rows)} declared contact(s) OPEN — worst "
+                      f"{first['a']}/{first['b']} {shown} vs "
+                      f"{first['tolerance_mm']:g} mm allowed"
+                      + (f"; {breaks[0]}" if breaks else "")
+                      + f"; every part is held by something"
+                      + f"; {examined}" + caveat + _welded_note(welded))
+            # THE PAYOFF, and the reason this gate carries locators at all: a part
+            # attached to nothing is invisible in a render and obvious the moment both
+            # ends of the joint that is not a joint light up. Two pins per open pair —
+            # the floating part and what it is supposed to be attached to — because
+            # either one of them may be the one that moved.
+            for row in open_rows[:_MAX_LOCATORS // 2]:
+                gap = row["gap_mm"]
+                for near, far in ((row["a"], row["b"]), (row["b"], row["a"])):
+                    if near not in meshes:
+                        continue
+                    if isinstance(gap, float):
+                        label = (f"{gap:.2f} mm from {far}, declared to be in contact "
+                                 f"with it (limit {row['tolerance_mm']:g} mm)")
+                    elif row["missing"]:
+                        label = f"declared to touch {far}, which is not in the assembly"
+                    else:
+                        label = f"contact with {far} could not be measured: {row['why'][:60]}"
+                    locators.append(_locate(movers, near, label=label, value=gap))
+        return Verdict(
+            gate="cad.assembly_connected", passed=False,
+            measured=headline["measured_mm"], limit=headline["limit_mm"],
+            units="mm", detail=detail, evidence=evidence, locators=locators)
+
+    # -- 4. a pass ---------------------------------------------------------- #
+    declared_clause = ""
+    if rows:
+        worst_row = max(rows, key=lambda r: (r["gap_mm"] or 0.0) - (r["tolerance_mm"] or 0.0))
+        declared_clause = (
+            f"; {len(rows)} declared contact(s) all closed ({sharing} interpenetrating "
+            f"by design), worst {worst_row['a']}/{worst_row['b']} "
+            f"{_gap_text(worst_row['gap_mm'])} vs {worst_row['tolerance_mm']:g} mm allowed")
+        if chains:
+            declared_clause += ("; " + ", ".join(
+                f"chain {n!r} continuous over {len(chains[n]) - 1} step(s)"
+                for n in sorted(chains)))
+    else:
+        declared_clause = ("; nothing is declared, so WHICH parts hold which is "
+                           "unproven — coverage says only that none is adrift")
+    free_clause = (f"; free-standing by declaration: "
+                   f"{', '.join(sorted(free_standing)[:_MAX_NAMED])}"
+                   + (f" +{len(free_standing) - _MAX_NAMED} more"
+                      if len(free_standing) > _MAX_NAMED else "")
+                   if free_standing else "")
+    # Never say "one connected assembly" when it is not one. A pass here can still
+    # have more than one piece — every extra piece declared free-standing — and a
+    # verdict that rounds that off to "connected" is claiming something nobody
+    # proved, which is the same defect as the misattributed measurement above.
+    shape = ("one connected assembly" if len(groups) == 1 else
+             f"{len(groups)} separate piece(s), every one beyond the largest declared "
+             f"free-standing")
+    lead = (f"every one of {len(names)} part(s) is held" if len(held) == len(names)
+            else f"{len(held)} of {len(names)} part(s) held by another part, the "
+                 f"remaining {len(names) - len(held)} declared free-standing")
+    detail = ((f"{lead}: {shape}, {len(edges)} contact(s), loosest "
+               f"{headline['a']}/{headline['b']} at "
+               f"{_gap_text(headline['measured_mm'])} vs {tol:g} mm"
+               if headline["kind"] == "loosest contact" else
+               f"all {len(names)} part(s) are declared free-standing and none touches "
+               f"another; there is no contact in this assembly to measure")
+              + free_clause + declared_clause + f"; {examined}" + caveat
+              + _welded_note(welded))
+    return Verdict(
+        gate="cad.assembly_connected", passed=True,
+        measured=headline["measured_mm"], limit=headline["limit_mm"],
+        units="mm", detail=detail, evidence=evidence)

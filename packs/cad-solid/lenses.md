@@ -88,7 +88,37 @@ worst one.
 - Under vibration, what walks? A part that floats within a clearance will migrate to
   one end of it and stay there.
 
-## 5. The kernel's tolerance budget
+## 5. What in this assembly is held in place by nothing?
+
+The lens that a whole revision of a real boat needed and nobody ran. Every other
+question here, and every gate in the pack, is about something being *wrong*: too
+big, too thin, too close, not closed. This one is about something being *absent* —
+and an absence is invisible to a check that looks for a presence, because the part
+that is attached to nothing has a perfect mesh and interferes with no one.
+
+- Go part by part, out loud, and name **what holds it**. Not "it sits in the
+  housing" — which face, which screw, which shoulder, which bond line? A part whose
+  answer is a sentence with no noun in it is floating.
+- Trace every chain end to end and say the joints in order: servo, pushrod, tiller,
+  stock, blade. Then find each joint in the geometry. On that boat the answer for
+  two of them was *there is no such part* — no stock, no tiller arm — and the rudder
+  blade hung 42.9 mm below its own bracket while 34 of 37 gates read green.
+- For every pair you have just named, ask the reverse of the clash question: not
+  "may these two share material" but **"must these two touch, and does the model say
+  so anywhere a gate can read it?"** Half of an ordinary `clash_allow` list is
+  already that list — a screw in its insert, a stock in its bearing, a shaft in its
+  tube — written down for the other reason.
+- Where does load actually *go*? Follow it from where it is applied to where it is
+  reacted, naming each interface. A load path with a gap in it is a part that will
+  move until it finds one.
+- Which of these joints did a *fix* create, and is the fix in the model or only in
+  the assembly instructions? "The stock goes through the bracket's boss" is not true
+  of the geometry until there is a boss and a stock in the geometry.
+- Then declare them — `role: "required"`, `mating_pairs`, `assembly_chains` — so the
+  next revision cannot quietly take one away. An undeclared requirement is one that
+  only exists in the head of whoever noticed it.
+
+## 6. The kernel's tolerance budget
 
 The check nobody runs, and the only one that catches a whole class of silently
 wrong geometry.
@@ -104,7 +134,7 @@ wrong geometry.
   how much it missed. That gap is a real design error somewhere upstream, and the
   heal has hidden it in a file that now passes every check.
 
-## 6. What the gates cannot see at all
+## 7. What the gates cannot see at all
 
 Ask these out loud, because no gate here will:
 
@@ -112,6 +142,10 @@ Ask these out loud, because no gate here will:
   minimum internal radius, support geometry?
 - Does it self-intersect while remaining closed and consistently wound? Nothing in
   this pack detects that.
+- Do the declared contacts touch on the faces you *meant*? `cad.assembly_connected`
+  proves a declared pair is not adrift, not that it is seated: a part that has come
+  off its shoulder but is still near its neighbour somewhere else still measures as
+  touching.
 - Is the clearance you did not model — for a finish, a coating, a label, a
   tolerance on a bought-in part — accounted for anywhere?
 - Is the bought-in part's model accurate? A vendor STEP file is a marketing

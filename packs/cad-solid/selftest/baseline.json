@@ -10,6 +10,10 @@
     "assembly_com_target_mm": ["com_target_mm"],
     "assembly_com_tol_mm": ["com_tol_mm"],
     "process_min_wall_mm": ["min_wall_mm"],
+    "max_mating_gap_mm": ["mating_tolerance_mm"],
+    "mating_pairs": ["assembly_joints"],
+    "assembly_chains": ["mating_chains", "linkages"],
+    "free_standing_parts": ["unattached_parts", "context_parts"],
     "meshes": ["solids", "parts"]
   },
 
@@ -30,7 +34,12 @@
     "clash_depth_tols_mm": "{'a|b': mm} per-pair overrides of the depth tolerance. Empty for the same reason as clash_tolerances_mm3: the curved pair already gets the larger organic depth (0.05 mm, a tessellated curve's chord height) from organic_parts.",
     "organic_parts": "Parts with a curved or lofted surface. Any pair touching one of these gets the larger organic tolerance (3 mm^3) instead of the prismatic default, because chord error on a tessellated curve is genuinely bigger than boolean noise. Per-pair on purpose: raising the GLOBAL tolerance to silence one curved pair is how a real overlap between two flat plates stays hidden.",
     "sliding_fits": "Pairs that are meant to MOVE relative to each other. cad.clash REFUSES an allowlist entry for one of these - 'they touch' and 'they jam' look identical to a boolean at a single pose, so the pair that must move is the pair that most needs the check.",
-    "clash_allow": "[{pair, reason}] intended contacts that are not interference. Every entry needs a stated reason, may not wildcard either side, and may not name a sliding pair; cad.clash FAILS the whole gate if an entry breaks those rules rather than quietly ignoring it.",
+    "clash_allow": "[{pair, reason, role}] intended contacts that are not interference. Every entry needs a stated reason, may not wildcard either side, and may not name a sliding pair; cad.clash FAILS the whole gate if an entry breaks those rules rather than quietly ignoring it. `role` is read by cad.assembly_connected and by nothing else: \"required\" means this pair must also still BE in contact (a screw in its insert, a stock in its bearing, a shaft in its tube - half an allowlist usually is), \"permitted\" means it merely may interfere. The list is written once and read from both directions; an unrecognised role is refused rather than treated as 'not required'.",
+    "max_mating_gap_mm": "How far apart two parts may be and still count as touching, mm. It is the default for every DECLARED required contact (an entry may state its own tol_mm) and it is also the threshold the coverage graph uses for 'these two parts are in contact', which is the same physical question asked without a name attached. cad.assembly_connected will not invent one for a DECLARED contact - it fails and says so - but coverage still runs without it, at the pack's tessellation floor (0.05 mm), because a gate that goes quiet when nobody declared anything is the defect it exists to find. 0.2 mm here sits between the two numbers that bracket it: an order above the 0.013 mm chord height a 48-sided tessellation of the roller can leave against the floor it rests on (this one lands a vertex ring on the floor, so the modelled contact measures 0.000 mm, but a different phase of the same tessellation would show that chord), and well below the 0.4 mm running clearance, which is a real designed gap elsewhere in this assembly and must never read as a contact. Falls back to mating_tolerance_mm.",
+    "mating_pairs": "[{pair, reason, tol_mm}] pairs that MUST be in contact and never interfere, so they never needed a clash_allow entry - a foot on a floor, a flange on a rim. Same three refusals as clash_allow (no reason, a wildcard, a part named twice) and the gate FAILS on a bad entry rather than ignoring it. The pairs that DO interfere by design are declared once, on the clash_allow entry that already names them, with \"role\": \"required\". Falls back to assembly_joints.",
+    "assembly_chains": "{name: {chain: [a, b, c, ...], reason, tol_mm}} ordered chains whose every CONSECUTIVE pair must be in contact. The ordered form is worth more than the same pairs unordered because the verdict can say WHERE the chain breaks and how far. A pair declared both here and as a clash_allow role is one contact, not two, and the TIGHTEST stated tolerance governs. Falls back to mating_chains, linkages.",
+    "mating_samples": "Surface sample points per part for cad.assembly_connected, as a count. The gate samples the FACES area-weighted as well as the vertices, because a tessellated cylinder has vertices only at its two end rings and a vertex-only distance measured a stock passing clean THROUGH a bearing bore as 5.5 mm apart. Must be a positive integer; the gate SKIPS rather than silently defaulting if it is anything else.",
+    "free_standing_parts": "[{part, reason}] parts that are attached to nothing ON PURPOSE - a loose tool, a part shown for context, a component held by something that is not modelled. cad.assembly_connected builds the contact graph from the geometry and reports every part in no contact at all, WITHOUT any declaration, because the assembly it was hardened against declared nothing and had a rudder hanging in space; this list is how a project says 'yes, and here is why'. Same three refusals as clash_allow - no reason, a wildcard, a name that is not in the assembly - and the gate FAILS on a bad entry rather than honouring it, because an entry with no reason is a silencer for the one check here that needs no foresight. Empty here: every part of this enclosure is held by another one. Falls back to unattached_parts, context_parts.",
     "bonded_joints": "[{pair, reason}] joints DESIGNED to be face to face - glued, welded, bonded. The honest middle between 'every contact is a failure' and clash_allow: the VOLUME tolerance is waived for the pair, because shared volume on a bond line is depth times glue area and the glue area is a design quantity that is legitimately large; the DEPTH tolerance is NOT, and a bonded pair deeper than 0.05 mm still FAILS. Same three refusals as clash_allow - no reason, a wildcard, a sliding pair - plus a pair that is also allowlisted, because then which declaration governs is a guess. Empty here: this enclosure is bolted, not bonded, and an entry invented for a joint that does not exist is how the mechanism stops meaning anything."
   },
 
@@ -61,8 +70,26 @@
   "clash_allow": [
     {
       "pair": ["cover", "housing"],
-      "reason": "the cover is bolted flat onto the housing rim; that face contact is the gasket seat, not interference"
+      "role": "required",
+      "reason": "the cover is bolted flat onto the housing rim; that face contact is the gasket seat, not interference - and it is a REQUIRED contact, because a cover that is not on the rim is not sealing anything"
     }
   ],
-  "bonded_joints": []
+  "bonded_joints": [],
+
+  "free_standing_parts": [],
+
+  "max_mating_gap_mm": 0.2,
+  "mating_samples": 2000,
+  "mating_pairs": [
+    {
+      "pair": ["guide_roller", "housing"],
+      "reason": "the roller rests on the cavity floor and is what stops the carriage at the -X end of its travel; a stop that is not on the floor it is located by is not a stop"
+    }
+  ],
+  "assembly_chains": {
+    "clamp_path": {
+      "chain": ["cover", "housing", "carriage"],
+      "reason": "the load path of the closed enclosure: the bolted cover seats on the housing rim and the carriage sits on the cavity floor. Both consecutive pairs are contacts by design, and the ordered form is what lets the verdict say which end came apart"
+    }
+  }
 }

@@ -140,7 +140,7 @@ Ten rules, in [`METHOD.md`](METHOD.md). The short version:
 | Pack | Gates | Needs | Settles |
 |---|---|---|---|
 | `beam-analytic` | 8 (8 tier-0) | none | tip deflection, mid-span deflection, deflection ratio, span over deflection limit, stiffness |
-| `cad-solid` | 6 (1 tier-0) | trimesh, numpy | watertightness, solid validity, degenerate faces, duplicate vertices, part interference |
+| `cad-solid` | 7 (1 tier-0) | trimesh, numpy | watertightness, solid validity, degenerate faces, duplicate vertices, part interference |
 | `fdm-print` | 7 (5 tier-0) | trimesh, numpy | bed fit, bridge span, build volume, cantilever overhang, filament mass |
 | `fluids-analytic` | 7 (7 tier-0) | none | buoyancy, displaced volume fraction, freeboard at load, reserve buoyancy, metacentric height |
 | `sourcing` | 7 (7 tier-0) | none | bill of materials completeness, unpriced line, build cost per unit, rolled-up cost, budget |

@@ -43,6 +43,10 @@ from __future__ import annotations
 import json
 import os
 
+#: derived key -> the spelling `baseline.json` states it under. See `main`.
+PRIMARY_KEYS = {"bbox_mm": "assembly_bbox_mm", "volume_mm3": "assembly_volume_mm3",
+                "com_mm": "assembly_com_mm"}
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACK = os.path.dirname(HERE)
 MESH_DIR = os.path.join(HERE, "meshes")
@@ -195,7 +199,14 @@ def main():
     if baseline.get("meshes") != paths:
         drift.append(f"meshes: projection says {baseline.get('meshes')}, built {paths}")
     for key, value in derived.items():
-        stated = baseline.get(key)
+        # The projection states each of these under the key that names the OBJECT
+        # (`assembly_bbox_mm`), because `fdm-print` reads the bare spelling for one
+        # printed part. This check compared the bare spelling only, so after the
+        # rename it read `None` for all three and reported drift on an assembly that
+        # had not moved -- a drift check that always fires is a drift check nobody
+        # reads. The primary spelling is tried first and the bare one is kept as the
+        # fallback the pack still accepts.
+        stated = baseline.get(PRIMARY_KEYS.get(key, key), baseline.get(key))
         same = (stated == value if not isinstance(value, list)
                 else (isinstance(stated, list) and len(stated) == len(value)
                       and all(abs(float(a) - float(b)) <= 5e-4 for a, b in zip(stated, value))))

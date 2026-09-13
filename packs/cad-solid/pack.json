@@ -1,7 +1,7 @@
 {
   "name": "cad-solid",
   "version": "0.1.0",
-  "description": "Validates that exported solids are real solids and that placed parts do not interfere: watertightness, volume validity, degenerate faces, clash, envelope, wall thickness.",
+  "description": "Validates that exported solids are real solids, that placed parts do not interfere, and that every part is held by something: watertightness, validity, clash, contact coverage, envelope, wall.",
   "settles": [
     "watertightness",
     "solid validity",
@@ -10,14 +10,31 @@
     "part interference",
     "clash detection",
     "assembly fit",
+    "assembly connectivity",
+    "mating contact",
+    "parts held by nothing",
+    "unattached parts",
+    "disconnected parts",
+    "declared linkage continuity",
     "bounding box",
     "envelope fit",
     "centre of mass",
     "minimum wall thickness"
   ],
   "claim_classes": [
-    "geometry", "mesh", "cad", "assembly", "fit", "manufacturability",
-    "envelope", "packaging", "wall", "interference", "mechanical"
+    "geometry",
+    "mesh",
+    "cad",
+    "assembly",
+    "fit",
+    "manufacturability",
+    "envelope",
+    "packaging",
+    "wall",
+    "interference",
+    "connectivity",
+    "linkage",
+    "mechanical"
   ],
   "provides_gates": [
     "cad.bounding",
@@ -25,18 +42,26 @@
     "cad.is_volume",
     "cad.degenerate_faces",
     "cad.wall_thickness",
-    "cad.clash"
+    "cad.clash",
+    "cad.assembly_connected"
   ],
-  "provides_views": ["assembly"],
+  "provides_views": [
+    "assembly"
+  ],
   "provides_generators": [],
   "requires_tools": [],
-  "requires_python": ["trimesh", "numpy"],
+  "requires_python": [
+    "trimesh",
+    "numpy"
+  ],
   "max_tier": 1,
   "lenses": [
     "assembly order",
     "tolerance stack",
     "the pose you did not check",
     "what floats and where it settles",
+    "what is held in place by nothing",
+    "what is held by something that is not modelled",
     "kernel tolerance budget"
   ],
   "licence": "Apache-2.0",
