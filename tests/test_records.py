@@ -78,7 +78,15 @@ from nopekit.models import (
 )
 from nopekit.util import NopekitError
 
-PHASE_1 = os.path.join(_env.REPO, "docs", "plan", "phase-1.md")
+#: Phase 1's canonical `claims/C1.json`, as its plan wrote it (docs/plan/phase-1.md,
+#: retired at a00d0e5 when docs/SPEC.md replaced the plan). What slipped through the
+#: retirement: this test read the plan file itself, so deleting the plan turned the
+#: full suite red at the commit that deleted it. The bytes now live here, where the
+#: test that holds them can see them.
+PHASE_1_C1 = """{"statement": "Tip sags no more than 0.5 mm at rated load", "kind": "measurable",
+ "acceptance": {"quantity": "tip deflection", "comparator": "<=", "limit": 0.5, "units": "mm"},
+ "rationale": "past ~0.5 mm the droop is visible against a level shelf edge; this is a product decision, not a physics one",
+ "tags": ["stiffness"]}"""
 
 #: The bytes of the one evidence file the rich legacy ledger ingested.
 NAPKIN = b"\x89PNG not really a png\n"
@@ -465,16 +473,8 @@ class StrictReader(_env.EnvCase):
 # the writer
 # --------------------------------------------------------------------------- #
 def _phase_1_c1() -> str:
-    """phase-1.md's `claims/C1.json` example, as the plan writes it."""
-    with open(PHASE_1, encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-    start = lines.index("// claims/C1.json") + 1
-    body: list[str] = []
-    for line in lines[start:]:
-        if line.startswith("```"):
-            break
-        body.append(line)
-    return "\n".join(body)
+    """Phase 1's `claims/C1.json` example (``PHASE_1_C1``)."""
+    return PHASE_1_C1
 
 
 class RecordWriter(_env.EnvCase):
