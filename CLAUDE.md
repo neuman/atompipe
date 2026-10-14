@@ -267,8 +267,8 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     `report --milestone` said the boundary's *ready* over a forged cache and `status`
     listed no milestone at all.)
 
-One more came with checkpoint P2.3, numbered as PLAN §4.0.1 numbers it (13 and 14 land
-with their mechanisms: preferences in P4, the site in P5). Enforced in
+One more came with checkpoint P2.3 (13 and 14 are reserved for the preference and site
+mechanisms, which `docs/SPEC.md` now schedules). Enforced in
 `tests/test_mutation.py`, over every mutation entry point in `src/`:
 
 15. **A mutation pass writes nothing, changes nothing it was handed, and never says more
@@ -381,7 +381,7 @@ layout in full, with each writer.
 | `docs/PACK_FORMAT.md` | the pack contract |
 | `docs/SITE_CONTRACT.md` | the site: view kinds, locators, `state.json` |
 | `docs/SPINE_CONTRACT.md` | internal: where facts live, each module's public surface, and the limits — what the spine cannot see |
-| `docs/PLAN.md` | the paper mapped onto the repo: gap-map rows (marked `closed` as their proofs land), invariants, sequencing rules; `docs/plan/` holds each phase's detail |
+| `docs/SPEC.md` | the architecture as decided on 2026-10-14: terms, what stays, each decision with its reason, the layout, the site, the sequence of work. The only plan. Ids like `D-14`, `S-60`, `P2.5b` in code comments refer to the retired plan, readable at commit `a00d0e5` |
 
 ## Adding a pack
 

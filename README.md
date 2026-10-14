@@ -1,5 +1,7 @@
 # nopekit
 
+<img src="docs/img/nopey.png" width="360" alt="Nopey the honey badger, nopekit's mascot: goggles, a tool belt, a wrench and a red toolbox">
+
 A framework for **grounding by falsification**: propose candidates as fast as you
 like, and keep an honest account of which claims about them have survived an
 evaluator that could have rejected them — and which have not.

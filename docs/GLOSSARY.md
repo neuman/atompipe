@@ -9,12 +9,11 @@ reason for the word it uses instead.
 The rule binds **human channels** (§7): whatever a person reads, or an agent repeats to
 one. It does not rename code. Identifiers, record keys, directories and CLI subcommands
 keep today's spelling until the rename pass, which works from §8; the *Code today* column
-is the map between the two. The one exception is the state directory, which moves to
-`.groundspace/` in P3 under its own migration ([`PLAN-v0.14.md`](PLAN-v0.14.md) §2.1).
+is the map between the two.
 
 **A development document.** The release bundle strips this file, as it strips
-`docs/PLAN*`: it quotes the paper and maps it onto code, and the agents that test nopekit
-in a sandbox must not share that prior (PLAN-v0.14, top). The words it fixes reach a user
+`docs/SPEC.md`: it quotes the paper and maps it onto code, and the agents that test nopekit
+in a sandbox must not share that prior. The words it fixes reach a user
 through what the tool prints (`report.HUMAN`, planned) and through the skills.
 
 What slipped through, and why this file exists: one word had come to mean four things.
@@ -294,7 +293,6 @@ owns a word.
 
 Not applied now. CLI subcommands stay: removing one a pack, skill or doc references is an
 ask-list item, so the pass adds aliases and changes output text, never removes a command.
-The state directory is not in this table: it moves in P3 (PLAN-v0.14 §2.1).
 
 | Today | Glossary term | Proposed |
 |---|---|---|

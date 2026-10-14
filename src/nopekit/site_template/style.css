@@ -593,3 +593,7 @@ text.s0, text.s1, text.s2, text.s3, text.s4, text.s5 { fill: currentColor; strok
 .annot-blurb { font-size: .84rem; color: var(--ink-2); }
 .annot-links { display: flex; flex-wrap: wrap; gap: .1em .6em; margin: 0; }
 .annot-links:empty { display: none; }
+
+/* Made with nopekit: the badge and two lines, at the bottom of every site. */
+.made-with { display: flex; gap: 1.5rem; align-items: center; margin-top: 3rem; }
+.made-with img { flex: 0 0 auto; }
