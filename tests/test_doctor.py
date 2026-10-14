@@ -83,7 +83,10 @@ ROWS = ("instruments", "opaque-inputs", "cache-entries", "two-outcomes", "sealed
         "imports", "env-reads", "memos", "dynamic-imports", "code-digest", "pending-controls",
         "orphan-entries", "qualification", "known-good",
         # P2.5b: the milestones, their export records and packages, the report.
-        "milestones", "exports", "report")
+        "milestones", "exports", "report",
+        # Architecture phase 1 (SPEC decisions 12, 13): the requirements and the
+        # mechanisms' evaluator names.
+        "requirements", "mechanisms")
 
 #: A fixture every planted project gate can borrow: the bracket's own, which
 #: sags the known-good design 30 mm — past any limit the planted gates use.

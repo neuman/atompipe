@@ -26,10 +26,12 @@ The hard part is never the domain. It is knowing which of your claims have actua
 been checked.
 
 ```
-claims  ->  gates  ->  packs  ->  readiness report
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
 ```
 
-A **claim** is something that must be true for a candidate to be accepted. A **gate**
+A **requirement** is what the person asked for, in their words; each claim names the
+requirements it serves. A **claim** is something that must be true for a candidate to
+be accepted. A **gate**
 is an evaluator that settles a claim *and is capable of failing*. A **pack** supplies
 gates for one domain. The **readiness report** is the claims and their verdicts
 rendered: what is checked, what is not, and why.
@@ -148,8 +150,10 @@ Records are files — one fact, one file, in the project, under git:
 my-project/
   model/bracket.py          the model: each parameter's value, why, and what lost (PARAMS)
   gates/   selftest/        the project's own gates, and the known-bad inputs they must fail on
-  claims/C1.json            one claim per file: what must be true, and its limit
+  requirements/R1.json      what the person asked for, in their words; claims name the ones they serve
+  claims/C1.json            one claim per file: what must be true, its limit, and how it settles
   params/  decisions/  needs/  inputs/  results/  views/     one record per file
+  milestones/  exports/     a spend and the claims it requires; that spend's sealed exports
   .nopekit/project.json    the project: its name, its model entry, its live packs
   .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
   .nopekit/ledger.json     an index of every record, generated (ignored: never edit it)
@@ -168,7 +172,8 @@ to keep: git and the verdict cache are the history.
 
 Ten rules, in [`METHOD.md`](METHOD.md). The short version:
 
-1. One parametric model is the only source of truth; everything else is generated.
+1. One set of instructions, whatever its layers, is the only source of truth; everything
+   else is generated.
 2. Derive, never duplicate.
 3. Every constant carries its provenance — especially the alternatives that lost.
 4. Validators are gates, not loggers. *A logger is not a gate.*
@@ -235,8 +240,8 @@ nopekit ask                   what evidence to request from the human
 nopekit ingest <files>        sketches, photos, CAD, datasheets, measurements
 nopekit extract <artifact>    what was read out of it, and what that grounds
 nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
-nopekit gap [--propose]       claims with no gate, and packs that might cover them
-nopekit why <param|claim>     one thing's full history, instead of the whole log
+nopekit gap [--propose]       every claim whose mechanism has yet to run, and packs that might run it
+nopekit why <name>            one param's, claim's or requirement's full history
 nopekit gate selftest         every negative control; fails any gate that can't fail
 nopekit report [--write]      the readiness report (--write: REPORT.md, an ignored output)
 nopekit export <milestone>    the spend: re-runs what it requires, then builds out/<milestone>/

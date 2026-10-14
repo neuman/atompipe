@@ -1092,8 +1092,11 @@ _LEDGER_FIELD_SET = frozenset(_LEDGER_FIELDS)
 
 #: Reading one of these through ``ctx.ledger`` makes the whole list an input.
 #: openmodelica's ``claims_addressable`` walks ``claims``: honest (packs:H21).
+#: SPEC decision 12 adds ``requirements``: a gate that reads what the person
+#: asked for is honest, and traced like ``milestones``; untraced, an edit to a
+#: requirement would leave its verdict Fresh.
 _LEDGER_WHOLE = frozenset({"claims", "params", "inputs", "needs", "decisions",
-                           "views", "meta", "milestones"})
+                           "views", "meta", "milestones", "requirements"})
 
 #: Never an input: a gate that read other gates' verdicts would put verdicts
 #: inside rho, a staleness that feeds itself. (The ledger's run record — the
@@ -1122,14 +1125,18 @@ _IN_MEMORY_FIELDS = {"claims": ("gates", "physical_result", "results", "attribut
 #: that read the claim.
 _ABSENT_WHEN_EMPTY = frozenset({"owner", "fallback", "terminal", "authority",
                                 # P2.5b-D4: a declared latency, empty ({}).
-                                "expected_latency"})
+                                "expected_latency",
+                                # Phase 1 (SPEC 12, 13): empty lists, so a claim
+                                # that names neither digests as before.
+                                "evaluators", "requirements"})
 
 
 def _record_form(item: Any, strip: tuple = ()) -> Any:
     form = item.to_dict() if hasattr(item, "to_dict") else item
     if isinstance(form, dict):
         form = {k: v for k, v in form.items()
-                if k not in strip and not (k in _ABSENT_WHEN_EMPTY and (v == "" or v == {}))}
+                if k not in strip and not (k in _ABSENT_WHEN_EMPTY
+                                           and (v == "" or v == {} or v == []))}
     return form
 
 

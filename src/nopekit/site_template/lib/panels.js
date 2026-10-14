@@ -203,7 +203,7 @@ function claimRow(claim, state, app) {
       ...(claim.acceptance_render ? field("Acceptance", code(claim.acceptance_render)) : []),
       ...(claim.rationale ? field("Why it matters", claim.rationale) : []),
       ...(claim.source ? field("Source", claim.source) : []),
-      ...(claim.note ? field("Note", claim.note) : []),
+      ...(claim.note ? field("Mechanism", claim.note) : []),
       ...(claim.tags || []).length ? field("Tags", ...claim.tags.map((t) => tag(t))) : [],
       ...(claim.grounded_by || []).length
         ? field("Grounded by", ...claim.grounded_by.map((id) => el("button", {

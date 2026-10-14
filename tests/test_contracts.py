@@ -100,6 +100,8 @@ NOT_SPINE_MODULES = frozenset({"__init__.py", "__main__.py"})
 RECORD_KINDS = (
     "Claim", "Acceptance", "Param", "Rejected", "Decision", "Need",
     "InputArtifact", "Extraction", "PhysicalResult", "View", "ProjectMeta",
+    # Architecture phase 1 (SPEC decision 12): the person's words.
+    "Requirement",
 )
 
 #: What PACK_FORMAT owes a pack author, class by class: `(where the class is
@@ -1138,6 +1140,59 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
     def test_a_split_view_payload_is_covered_by_the_template(self):
         self.assertEqual(site_problems([], ["views/assembly.json"],
                                        _read(SITE_CONTRACT)), [])
+
+
+def readme_layout_problems(readme: str) -> list[str]:
+    """Every record directory (`store.RECORD_DIRS`) README's "Where the facts
+    live" layout does not name as `<dir>/`. What slipped through (review of
+    architecture phase 1): README opened its chain with requirements, and its
+    layout named no `requirements/`."""
+    from nopekit import store
+    block = readme.split("## Where the facts live", 1)[1].split("```", 2)[1]
+    named = set(re.findall(r"(?<![\w./-])([a-z_]+)/", block))
+    return [f"README's layout names no {d}/" for d in store.RECORD_DIRS if d not in named]
+
+
+def terminal_problems(contract: str) -> list[str]:
+    """Every claim row of SITE_CONTRACT's `state.json` example whose flat
+    `terminal` is not its `mechanism.by` — one field in memory
+    (`report.claim_json` sets both from `Claim.terminal`), so an example that
+    parts them teaches a page author to prefer one (review of phase 1)."""
+    terminals = re.findall(r'"terminal": "([^"]*)"', contract)
+    bys = re.findall(r'"mechanism": \{ "by": "([^"]*)"', contract)
+    out = []
+    if not terminals or len(terminals) != len(bys):
+        out.append(f"{len(terminals)} terminal(s) beside {len(bys)} mechanism.by")
+    out += [f'"terminal": "{t}" beside "by": "{b}"' for t, b in zip(terminals, bys) if t != b]
+    return out
+
+
+class TheLayoutAndTheRowsAgree(unittest.TestCase):
+    """README's record layout names every record directory, and SITE_CONTRACT's
+    claim row shows `terminal` and `mechanism.by` as the one field they are."""
+
+    def test_the_readme_names_every_record_directory(self):
+        readme = _read(os.path.join(REPO, "README.md"))
+        self.assertEqual(readme_layout_problems(readme), [])
+        planted = readme.replace("requirements/R1.json", "claims/R1.json")
+        self.assertEqual(readme_layout_problems(planted),
+                         ["README's layout names no requirements/"])
+
+    def test_the_contract_shows_one_terminal(self):
+        contract = _read(SITE_CONTRACT)
+        self.assertEqual(terminal_problems(contract), [])
+        planted = contract.replace('"terminal": "closed_form"', '"terminal": ""', 1)
+        self.assertNotEqual(planted, contract)
+        self.assertEqual(terminal_problems(planted),
+                         ['"terminal": "" beside "by": "closed_form"'])
+
+    def test_every_bracket_row_has_one_terminal(self):
+        from nopekit import report, store
+        ledger = store.load(os.path.join(REPO, "examples", "bracket"))
+        rows = {c.id: report.claim_json(c) for c in ledger.claims}
+        self.assertEqual({cid: r["terminal"] for cid, r in rows.items()},
+                         {cid: r["mechanism"]["by"] for cid, r in rows.items()})
+        self.assertEqual(rows["C1"]["terminal"], "closed_form")
 
 
 class DocumentedNamesExist(unittest.TestCase):

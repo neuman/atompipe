@@ -14,28 +14,29 @@ Everything in `src/` exists to make one of them mechanical.
 ## 0. The shape
 
 ```
-claims  ->  gates  ->  packs  ->  readiness report
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
 ```
 
-A **claim** is something that must be true for the design to work. A **gate** is an
-executable that settles a claim and is capable of failing. A **pack** supplies gates
-for one physical domain. The **readiness report** is the ledger rendered: what is
-proven, what is not, and why.
+A **requirement** is what the person asked for, in their words. A **claim** is
+something that must be true for the design to work. A **gate** is an executable that
+settles a claim and is capable of failing. A **pack** supplies proposers and gates
+for one physical domain; a proposer produces options or evidence and settles nothing.
+The **readiness report** is the ledger rendered: what is proven, what is not, and why.
 
 Everything else is commentary.
 
 ---
 
-## 1. One parametric model is the only source of truth
+## 1. One set of instructions is the only source of truth
 
 Every output — geometry, boards, firmware, renders, bills of materials, docs — is
-*generated* from a single model. Move one feature and every representation of it
-moves too, because none of them is typed twice.
+*generated* from one set of instructions, whatever its layers. Move one feature and
+every representation of it moves too, because none of them is typed twice.
 
 The corollary is a rule about files: **generated files are outputs, not sources.**
-Never hand-edit something a generator produced. If it is wrong, the model is wrong.
-A repo that tolerates hand-patched outputs has no source of truth, only a rumour of
-one.
+Never hand-edit something a generator produced. If it is wrong, the instructions are
+wrong. A repo that tolerates hand-patched outputs has no source of truth, only a rumour
+of one.
 
 ## 2. Derive, never duplicate
 
@@ -180,11 +181,12 @@ not a validated design. Say so, in the report, every time.
 
 *In public* is where the project site comes in — `nopekit site build` renders the
 same ledger as a page, and the separation stops being a section heading and becomes
-a thing you look at: the headline verdict above the fold, the physical and assumed
-claims never blurred into the proven ones, how old each result is, and the failing
-part lit up in the viewer rather than described in coordinates. It renders the
-ledger and never computes truth; if a number on the page is wrong, the ledger is
-wrong. Contract in [`docs/SITE_CONTRACT.md`](docs/SITE_CONTRACT.md).
+a thing you look at: the representation first, with the verdict in the map section
+right under it, the physical and assumed claims never blurred into the proven ones,
+how old each result is, and the failing part lit up in the viewer rather than
+described in coordinates. It renders the ledger and never computes truth; if a
+number on the page is wrong, the ledger is wrong. Contract in
+[`docs/SITE_CONTRACT.md`](docs/SITE_CONTRACT.md).
 
 ## 10. Cheap inner loops, or there is no loop
 

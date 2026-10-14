@@ -145,6 +145,14 @@ LIMIT_WARNING = re.compile(
     r"(?P<claim>\S+)'s acceptance condition \((?P<condition>.+)\) — one number in two "
     r"places$")
 
+#: `check`'s warning for an evaluator a claim's mechanism names that is not
+#: registered here, or does not cover the claim (architecture phase 1, SPEC
+#: decision 13): one line per name, after the limit warnings. A cross-check,
+#: never coverage — so the line always says no status moves.
+MECHANISM_WARNING = re.compile(
+    r"^warning: (?P<claim>\S+)'s mechanism names (?P<gate>\S+), which is (?:not registered "
+    r"here|not one of \S+'s evaluators \(it is filed under .+\)) — no status moves; .+$")
+
 #: `check`'s controls line, printed only when a control ran or was re-qualified
 #: by its values — in GLOSSARY §9's words from P2.3 (R-6, words only: `N
 #: executed, N cached, N re-verified` before).
@@ -200,14 +208,14 @@ MODEL_BROKEN = re.compile(r"^model: (?P<entry>\S+) DOES NOT LOAD — (?P<error>.
 
 #: One evaluator's qualification line (P2.3, GLOSSARY §6 *reject*): each
 #: control's outcome in outcome words — `not run` for a known-good control that
-#: does not exist, `reads the candidate` for one handed the live design — then,
+#: does not exist, `reads the current design` for one handed the live design — then,
 #: for an evaluator walked by the mutation pass, its tally or why it made none,
 #: then a control-level fact, then the decision. Its own negative control lives
 #: in `test_shapes` (a line missing `→ …`, `0/0`, the walkthrough's `ok`,
 #: `rejected`, `flipped`, a fourth segment, an outcome tag before the id).
 QUALIFICATION_LINE = re.compile(
-    r"^(?P<id>[^\s\[]\S*) : known-good (?P<good>pass|fail|skipped|errored|not run|reads the candidate"
-    r"|outside its operating context)"
+    r"^(?P<id>[^\s\[]\S*) : known-good (?P<good>pass|fail|skipped|errored|not run"
+    r"|reads the current design|outside its operating context)"
     r" · known-bad (?P<bad>pass|fail(?: \(raised, as declared\))?|skipped|errored)"
     r"(?: · channels differ| · known-good and known-bad via ctx\.extra)?"
     r"(?: · mutation (?:(?P<fails>\d+)/(?P<conclusive>[1-9]\d*) fail|0 conclusive)"
@@ -460,7 +468,12 @@ STEPS: Tuple[Step, ...] = (
              r"No claim is checked on any article\.$"),
         line(r"^7 claims · 3 checked · 1 failing · 2 gaps · 1 pending build$"),
         line(r"^\[gap  \] C6 The load is static and centred on the arm — no owner recorded$"),
-        line(r"^\[build\] C5 .+ — needs an article; no test written down$"),
+        line(r"^\[build\] C5 .+ — needs an article$"),
+        # Phase 1 (SPEC decision 12): the bracket's requirements, each the worst
+        # of the claims that serve it. C5's test is written down (its
+        # mechanism's `how`), so its row no longer says it is not.
+        line(r"^requirements 4 — R1 failing \(C1\) · R2 gap \(C7\) · R3 pending build \(C5\) "
+             r"· R4 checked$"),
         line(r"^invalidated: none   \(6 verdicts current\)$"),
     )),
     Step("edit-bed-xy", (1, 2),

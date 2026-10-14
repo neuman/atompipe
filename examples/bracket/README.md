@@ -35,9 +35,9 @@ no evaluator covers it yet; and C6 is an assumption nobody owns, a gap until its
 records it — name them as `"owner"` in `claims/C6.json`, and they run `nopekit claim
 physical C6 assume` in their own shell; the name in the file alone does not count). C5
 waits on an article: `nopekit status` says *pending build*, and the project is not
-*ready* until every required claim reads checked. Once its test is written down (a
-`note` in `claims/C5.json`), the person who tested a printed bracket records the result
-in their own shell — `nopekit claim physical C5 pass --evidence <photo> --detail "..."`
+*ready* until every required claim reads checked. Its test is written down in
+`claims/C5.json` (its mechanism's `how`), so the person who tested a printed bracket
+records the result in their own shell — `nopekit claim physical C5 pass --evidence <photo> --detail "..."`
 — and it counts on that design only: change a value afterwards and C5 reads stale, the
 article named for rebuild. Before you run anything, `nopekit status` names each gate the
 edit reached and what moved for it; `check` re-runs exactly those and serves the rest
@@ -47,6 +47,27 @@ That is the entire loop: one parameter, one gate, one verdict. Everything else i
 nopekit is this loop with more expensive gates attached.
 
 ## What it demonstrates
+
+**Requirements first, and every claim says how it settles.** `requirements/R1.json` to
+`R4.json` are what the person asked for, in their words ("Hold the pump on the shelf
+without breaking, and without a sag anyone can see"); each claim names the ones it
+serves, and each says in its `"mechanism"` what would settle it — where its evidence
+bottoms out (`by`), in words (`how`), and the evaluators it expects. A requirement reads
+the worst of its claims: R1 is failing while C1 is, R2 a gap while nothing evaluates
+C7. *Ready* stays the claims': a requirement is shown, never required. `nopekit status`
+says it in one line —
+
+```
+requirements 4 — R1 failing (C1) · R2 gap (C7) · R3 pending build (C5) · R4 checked
+```
+
+— and `nopekit gap` lists every claim whose mechanism has yet to run, with what would
+settle it:
+
+```
+[gap  ] C7 First mode is clear of the pump that sits on the sh… — no evaluator
+        mechanism: automated — A closed-form estimate of the arm's first natural frequency with the shelf and the pump at its tip, against the pump's 50 Hz with margin
+```
 
 **Rule 1 — one source of truth.** `model/bracket.py` holds every input. Section
 properties, stresses, deflections and the print footprint are all computed by
@@ -112,6 +133,7 @@ model/bracket.py              tracked   the model: Config, PARAMS, build(). Runn
 gates/structural.py           tracked   six tier-0 gates, all pure arithmetic
 selftest/known_good.py        tracked   the design every control starts from
 selftest/bad_configs.py       tracked   one known-bad fixture per gate
+requirements/R1.json … R4.json tracked  what the person asked for, in their words
 claims/C1.json … C7.json      tracked   what must be true: one record per claim, the
                                         filename is its id. Edit these by hand.
 milestones/print-v1.json      tracked   a spend — the print — and the claims it

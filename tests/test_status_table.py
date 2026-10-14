@@ -73,7 +73,7 @@ from nopekit import claims as claims_mod
 from nopekit import report as report_mod
 from nopekit.models import (
     BLOCKING_STATUSES, Acceptance, Claim, ClaimKind, ClaimStatus, Comparator, GateSpec, Ledger, NegativeControl,
-    PhysicalResult, ProjectMeta, Tier, Verdict,
+    PhysicalResult, ProjectMeta, Requirement, Tier, Verdict,
 )
 
 #: The five covering outcomes a claim's verdicts can carry, as the table names them.
@@ -848,6 +848,14 @@ class ReportSectionOrder(unittest.TestCase):
         for name, ledger in (("empty", empty), ("full", full)):
             with self.subTest(ledger=name):
                 self.assertEqual(self._headings(ledger), self.WANT)
+        # Architecture phase 1 (SPEC decision 12): with a requirement recorded,
+        # its section after Failing and before Reproduce; PROVEN stays first.
+        served = dataclasses.replace(
+            full, claims=[dataclasses.replace(c, requirements=["R1"]) if c.id == "C1" else c
+                          for c in claims],
+            requirements=[Requirement(id="R1", statement="it holds")])
+        self.assertEqual(self._headings(served),
+                         self.WANT[:-1] + ["## Requirements", "## Reproduce"])
 
     def test_section_proven_is_the_first_section(self):
         self.assertEqual(report_mod.SECTION_PROVEN, self.WANT[0])

@@ -2,10 +2,10 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.model_validity",
-  "rho": "39011d93fa46864a645f34d6ed4e67f8abf74cc3ba0a72aecc921a6739245a31",
-  "static": "e6035d6b0bdbfcff8dcf0b65265c66f14b0885e74111870b3cd65be93f879909",
+  "rho": "ca5e0957f742525cf5a3f9c29c44ce9c22d3b9c74da821829240b39b7638fe52",
+  "static": "0b2edf6db531d51cf03b5b85faaa985b05846e9a7cbfafc4ad6d5231ed0d45e8",
   "static_parts": {
-    "spine": "f396daf6190537c7f68ede528849d58110bd85d8d545c39e61ecc2efda945530",
+    "spine": "7d5aa8d7e879f51e43ce49fa1732d6ac66e2e4d43e9384b0e9c90270c56b10c8",
     "code": {
       "digest": "8bbb6f55b6d82cbcb68e16993a8d2ba1eadc7d9e9e85da57b7c64b52d1a62fd0",
       "files": [
@@ -102,5 +102,5 @@
   "measured": 2.5,
   "limit": 5.0,
   "units": "L/h",
-  "digest": "25ae25f0be42de62213843bd6cb83f6f65ff21679156b46d30b942d92f3a10c5"
+  "digest": "f172b707d788419a70e1966e30366ca76b4120722b46d2ded6ca9f51a6bf0620"
 }

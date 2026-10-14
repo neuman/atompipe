@@ -2057,7 +2057,7 @@ def _phrase(text: str) -> str:
     return " ".join(w for w in words if w)
 
 
-def score(need: Need, manifest: PackManifest) -> float:
+def score(need: Need, manifest: PackManifest, *, how: str = "") -> float:
     """How well one pack's vocabulary covers one capability gap. 0 = no signal.
 
     An exact phrase hit ("righting moment" appearing verbatim in ``settles``)
@@ -2101,10 +2101,22 @@ def score(need: Need, manifest: PackManifest) -> float:
     total += 2.0 * len(c_tokens & class_tokens)
     total += 1.0 * len(c_tokens & settles_tokens)
 
+    # The mechanism's words (SPEC decision 13: `gap --propose` searches with the
+    # claim's `how`) weigh half what the quantity weighs: the quantity is the
+    # sharpened form (extension protocol step 1), and `how` is prose with
+    # incidental words. Tokens already counted from the quantity or the class
+    # count once. *Rejected:* equal weight (prose length would outrank a pack
+    # that names the quantity); a whole-phrase bonus on `how` (prose almost
+    # never equals a `settles` phrase). With `how=""` every score is what it was.
+    h_tokens = _tokens(how) - q_tokens - c_tokens
+    total += 1.0 * len(h_tokens & settles_tokens)
+    total += 0.5 * len(h_tokens & class_tokens)
+
     return total
 
 
-def match(need: Need, manifests: Sequence[PackManifest]) -> list[PackManifest]:
+def match(need: Need, manifests: Sequence[PackManifest], *,
+          how: str = "") -> list[PackManifest]:
     """Packs that might close this gap, best first. Scored on vocabulary overlap.
 
     This is the function that turns "no gate covers C2" into something
@@ -2126,7 +2138,7 @@ def match(need: Need, manifests: Sequence[PackManifest]) -> list[PackManifest]:
     """
     scored: list[tuple[float, str, PackManifest]] = []
     for manifest in manifests or ():
-        value = score(need, manifest)
+        value = score(need, manifest, how=how)
         if value > 0:
             scored.append((value, manifest.name, manifest))
     scored.sort(key=lambda item: (-item[0], item[1]))

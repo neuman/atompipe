@@ -729,7 +729,7 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         self.assertEqual(list(index), [
             "generated", "schema", "records_digest", "meta", "claims", "params", "decisions",
             "needs", "inputs", "results", "attributions", "views", "milestones", "exports",
-            "unregistered_inputs", "problems"])
+            "requirements", "unregistered_inputs", "problems"])
         # P2.5b: a milestone's export entries are records as stored — their
         # `counted` is what the export saw, sealed, not a status now.
         self.assertEqual(index["generated"], store.INDEX_BANNER)
@@ -1424,6 +1424,18 @@ def _migrated_bracket(dest: str) -> str:
     _write(os.path.join(project, "exports", "print-v1.json"),
            json.dumps({"exports": [_sealed_export(_EXPORT, "print-v1", "")]}, indent=2,
                       ensure_ascii=False) + "\n")
+    # Architecture phase 1 (SPEC decisions 12, 13): a requirement, and C1 holding a
+    # mechanism and a pointer to it — by hand, so a command that normalised a
+    # mechanism (or wrote the older keys back) is caught too.
+    _write(os.path.join(project, "requirements", "R1.json"),
+           json.dumps({"statement": "It holds the pump without a sag anyone can see",
+                       "source": "interview"}, indent=2) + "\n")
+    path = os.path.join(project, "claims", "C1.json")
+    data = json.loads(_read_bytes(path))
+    data["mechanism"] = {"evaluators": ["bracket.deflection"], "by": "closed_form",
+                         "how": "the tip deflection, closed form"}
+    data["requirements"] = ["R1"]
+    _write(path, json.dumps(data, indent=3))
     return project
 
 
@@ -2833,6 +2845,159 @@ class ReportIsAnIgnoredOutput(_env.EnvCase):
                 contextlib.redirect_stdout(io.StringIO()):
             cli_mod.main(["report", "--write", "-C", root])
         self.assertIn("?? REPORT.md", self.porcelain(root))
+
+
+#: What the index and doctor say for `requirements/R1.json` beside
+#: `claims/R1.json` (store.build_index and cli._doctor_requirement_rows).
+COLLISION = ("requirements/R1.json: R1 is also a claim id (claims/R1.json) — rename one; "
+             "why R1 would be a guess")
+
+
+def collision_problems(root: str) -> list[str]:
+    """Every channel that does not name a requirement id that is also a claim
+    id in ``root`` (which holds R1 as both): the index's problems, doctor's
+    `requirements` row (a FAIL), and `why R1`, which must be the claim's.
+    In process: the index and doctor's row as `doctor` builds them."""
+    from nopekit import cli, decisions
+    out: list[str] = []
+    if COLLISION not in store.build_index(root)["problems"]:
+        out.append("index: no collision problem")
+    results: list[dict] = []
+    cli._doctor_requirement_rows(results, store.load(root))
+    if ("FAIL", COLLISION) not in [(r["status"], r["detail"]) for r in results
+                                   if r["check"] == "requirements"]:
+        out.append(f"doctor: {results}")
+    head = decisions.why(store.load(root), "R1").splitlines()[0]
+    if not head.startswith("claim  R1  "):
+        out.append(f"why: R1 reads {head!r}")
+    return out
+
+
+class RequirementsAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 1: SPEC decision 12) `requirements/<id>.json`
+    is a record — the person's words — read strictly; a claim's pointers to
+    requirements are read, never refused when one has no file; the index lists
+    the requirements and names a dangling pointer; `agree` sees a hand edit; a
+    legacy project keeps its requirements through the migration."""
+
+    def write(self, stem: str, record: Any, kind: str = "requirements") -> str:
+        root = self.tmp()
+        path = os.path.join(root, kind, stem)
+        _write(path, json.dumps(record, indent=2) if not isinstance(record, str) else record)
+        return path
+
+    def test_the_strict_reader(self):
+        found = store.read_record(self.write("R1.json", {"statement": "It holds the pump",
+                                                         "source": "interview"}),
+                                  "requirements")
+        self.assertEqual((found.id, found.statement, found.source),
+                         ("R1", "It holds the pump", "interview"))
+        refused = {
+            "a stem that is no requirement id": ("Req1.json", {"statement": "s"},
+                                                 "R and a number"),
+            "a leading zero": ("R01.json", {"statement": "s"}, "R and a number"),
+            "no words": ("R1.json", {"source": "interview"}, "the person's words"),
+            "blank words": ("R1.json", {"statement": "  "}, "the person's words"),
+            "words that are not text": ("R1.json", {"statement": 3}, "the person's words"),
+            "a source that is not text": ("R1.json", {"statement": "s", "source": 1},
+                                          '"source" must be text'),
+            "a stored status": ("R1.json", {"statement": "s", "status": "pass"},
+                                "claims.requirement_statuses"),
+            "a claims list": ("R1.json", {"statement": "s", "claims": ["C1"]},
+                              '"requirements" in claims/<id>.json'),
+            "an unknown key, with its suggestion": ("R1.json", {"statment": "s"},
+                                                    'did you mean "statement"'),
+        }
+        for name, (stem, record, needle) in refused.items():
+            with self.subTest(name):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write(stem, record), "requirements")
+                self.assertIn(needle, str(caught.exception))
+                self.assertIn("requirements/", str(caught.exception))
+        with self.assertRaises(NopekitError) as caught:
+            store.read_record(self.write("R2.json", {"statment": "s"}), "requirements")
+        self.assertIn("move it into inputs/specs/", str(caught.exception))
+
+    def test_a_claims_pointers(self):
+        found = store.read_record(self.write("C1.json", {"statement": "s",
+                                                         "requirements": ["R1", "R9"]},
+                                             kind="claims"), "claims")
+        self.assertEqual(found.requirements, ["R1", "R9"], "a missing target still reads")
+        for record, needle in (({"statement": "s", "requirements": "R1"}, "must be a list"),
+                               ({"statement": "s", "requirements": ["C1"]},
+                                '"requirements"[0] "C1" is not a requirement id'),
+                               ({"statement": "s", "requirements": ["R1", "R1"]},
+                                "names R1 twice")):
+            with self.subTest(needle):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write("C1.json", record, kind="claims"), "claims")
+                self.assertIn(needle, str(caught.exception))
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        index = store.build_index(root)
+        self.assertEqual([row["id"] for row in index["requirements"]], ["R1", "R2", "R3", "R4"])
+        self.assertEqual(index["problems"], [])
+        _write(os.path.join(root, "requirements", "C1.json"), '{"statement": "s"}\n')
+        with self.assertRaises(NopekitError):
+            store.build_index(root)
+        os.remove(os.path.join(root, "requirements", "C1.json"))
+        os.remove(os.path.join(root, "requirements", "R2.json"))
+        self.assertIn("claims/C7.json: requirements names 'R2', which has no "
+                      "requirements/R2.json", store.build_index(root)["problems"])
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        path = os.path.join(root, "requirements", "R1.json")
+        _write(path, json.dumps({"statement": "It holds", "source": "interview"}))
+        self.assertTrue(any(p.startswith("requirements.R1.statement")
+                            for p in store.agree(root)), store.agree(root))
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+
+    def test_a_legacy_project_keeps_its_requirements(self):
+        project = _bracket(self)
+        path = _write(os.path.join(project, "requirements", "R1.json"),
+                      '{"statement": "It holds the pump"}\n')
+        before = _read_bytes(path)
+        plan = store.migrate_legacy(project, apply=False, when="")
+        self.assertNotIn("requirements/R1.json", plan.files)
+        store.migrate_legacy(project, apply=True, when="2026-09-28T00:00:00Z")
+        self.assertEqual(_read_bytes(path), before)
+        self.assertEqual([r.id for r in store.load(project).requirements], ["R1"])
+
+    def test_a_requirement_id_that_is_a_claim_id_is_named(self):
+        """(review of phase 1) `requirements/R1.json` beside `claims/R1.json`:
+        the index names it, doctor's `requirements` row FAILs on it, and `why
+        R1` is the claim's (exact claim id before exact requirement id) — and
+        a planted index and doctor that leave the collision out are caught."""
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        record = json.loads(_read_bytes(os.path.join(root, "claims", "C4.json")))
+        record.pop("requirements", None)
+        _write(os.path.join(root, "claims", "R1.json"), json.dumps(record, indent=2))
+        self.assertEqual(collision_problems(root), [])
+        real = store.build_index
+
+        def quiet_index(root_):
+            index = real(root_)
+            return dict(index, problems=[p for p in index["problems"]
+                                         if "also a claim id" not in p])
+
+        from nopekit import cli
+        with mock.patch.object(store, "build_index", quiet_index), \
+                mock.patch.object(cli, "_doctor_requirement_rows",
+                                  lambda results, ledger: None):
+            found = collision_problems(root)
+        self.assertEqual([p.split(":", 1)[0] for p in found], ["index", "doctor"])
+
+    def test_doctor_fails_on_a_dangling_pointer(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        os.remove(os.path.join(root, "requirements", "R2.json"))
+        proc = _env.nopekit(["doctor", "--json"], cwd=root)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        rows = [r for r in json.loads(proc.stdout)["checks"] if r["check"] == "requirements"]
+        self.assertEqual([(r["status"], r["detail"]) for r in rows],
+                         [("FAIL", "claims/C7.json names requirement R2, which has no "
+                                   "requirements/R2.json")])
 
 
 class MilestonesAreRecords(_env.EnvCase):

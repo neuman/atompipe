@@ -68,8 +68,9 @@ hundred lines; it costs nothing until an agent is actually meshing.
 
 `settles` is the **matching vocabulary**. When `nopekit gap` finds a claim with no
 gate, it scores every manifest's `settles` and `claim_classes` against the claim's
-quantity to suggest candidates. Write the phrases a person would actually use for
-the quantity, not your internal gate names.
+quantity and the words of its mechanism (`"mechanism": {"how": …}`, weighed below the
+quantity) to suggest packs. Write the phrases a person would actually use for the
+quantity, not your internal gate names.
 
 `provides_views` lists the view ids `views/*.py` registers. It is tier 1 for two
 reasons: a reader deciding whether to install a pack wants to know it comes with a
@@ -524,7 +525,10 @@ by exactly those reads (`rho`). So:
   checkout) — never decide a verdict on either.
 - **`ctx.ledger` holds no verdicts.** A gate that read other gates' verdicts would put
   verdicts inside its own content address. Claims are readable; `ctx.ledger.claim(id)`
-  makes that claim an input.
+  makes that claim an input. `requirements` (what the person asked for) is readable
+  and read whole (traced), like `claims`. A project's claims may name your evaluator
+  ids in their mechanism's `evaluators` — a cross-check, never coverage — so a renamed
+  id warns there (`check`, `doctor`); coverage stays your `claims=` ids and tags.
 - **Reading `ctx.tier` makes the tier an input.** A gate may pick a cheaper path by
   it — `if ctx.tier < Tier.SOLVE`, `PATHS[ctx.tier]` — and then its verdict is keyed
   on the tier it read: a sweep at tier N serves an entry recorded at N or above (the
@@ -817,7 +821,7 @@ the bundled packs — every conclusive mutation of its known-good control failed
   for a pack's gate, the pack's own `selftest/baseline.json`; else, for a project's,
   `selftest/known_good.py`'s `context(ctx)`. A gate with none is *known-bad shown*,
   never qualified (`known-good not run`). A `good` fixture that reads the live design
-  it is handed is unusable (`known-good control reads the candidate`), and in a pack
+  it is handed is unusable (`known-good control reads the current design`), and in a pack
   it is a seal finding too (invariant 5).
 - **Both controls reach the gate through the same channel**: the `ctx.extra` keys
   each hands its gate (the spine's `pack_dir`, `pack_dirs` removed) must be equal,

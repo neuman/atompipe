@@ -937,9 +937,14 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
     shown = dataclasses.replace(
         view, claims=[dataclasses.replace(claim, grounded_by=list(grounds.get(claim.id, ())))
                       for claim in view.claims])
+    # A requirement's status from the view as `status` judges it (SPEC
+    # decision 12): the caller's compositions, never the raw opinion.
+    composed = claims.compositions(view, registry=registry,
+                                   stale_gates=resolution.stale_gates)
     return decisions.why(shown, name, view=views,
                          coverage=claims.effective_gates(ledger, registry),
-                         read_sets=read_sets, verdicts=resolution.verdicts)
+                         read_sets=read_sets, verdicts=resolution.verdicts,
+                         composed=composed)
 
 
 # --------------------------------------------------------------------------- #
@@ -1242,6 +1247,9 @@ def cmd_status(args: argparse.Namespace) -> int:
             "problems": problems,
             # P2.5a-D16: the rebuild prediction, additive (P2.1-D12).
             "rebuild": summary["rebuild"],
+            # SPEC decision 12, additive: each requirement, its status from the
+            # one producer over the compositions above.
+            "requirements": _requirement_rows(view, composed, registry),
         })
         return 0
 
@@ -1469,6 +1477,27 @@ def _qualification_lines(rows: list[verdicts.SweepRow]) -> list[str]:
         elif facts is not None and admission.executed and facts.mutation is not None:
             out.append(report.qualification_line(row.verdict.gate, facts))
     return out
+
+
+def _requirement_rows(view: Ledger, composed: Mapping[str, Any],
+                      registry: Any) -> list[dict[str, Any]]:
+    """`requirements` in `status --json` and `report --json` (SPEC decision 12):
+    `report.requirement_json` over `claims.requirement_statuses`, the one
+    producer — never a status folded here — with the claims whose status and
+    evidence disagree named (`report.requirement_statuses`, D18)."""
+    found = report.requirement_statuses(view, composed,
+                                        claims.effective_gates(view, registry))
+    return [report.requirement_json(r, found[r.id]) for r in view.requirements]
+
+
+def _mechanism_lines(view: Ledger, registry: Any) -> list[str]:
+    """`check`'s mechanism warnings (SPEC decision 13): one per evaluator a
+    claim's mechanism names that is not registered here, or does not cover the
+    claim. On stdout beside the limit warnings, never a status and never the
+    exit code: the list is a cross-check, never coverage (S-37)."""
+    said = report.HUMAN["mechanism"]
+    return [said["warning"].format(line=report.mechanism_problem_words(found))
+            for found in claims.mechanism_problems(view, registry)]
 
 
 def _limit_lines(view: Ledger, stale_gates: Iterable[str] = ()) -> list[str]:
@@ -1733,6 +1762,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             "limit_disagreements": [found._asdict()
                                     for found in claims.limit_disagreements(
                                         view, stale_gates=stale_gates)],
+            # Additive (SPEC decision 13): the evaluators claims' mechanisms
+            # name that are not registered or do not cover them — warnings only.
+            "mechanism_problems": [dict(found._asdict(), filed=list(found.filed))
+                                   for found in claims.mechanism_problems(view, registry)],
             # Additive (P2.1-D12): each evaluator's qualification as this check
             # judged it — the line in words, the judge's token, and the state.
             # The token is the QUALIFICATION's alone: a pass outside its
@@ -1761,6 +1794,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     for line in _qualification_lines(rows):
         _say(line)
     for line in _limit_lines(view, stale_gates):
+        _say(line)
+    for line in _mechanism_lines(view, registry):
         _say(line)
     for note in notes:
         _say(f"note: {note}")
@@ -3386,13 +3421,25 @@ def _result_entry(args: argparse.Namespace, root: str, claim: Claim, current: Cl
 # gaps
 # --------------------------------------------------------------------------- #
 def cmd_gap(args: argparse.Namespace) -> int:
-    """Measurable claims no gate covers — and, with `--propose`, packs that might.
+    """Every claim whose mechanism has yet to run — and, with `--propose`, packs
+    that might run it.
 
-    A gap is a growth signal, not a failure: the system is admitting there is a
-    physical quantity it cannot currently check. `find_gaps` matches the Need
-    records (`needs/<id>.json`) by claim id and keeps everything written on them,
-    so the classification and the candidate costs an agent records against a
-    gap — by editing that file — show here in the next session.
+    SPEC decision 13: every claim is settleable, some expensively, so `gap` lists
+    every claim that reads Gap, Pending build or Assumed (`claims.yet_to_run`,
+    read off the composition `status` prints), physical and assumption claims
+    included, each with its mechanism — what would settle it, in words — any
+    warning about the evaluators that mechanism names, and the gap record that
+    names it. Resolved exactly as `status` resolves (the registry, the
+    projection, the verdict cache). What slipped through before: it listed only
+    `find_gaps`' Need records, the automated claims no evaluator covers, so a
+    physical test nobody had run and an assumption nobody owned read "no gaps".
+
+    A gap record is still a growth signal, not a failure: the system is
+    admitting there is a physical quantity it cannot currently check.
+    `find_gaps` matches the Need records (`needs/<id>.json`) by claim id and
+    keeps everything written on them, so the classification and the tool option
+    costs an agent records against a gap — by editing that file — show here in
+    the next session.
 
     A READ: no lock, no write. What slipped through (S-43): it persisted every gap
     it derived, so a command that reads like a query rewrote the whole ledger on
@@ -3404,44 +3451,141 @@ def cmd_gap(args: argparse.Namespace) -> int:
     root = _root(args)
     ledger = _load(root)
     registry, _ = _registry(root, ledger, strict=False)
-    gaps = claims.find_gaps(ledger, registry)
+    model, projection, model_error = _projection_safe(root, ledger)
+    view, resolution = _resolved(root, ledger, registry, projection, model_error,
+                                 now=utcnow_iso(), model=model)
+    composed = claims.compositions(view, registry=registry,
+                                   stale_gates=resolution.stale_gates)
+    stale_reasons = _stale_reasons(resolution)
+    waiting = report.in_severity(view, composed, claims.yet_to_run(view, composed))
+    gaps = claims.find_gaps(view, registry)
+    named = claims.mechanism_problems(view, registry)
+    said = report.HUMAN["mechanism"]
 
     manifests = packs.discover(root) if args.propose else []
+    # One search per gap record — its quantity, and the how of the claims it
+    # names (`claims.need_how`) — and each listed claim's: its record's search,
+    # or a transient Need (never written) with its own how. SPEC decision 13:
+    # `--propose` searches the how; one need, one pack list (review of phase 1).
     proposals: dict[str, list[Any]] = {
-        need.id: packs.match(need, manifests) for need in gaps} if args.propose else {}
+        need.id: packs.match(need, manifests, how=claims.need_how(view, need))
+        for need in gaps} if args.propose else {}
+    searched: dict[str, list[Any]] = {}
+    if args.propose:
+        for claim in waiting:
+            query, how = claims.proposal_query(claim, gaps, view)
+            searched[claim.id] = (proposals[query.id] if query.id in proposals
+                                  else packs.match(query, manifests, how=how))
+
+    def need_of(claim: Claim) -> Any:
+        return next((n for n in gaps if claim.id in (n.claim_ids or ())), None)
 
     if args.json:
+        rows = []
+        for claim in waiting:
+            found = composed[claim.id]
+            need = need_of(claim)
+            row: dict[str, Any] = {
+                "id": claim.id, "statement": claim.statement,
+                "status": str(found.status), "key": claims.STATUS_KEY[found.status],
+                "word": report.word(found.status, errored=found.errored),
+                "cause": str(found.cause.value),
+                "reason": report.reason(found, view, claim, full=True,
+                                        stale_reasons=stale_reasons),
+                "errored": found.errored,
+                "mechanism": report.claim_json(claim)["mechanism"],
+                "by_word": report.terminal_word(claim),
+                "need": need.id if need is not None else None,
+                "problems": [{"evaluator": p.evaluator, "kind": p.kind,
+                              "filed": list(p.filed)}
+                             for p in named if p.claim == claim.id]}
+            if args.propose:
+                row["candidates_from_packs"] = [m.to_dict() for m in searched[claim.id]]
+            rows.append(row)
         _dump({
             "gaps": [dict(need.to_dict(),
                           candidates_from_packs=[m.to_dict() for m in proposals.get(need.id, [])])
                      for need in gaps],
             "n_gaps": len(gaps),
+            # SPEC decision 13, additive: every claim whose mechanism has yet to run.
+            "yet_to_run": rows,
+            "n_yet_to_run": len(rows),
         })
         return 0
 
-    if not gaps:
-        _say("no gaps: every measurable claim has a registered gate covering it")
-        return 0
+    def need_lines(need: Any, indent: str) -> None:
+        if need.claim_class:
+            _say(f"{indent}class: {need.claim_class}")
+        for option in need.candidates:
+            _say(f"{indent}{option.kind or 'option':<9} {option.name} "
+                 f"— {option.cost or 'cost unstated'}")
 
+    def pack_lines(matched: list[Any], indent: str, *, settled_by: str = "") -> None:
+        """A claim's packs; with none, the extension protocol's trigger only
+        for an automated claim — a physical, judged or assumed one (its
+        `settled_by` word) is settled by its mechanism, never by a solver
+        (docs/EXTENSION_PROTOCOL.md "When this fires")."""
+        if matched:
+            for manifest in matched[:3]:
+                _say(f"{indent}pack      {manifest.name} — {manifest.description}")
+        elif settled_by:
+            _say(f"{indent}{said['no_match_settled'].format(by=settled_by)}")
+        else:
+            _say(f"{indent}{said['no_match']}")
+
+    indent = " " * 8
+    for claim in waiting:
+        found = composed[claim.id]
+        why = report.reason(found, view, claim, stale_reasons=stale_reasons)
+        _say(f"{report.status_tag(found.status, errored=found.errored)} {claim.id} "
+             f"{report._trunc(claim.statement, 52)} — {why}")
+        _say(indent + report.mechanism_line(claim))
+        for problem in named:
+            if problem.claim == claim.id:
+                _say(indent + said["warning"].format(
+                    line=report.mechanism_problem_words(problem)))
+        need = need_of(claim)
+        if need is not None:
+            _say(indent + said["need"].format(
+                id=need.id, quantity=need.quantity or "(unnamed quantity)",
+                word=report.need_word(need.status)))
+            need_lines(need, indent + "  ")
+        if args.propose:
+            settled_by = ""
+            if claims.terminal_of(claim):
+                # Physical, judged or assumed: an automated pass never settles
+                # it (compose's rungs), whatever a pack's evaluator checks.
+                settled_by = report.terminal_word(claim)
+                _say(indent + said["modelled_part"].format(id=claim.id, by=settled_by))
+            pack_lines(searched[claim.id], indent, settled_by=settled_by)
+
+    # A gap record whose claims are not listed above (a claim that reads Open or
+    # Stale while no registered evaluator covers it, say), in its own row.
+    listed = {c.id for c in waiting}
     for need in gaps:
+        if any(cid in listed for cid in need.claim_ids or ()):
+            continue
         cids = ", ".join(need.claim_ids)
         _say(f"{_tag('gap')} {need.id:<10} {need.quantity or '(unnamed quantity)'} "
              f"— claims {cids} ({report.need_word(need.status)})")
-        if need.claim_class:
-            _say(f"            class: {need.claim_class}")
-        for candidate in need.candidates:
-            _say(f"            {candidate.kind or 'candidate':<9} {candidate.name} "
-                 f"— {candidate.cost or 'cost unstated'}")
+        need_lines(need, " " * 12)
         if args.propose:
-            matched = proposals.get(need.id, [])
-            if matched:
-                for manifest in matched[:3]:
-                    _say(f"            pack      {manifest.name} — {manifest.description}")
-            else:
-                _say("            no installed pack settles this vocabulary — this is the "
-                     "extension protocol's trigger (docs/EXTENSION_PROTOCOL.md)")
-    _say(f"{len(gaps)} gap(s). Name the quantity, try the analytic answer first, and only "
-         f"then propose a solver — with its real cost said out loud.")
+            pack_lines(proposals.get(need.id, []), " " * 12)
+
+    if not waiting:
+        _say(said["empty"].format(gap=report.word(ClaimStatus.UNCLAIMED),
+                                  pending_build=report.word(ClaimStatus.UNVERIFIED),
+                                  assumed=report.word(ClaimStatus.ASSERTED)))
+        return 0
+    counts = " · ".join(bit["label"] for bit in report.count_bits(
+        {c.id: composed[c.id] for c in waiting}))
+    # "Propose a solver" only when an automated claim is listed: a physical
+    # test, a judgment or an assumption is settled by its mechanism, and the
+    # extension protocol never fires there (review of phase 1).
+    footer = said["footer"] if any(not claims.terminal_of(c) for c in waiting) \
+        else said["footer_settled"]
+    _say(footer.format(n=len(waiting), claims=report._plural(len(waiting), "claim"),
+                       counts=counts))
     return 0
 
 
@@ -4487,6 +4631,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             "coverage_understated": bool(banner),
             # P2.5a-D16: the rebuild prediction, additive.
             "rebuild": [found.to_dict() for found in claims.rebuild(view)],
+            # SPEC decision 12, additive: as `status --json` holds them.
+            "requirements": _requirement_rows(view, composed, registry),
         })
         return 0
 
@@ -6604,6 +6750,36 @@ def _bound_at_module(tree: Any, name: str) -> bool | None:
     return True if found else (None if unseen else False)
 
 
+def _doctor_requirement_rows(results: list[dict], ledger: Ledger) -> None:
+    """`doctor`'s `requirements` row (SPEC decision 12), always present, writing
+    nothing: a claim naming a requirement no file holds, or a requirement id that
+    is also a claim's — problems, as a milestone requiring a missing claim is;
+    else a requirement no claim serves — a warning (it reads Gap); else ok."""
+    said = report.HUMAN["requirement"]
+    held = {r.id for r in ledger.requirements}
+    claim_ids = {c.id for c in ledger.claims}
+    problems = [said["doctor_dangling"].format(claim=claim.id, id=rid)
+                for claim in ledger.claims for rid in claim.requirements if rid not in held]
+    problems += [f"requirements/{r.id}.json: {r.id} is also a claim id "
+                 f"(claims/{r.id}.json) — rename one; why {r.id} would be a guess"
+                 for r in ledger.requirements if r.id in claim_ids]
+    for problem in problems:
+        _check(results, "requirements", "FAIL", problem)
+    if problems:
+        return
+    served = {rid for claim in ledger.claims for rid in claim.requirements}
+    unserved = [r.id for r in ledger.requirements if r.id not in served]
+    if unserved:
+        _check(results, "requirements", "warn", said["doctor_unserved"].format(
+            ids=_listed(unserved, ", "),
+            gap=report.word(ClaimStatus.UNCLAIMED)))
+    elif ledger.requirements:
+        _check(results, "requirements", "ok",
+               said["doctor_ok"].format(n=len(ledger.requirements)))
+    else:
+        _check(results, "requirements", "ok", said["doctor_none"])
+
+
 def _doctor_milestone_rows(results: list[dict], root: str, ledger: Ledger) -> None:
     """`doctor`'s P2.5b rows, each writing nothing:
 
@@ -6780,6 +6956,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     _doctor_records_rows(results, root, ledger)
     _doctor_results_rows(results, root, ledger)
     _doctor_milestone_rows(results, root, ledger)
+    _doctor_requirement_rows(results, ledger)
 
     paths = store.project_paths(root)
     missing = [key for key in ("out", "inputs", "docs", "model")
@@ -6951,6 +7128,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             n=len(parted), list="; ".join(line.split(": ", 1)[1] for line in parted)))
     else:
         _check(results, "limits", "ok", said["doctor_ok"])
+    # SPEC decision 13: the evaluators claims' mechanisms name, against the
+    # registry — always a row, never a FAIL: a cross-check is not an integrity
+    # fault, and it moves no status.
+    said = report.HUMAN["mechanism"]
+    named = [p for p in claims.mechanism_problems(view, registry)]
+    if named:
+        _check(results, "mechanisms", "warn", said["doctor_warn"].format(
+            n=len(named), list=_listed([report.mechanism_problem_words(p) for p in named])))
+    elif any(getattr(c, "evaluators", None) for c in view.claims):
+        _check(results, "mechanisms", "ok", said["doctor_ok"])
+    else:
+        _check(results, "mechanisms", "ok", said["doctor_none"])
     _doctor_seal_row(results, registry,
                      _context(root, ledger, model, projection, ALL_TIERS, quiet=True))
 
@@ -7179,9 +7368,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- gap -------------------------------------------------------------- #
     p = sub.add_parser("gap", parents=[common],
-                       help="measurable claims no gate covers — how the system grows")
+                       help="every claim whose mechanism has yet to run — gap, pending "
+                            "build, assumed — and, with --propose, packs that might run it")
     p.add_argument("--propose", action="store_true",
-                   help="also list installed packs whose vocabulary matches")
+                   help="also list installed packs whose vocabulary matches each claim's "
+                        "quantity and how")
     p.set_defaults(func=cmd_gap)
 
     # -- gate ------------------------------------------------------------- #
@@ -7251,7 +7442,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("why", parents=[common],
-                       help="one param or claim's full history, instead of the whole log")
+                       help="one param's, claim's or requirement's full history, instead "
+                            "of the whole log")
     p.add_argument("name")
     p.set_defaults(func=cmd_why)
 

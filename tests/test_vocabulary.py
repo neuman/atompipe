@@ -289,6 +289,9 @@ _BRACKET_RUNS = (("check", ["check", "--junit"]), ("status", ["status"]),
                  ("status.json", ["status", "--json"]), ("report", ["report"]),
                  ("claim.list", ["claim", "list"]), ("claim.show", ["claim", "show", "C6"]),
                  ("why.C6", ["why", "C6"]), ("why.C7", ["why", "C7"]),
+                 # Architecture phase 1: `gap` lists claims by status, with their
+                 # mechanisms, so its lines are a channel too; and `why R1`.
+                 ("gap", ["gap"]), ("why.R1", ["why", "R1"]),
                  ("site.init", ["site", "init"]), ("site.build", ["site", "build"]),
                  # P2.5b (critique 11 of its design): the milestone list, the
                  # boundary's dry run and the milestone's report are channels too.
@@ -974,7 +977,8 @@ def _variant(name: str, *, drop: tuple = (), not_required: tuple = (),
         path = os.path.join(root, "claims", "C5.json")
         with open(path, encoding="utf-8") as fh:
             record = json.load(fh)
-        record["note"] = "outdoor rack, two winters, look for crazing at the root"
+        # Its mechanism's `how` (architecture phase 1): C5's file holds one.
+        record["mechanism"] = {"how": "outdoor rack, two winters, look for crazing at the root"}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(record, fh, indent=2)
         os.makedirs(os.path.join(root, "photos"), exist_ok=True)
@@ -1803,3 +1807,90 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
         with mock.patch.object(report_mod, "_verdict_sentence", dropped):
             found = self.problems()
         self.assertTrue([p for p in found if "on-article clauses" in p], found[:5])
+
+
+# --------------------------------------------------------------------------- #
+# architecture phase 1: the glossary's new rows, and the current design
+# --------------------------------------------------------------------------- #
+def _row(text: str, section: int, term: str) -> list[str] | None:
+    return next((row for row in _rows(_section(text, section))
+                 if re.sub(r"\*\*", "", row[0]).strip() == term), None)
+
+
+def phase_one_glossary_problems(text: str) -> list[str]:
+    """What phase 1 owes GLOSSARY (SPEC §0.9, decisions 12, 13, 38, 17, 18):
+    §1's requirement, mechanism, proposer and basis; §4's round record and
+    board, whose Never-says are italic only (§4's plain ones are scanned over
+    every rendering); *proposer* off the generator's Never-say and *requirement*
+    off the claim's; a candidate that is an alternative design."""
+    out: list[str] = []
+    for section, term in ((1, "requirement"), (1, "mechanism"), (1, "proposer"),
+                          (1, "basis"), (4, "round record"), (4, "board")):
+        row = _row(text, section, term)
+        if row is None:
+            out.append(f"§{section} has no {term} row")
+        elif section == 4 and any(item.strip() and not item.strip().startswith("*")
+                                  for item in row[-1].split(" · ")):
+            out.append(f"§4's {term} has a Never-say the scanner would read: {row[-1]}")
+    generator, claim, candidate = (_row(text, 1, t) for t in ("generator", "claim",
+                                                              "candidate"))
+    if generator is None or "proposer" in generator[-1]:
+        out.append("proposer is still a Never-say of generator")
+    if claim is None or "requirement" in claim[-1]:
+        out.append("requirement is still a Never-say of claim")
+    if candidate is None or "alternative design" not in candidate[2]:
+        out.append("a candidate is not an alternative design")
+    return out
+
+
+class TheGlossaryNamesPhaseOnesTerms(unittest.TestCase):
+    """Architecture phase 1's vocabulary is GLOSSARY's: people see *evaluator*;
+    *proposer*, *requirement*, *mechanism*, *basis*, *round record* and *board*
+    are terms; a *candidate* is an alternative design with a disposition."""
+
+    def test_the_rows_are_there(self):
+        self.assertEqual(phase_one_glossary_problems(_glossary()), [])
+
+    def test_a_planted_glossary_is_caught(self):
+        text = _glossary()
+        planted = {
+            "proposer back on the generator": text.replace(
+                "| — (the agent, the user) | *the AI* |",
+                "| — (the agent, the user) | proposer · *the AI* |"),
+            "no board": re.sub(r"(?m)^\| \*\*board\*\* \|.*\n", "", text),
+            "a scanned Never-say on the round record": text.replace(
+                "| *judgement* (an expert's judgment is §1's) · *snapshot* |",
+                "| judgement · *snapshot* |"),
+        }
+        for label, mutant in planted.items():
+            with self.subTest(label):
+                self.assertNotEqual(mutant, text, label)
+                self.assertTrue(phase_one_glossary_problems(mutant), label)
+
+
+#: The current design called a candidate (GLOSSARY §1: a candidate is an
+#: alternative design with a disposition, SPEC decision 15).
+_CURRENT_CANDIDATE = re.compile(r"(?i)\b(?:the|current) candidate\b")
+
+
+def candidate_problems(human: Any) -> list[str]:
+    return [s for s in _strings(human) if _CURRENT_CANDIDATE.search(s)]
+
+
+class NoChannelCallsTheCurrentDesignACandidate(unittest.TestCase):
+    """No string `report.HUMAN` holds calls the design in the checkout a
+    candidate: Failing's hint and a control handed the live design say *the
+    current design*. What slipped through before phase 1: both said *the
+    current candidate* / *reads the candidate*, which from decision 15 names
+    an alternative that won or lost."""
+
+    def test_human_says_the_current_design(self):
+        self.assertEqual(candidate_problems(report_mod.HUMAN), [])
+        self.assertIn("the current design", report_mod.HUMAN["status"][ClaimStatus.FAIL].hint)
+
+    def test_a_planted_hint_is_caught(self):
+        failing = report_mod.HUMAN["status"][ClaimStatus.FAIL]
+        planted = MappingProxyType(dict(report_mod.HUMAN, status=MappingProxyType(dict(
+            report_mod.HUMAN["status"], **{ClaimStatus.FAIL: failing._replace(
+                hint="an evaluator failed the current candidate")}))))
+        self.assertTrue(candidate_problems(planted))

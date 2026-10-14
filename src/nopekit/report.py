@@ -176,7 +176,7 @@ _CHECKED = _status_row(
     "does not mean true")
 _FAILING = _status_row(
     ClaimStatus.FAIL, "failing", "Failing", "failing", "FAIL ",
-    "an evaluator failed the current candidate, a physical result failed, or an "
+    "an evaluator failed the current design, a physical result failed, or an "
     "evaluator's value does not meet the claim's acceptance condition")
 _STALE = _status_row(
     ClaimStatus.STALE, "stale", "Stale", "stale", "STALE",
@@ -385,8 +385,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "none_pass": "nothing settles an assumption with a pass — its owner records it: "
                      "nopekit claim physical {id} assume. Nothing was written.",
         "no_test": "{id} has no test written down — a pass needs an acceptance condition or a "
-                   "note saying what was done (\"note\" in claims/{id}.json). Nothing was "
-                   "written.",
+                   "mechanism saying what was done (\"mechanism\": {{\"how\": …}} in "
+                   "claims/{id}.json). Nothing was written.",
         "no_evidence": "a pass on {id} needs --evidence <file>: a photo, a log or a "
                        "measurement file under the project. Nothing was written.",
         "bad_evidence": "--evidence {path}: {why}. Nothing was written.",
@@ -602,7 +602,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         # expert judgment, which takes none by design; *threshold* is the
         # acceptance condition's Never-say).
         "why_none": "acceptance: no acceptance condition",
-        "why_note": "acceptance: none — the test is its note",
+        "why_note": "acceptance: none — the test is its mechanism",
         "why_judgment": "acceptance: none — settled only by {authority}'s judgment",
         "doctor_warn": "{n} evaluator limit(s) part from their claim's: {list}",
     }),
@@ -663,6 +663,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "failing": "## Failing, stale, skipped or open",
         "reproduce": "## Reproduce",
         "gaps_context": "### Outside an evaluator's operating context",
+        "requirements": "## Requirements",
     }),
     # A milestone's one line (P2.5b-D18; critique 20 of its design: one shape
     # everywhere — the `export` list, REPORT.md, `export <m>`), the list's head,
@@ -839,7 +840,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
                               "--measured <value> --detail \"…\" — the value decides; a "
                               "fail on a cross-check contradicts its evaluator, on its track "
                               "record",
-        "no_test": "no test written down: a pass needs one in claims/{id}.json (\"note\")",
+        "no_test": "no test written down: a pass needs one in claims/{id}.json "
+                   "(\"mechanism\": {{\"how\": …}})",
         "help": "the boundary that spends: re-run what a milestone requires, refuse while "
                 "a required claim is unresolved, and write its package",
         "milestone_help": "the milestone (milestones/<name>.json); none lists them",
@@ -862,11 +864,13 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "known_bad": "known-bad",
         # A control's outcome on the line: GLOSSARY §1's outcome words, `not
         # run` for a known-good control that does not exist (§2's own reason
-        # for known-bad shown), `reads the candidate` for one handed the live
-        # design (GLOSSARY §1: the current configuration is a *candidate*).
+        # for known-bad shown), `reads the current design` for one handed the
+        # live design (GLOSSARY §1: a *candidate* is an alternative design with
+        # a disposition, SPEC decision 15; the design in the checkout is the
+        # current design).
         "outcome": MappingProxyType({"pass": "pass", "fail": "fail", "errored": "errored",
                                      "skipped": "skipped", "not-run": "not run",
-                                     "live": "reads the candidate",
+                                     "live": "reads the current design",
                                      # P2.4-D19: it passed outside its own
                                      # operating context.
                                      "outside": "outside its operating context"}),
@@ -913,7 +917,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
             "known-good:errored": "known-good errored: {text}",
             "known-good:skipped": "known-good skipped itself: {text}",
             "known-good:not-run": "known-good not run",
-            "known-good:live": "known-good control reads the candidate",
+            "known-good:live": "known-good control reads the current design",
             "known-good:outside": "known-good outside its operating context",
             "goalpost:moves": "its known-good value moves when the acceptance condition it "
                               "reads ({text}) moves: a value is measured, never chosen by the "
@@ -1027,6 +1031,91 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         }),
         "help": "run each evaluator's known-good and known-bad controls, and the mutation "
                 "pass for one not from a bundled pack; exits 1 on any unqualified evaluator",
+    }),
+    # SPEC decision 13: what would settle a claim, and the cross-check of the
+    # evaluators its mechanism names (never coverage, never a status). Never
+    # "not run" (Open's word): a mechanism "has yet to run".
+    "mechanism": MappingProxyType({
+        # The label apart from the body (review of phase 1): the report's gap
+        # section puts its own bold label in front, and read "**Mechanism:**
+        # mechanism: automated — …".
+        "line": "mechanism: {body}",
+        "body": "{by} — {how}",
+        "unsaid": "{by} — what would settle it is not written down: say it in "
+                  "claims/{id}.json (\"mechanism\": {{\"how\": …}})",
+        "names": "evaluators it expects: {evaluators}",
+        "unregistered": "{id}'s mechanism names {evaluator}, which is not registered here — "
+                        "no status moves; install the pack that provides it, or fix the "
+                        "name in claims/{id}.json",
+        # Never "tag the claim for it" (review of phase 1): tags are coverage,
+        # so that advice turned the cross-check into coverage — C7 (first
+        # mode) read Checked on the bearing-stress pass once tagged `bearing`.
+        "uncovered": "{id}'s mechanism names {evaluator}, which is not one of {id}'s "
+                     "evaluators (it is filed under {filed}) — no status moves; it "
+                     "settles another claim's quantity: fix the name in "
+                     "claims/{id}.json, or name an evaluator that computes {id}'s own",
+        "filed_none": "nothing",
+        "warning": "warning: {line}",
+        "doctor_ok": "every evaluator a claim's mechanism names is registered here and "
+                     "covers that claim",
+        "doctor_none": "no claim's mechanism names an evaluator",
+        "doctor_warn": "{n} evaluator name(s) in claims' mechanisms do not match the "
+                       "registry: {list}",
+        "modelled_part": "a pack's evaluator can check a modelled part of {id}; its pass "
+                         "never settles {id} — {by} does",
+        "empty": "nothing to list: no claim reads {gap}, {pending_build} or {assumed}",
+        "footer": "{n} {claims} whose mechanism has yet to run: {counts}. Name the "
+                  "quantity, try the analytic answer first, and only then propose a "
+                  "solver — with its real cost said out loud.",
+        "need": "gap record {id} {quantity} ({word})",
+        "no_match": "no installed pack settles this vocabulary — this is the extension "
+                    "protocol's trigger (docs/EXTENSION_PROTOCOL.md)",
+        # A physical, judged or assumed claim (review of phase 1): the protocol
+        # never fires there, so no pack is not its trigger.
+        "no_match_settled": "no installed pack checks a modelled part of this — and "
+                            "none is needed: {by} settles it, never a solver",
+        "footer_settled": "{n} {claims} whose mechanism has yet to run: {counts}. Each "
+                          "is settled by its mechanism — a test on an article, a "
+                          "person's judgment or an owner — never by a solver.",
+    }),
+    # SPEC decision 12: what the person asked for, rolled up from its claims by
+    # `claims.requirement_statuses`, the one producer. Never a status of its
+    # own: the eight words, and *ready* stays the claims'.
+    "requirement": MappingProxyType({
+        "intro": "What the person asked for, in their words. Each reads the worst status "
+                 "among the claims that serve it, and one no claim serves reads {gap}. "
+                 "Ready is judged on the claims a milestone requires, never on these.",
+        "md_row": "- **{id}** *({word})* {statement} — {claims}",
+        "group": "{ids} {word}",
+        "sep": " · ",
+        "no_claim": "no claim serves it",
+        "line": "requirements {n} — {items}",
+        "item": "{id} {word}",
+        "item_worst": "{id} {word} ({ids})",
+        "item_none": "{id} {word} (no claim)",
+        # D18 carried up (review of phase 1): a requirement over a claim the
+        # resolver calls Checked while its evidence says otherwise is never a
+        # bare "checked" — the claim rows list that claim as a contradiction.
+        "item_disagree": "{id} {word} (status and evidence disagree: {ids})",
+        "md_disagree": "**status and evidence disagree: {ids}** — ",
+        "why_disagree": "status and evidence disagree on {ids} — the resolver and the "
+                        "verdicts disagree, a defect to report",
+        "more": "+{k} more",
+        "more_unresolved": "+{k} more ({u} unresolved)",
+        "why_head": "requirement  {id}  [{word}]",
+        "why_source": "source: {source}",
+        "why_claims": "CLAIMS ({n})",
+        "why_none": "(none — no claim names {id} in \"requirements\", so it reads {gap}: "
+                    "write a claim that settles it, and name {id} there)",
+        "serves": "serves: {ids}",
+        "serves_missing": "{id} (no requirements/{id}.json)",
+        "doctor_ok": "{n} requirement(s), each served by a claim",
+        "doctor_none": "none recorded — a requirement is requirements/<id>.json: the "
+                       "person's words",
+        "doctor_unserved": "{ids}: served by no claim — each reads {gap} until a claim "
+                           "names it in \"requirements\"",
+        "doctor_dangling": "claims/{claim}.json names requirement {id}, which has no "
+                           "requirements/{id}.json",
     }),
 })
 
@@ -1882,9 +1971,12 @@ def claim_json(claim: Claim, *, composed: Any = None,
     hash), `standing` (the judge's state) and `contradicts` (evaluator ids).
     From P2.5b, additive: `superseded` (the fails a pass on another exported
     article superseded, by index) and `latency` (`{seconds, source, article}`:
-    measured from an export, else declared — `claims.latency`)."""
+    measured from an export, else declared — `claims.latency`). From phase 1
+    (SPEC decision 13), additive: `mechanism` — `{by, how, evaluators}` as
+    declared, all three keys always present — in place of a flat `evaluators`
+    (one spelling per channel); `requirements` stays flat, as the record holds it."""
     row = claim.to_dict()
-    for name in ("results", "attributions", "standing"):
+    for name in ("results", "attributions", "standing", "evaluators"):
         row.pop(name, None)
     standing = getattr(claim, "standing", None)
     row["terminal"] = str(getattr(claim, "terminal", "") or "")
@@ -1898,9 +1990,191 @@ def claim_json(claim: Claim, *, composed: Any = None,
     found = claim_logic.latency(claim, exports or ())
     row["latency"] = {"seconds": found.seconds, "source": found.source,
                       "article": found.article}
+    row["mechanism"] = {"by": str(getattr(claim, "terminal", "") or ""),
+                        "how": str(getattr(claim, "note", "") or ""),
+                        "evaluators": list(getattr(claim, "evaluators", None) or ())}
     if claim.physical_result is not None and isinstance(row.get("physical_result"), dict):
         row["physical_result"].update(result_facts(claim, claim.physical_result))
     return row
+
+
+def mechanism_body(claim: Claim) -> str:
+    """`<by> — <how>` (SPEC decision 13): where the claim's evidence bottoms
+    out, in its display word (`terminal_word`, never the raw token), and in
+    words what would settle it — or that nothing says so yet, and where to say
+    it. One line: `how` comes from a record (`_one`). Unlabelled, for a reader
+    that labels it itself (the report's `**Mechanism:**`, `why`'s MECHANISM)."""
+    said = HUMAN["mechanism"]
+    how = _one(getattr(claim, "note", ""))
+    if how:
+        return said["body"].format(by=terminal_word(claim), how=how)
+    return said["unsaid"].format(by=terminal_word(claim), id=claim.id)
+
+
+def mechanism_line(claim: Claim) -> str:
+    """`mechanism: <by> — <how>` — `mechanism_body`, labelled: `gap`'s line."""
+    return HUMAN["mechanism"]["line"].format(body=mechanism_body(claim))
+
+
+def mechanism_problem_words(problem: Any) -> str:
+    """One `claims.MechanismProblem` in words — the line `check` warns with and
+    `doctor` lists: the claim, the evaluator its mechanism names, and that no
+    status moves."""
+    said = HUMAN["mechanism"]
+    return said[problem.kind].format(
+        id=problem.claim, evaluator=problem.evaluator,
+        filed=", ".join(problem.filed) or said["filed_none"])
+
+
+#: How many requirements `status`'s one line names before `+N more`, and how
+#: many of a requirement's worst claims each names. Eight keeps the line near
+#: one screen width for the ids a project numbers R1..R8; *rejected:* one row
+#: per requirement (lines out of status's ~40-line budget, and a `[tag]` row the
+#: claim-row parsers would read as a claim).
+_MAX_REQUIREMENT_ITEMS = 8
+_MAX_WORST_IDS = 3
+
+
+def status_word(status: Any, *, errored: bool = False) -> str:
+    """A status's word with a crash said apart — `skipped, errored` — as the
+    report's section heads say it (invariant 2: louder than a missing tool,
+    wherever a status is rolled up and its tag is not printed beside it)."""
+    shown = word(status, errored=errored)
+    if errored and _norm_status(status) is ClaimStatus.BLOCKED:
+        shown += f", {HUMAN['lead'][ClaimCause.ERRORED]}"
+    return shown
+
+
+def requirement_statuses(ledger: Ledger, composed: Mapping[str, Any],
+                         cover: Mapping[str, list[str]]) -> dict[str, Any]:
+    """`claims.requirement_statuses` — the one producer, its statuses untouched —
+    with each row's `disagree` filled: the serving claims whose status and
+    evidence disagree (`_disagreement`, D18), record order. Every requirement
+    reader asks this, so none prints a requirement bare "checked" over a claim
+    the claim rows list as a contradiction. What slipped through (review of
+    phase 1): the roll-up ranked by the composition alone, so a resolver
+    regression the claim rows caught read `R1 checked` one line below them."""
+    found = claim_logic.requirement_statuses(ledger, composed)
+    cover = dict(cover)
+    out: dict[str, Any] = {}
+    for rid, row in found.items():
+        bad = tuple(cid for cid in row.claims
+                    if (claim := ledger.claim(cid)) is not None
+                    and _disagreement(ledger, claim, composed[cid], cover))
+        out[rid] = row._replace(disagree=bad) if bad else row
+    return out
+
+
+def _requirement_order(requirements: list[Any], found: Mapping[str, Any]) -> list[Any]:
+    """The requirements `status`'s line names before `+N more`: worst first, in
+    `claims.SEVERITY_ORDER` as the claim rows above it are (a disagreement
+    first, as those rows list it), record order within a rank; Gap with no
+    claim at Gap's rank. What slipped through (review of phase 1): the line cut
+    at eight in record order, so a failing ninth read `+1 more` under eight
+    checked ones."""
+    def rank(requirement: Any) -> int:
+        row = found[requirement.id]
+        if row.disagree:
+            return -1
+        key = "errored" if row.errored else claim_logic.STATUS_KEY[row.status]
+        return claim_logic.SEVERITY_ORDER.index(key)
+    return sorted(requirements, key=rank)
+
+
+def requirement_line(ledger: Ledger, composed: Mapping[str, Any],
+                     cover: Mapping[str, list[str]] | None = None) -> str | None:
+    """`requirements 4 — R1 failing (C1) · R2 gap (C7) · R4 checked` — the
+    requirements line `status` prints (SPEC decision 12), or None when the
+    project records none. Every status from `requirement_statuses` over
+    `claims.requirement_statuses`, the one producer; record order while every
+    one fits, else worst first (`_requirement_order`) with `+N more (k
+    unresolved)`; Checked ones name no claim unless one disagrees with its
+    evidence. ``cover`` is the caller's coverage (`_coverage`); None reads
+    each claim's own cached list."""
+    requirements = list(getattr(ledger, "requirements", None) or ())
+    if not requirements:
+        return None
+    said = HUMAN["requirement"]
+    if cover is None:
+        cover = _coverage(ledger, None)
+    found = requirement_statuses(ledger, composed, cover)
+    shown_ones = (requirements if len(requirements) <= _MAX_REQUIREMENT_ITEMS
+                  else _requirement_order(requirements, found)[:_MAX_REQUIREMENT_ITEMS])
+    items = []
+    for requirement in shown_ones:
+        status = found[requirement.id]
+        shown = status_word(status.status, errored=status.errored)
+        if status.disagree:
+            items.append(said["item_disagree"].format(
+                id=requirement.id, word=shown, ids=", ".join(status.disagree)))
+        elif not status.claims:
+            items.append(said["item_none"].format(id=requirement.id, word=shown))
+        elif status.status in (ClaimStatus.PASS, ClaimStatus.VERIFIED):
+            items.append(said["item"].format(id=requirement.id, word=shown))
+        else:
+            ids = ", ".join(status.worst[:_MAX_WORST_IDS]) + (
+                f", {said['more'].format(k=len(status.worst) - _MAX_WORST_IDS)}"
+                if len(status.worst) > _MAX_WORST_IDS else "")
+            items.append(said["item_worst"].format(id=requirement.id, word=shown, ids=ids))
+    if len(requirements) > _MAX_REQUIREMENT_ITEMS:
+        kept = {r.id for r in shown_ones}
+        hidden = [found[r.id] for r in requirements if r.id not in kept]
+        left = sum(1 for r in hidden if r.disagree or r.status not in (
+            ClaimStatus.PASS, ClaimStatus.VERIFIED))
+        items.append(said["more_unresolved"].format(k=len(hidden), u=left) if left
+                     else said["more"].format(k=len(hidden)))
+    return said["line"].format(n=len(requirements), items=said["sep"].join(items))
+
+
+def requirement_json(requirement: Any, found: Any) -> dict[str, Any]:
+    """A requirement as every JSON channel shows it — `status --json`, `report
+    --json` and `state.json` (SPEC decision 12): its record, and its status from
+    `claims.requirement_statuses` (`found`), worded once here."""
+    return {"id": requirement.id, "statement": str(requirement.statement or ""),
+            "source": str(requirement.source or ""), "status": found.status.value,
+            "key": found.key, "word": status_word(found.status, errored=found.errored),
+            "errored": bool(found.errored), "claims": list(found.claims),
+            "worst": list(found.worst),
+            # D18 carried up: the serving claims whose status and evidence
+            # disagree (`requirement_statuses`); empty under the composition.
+            "disagree": list(getattr(found, "disagree", ()) or ())}
+
+
+def _section_requirements(ledger: Ledger, composed: Mapping[str, Any],
+                          cover: Mapping[str, list[str]] | None = None) -> list[str]:
+    """The report's `## Requirements` (SPEC decision 12): each requirement, its
+    status from `claims.requirement_statuses`, its words, and the claims that
+    serve it grouped by status, most urgent first. Empty when the project
+    records none, so a report without requirements is byte-identical to one
+    before phase 1. After the Failing section: SECTION_PROVEN stays first, and a
+    requirement is never a claim row (no JUnit suite either)."""
+    requirements = list(getattr(ledger, "requirements", None) or ())
+    if not requirements:
+        return []
+    said = HUMAN["requirement"]
+    found = requirement_statuses(ledger, composed,
+                                 _coverage(ledger, None) if cover is None else cover)
+    out = [HUMAN["heading"]["requirements"], "",
+           said["intro"].format(gap=word(ClaimStatus.UNCLAIMED)), ""]
+    for requirement in requirements:
+        status = found[requirement.id]
+        groups: dict[tuple, list[str]] = {}
+        for cid in status.claims:
+            one = composed[cid]
+            groups.setdefault((claim_logic.severity(one), one.status, one.errored),
+                              []).append(cid)
+        claims = said["sep"].join(
+            said["group"].format(ids=", ".join(ids), word=status_word(st, errored=err))
+            for (_rank, st, err), ids in sorted(groups.items(), key=lambda kv: kv[0][0])
+        ) or said["no_claim"]
+        statement = _trunc(_one(requirement.statement), 160)
+        if status.disagree:
+            statement = said["md_disagree"].format(ids=", ".join(status.disagree)) + statement
+        out.append(said["md_row"].format(
+            id=requirement.id, word=status_word(status.status, errored=status.errored),
+            statement=statement, claims=claims))
+    out.append("")
+    return out
 
 
 def result_facts(claim: Claim, entry: Any) -> dict[str, Any]:
@@ -2925,8 +3199,9 @@ def _physical_test(claim: Claim) -> str:
         return (f"measure {rendered} on the article and compare against the "
                 f"acceptance")
     return ("**no test has been written down.** As stated, this claim cannot be "
-            "settled by any observation — give it an acceptance or a procedure in "
-            "its note, or it will stay on this list forever")
+            "settled by any observation — give it an acceptance condition, or say what "
+            "would settle it in its mechanism (\"how\"), or it will stay on this list "
+            "forever")
 
 
 def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
@@ -2965,9 +3240,10 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
         return out
 
     if needs or no_evaluator:
-        out.append(f"A claim with no evaluator is a {word(gap)}, not a defect. It is closed "
-                   f"by installing or writing a tool — with the cost said out loud before "
-                   f"anyone agrees to it.")
+        out.append(f"A claim with no evaluator is a {word(gap)}, not a defect. Its mechanism "
+                   f"says what would settle it; the cheapest evaluator that runs it comes "
+                   f"first, and a tool is installed or written only with its cost said out "
+                   f"loud before anyone agrees to it.")
         out.append("")
     recorded = {cid for need in needs for cid in (need.claim_ids or ())}
     for need in needs:
@@ -2979,6 +3255,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             found = composed.get(cid)
             tag = word(found.status, errored=found.errored) if found is not None else "?"
             out.append(f"- **Claim:** {cid} — {text}  `{tag}`")
+            if claim and claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
             if claim and claim.gates and found is not None and found.status in (
                     ClaimStatus.PENDING, ClaimStatus.BLOCKED):
                 # Not a contradiction, and worth one line so nobody reads it as
@@ -3038,6 +3316,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if outside:
@@ -3052,6 +3332,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if unjudged:
@@ -3067,6 +3349,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if unowned:
@@ -3079,6 +3363,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
     return out
 
@@ -3628,6 +3914,7 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
     out += _section_failing(ledger, composed, cover, registry, stale_gates=stale_gates,
                             stale_reasons=stale_reasons,
                             required_word="required" if milestone is not None else "critical")
+    out += _section_requirements(ledger, composed, cover)
     out += _section_reproduce(ledger, registry, root=root)
 
     out.append("---")
@@ -3697,6 +3984,11 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
         lines.append(f"       ... and {len(problems) - _MAX_TERMINAL_CLAIMS} more "
                      f"unresolved claims — see `nopekit report`")
     lines.extend(rebuild_line(found) for found in claim_logic.rebuild(ledger))
+    # SPEC decision 12: one untagged line, so status keeps its budget and no
+    # claim-row parser reads R1 as a claim; only when requirements are recorded.
+    said_requirements = requirement_line(ledger, composed, cover)
+    if said_requirements is not None:
+        lines.append(said_requirements)
 
     # The gap RECORDS (`find_gaps`' Needs), with their tool options. Headed
     # "gap records", never "gaps": the count line above counts the claims that
@@ -4255,4 +4547,11 @@ __all__ = [
     "render_junit",
     "render_selftest_junit",
     "junit_safe",
+    "mechanism_line",
+    "mechanism_body",
+    "mechanism_problem_words",
+    "requirement_line",
+    "requirement_json",
+    "requirement_statuses",
+    "status_word",
 ]

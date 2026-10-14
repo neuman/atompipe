@@ -3,7 +3,7 @@
 nopekit takes a design from a sketch to a validated physical thing. Its chain is
 
 ```
-claims  ->  gates  ->  packs  ->  readiness report
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
 ```
 
 Read [`METHOD.md`](METHOD.md) first — ten rules, and everything in `src/` exists to
@@ -78,7 +78,9 @@ every class that holds each invariant):
    a pass on its current article — and an expert-judgment claim only on its
    authority's own judgment of the claim as it reads now; one the resolver calls
    Checked without either is listed loud, as status and evidence disagreeing (P2.5a;
-   `tests/test_physical.py`).
+   `tests/test_physical.py`). A mechanism's evaluator list is a cross-check, never
+   coverage: a name there adds no evaluator to a claim and moves no status (SPEC
+   decision 13; S-37).
 
 Two more, learned the hard way and enforced in `tests/test_packs.py`:
 
@@ -100,7 +102,9 @@ below names:
    what its gate actually read — parameters, files, claim records, the acceptance
    conditions it read, its own code, the spine. When any of those moves, its pass
    reads Stale until the gate runs again — and a limit edit re-keys exactly the gates
-   that read that claim's acceptance condition, and a statement edit none. A physical
+   that read that claim's acceptance condition, and a statement edit none; a mechanism
+   or requirement-pointer edit re-keys only the gates that read that claim or the claims
+   whole, and a requirement edit only those that read the requirements. A physical
    pass is bound to its article — the design it was recorded on: when that design
    moves it reads Stale, naming the article to rebuild — a check run cannot restore
    it (P2.5a). An article `export` built is what its generator read, and every value
@@ -115,7 +119,7 @@ below names:
 8. **The index never disagrees with the records, and no command writes a record
    it was not asked to write.** The records are files — `claims/`, `params/`,
    `decisions/`, `needs/`, `inputs/`, `results/`, `views/`, `milestones/`,
-   `exports/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
+   `exports/`, `requirements/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
    from them, rebuilt after every command (`doctor`, `init` and `--no-record` runs
    write none of it), so a hand edit made since the last command reaches it;
    nothing reads it for truth. `check` writes no record: every path it writes is
@@ -215,7 +219,9 @@ earned. Enforced in `tests/test_signing.py`, `tests/test_physical.py` and
     `--article` is bound to an exported article, and its pass counts only while
     `exports/` holds that export. An
     owner, and an expert-judgment claim's authority, count only as that person
-    recorded them, as themselves: the claim is Gap until then, and an expert
+    recorded them, as themselves (the seal keeps its P2.5a form — `terminal` is
+    `mechanism.by`, `note` is `mechanism.how` — so a claim file moved to the mechanism
+    form stays bound): the claim is Gap until then, and an expert
     judgment Assumed under its authority's name until they judge it — and Gap again
     when the claim is edited after. A fail
     on a claim an automated evaluator had passed — qualified and current — is a
@@ -242,7 +248,10 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
 12. **No reader says more than the composition, and the boundary that spends
     re-executes.** No renderer shows a claim more resolved than `claims.compose`
     composes it, nor says *ready* more generously than `claims.unresolved` — the one
-    predicate the readiness sentence, `export`, the JSON summaries and the page read.
+    predicate the readiness sentence, `export`, the JSON summaries and the page read —
+    nor a requirement more resolved than the worst claim that serves it
+    (`claims.requirement_statuses`, the one producer), and *ready* never reads a
+    requirement.
     A milestone (`milestones/<name>.json`) names the claims its spend requires; it is
     ready only when every one reads Checked — Assumed, Pending build and a Stale that
     waits on a person included in what is not. Every reader but `export` says *ready*
@@ -296,15 +305,15 @@ named.)
 | 1 | `test_invariants.SkipIsNotPass`, `test_invariants.CheckedMeansEveryEvaluatorPassed` |
 | 2 | `test_invariants.ErrorIsNotPass`, `test_louder.ErrorIsLouder`, `test_invariants.UnqualifiedIsTheSpinesWord`, `test_prerequisites.AnErroredPrerequisiteStaysLouder` |
 | 3 | `test_invariants.RegistryRefusesLoggers` |
-| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults` |
+| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
-| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained` |
+| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords` |
 | 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
-| 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated` |
+| 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims` |
 | 15 | `test_mutation.MutationIsSealed` |
 
 ## House rules
@@ -332,7 +341,8 @@ named.)
 Each fact has one home; everything else that shows it is an output of that home.
 
 - **Records** — tracked, one file per record, edited by hand or by the agent and read
-  strictly (an unknown key is refused, with a suggestion): `claims/<id>.json`,
+  strictly (an unknown key is refused, with a suggestion): `requirements/<id>.json`
+  (the person's words; claims point at them with `requirements`), `claims/<id>.json`,
   `params/`, `decisions/`, `needs/`, `inputs/<id>.json`, `results/<claim-id>.json`,
   `views/*.json`, `milestones/<name>.json` (a spend and the claims it requires),
   `exports/<name>.json` (that spend's exports, sealed and chained, appended only by

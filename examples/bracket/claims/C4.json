@@ -11,5 +11,16 @@
   "tags": [
     "bed-fit",
     "wall-thickness"
+  ],
+  "mechanism": {
+    "by": "closed_form",
+    "how": "The arm's printed footprint against the 220 mm bed less the brim, and its thinnest wall against what the nozzle can print",
+    "evaluators": [
+      "bracket.bed_fit",
+      "bracket.min_wall"
+    ]
+  },
+  "requirements": [
+    "R4"
   ]
 }

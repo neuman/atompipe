@@ -2062,6 +2062,9 @@ def state(
         row["limit_text"] = report_logic.limit_words(claim.acceptance)
         claim_rows.append(row)
 
+    # The one producer's statuses, with D18's disagreeing claims named
+    # (`report.requirement_statuses`): the same `cover` as `row["disagree"]`.
+    served = report_logic.requirement_statuses(view, composed, cover)
     views = [v.to_dict() for v in view.views]
     problems = locator_problems(view.views, view.verdicts)
 
@@ -2128,6 +2131,12 @@ def state(
         # title (`report.page_phrases`).
         "phrases": report_logic.page_phrases(),
         "claims": claim_rows,
+        # SPEC decision 12: each requirement, its status from the one producer
+        # over the compositions above, worded by `report.requirement_json`. The
+        # page draws none until the map (phase 5); `judgement_digest` covers
+        # them, so a moved requirement status marks the page behind.
+        "requirements": [report_logic.requirement_json(r, served[r.id])
+                         for r in view.requirements],
         "verdicts": verdict_rows,
         "views": views,
         "locator_problems": problems,

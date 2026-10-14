@@ -8,11 +8,11 @@ description: Build a new nopekit pack — a reusable validation capability for a
 A pack is how a validation capability stops being a one-off. You built a gate for
 your project; a pack is that gate made reusable, self-testing and contributable.
 
-Read `docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
+Read `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
 
 ## Before you start
 
-**Have you followed `docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
+**Have you followed `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
 protocol, not step 1. If you have not yet named the physical quantity precisely,
 tried the analytic answer, chosen the tool deliberately and run a negative control,
 you are packaging something you do not trust yet.
@@ -26,7 +26,7 @@ would recognise? If not, split.
 ### 1. Lay out the directory
 
 No command creates a pack: it is an ordinary directory. Make the layout in
-`docs/PACK_FORMAT.md` — `pack.json`, `PACK.md`, `gates/`, `selftest/`, `references/` —
+`${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` — `pack.json`, `PACK.md`, `gates/`, `selftest/`, `references/` —
 under `.nopekit/packs/<name>/` in the project that needs it (or `packs/<name>/` in
 the nopekit repository). `pack validate` and `gate selftest --pack` find it there by
 name before it is published anywhere; `nopekit packs add <name>` opts the project
@@ -212,7 +212,7 @@ unqualified (`channels differ`). The line says which facts held:
 cad.watertight : known-good pass · known-bad fail → qualified
 ```
 
-A pack loaded from outside the bundled `packs/` — under `.nopekit/packs/` while you
+A pack loaded from outside the bundled `${CLAUDE_PLUGIN_ROOT}/packs/` — under `.nopekit/packs/` while you
 write it, or `~/.nopekit/packs` — reads its controls through `ctx.extra` at its peril
 (`known-good and known-bad via ctx.extra`: a check run never hands `extra`), is handed
 no `ctx.model` on any run, and a verdict that read a ledger value its baseline never
@@ -269,7 +269,7 @@ Three things to get right:
 A pack with no view still works; the site degrades all the way down to claims,
 verdicts and provenance. But if your domain has geometry and you skip this, every
 failure it finds stays a sentence about coordinates. Contract:
-`docs/SITE_CONTRACT.md`.
+`${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md`.
 
 ### 4c. Get the tag vocabulary right
 

@@ -13,7 +13,24 @@ least one violation test of every invariant runs every iteration, and a break
 that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
-The budget is 90 s as ONE process on an otherwise idle machine. The review of
+The budget is 90 s as ONE process on an otherwise idle machine. Architecture
+phase 1 (requirements and mechanisms) paid back what it added, measured as two
+interleaved pairs in one session on 2026-10-14 (load average 0.7-2.3): 92.3 s and
+89.8 s wall (65.5 s user) for its 769 tests, against 90.4 s and 91.3 s wall (67.4-67.7 s
+user) for 94b9963's 751. What it added (~4 s): its invariant classes' in-process rows
+(~1.5 s: the seal pinned across both spellings, both spellings keying alike, a
+mechanism moving no status, a requirement never above its worst claim, every reader
+agreeing on one, *ready* staying the claims', the requirement record), `gap` now
+resolving as `status` does in each records sweep's gap rows (~2 s), and `gap` and
+`why R1` in the vocabulary world (~0.5 s). What it paid (~4.2 s):
+`test_status_table.UnqualifiedReadsGap` (3.5 s; not an invariant class, the composition
+it reads held in process by UnqualifiedBesideAPassIsNeverChecked and StatusTable) and
+`test_renderers.BlockingTagIsStatusTag`'s `check` run (0.7 s) to the full suite. Still
+at the line, not under it: the next change that adds pays first. The review of phase 1
+added six in-process rows (~0.03 s: a requirement over a disagreeing claim, the capped
+requirements line, the requirement-claim id collision) and measured flat: 89.4 s and
+89.5 s wall for its 775 tests against 89.3 s and 92.2 s for b67e135's 769, interleaved
+in one session on 2026-10-14 (load average 1.2-1.5). The review of
 P2.5b added eight rows (the in-process halves of its laundering paths, ~0.3 s;
 its end-to-end rows are left to the gate, below) and measured flat: 93.6 s wall
 (67 s user) for 746 tests against 93.6 s for 7e71aac's 738 in the same session,
@@ -209,8 +226,17 @@ FAST: list[str] = [
     "test_availability",
     # Every reader of a verdict (`ok`, `render`, the claim ladder, JUnit) says the
     # same thing about it, over every combination of passed/skipped/error: a
-    # reader that calls a skip a pass is red here. 1.3 s.
-    "test_renderers",
+    # reader that calls a skip a pass is red here. 1.3 s. Listed class by class
+    # since architecture phase 1's pay-back: BlockingTagIsStatusTag's `check`
+    # run (0.7 s) is the full suite's — its in-process row stays, and the tag a
+    # blocker prints is `test_louder`'s and `test_shapes`' too.
+    "test_renderers.RenderersAgree",
+    "test_renderers.ExplainingVerdict",
+    "test_renderers.ReasonsAgree",
+    "test_renderers.VerdictRowSaysOutcome",
+    "test_renderers.BlockingTagIsStatusTag.test_each_blocking_status",
+    "test_renderers.TheWalkWordsComeFromTheWalksConstants",
+    "test_renderers.QualificationLineAgrees",
     # JUnit is never greener than the exit code: a skip or an error is never a
     # passing testcase to CI. 0.1 s.
     "test_junit",
@@ -247,11 +273,9 @@ FAST: list[str] = [
     # are left to the gate below.)
     "test_status_table.UnqualifiedBesideAPassIsNeverChecked.test_a_pass_beside_an_unadmitted_evaluator_is_never_checked",
     "test_status_table.UnqualifiedBesideAPassIsNeverChecked.test_a_resolver_that_lets_the_pass_win_is_caught",
-    "test_status_table.UnqualifiedReadsGap.test_resolve_says_a_refusal_with_no_entry",
-    "test_status_table.UnqualifiedReadsGap.test_the_refusal_checks_refuse_today",
-    "test_status_table.UnqualifiedReadsGap.test_an_unqualified_claim_never_reads_errored",
-    "test_status_table.UnqualifiedReadsGap.test_the_tallies_that_called_it_errored_or_unrun_are_caught",
-    "test_status_table.UnqualifiedReadsGap.test_a_compose_that_reads_the_mark_as_a_crash_is_caught",
+    # (Architecture phase 1's pay-back: UnqualifiedReadsGap, ~3.5 s, not an
+    # invariant class, is the full suite's — the composition it reads is held in
+    # process by UnqualifiedBesideAPassIsNeverChecked above and StatusTable.)
     # P2.1's vocabulary and JSON: GLOSSARY §3's words from one table on every
     # channel (the louder and refused worlds shared with the two modules above,
     # one process; a bracket, an empty project and an unevaluated one of its
@@ -659,6 +683,35 @@ FAST: list[str] = [
     "test_physical.AResultBindsToAnExportedArticle.test_in_process_every_record_of_one_article_is_read",
     "test_louder.ErrorIsLouder.test_an_export_refusal_says_errored",
     "test_export.EveryCacheReaderSaysAsLastEvaluated.test_a_cache_reader_says_ready_as_last_evaluated",
+    # -- architecture phase 1 (SPEC decisions 12, 13): claims say how they
+    # settle. In process, each with its planted violator (~1.5 s together,
+    # measured 2026-10-14): the seal pinned across both spellings (11), both
+    # spellings keying alike and an edit re-keying exactly its readers (7), a
+    # mechanism moving no status and a requirement never more resolved than its
+    # worst claim (4), every reader agreeing on a requirement and *ready*
+    # staying the claims' (12), and the requirement record's strict reader,
+    # pointers, index and migration (8). The pty row, the bracket through the
+    # commands and doctor's row are left to the gate, below.
+    "test_mechanism.TheSealSurvivesTheNewSpelling.test_the_seal_form_is_pinned",
+    "test_mechanism.TheSealSurvivesTheNewSpelling.test_pointers_and_expectations_are_not_sealed",
+    "test_mechanism.TheMechanismMovesNoKey",
+    "test_mechanism.AMechanismNeverMovesAStatus",
+    "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_the_small_world_reads_as_typed",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_every_channel_agrees",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_the_words_are_humans",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_the_page_takes_its_rows_from_the_producer",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_section_that_folds_statuses_itself_is_caught",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_disagreeing_claim_is_named_under_its_requirement",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_requirement_reader_that_drops_the_disagreement_is_caught",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_capped_line_names_the_worst_first",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_line_cut_in_record_order_is_caught",
+    "test_requirements.ReadinessStaysTheClaims",
+    "test_records.RequirementsAreRecords.test_the_strict_reader",
+    "test_records.RequirementsAreRecords.test_a_claims_pointers",
+    "test_records.RequirementsAreRecords.test_the_index_lists_them_and_names_the_problems",
+    "test_records.RequirementsAreRecords.test_a_legacy_project_keeps_its_requirements",
+    "test_records.RequirementsAreRecords.test_a_requirement_id_that_is_a_claim_id_is_named",
 ]
 
 
@@ -666,6 +719,16 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Architecture phase 1's end-to-end halves (~2 s): a pass typed in a pty on
+    # an older-spelled claim, read Checked after the file is respelled (11);
+    # the bracket's requirements through `status --json`, `report --json` and
+    # `why` (12); doctor's FAIL on a dangling pointer (8). Each rule is held in
+    # process above; an iteration touching `store`'s claim reader or writer,
+    # `claims.requirement_statuses`, a requirement renderer or `cmd_doctor` runs
+    # test_mechanism, test_requirements and test_records whole.
+    "test_mechanism.TheSealSurvivesTheNewSpelling.test_a_recorded_pass_stays_bound_across_the_rewrite",
+    "test_requirements.EveryReaderAgreesOnARequirement.test_the_bracket_end_to_end",
+    "test_records.RequirementsAreRecords.test_doctor_fails_on_a_dangling_pointer",
     # P2.5a's pay-back (~27 s, measured 2026-10-04 with --durations): the CLI
     # rows whose rule an in-process row above already holds. Invariant 2's
     # planted project — every command run once over an errored evaluator (~6 s);

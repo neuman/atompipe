@@ -84,6 +84,9 @@ STATUS_HEAD = (
     ("counts", re.compile(r"^\d+ claims?(?: · \d+ [a-z ]+(?: \(\d+ errored\))?)*$"), 1, 1),
     ("claim", re.compile(r"^\[.{5}\] \S+ .+ — .+$"), 0, None),
     ("more claims", re.compile(r"^       \.\.\. and \d+ more unresolved claims — .+$"), 0, 1),
+    # Architecture phase 1 (SPEC decision 12): one untagged line, only when the
+    # project records requirements.
+    ("requirements", re.compile(r"^requirements \d+ — .+$"), 0, 1),
     ("gaps", re.compile(r"^gap records \d+:$"), 0, 1),
     ("gap", re.compile(r"^  \S+ .+ \(\S+\) — .+$"), 0, None),
     ("more gaps", re.compile(r"^  \.\.\. and \d+ more$"), 0, 1),
@@ -198,6 +201,10 @@ def check_problems(stdout: str) -> list[str]:
                                or T.CONTEXT_LINE.fullmatch(lines[at])):
         at += 1
     while at < len(lines) and T.LIMIT_WARNING.fullmatch(lines[at]):
+        at += 1
+    # Architecture phase 1 (SPEC decision 13): a claim's mechanism naming an
+    # evaluator that does not settle it here — a warning, after the limit ones.
+    while at < len(lines) and T.MECHANISM_WARNING.fullmatch(lines[at]):
         at += 1
     while at < len(lines) and (SKIP_GROUP.fullmatch(lines[at]) or SKIP_ONE.fullmatch(lines[at])):
         at += 1
@@ -720,6 +727,24 @@ class StatusShape(_ShapeCase):
         rowless = "\n".join(ln for ln in lines if not ln.startswith("  print-v1: ")) + "\n"
         self.refuses(rowless, "the milestones head with no milestone under it")
 
+    def test_the_requirements_line(self):
+        """Architecture phase 1 (SPEC decision 12): one untagged requirements
+        line, after the claim rows and before the gap records — the bracket's,
+        as `test_fresh_clone` holds it, put where `render_terminal` prints it
+        (this transcript's bracket is the legacy one, which records none); a
+        second one, or one moved below the gate tally, is refused."""
+        said = ("requirements 4 — R1 failing (C1) · R2 gap (C7) · R3 pending build (C5) · "
+                "R4 checked")
+        lines = self.out("status-current", 0).splitlines()
+        gaps = next(i for i, line in enumerate(lines) if line.startswith("gap records "))
+        placed = lines[:gaps] + [said] + lines[gaps:]
+        self.accepts("\n".join(placed) + "\n")
+        twice = lines[:gaps] + [said, said] + lines[gaps:]
+        self.refuses("\n".join(twice) + "\n", "the requirements line twice")
+        tally = next(i for i, line in enumerate(lines) if line.startswith("gates: "))
+        moved = lines[:tally + 1] + [said] + lines[tally + 1:]
+        self.refuses("\n".join(moved) + "\n", "the requirements line below the gate tally")
+
 
 class GateShowShape(_ShapeCase):
     matcher = staticmethod(gate_show_problems)
@@ -1062,7 +1087,7 @@ class QualificationLineShape(unittest.TestCase):
         "→ qualified",
         "beam.deflection : known-good pass · known-bad fail → qualified",
         "q.honest : known-good not run · known-bad fail → unqualified",
-        "qpack.span : known-good reads the candidate · known-bad fail → unqualified",
+        "qpack.span : known-good reads the current design · known-bad fail → unqualified",
         "q.extra : known-good pass · known-bad fail · channels differ → unqualified",
         "q.honest : known-good pass · known-bad fail · mutation could not run → unqualified",
         "q.tiered : known-good pass · known-bad fail · mutation 0/1 fail · outcomes differ by "
@@ -1198,6 +1223,25 @@ class GoalpostAndContextLinesShape(unittest.TestCase):
             "bracket.bed_fit : its limit 234 mm is not C4's acceptance condition (bed fit <= "
             "204.0 mm) — one number in two places"), "the warning without its lead")
 
+    def test_the_mechanism_warning_has_one_shape(self):
+        """Architecture phase 1: both kinds of mechanism warning match, from the
+        words `report.HUMAN` holds; a warning that says a status moved, or has
+        lost its lead, does not."""
+        from nopekit import claims as claim_logic, report
+        said = report.HUMAN["mechanism"]
+        for problem in (claim_logic.MechanismProblem("C1", "acme.span", "unregistered"),
+                        claim_logic.MechanismProblem("C1", "bracket.bearing", "uncovered",
+                                                     ("bearing",))):
+            line = said["warning"].format(line=report.mechanism_problem_words(problem))
+            with self.subTest(kind=problem.kind):
+                self.assertRegex(line, T.MECHANISM_WARNING)
+        for bad in ("C1's mechanism names acme.span, which is not registered here — no "
+                    "status moves; install the pack that provides it",
+                    "warning: C1's mechanism names acme.span, which is not registered here — "
+                    "C1 reads gap; install the pack that provides it"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(T.MECHANISM_WARNING.fullmatch(bad))
+
     def test_the_qualification_line_gains_two_facts(self):
         for good in ("t.span : known-good outside its operating context · known-bad fail "
                      "→ unqualified",
@@ -1317,8 +1361,9 @@ RESULTS_HEAD = re.compile(r"^PHYSICAL RESULTS \(\d+, oldest first\)$")
 JUDGMENTS_HEAD = re.compile(r"^JUDGMENTS \(\d+, oldest first\)$")
 #: `why`'s acceptance line when the claim writes none (review of P2.5a: "NONE —
 #: without a threshold this is a wish", for a note's test and a judgment alike).
+#: From architecture phase 1 the test is the mechanism's `how`.
 ACCEPTANCE_NONE = re.compile(r"^  acceptance: (?:no acceptance condition|none — the test is "
-                             r"its note|none — settled only by .+'s judgment)$")
+                             r"its mechanism|none — settled only by .+'s judgment)$")
 RESULT_ROW = re.compile(r"^  (?:pass|fail)(?: on article [0-9a-f]{12})? \(recorded .+$")
 
 

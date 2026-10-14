@@ -47,7 +47,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import modelio, store
-from .models import Claim, ClaimKind, Decision, Ledger, Param, Rejected, Verdict, slugify
+from .models import (Claim, ClaimKind, ClaimStatus, Decision, Ledger, Param, Rejected,
+                     Verdict, slugify)
 from .util import NopekitError, atomic_write_text, ensure_dir, iter_suffix_unique
 
 __all__ = ["add", "changed_in", "render_log", "write_log", "why"]
@@ -881,6 +882,15 @@ def _why_claim(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
         out += _wrap(f"source: {claim.source}", indent="  ")
     if claim.tags:
         out += _wrap("tags: " + ", ".join(claim.tags), indent="  ")
+    # SPEC decision 12: the requirements this claim serves, each one a file
+    # names — or said missing, never dropped.
+    serves = list(getattr(claim, "requirements", None) or ())
+    if serves:
+        said_req = report.HUMAN["requirement"]
+        held = {r.id for r in getattr(ledger, "requirements", None) or ()}
+        out += _wrap(said_req["serves"].format(ids=", ".join(
+            rid if rid in held else said_req["serves_missing"].format(id=rid)
+            for rid in serves)), indent="  ")
     if str(getattr(claim, "authority", "") or "").strip():
         out += _wrap(f"authority: {claim.authority}", indent="  ")
     # P2.5b-D19: a measurement's latency, declared until an article an export
@@ -896,8 +906,15 @@ def _why_claim(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
 
     _section(out, "WHY")
     out += _wrap(claim.rationale or "(no rationale recorded — what breaks if this is false?)")
-    if claim.note:
-        out += _wrap(claim.note)
+
+    # SPEC decision 13: what would settle it, where its evidence bottoms out,
+    # and the evaluators it expects — the `how` moved here from WHY. No
+    # registry warning here: those are `check`'s and `doctor`'s.
+    _section(out, "MECHANISM")
+    out += _wrap(report.mechanism_body(claim))
+    if getattr(claim, "evaluators", None):
+        out += _wrap(report.HUMAN["mechanism"]["names"].format(
+            evaluators=", ".join(claim.evaluators)))
 
     # A claim has no `rejected` field of its own; everything that lost while
     # settling it lives in the decisions that touched it.
@@ -991,6 +1008,53 @@ def _no_evaluator(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
     return f"no evaluator covers this claim: {status}"
 
 
+def _why_requirement(ledger: Ledger, requirement: Any,
+                     composed: Mapping[str, Any],
+                     coverage: Mapping[str, list[str]] | None = None) -> str:
+    """One requirement (SPEC decision 12): its words, where they came from, its
+    status from `claims.requirement_statuses` (the one producer, through
+    `report.requirement_statuses`), each claim that serves it in severity order
+    with its reason, and the decisions that name it. A serving claim the
+    resolver calls Checked while its evidence disagrees (D18) is said under the
+    head and on its row, never a bare Checked row. ``coverage`` is the caller's
+    (`claims.effective_gates`); None reads each claim's cached list."""
+    from . import report                            # a reader's module: not at import
+    said = report.HUMAN["requirement"]
+    cover = dict(coverage) if coverage is not None else report._coverage(ledger, None)
+    found = report.requirement_statuses(ledger, composed, cover)[requirement.id]
+    out: list[str] = [said["why_head"].format(
+        id=requirement.id, word=report.status_word(found.status, errored=found.errored))]
+    if found.disagree:
+        out += _wrap(said["why_disagree"].format(ids=", ".join(found.disagree)),
+                     indent="  ")
+    out += _wrap(requirement.statement)
+    if str(requirement.source or "").strip():
+        out += _wrap(said["why_source"].format(source=requirement.source), indent="  ")
+
+    serving = [c for c in ledger.claims if c.id in found.claims]
+    _section(out, said["why_claims"].format(n=len(serving)))
+    if not serving:
+        out += _wrap(said["why_none"].format(id=requirement.id,
+                                             gap=report.word(found.status)))
+    for claim in report.in_severity(ledger, composed, serving):
+        one = composed[claim.id]
+        row = (f"  {report.status_tag(one.status, errored=one.errored)} {claim.id} "
+               f"{report._trunc(report._one(claim.statement), 52)}")
+        disagreeing = report._disagreement(ledger, claim, one, cover)
+        if disagreeing:
+            row += f" — status and evidence disagree — {disagreeing}"
+        elif one.status not in (ClaimStatus.PASS, ClaimStatus.VERIFIED):
+            row += " — " + report.reason(one, ledger, claim)
+        out.append(row)
+
+    moved = _decisions_touching(ledger, {requirement.id})
+    _section(out, f"DECISIONS ({len(moved)}, newest first)")
+    out += _decision_lines(moved) if moved else _wrap(
+        "(none — this requirement has never been revisited)"
+    )
+    return "\n".join(out).rstrip() + "\n"
+
+
 def _why_decision_only(ledger: Ledger, name: str, close: Sequence[str]) -> str:
     """A name that only the decision log knows about.
 
@@ -1041,8 +1105,10 @@ def _first_by_gate(verdicts: Iterable[Verdict] | None) -> dict[str, Verdict] | N
 def why(ledger: Ledger, name: str, *, view: Any = None,
         coverage: Mapping[str, Sequence[str]] | None = None,
         read_sets: Mapping[str, Iterable[Any]] | None = None,
-        verdicts: Iterable[Verdict] | None = None) -> str:
-    """Everything known about one parameter or claim, as one dense plain-text block.
+        verdicts: Iterable[Verdict] | None = None,
+        composed: Mapping[str, Any] | None = None) -> str:
+    """Everything known about one parameter, claim or requirement, as one dense
+    plain-text block.
 
     This is the context-window win and the reason this module exists. An agent
     about to change `wall_mm` calls `why("wall_mm")` and gets the value, what it
@@ -1069,10 +1135,14 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     `ledger.verdict`; each left `None` keeps the stored copy. The CLI passes all
     four from 1.3 (U29); until then `cmd_why` passes none and gets today's text.
 
-    Resolution order: exact param name, exact claim id, then the same two
-    case-insensitively, then a name the decision log mentions but no record
-    holds. A param and a claim sharing a name is pathological; the param wins
-    and the claim is still findable by exact id.
+    Resolution order: exact param name, exact claim id, exact requirement id
+    (SPEC decision 12), then the same three case-insensitively, then a name the
+    decision log mentions but no record holds. A param and a claim sharing a
+    name is pathological; the param wins and the claim is still findable by
+    exact id. `composed` is the caller's compositions (`cmd_why` passes the
+    view it judged); a requirement's status is read from it through
+    `claims.requirement_statuses`, and with none given from
+    `claims.compositions(ledger)` — the raw opinion, for callers outside the CLI.
 
     Plain text, no ANSI: this output goes into a context window and into pipes
     at least as often as it goes to a terminal, and escape codes there are noise
@@ -1084,7 +1154,12 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     """
     wanted = (name or "").strip()
     if not wanted:
-        raise NopekitError("why needs a parameter name or a claim id")
+        raise NopekitError("why needs a parameter name, a claim id or a requirement id")
+
+    def requirement_text(requirement: Any) -> str:
+        from . import claims as claim_logic          # a reader's module: not at import
+        found = composed if composed is not None else claim_logic.compositions(ledger)
+        return _why_requirement(ledger, requirement, found, coverage)
 
     evidence = _Evidence(coverage=coverage, read_sets=read_sets,
                          verdicts=_first_by_gate(verdicts))
@@ -1103,6 +1178,10 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     claim = ledger.claim(wanted)
     if claim is not None:
         return _why_claim(ledger, claim, evidence)
+    requirements = list(getattr(ledger, "requirements", None) or ())
+    requirement = next((r for r in requirements if r.id == wanted), None)
+    if requirement is not None:
+        return requirement_text(requirement)
 
     folded = wanted.casefold()
     text = param_named(lambda candidate: candidate.casefold() == folded)
@@ -1111,10 +1190,13 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     for candidate in ledger.claims:
         if candidate.id.casefold() == folded:
             return _why_claim(ledger, candidate, evidence)
+    for requirement in requirements:
+        if requirement.id.casefold() == folded:
+            return requirement_text(requirement)
 
     param_names = ([v.name for v in views] if views is not None
                    else [p.name for p in ledger.params])
-    known = param_names + [c.id for c in ledger.claims]
+    known = param_names + [c.id for c in ledger.claims] + [r.id for r in requirements]
     close = difflib.get_close_matches(wanted, known, n=_SUGGESTIONS, cutoff=0.6)
 
     in_decisions = any(
@@ -1128,20 +1210,21 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     # instead of offering "did you mean" on an unrelated parameter.
     if any(d.id == wanted for d in ledger.decisions):
         raise NopekitError(
-            f"{wanted!r} is a decision id, not a parameter or claim — see "
+            f"{wanted!r} is a decision id, not a parameter, claim or requirement — see "
             f"docs/decisions.md for its entry"
         )
 
     if not known:
         raise NopekitError(
-            f"no parameter or claim named {wanted!r}: this ledger has no parameters "
-            f"and no claims yet"
+            f"no parameter, claim or requirement named {wanted!r}: this ledger has no "
+            f"parameters, no claims and no requirements yet"
         )
     if close:
         raise NopekitError(
-            f"no parameter or claim named {wanted!r}. Close matches: " + ", ".join(close)
+            f"no parameter, claim or requirement named {wanted!r}. Close matches: "
+            + ", ".join(close)
         )
     raise NopekitError(
-        f"no parameter or claim named {wanted!r}, and nothing close. "
+        f"no parameter, claim or requirement named {wanted!r}, and nothing close. "
         f"`nopekit status` lists what exists"
     )

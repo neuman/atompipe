@@ -11,14 +11,21 @@ get one**, and the discipline to make sure the one you got actually works.
 
 ## When this fires
 
-`nopekit gap` reports a **MEASURABLE** claim with no covering gate. That is a
-capability gap, and it is the system's growth mechanism, not a failure.
+`nopekit gap` lists every claim whose mechanism has yet to run — Gap, Pending
+build and Assumed, physical and assumption claims included. This protocol fires for
+one of them only: an **automated** claim (a MEASURABLE one whose mechanism no person
+settles) with no covering evaluator — with `--propose`, the one `gap` marks "this is
+the extension protocol's trigger". That is a capability gap, and it is the system's
+growth mechanism, not a failure.
 
-It does *not* fire for:
+It does *not* fire for the others `gap` lists, whose mechanism's `by` settles them:
 - **PHYSICAL** claims — no tool will ever settle "the printed seam is watertight".
-  Those stay in the report as UNVERIFIED until a human builds one and records a
-  result. Do not invent a simulation to launder them into green.
-- **ASSUMPTION** claims — those are already honest about being unevidenced.
+  Those stay in the report as Pending build until a human builds one and records a
+  result. Do not invent a simulation to launder them into green; a pack `gap`
+  proposes there checks a modelled part of the claim, never the claim.
+- **Expert-judgment** claims — a named person judges them.
+- **ASSUMPTION** claims — those are already honest about being unevidenced; an
+  owner carries them.
 
 ---
 

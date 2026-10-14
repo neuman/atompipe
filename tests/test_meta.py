@@ -93,7 +93,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_goalposts.AnEvaluatorStatesItsOwnUnits",
         # P2.5a: a physical or expert-judgment claim is listed Checked only on a
         # result that counts, and every claim in exactly one section.
-        "test_physical.TheCheckedSectionHoldsOnlyBoundResults"],
+        "test_physical.TheCheckedSectionHoldsOnlyBoundResults",
+        # Architecture phase 1: a requirement is never more resolved than its
+        # worst claim, and a mechanism's evaluator list moves no status.
+        "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
+        "test_mechanism.AMechanismNeverMovesAStatus"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.
@@ -101,11 +105,16 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # P2.5a: a physical pass whose article's design moved reads Stale.
         "test_physical.AMovedArticleReadsStale",
         # P2.5b: an exported article moves exactly with what its generator read.
-        "test_fig4.TwoArticlesExactly"],
+        "test_fig4.TwoArticlesExactly",
+        # Architecture phase 1: both spellings of a claim key alike, and an edit
+        # re-keys only the gates that read what moved.
+        "test_mechanism.TheMechanismMovesNoKey"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
-        "test_records.MilestonesAreRecords", "test_records.TheExportRecordIsSealedAndChained"],
+        "test_records.MilestonesAreRecords", "test_records.TheExportRecordIsSealedAndChained",
+        # Architecture phase 1: requirements are records.
+        "test_records.RequirementsAreRecords"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -141,7 +150,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # P2.5b: a result bound to an exported article; a fail superseded only
          # on another one, and counting again when the design returns.
          "test_physical.AResultBindsToAnExportedArticle",
-         "test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle"],
+         "test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle",
+         # Architecture phase 1: the seal keeps its form across the mechanism.
+         "test_mechanism.TheSealSurvivesTheNewSpelling"],
     # 12 (P2.5b): no reader says more than the composition — a claim's status on
     # every channel (P2.5a's renderer agreement), *ready* as one predicate — and
     # the boundary that spends re-executes; moved here from
@@ -153,7 +164,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Review of P2.5b: every reader but the boundary says ready as last
          # evaluated, through the commands (`report --milestone` said the
          # boundary's words over a forged cache; `status` listed no milestone).
-         "test_export.EveryCacheReaderSaysAsLastEvaluated"],
+         "test_export.EveryCacheReaderSaysAsLastEvaluated",
+         # Architecture phase 1: every reader agrees on a requirement, and
+         # *ready* stays the claims'.
+         "test_requirements.EveryReaderAgreesOnARequirement",
+         "test_requirements.ReadinessStaysTheClaims"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: "test_mutation.MutationIsSealed",

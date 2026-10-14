@@ -2,10 +2,10 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.bearing",
-  "rho": "47dd4c04ae5fbcf02cf942cbcee84c67c86d8d1fc4458194e3f4add03c5ad95c",
-  "static": "e27cc0a77c70500465f8b279fc37dc20c77bda1aac88702e6587daf8e51ed4d3",
+  "rho": "4699cf539fbe0e58128b57bc89774bbef1fdc042bef99d17901ba8a0269ad302",
+  "static": "0346cc5c574af48d1d992f8d1257daf27b04382cd7abe10d39bcebe0a3851f94",
   "static_parts": {
-    "spine": "f396daf6190537c7f68ede528849d58110bd85d8d545c39e61ecc2efda945530",
+    "spine": "7d5aa8d7e879f51e43ce49fa1732d6ac66e2e4d43e9384b0e9c90270c56b10c8",
     "code": {
       "digest": "615b2a71c694a1207b6b712bd8d0f6d8b0b46d42db3353026e9849373ba5e49d",
       "files": [
@@ -170,5 +170,5 @@
   "measured": 26.667,
   "limit": 15.0,
   "units": "MPa",
-  "digest": "861a361665938cd889451584e65bbde161771e5f337c8532ab415f404c606583"
+  "digest": "6bdd86ec058232995206f329166f35c7d0b510180e328f357dee08b3bb76132b"
 }

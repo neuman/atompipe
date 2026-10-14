@@ -8,7 +8,7 @@ description: Design, validate and fabricate real physical things — hardware, e
 Take a sketch or a discussion to a physical thing you can actually build, with an
 honest account of what has been verified and what has not.
 
-**Read `METHOD.md` at the repo root before doing design work.** It is ten rules and
+**Read `${CLAUDE_PLUGIN_ROOT}/METHOD.md` before doing design work.** It is ten rules and
 it is the whole system. Everything below is how to apply it.
 
 ## First: make `nopekit` runnable
@@ -19,17 +19,18 @@ working command with the first of these that succeeds:
 ```sh
 nopekit --version                                    # already on PATH?
 python3 -m nopekit --version                         # already importable?
-PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src" python3 -m nopekit --version    # plugin install
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 -m nopekit --version    # plugin install
 pip install --user git+https://github.com/neuman/nopekit            # anything else
 ```
 
-If you are running from the plugin, export it once for the session rather than
-prefixing every call:
+If you are running from the plugin, prefix every call — each Bash call starts a
+fresh shell, so an `export` or an `alias` is gone by the next one:
 
 ```sh
-export PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src:$PYTHONPATH"
-alias nopekit='python3 -m nopekit'
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 -m nopekit status
 ```
+
+Below, `nopekit …` stands for whichever form worked.
 
 `nopekit doctor` is the first thing to run whenever something is confusing — it
 checks the environment, the model, determinism, the records and their index, pack
@@ -55,6 +56,7 @@ stale now.
 
 | File | Holds |
 |---|---|
+| `requirements/<id>.json` | what the person asked for, in their words (R1, R2, …): `"statement"`, `"source"` |
 | `claims/<id>.json` | one claim — the file name is its id |
 | `decisions/<slug>.json` | one decision, including what LOST |
 | `inputs/<id>.json` | one piece of evidence and what was extracted from it (its bytes stay in `inputs/<bucket>/`) |
@@ -80,13 +82,14 @@ layout is migrated to record files by its first `check`).
 ## The shape
 
 ```
-claims  ->  gates  ->  packs  ->  readiness report
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
 ```
 
-A **claim** is something that must be true for the design to work. A **gate** is an
-executable that settles a claim *and is capable of failing*. A **pack** supplies
-gates for one physical domain. The **readiness report** is the claims and their
-verdicts, rendered.
+A **requirement** is what the person asked for, in their words. A **claim** is
+something that must be true for the design to work. A **gate** is an executable that
+settles a claim *and is capable of failing*. A **pack** supplies proposers and gates
+for one physical domain; a proposer produces options or evidence and settles nothing.
+The **readiness report** is the claims and their verdicts, rendered.
 
 Your job is to keep that chain honest. The failure mode you are guarding against is
 not "the design is wrong" — it is "the design looks validated and is not".
@@ -126,6 +129,12 @@ ASSUMPTION claims so they stay visible.
 
 ### 2. Extract the claims
 
+Write what the person asked for first, in their words, as requirements —
+`requirements/R1.json`: `{"statement": "It holds the pump without sagging", "source":
+"interview"}` — and have each claim name the requirements it serves (`"requirements":
+["R1"]`). A requirement reads the worst status of its claims, Gap when no claim serves
+it; *ready* stays the claims'.
+
 Turn the brief into claims that must be true, each with a **machine-checkable
 acceptance**. "Strong enough" is not a claim. `≤0.5 mm tip deflection at 3 N` is.
 Write each one as its own file, `claims/<id>.json`:
@@ -134,7 +143,11 @@ Write each one as its own file, `claims/<id>.json`:
 {"statement": "Tip sags no more than 0.5 mm at rated load", "kind": "measurable",
  "acceptance": {"quantity": "tip deflection", "comparator": "<=", "limit": 0.5, "units": "mm"},
  "rationale": "past ~0.5 mm the droop is visible against a level shelf edge",
- "tags": ["stiffness"]}
+ "tags": ["stiffness"],
+ "mechanism": {"by": "closed_form",
+               "how": "Euler-Bernoulli tip deflection of the arm under the rated load",
+               "evaluators": ["bracket.deflection", "bracket.model_validity"]},
+ "requirements": ["R1"]}
 ```
 
 Give each the narrowest `tags` that describe what it asserts: a gate covers a claim
@@ -149,16 +162,25 @@ Classify each one honestly:
 | `physical` | An article, or its authority's judgment, settles it. Watertightness, feel, RF range, taste. | *measurement*, or *expert judgment: <authority>* |
 | `assumption` | Accepted provisionally, with a reason and an owner. Recorded so it stays visible. | *assumption*, or *expert judgment: <authority>* |
 
-`claim list` prints that last column. A claim may declare it with `"terminal"` in its
-file — `measurement` or `human` for a physical claim, `none` or `human` for an
-assumption — and a declaration never lowers the bar: the reader refuses a pairing
-outside those, and a measurable claim declared `closed_form`, `solver` or `datasheet`
-reads exactly as an undeclared one.
+`claim list` prints that last column. Every claim has a mechanism, `"mechanism": {"by":
+…, "how": …, "evaluators": [...]}`: `by` is that column's value — declared
+(`measurement` or `human` for a physical claim, `none` or `human` for an assumption,
+`closed_form`, `solver` or `datasheet` for a measurable one) or left out to follow the
+kind; `how` says in words what would settle the claim (for a physical claim, its test);
+`evaluators` names the evaluators you expect to settle it. A declaration never lowers
+the bar: the reader refuses a pairing outside those, and a measurable claim declared
+`closed_form`, `solver` or `datasheet` reads exactly as an undeclared one. `evaluators`
+is a cross-check: `check` and `doctor` warn when one is not registered or does not
+cover the claim; it never adds one and no status moves. `nopekit gap` lists every claim
+whose mechanism has yet to run, and `gap --propose` searches the packs with each
+claim's quantity and its `how`. Older files spell `by` as `"terminal"` and `how` as
+`"note"`; both still read, but never both names for one member.
 
 Say the physical ones out loud early: *"No evaluator here can settle C5 — it needs a
 real hull in real water. It is pending build until you test it."* This builds trust
 and sets expectations correctly. A physical claim needs a test written down — an
-acceptance condition, or a `note` saying what to do — before any pass can count.
+acceptance condition, or its mechanism's `how` saying what to do — before any pass can
+count.
 
 **The person who tested it records the result, in their own shell — never you.**
 Ask them to run `nopekit claim physical C5 pass --evidence photos/c5.jpg --detail
@@ -190,7 +212,8 @@ recorded un-records it. Never edit an owner in to clear a gap, and never make a 
 not required to get `check` to pass — whether it is required is the user's call.
 
 **Some claims end in a person's judgment** — "meets the venue's fire-safety rules". Write
-`"terminal": "human"` and `"authority": "<name>"` into its file. It reads Gap until
+`"mechanism": {"by": "human", "how": "…"}` and `"authority": "<name>"` into its file. It
+reads Gap until
 that person records it with `nopekit claim physical <id> assume --authority
 "<name>"`, Assumed under their name until they judge it with `nopekit claim physical
 <id> pass --authority "<name>"` (or `fail`), each in their own shell, as themselves.
@@ -224,8 +247,8 @@ nopekit gate list             # what will ACTUALLY run — check this early
 nopekit status                # where is this project
 nopekit check                 # tier-0 gates, seconds — run this constantly
 nopekit check --tier 2        # the full sweep, before any spend decision
-nopekit gap --propose         # claims with no gate, and packs that might cover them
-nopekit why <param|claim>     # one thing's full history, instead of the whole log
+nopekit gap --propose         # every claim whose mechanism has yet to run, and packs that might run it
+nopekit why <name>            # one param's, claim's or requirement's full history
 nopekit report --write        # REPORT.md, the readiness report — an ignored output
 nopekit export <m> --dry-run  # ready for milestone <m>? re-runs everything it requires
 nopekit site build            # rebuild the page after a sweep
@@ -270,7 +293,7 @@ The site never computes truth; it renders the records and the verdict cache.
 Everything on the page is in `site/data/state.json`, so read that rather than the
 HTML when you want the state back. A project with no geometry still gets a useful
 site — claims, verdicts, evidence, provenance, readiness. Contract:
-`docs/SITE_CONTRACT.md`.
+`${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md`.
 
 ## Rules you will be tempted to break
 
@@ -345,7 +368,7 @@ does — and never edit a gate's number to make a claim pass. Two readings follo
 ## When a claim has no gate
 
 That is a capability gap, and it is how the system grows. **Do not guess at a tool.**
-Read `docs/EXTENSION_PROTOCOL.md` and follow it: name the quantity precisely,
+Read `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md` and follow it: name the quantity precisely,
 classify it, try the analytic answer first, choose the standard open tool and record
 why, install pinned with a smoke test, wrap it as a gate **with a negative control
 you actually ran**, record every solver setting as a constant, and emit a pack.
@@ -405,10 +428,11 @@ anything. Most people are not starting from zero.
 
 ## Reference
 
-- `METHOD.md` — the ten rules. Read this.
-- `docs/EXTENSION_PROTOCOL.md` — growing a new validation capability.
-- `docs/PACK_FORMAT.md` — the pack contract.
-- `docs/SITE_CONTRACT.md` — the project site: view kinds, locators, `state.json`.
+- `${CLAUDE_PLUGIN_ROOT}/METHOD.md` — the ten rules. Read this.
+- `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md` — growing a new validation capability.
+- `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` — the pack contract.
+- `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md` — the project site: view kinds, locators,
+  `state.json`.
 - `nopekit packs list` — what is installed; `nopekit packs show <name>` for its
   PACK.md (tier 2). Load a pack's `references/` only for the specific task at hand.
 - `nopekit doctor` — run this first when something is confusing.

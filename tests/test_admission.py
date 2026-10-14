@@ -3617,7 +3617,7 @@ class AKnownGoodControlReadsNoCandidate(_env.EnvCase):
     """(V1n, the critique's identity case) A `good=` fixture handed the live
     design — a pack evaluator's, in a project — that reads it, or hands it
     through for the GATE to read, makes the live design the known-good one: S-07
-    in the good direction. Unqualified, `known-good control reads the candidate`,
+    in the good direction. Unqualified, `known-good control reads the current design`,
     and `pack validate` names it as an unsealed fixture."""
 
     def test_a_good_fixture_on_the_live_design_is_unusable(self):

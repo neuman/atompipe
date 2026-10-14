@@ -1,5 +1,11 @@
 {
   "statement": "The load is static and centred on the arm",
   "kind": "assumption",
-  "rationale": "this model has no fatigue, impact or eccentricity term — a claim that said otherwise would be lying"
+  "rationale": "this model has no fatigue, impact or eccentricity term — a claim that said otherwise would be lying",
+  "mechanism": {
+    "how": "Watch what the shelf carries for a month: a load off the arm's centre line, or one that moves, fails this"
+  },
+  "requirements": [
+    "R1"
+  ]
 }

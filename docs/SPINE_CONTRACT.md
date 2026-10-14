@@ -38,6 +38,7 @@ is `cli.py`'s.
 | time savers: file digests, re-verified fixtures | `.nopekit/cache/digests.json`, `controls.json` | ignored | `check`; losing either costs a re-hash or a fixture run, never a verdict |
 | gate scratch and evidence | `.nopekit/out/` (a control's: `out/controls/<gate id>/`) | ignored | gates |
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
+| a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
 | the readiness report (P2.5b; was `docs/readiness.md`) | `REPORT.md` at the root | ignored | `report --write` |
 | a milestone's package: what the spend gets (P2.5b) | `out/<milestone>/` at the root | ignored | `export <milestone>` |
@@ -157,13 +158,18 @@ class Claim(Record):            # something that must be true for the design to 
     id: str; statement: str; kind: ClaimKind = MEASURABLE; acceptance: Acceptance
     rationale: str = ""; source: str = ""; grounded_by: list[str]; gates: list[str]
     tags: list[str]; critical: bool = True; physical_result: PhysicalResult | None = None
-    note: str = ""; owner: str = ""   # P2.1: a NOMINEE for an assumption, never an attribution
+    note: str = ""                    # on disk mechanism.how (phase 1); "note" the older key
+    owner: str = ""                   # P2.1: a NOMINEE for an assumption, never an attribution
     fallback: str = ""                # P2.4: why it may be carried outside an operating
                                       #   context; counts only through an attribution
-    terminal: str = ""                # P2.5a: declared Terminal, "" = by kind; strict reader
+    terminal: str = ""                # P2.5a: declared Terminal, "" = by kind; strict reader;
+                                      #   on disk mechanism.by (phase 1), "terminal" the older key
     authority: str = ""               # P2.5a: an expert judgment's NOMINEE (terminal human)
     expected_latency: dict            # P2.5b: {value > 0, units in LATENCY_UNITS} or {}; a
                                       #   measurement-terminal claim's alone (strict reader)
+    evaluators: list[str]             # phase 1: on disk mechanism.evaluators only — a
+                                      #   cross-check, never coverage (S-37); not sealed
+    requirements: list[str]           # phase 1: the requirement ids it serves; not sealed
     results: tuple = ()               # in memory: every entry of results/<id>.json, oldest first
     attributions: tuple = ()          # in memory: interactive AttributionRecords, newest first
     standing: Standing | None = None  # in memory: set by verdicts.view only
@@ -205,6 +211,10 @@ class ExportRecord(Record):     # P2.5b: one entry of exports/<milestone>.json's
     package: dict                   # {hash, files: {rel: sha256}, manifest: sha256}
     proceed: Any = None             # None, or {claims: [{id, status, cause}], why} (D8)
     prev: str = ""; digest: str = ""   # the chain and the seal (store.append_sealed)
+class Requirement(Record):      # phase 1: requirements/<id>.json — the person's words
+    id: str                         # its stem, store.REQUIREMENT_ID (R1, R2, …)
+    statement: str = ""             # the words, verbatim; required, non-blank
+    source: str = ""                # "interview", or an input id
 class PackManifest(Record):     # pack.json, tier 1 (docs/PACK_FORMAT.md)
     name: str; version: str = "0.1.0"; description: str = ""; settles: list[str]
     claim_classes: list[str]; provides_gates: list[str]; provides_views: list[str]
@@ -227,8 +237,9 @@ class Ledger(Record):           # the whole project, in memory (store.load assem
                                  # file holds, as a claim (to_dict drops it; view composes it)
     milestones: list[Milestone]  # P2.5b
     exports: list[ExportRecord]  # P2.5b: every milestone's, file by file, oldest first
+    requirements: list[Requirement]  # phase 1: natural id order; read whole by a gate, traced
     def claim(cid) | param(name) | artifact(aid) | need(nid) | verdict(gate_id)
-        | milestone(name) -> record | None
+        | milestone(name) | requirement(rid) -> record | None
     def verdicts_for(cid) -> list[Verdict];  def upsert_verdict(verdict) -> None
 ```
 **Records as files** (checkpoint 1.3). Three constants tell `store` how a record
@@ -238,16 +249,22 @@ types, not about the disk:
 RECORD_KINDS: dict[str, type]    # record dir -> kind: claims Claim, params Param,
                                  # decisions Decision, needs Need, inputs InputArtifact,
                                  # results PhysicalResult, views View, milestones Milestone,
-                                 # exports ExportRecord (store.RECORD_DIRS' order)
+                                 # exports ExportRecord, requirements Requirement
+                                 # (store.RECORD_DIRS' order)
 FORBIDDEN_KEYS: dict[str, dict[str, str]]   # class name -> {key: the home that owns it};
                                  # "*" applies at every depth of every kind
 ALWAYS_WRITTEN: frozenset[tuple[str, str]]  # {("Claim", "kind"), ("Acceptance", "comparator")}
+CLAIM_MECHANISM: tuple[tuple[str, str], ...]  # phase 1: (("by", "terminal"), ("how", "note"),
+                                 # ("evaluators", "evaluators")) — the file's "mechanism"
+                                 # member -> the flat in-memory field that holds it
 ```
 `FORBIDDEN_KEYS` is what a record FILE may never carry, each with its owner named in the
 refusal: `Claim.gates` (derived from gate coverage), `Claim.physical_result` (its home is
 `results/<id>.json`), `Param.value` and `Param.derived_from` (the model — `{model}` is
 filled with `meta.model_entry`), `Param.gates` and `Param.changed_in` (derived),
-`InputArtifact.bytes` (computed from the file), and `"*"`: `independence` anywhere —
+`InputArtifact.bytes` (computed from the file), `Requirement.status` (derived on every
+read, `claims.requirement_statuses`) and `Requirement.claims` (a claim names the
+requirements it serves), and `"*"`: `independence` anywhere —
 derived from origin, never a field the proposer fills in. The **dataclass fields stay**:
 `claims.resolve_status` still reads `Claim.gates` in memory, `Ledger.verdicts` is still
 filled by readers, and `Ledger.to_dict()` still emits `verdicts` (tests:H4); only the
@@ -423,7 +440,8 @@ PROJECT_NAME = "project.json"         # .nopekit/project.json — meta, and the 
 LEGACY_LEDGER_NAME = "ledger.legacy.json"   # what a migrated ledger.json is renamed to
 PROJECT_SCHEMA = 2                    # project.json's schema; a newer one is refused
 RECORD_DIRS = ("claims", "params", "decisions", "needs", "inputs", "results", "views",
-               "milestones", "exports")   # the last two P2.5b's: never on a legacy project
+               "milestones", "exports",   # P2.5b's: never on a legacy project
+               "requirements")            # phase 1 (SPEC decision 12), last
 VERDICTS_NAME = "verdicts"; CACHE_NAME = "cache"; OBS_NAME = "obs"   # under .nopekit/
 INDEX_BANNER: str                     # the index's "generated" value: edit the records, never this
 LEGACY_GITIGNORE_TEMPLATES: tuple[str, str]  # init's .nopekit/.gitignore at 1e09113, and at 1.2
@@ -452,6 +470,8 @@ def append_sealed(root, kind, stem, list_name, entry: dict) -> dict  # P2.5b: TH
                                        #   entry — results/<id>.json's lists, exports/<m>.json's
 class ExportsFile(list):        # P2.5b: list[ExportRecord], plus .raw (the file as stored)
 MILESTONE_NAME: re.Pattern      # P2.5b: ^[a-z0-9][a-z0-9._-]{0,63}$ — a milestone file's stem
+REQUIREMENT_ID: re.Pattern      # phase 1: ^R[1-9][0-9]*$ — a requirement file's stem, and every
+                                #   id a claim's "requirements" names
 def generator_parts(ref) -> tuple[str, str]   # "<path>.py:<function>" -> (path, function); refuses
 ARTICLE_KEYS = ("source", "hash", "built_from", "traced", "milestone", "when", "revision",
                 "dirty")        # an article dict's closed keys, a result's and an export's
@@ -549,7 +569,36 @@ top-level `inputs/*.json` is most likely stray evidence, and the message names
 items say `passed` as a bool, and a claim's `critical`, when present, is a bool too
 (review of P2.1: `"critical": null` read as not required by truthiness, so a failing
 claim left every required list and `check` said ready). `load` also refuses two record files whose stems differ
-only in case. *Rejected:* quarantining a file that does not read as an index `problem` —
+only in case.
+
+**A claim's mechanism** (architecture phase 1, SPEC decision 13). A claim file says
+how it settles in one object, `"mechanism": {"by", "how", "evaluators"}`, and the
+reader unfolds it (`_unfold_mechanism`) into the flat fields every reader reads —
+`terminal`, `note`, `evaluators` (`models.CLAIM_MECHANISM`) — before `_check_keys`
+runs (which takes `suggest=("mechanism",)`, so `mechansim` is told `did you mean
+"mechanism"`). Each rule binds only when its key is present (R-10): a top-level
+`"evaluators"` is refused (it lives in the mechanism, a cross-check, never coverage —
+S-37); a mechanism that is not an object, or holds a member it does not know, is
+refused with a suggestion; one member said under both names — `"terminal"` beside
+`mechanism.by`, `"note"` beside `mechanism.how` — is refused even when the two agree
+(the dropped one would be erased by the next write, S-40), while different members in
+different spellings read; `how` is text; `evaluators` is a list of distinct,
+unpadded ids; `"mechanism": {}` reads as absent. `by` then goes through
+`_check_terminal(..., spelled="mechanism.by")`, held to `TERMINALS_BY_KIND` exactly as
+`terminal` is, each refusal naming the spelling the file used. The writer folds them
+back (`_fold_mechanism`, from `_encode`): `"mechanism"` at `note`'s slot, members in
+`by`/`how`/`evaluators` order, only those not at their default — a claim with no
+mechanism writes exactly the bytes it wrote before. `Record.to_dict` stays flat (it
+feeds `verdicts._record_form`, `report.claim_json` and the `LedgerView`'s copies).
+
+**Requirements** (architecture phase 1, SPEC decision 12). `requirements/<id>.json`
+holds `statement` (the person's words, non-blank text) and `source` (text: "interview",
+or an input id); its stem is a `REQUIREMENT_ID` (`_check_requirement`), and a refusal
+of a top-level `requirements/*.json` adds `_REQUIREMENTS_HINT` (a document of the
+project's own goes in `inputs/specs/`, through `ingest`). A claim's `"requirements"` is
+a list of distinct requirement ids (`_check_id_list`); one naming a requirement no file
+holds is read, never refused (the milestone precedent), and named by the index and by
+`doctor`. *Rejected:* quarantining a file that does not read as an index `problem` —
 a typo'd real record would vanish (S-40's shape). `Record.from_dict` stays lenient.
 
 **`load`** reads the records (each kind in natural id order — C2 before C10 —,
@@ -586,14 +635,17 @@ legacy `ledger.json` with `verdicts: []` and no sweep record, and does not migra
 **The index** is `build_index(root)`, a pure function of the record files and the bytes
 of the inputs they name — no clock, model, registry or listing order. Keys, in order:
 `generated` (`INDEX_BANNER`), `schema`, `records_digest`, `meta`, `claims`, `params`,
-`decisions`, `needs`, `inputs`, `results`, `views`, `unregistered_inputs`, `problems`.
-Each record row is its file's content plus its id. Each input row adds `sha256` (the
+`decisions`, `needs`, `inputs`, `results`, `attributions`, `views`, `milestones`,
+`exports`, `requirements` (phase 1), `unregistered_inputs`, `problems`.
+Each record row is its file's content plus its id, as the writer spells it (a claim
+read from the older `terminal` and `note` keys shows them as `mechanism`). Each input row adds `sha256` (the
 digest of the bytes NOW, through `util.FileDigests` and the untracked
 `.nopekit/cache/digests.json`, read, never written), `pinned` (the record's sha256),
 `drift` and `exists` (`null` for an input with no path). `unregistered_inputs` lists
 evidence bytes under `inputs/` — not a top-level `*.json`, not `inputs/README.md`, not a
 dot-file — that no record's `path` names. `problems`: missing bytes, drift, dangling
-`grounded_by`/`claim_ids`/`claims_changed` links, results for a claim with no file. It
+`grounded_by`/`claim_ids`/`claims_changed` links, results for a claim with no file, a
+claim naming a requirement no file holds, a requirement id that is also a claim's. It
 **never** holds a status, coverage or a verdict — those sit in `last_check.json`, and an
 index that carried them could disagree with them. What slipped through without the
 computed digest (S-45): evidence was hashed at ingest and never again, so tampered bytes
@@ -1054,7 +1106,14 @@ empty — a gate reading other gates' verdicts would put verdicts inside rho.
 `claim(cid)` records `"claim:<cid>"` with the digest of that claim, its in-memory
 `gates` and `physical_result` stripped (coverage and a bench result are not what a
 gate read), or `ABSENT`. Reading `claims`, `params`, `inputs`, `needs`, `decisions`,
-`views` or `meta` records the whole list. openmodelica reads a claim's limit through
+`views`, `meta`, `milestones` or — architecture phase 1 — `requirements` records the
+whole list (`_LEDGER_WHOLE`: untraced, an edit to a requirement would leave the verdict
+of a gate that read it Fresh). A field a gate's read of a record leaves out while it
+holds its default (`_ABSENT_WHEN_EMPTY`) gains `evaluators` and `requirements` (empty
+lists), so a claim that names neither digests as before phase 1, and a mechanism or a
+pointer edit re-keys only the gates that read that claim (`ctx.ledger.claim(id)`, keyed
+`claim:<id>`) or the claims whole — `how` is the record's `note`, always in the digest.
+openmodelica reads a claim's limit through
 `ctx.ledger` (S-23), which is why this is an input at all. **`ModelProxy`**: any real
 use of `ctx.model` sets `model_used` (rho then carries the whole projection and the
 model's code); copying the context or truth-testing the model does not. `None` stays
@@ -2351,7 +2410,38 @@ def latency(claim, exports) -> Latency        # a measurement's: from the newest
                                               #   article not after the newest result a person
                                               #   typed on it; else declared; an automated
                                               #   claim's is none (its evaluator's run's)
+# Architecture phase 1: the mechanism (SPEC decision 13) and requirements (decision 12)
+class MechanismProblem(NamedTuple): claim; evaluator; kind; filed = ()  # kind: unregistered | uncovered
+def mechanism_problems(ledger, registry) -> list[MechanismProblem]   # a cross-check: moves no status;
+                                              #   registry None -> []
+MECHANISM_YET_TO_RUN: frozenset[ClaimStatus]  # Gap, Pending build, Assumed
+def yet_to_run(ledger, composed) -> list[Claim]   # every claim whose mechanism has yet to run
+def need_how(ledger, need) -> str             # the how of every claim a Need names, joined
+def proposal_query(claim, gaps, ledger=None) -> tuple[Need, str]   # gap --propose's search: the
+                                              #   claim's Need with need_how (one search per
+                                              #   record), or a transient one never written
+                                              #   with the claim's how
+class RequirementStatus(NamedTuple): id; status; errored; claims; worst; disagree = ()
+                                              # key -> str (property); disagree is
+                                              #   report.requirement_statuses' to fill
+def requirement_statuses(ledger, composed) -> dict[str, RequirementStatus]   # THE producer:
+                                              #   the worst serving claim by severity; Gap with none
 ```
+**A claim's mechanism and its requirements (architecture phase 1).** The evaluators
+a claim's mechanism names are a cross-check, never coverage: `mechanism_problems` is
+the one place that compares them with the registry, for `check`'s and `doctor`'s
+warnings, and nothing it returns reaches `compose`, `compositions`, `effective_gates`
+or `coverage` (S-37: a claim file that held coverage was rewritten by `check` on every
+run). `yet_to_run` reads the composition a caller already holds — `gap`'s list — and
+`find_gaps` keeps its Need half. `requirement_statuses` is the one producer of a
+requirement's status: the worst composition among the claims that name it, in
+`SEVERITY_ORDER` (a crash's Skipped above a plain one), Checked only when every one is,
+Gap with none and no cause of its own; status, `why`, the report, `summarise`, the JSON
+rows and `state.json` ask it and never fold. *Ready* never reads it: `unresolved` is
+unchanged. `claim_digest` keeps its P2.5a form: `terminal` is `mechanism.by`, `note` is
+`mechanism.how`, and `evaluators` and `requirements` are not sealed, so a claim file
+moved to the mechanism form stays bound.
+
 **Ready is one predicate (P2.5b-D1, invariant 12).** `unresolved` is the one place that
 decides *ready*: every reader — `check`'s line, `status`, the report's sentence,
 JUnit's properties, `summarise`'s `milestones`, `state.json` and `export` — asks it,
@@ -2574,8 +2664,10 @@ class SealFinding:                           # one unsealed control (invariant 5
     gate: str                                # the gate whose control read the host
     fixture: str                             # its NegativeControl.fixture
     host_paths: tuple[str, ...]              # the host-param paths read, sorted, dotted; "(all params)" = the top level
-def match(need: Need, manifests) -> list[PackManifest]      # gap -> candidate packs, by `settles`
-def score(need: Need, manifest) -> float                   # 0 = no signal; what `match` ranks by
+def match(need: Need, manifests, *, how="") -> list[PackManifest]  # gap -> candidate packs, by `settles`
+def score(need: Need, manifest, *, how="") -> float        # 0 = no signal; what `match` ranks by;
+                                                           #   how: the claim's mechanism words (phase 1),
+                                                           #   half the quantity's weight; "" = as before
 def installed(root, *, ledger=None) -> list[str]           # the project's opted-in packs, in order:
                                                              # project.json's `packs`, via store.load
                                                              # with check's model_prose (a legacy project)
@@ -2661,9 +2753,9 @@ def add(ledger, *, title, summary, when, rejected=(), params_changed=(),
 def render_log(ledger) -> str                # markdown, NEWEST FIRST
 def write_log(root, ledger) -> str           # docs/decisions.md — `report --write`'s output
 def why(ledger, name: str, *, view=None, coverage=None, read_sets=None,
-        verdicts=None) -> str                # one param or claim: value, rationale,
-                                             # rejected alternatives, gates, grounding,
-                                             # and the decisions that moved it
+        verdicts=None, composed=None) -> str # one param, claim or requirement: value,
+                                             # rationale, rejected alternatives, gates,
+                                             # grounding, and the decisions that moved it
 def changed_in(ledger, name: str) -> str     # the decision that last moved a param: derived
 ```
 From checkpoint 1.3 (U27) `add` no longer sets `Param.changed_in` — a copy in the param
@@ -2673,6 +2765,14 @@ optional and every default keeps the old rendering: with a `modelio.ParamView` a
 it prints the model's value and where it lives (`param thickness = 7.0 mm
 (model/bracket.py Config.thickness)`) and each rejection with its origin; a model that
 does not load prints `model does not load: …` and no number.
+From architecture phase 1 `why` resolves a requirement id after an exact param and
+claim (then the three case-insensitively): `_why_requirement` prints its words, its
+source, its status from `claims.requirement_statuses` over the caller's `composed`
+(`claims.compositions(ledger)` without one), each serving claim in severity order with
+its reason, and the decisions that name it. A claim's block gains `serves: R1, R3`
+and a MECHANISM section (`report.mechanism_line`, and the evaluators it expects); the
+`how` text moved there from WHY. It prints no registry warning: those are `check`'s and
+`doctor`'s.
 `why` is the context-window win: an agent pulls one parameter's full history
 instead of reading a 1,672-line decision log.
 
@@ -2684,7 +2784,8 @@ HUMAN: Mapping[str, Any]   # THE table (PLAN D-16): "status" {ClaimStatus: Statu
                            # "recorded" {named, unattributed}, "need" {NeedStatus: word},
                            # "outcome" {outcome: word}, "outcome_hint" {outcome: line},
                            # "outcome_tag" (models._RENDER_TAG itself), "heading", "refusal",
-                           # "prerequisite" {failed, not-established, not-registered} (P2.2)
+                           # "prerequisite" {failed, not-established, not-registered} (P2.2),
+                           # "mechanism" and "requirement" (architecture phase 1)
 STATUS_TAG: Mapping[ClaimStatus, str]        # HUMAN's tags, a view: PASS -> "ok   ", ...
 SECTION_PROVEN = "## What is PROVEN"         # the checked section's heading (text: A-11)
 JUNIT_DEFAULT = ".nopekit/out/junit.xml"    # `--junit` with no path; ignored scratch, never tracked
@@ -2722,7 +2823,36 @@ def render_junit(ledger, verdicts, registry, *, tier, ready, exit_code, when,
 def render_selftest_junit(results, *, exit_code, when, baselines=None) -> str
     # `gate selftest --junit`: suite controls, plus baselines in pack mode
 def junit_safe(text) -> str                  # XML-1.0-illegal code points -> visible "\xNN" / "\uNNNN"
+# Architecture phase 1: the mechanism (SPEC decision 13) and requirements (decision 12)
+def mechanism_body(claim) -> str             # "<by's display word> — <how>", or where to say it
+def mechanism_line(claim) -> str             # mechanism_body, labelled "mechanism: " (gap's line)
+def mechanism_problem_words(problem) -> str  # one claims.MechanismProblem, in words: no status moves
+def status_word(status, *, errored=False) -> str   # word, with ", errored" for a crash's Skipped
+def requirement_statuses(ledger, composed, cover) -> dict[str, RequirementStatus]
+                                             # claims.requirement_statuses, each row's disagree
+                                             #   filled: serving claims _disagreement names (D18)
+def requirement_line(ledger, composed, cover=None) -> str | None   # status's one line, or None;
+                                             #   past eight, worst first and "+N more (k unresolved)"
+def requirement_json(requirement, found) -> dict       # the one JSON row: status --json, report --json,
+                                             #   state.json — {id, statement, source, status, key, word,
+                                             #   errored, claims, worst, disagree}
 ```
+**Requirements and mechanisms in the renderers (architecture phase 1).** Every status a
+requirement shows is `claims.requirement_statuses`', worded here: `status` prints one
+untagged line after the claim rows and the rebuild lines (`requirement_line`, so no
+claim-row parser reads R1 as a claim, and only when requirements are recorded); the
+report's `## Requirements` (`_section_requirements`) comes after the Failing section and
+before Reproduce, so `SECTION_PROVEN` stays first, and is empty when none is recorded;
+there is no JUnit suite. Every one of those, `why` and the JSON rows reads
+`requirement_statuses` here, never the bare producer: a requirement over a claim the
+resolver calls Checked while its evidence disagrees (D18) names that claim — `R1
+checked (status and evidence disagree: C2)` — never a bare "checked" one line under
+the claim row that lists it as a contradiction (review of phase 1). Past eight
+requirements the line keeps the worst first (`claims.SEVERITY_ORDER`, a disagreement
+first) and says how many of the rest are unresolved. `claim_json` gains `mechanism` (`{by, how, evaluators}` as
+declared, all three keys always present) and drops the flat `evaluators`. `reason` is
+unchanged: the `how` shows in `gap`, `why`, the report's gap section (a `Mechanism:`
+sub-bullet under each claim) and JSON, never in a Gap's reason.
 **`HUMAN` is the one table** every human word for a status, a cause's lead and an
 outcome comes from (PLAN D-16; GLOSSARY §7), equal to GLOSSARY §3 (Table 1's seven
 words plus Open: Checked, Failing, Stale, Assumed, Pending build, Gap, Skipped, Open)
@@ -2743,7 +2873,7 @@ never the traceback; a skip `skipped: <gate> : <reason>`; a refusal `unqualified
 `no owner recorded`; `owner X is named in claims/<id>.json and has not recorded it —
 no command can record it yet`; `no reason recorded`; `unrun: <gates>`; `invalidated:
 <gate> : <what moved>`; `needs an article` (`; no test written down` with neither
-acceptance nor note); `assumed by <owner>: <rationale>`; `a pass recorded by <who>, not
+acceptance nor `mechanism.how`); `assumed by <owner>: <rationale>`; `a pass recorded by <who>, not
 bound to an article` (`recorded, unattributed` with no one named, `recorded_by`).
 `cli._blocking_reason` and `report._terminal_reason` wrap it (S-68: two copies once
 told two stories). **Every value a record supplies — an owner, a result's `who` and
@@ -2943,6 +3073,11 @@ numbers beside week-old tier-2 numbers under one "built at" stamp. `state` borro
 statuses from `claims`, the readiness sentence and the PARTIAL logic from `report` —
 because a second implementation would give the page and the readiness document two
 opinions about one ledger (the site renders the ledger; it never computes truth).
+From architecture phase 1 the document gains `requirements` — each row
+`report.requirement_json` over `claims.requirement_statuses`, the one producer — and
+each claim row a `mechanism` and its `requirements` (through `report.claim_json`);
+`judgement_digest` covers them, so a moved requirement status marks the page behind.
+The page draws no requirement until the map (phase 5).
 `now` is the caller's timestamp: without it every `age_s` is `null`, never 0, since
 an age of zero renders as "just now". `meta.records_digest` is `store.records_digest(root)`
 at build time — which records the page was built from; the CLI's site staleness compares
@@ -3044,6 +3179,24 @@ nopekit gate selftest [GATE ...] [--pack NAME|DIR] [--user-packs] [--allow-empty
 ```
 Output is terse and machine-parseable by default (one line per verdict);
 `--json` on every read command.
+
+**Requirements and mechanisms at the edge** (architecture phase 1). `gap` lists every
+claim whose mechanism has yet to run (`claims.yet_to_run`: Gap, Pending build, Assumed),
+resolved exactly as `status` resolves — the registry, the projection, the verdict cache
+— each row with its mechanism line, a warning per evaluator its mechanism names that
+does not settle it here, and the gap record that names it; `--propose` searches a gap
+record with its quantity and the `how` of the claims it names (`claims.need_how`), and a
+listed claim with its record's search or, with none, a transient Need (never written)
+and its own `how` (`claims.proposal_query`, `packs.match(..., how=)`) — one need, one
+pack list. For a physical, judged or assumed claim it says a pack's evaluator checks
+only a modelled part, and with no pack that its mechanism settles it: the extension
+protocol's trigger, and the footer's "propose a solver", are an automated claim's only. It stays a read: no
+lock, no record (S-43). `--json` keeps `gaps`/`n_gaps` (the Need records) and adds
+`yet_to_run`/`n_yet_to_run`. `check` prints the mechanism warnings on stdout after the
+limit warnings (`_mechanism_lines`) and adds `mechanism_problems` to `--json`; the exit
+code never moves. `status --json` and `report --json` add `requirements`
+(`_requirement_rows`); `why` takes the view's compositions (`_why_text`); `doctor` has a
+`requirements` and a `mechanisms` row (`_doctor_requirement_rows`).
 
 **Records at the edge** (checkpoint 1.3, spec §3.15). A record is a file, and a
 command writes exactly the one record it was asked to write — never the whole
@@ -3441,6 +3594,8 @@ each `ok` when there is nothing to say — a clean project shows that it looked:
 | `env-reads` | warn | the static env-read detector (spec §3.17): an AST scan of every registered gate's closure files for `os.environ`, `os.getenv`, `os.putenv` (and the bytes twins), through any alias of `os` or a `from os import`. rho never keys a variable (§8): a read inside a window is named opaque (`env:<NAME>`) and costs a re-run on every check, and a module-level read made at import, before any window, is seen by nothing else |
 | `memos` | warn | the static memo detector: an AST scan of every registered gate's closure files for a module-global memo `modelio.clear_caches` cannot empty — a module-level container (a `{}`, `dict()`, `defaultdict` and the like) written into from a function body that does not bind the name itself, a module global a function rebinds under `global`, a mutable default argument its function writes into. The first gate to fill one opens the file; every later one opens nothing, and no entry keys it (review round 2) |
 | `dynamic-imports` | warn | the static dynamic-import detector (`modelio.dynamic_imports`): an AST scan of every registered gate's closure files and of its owner's `selftest/*.py` (the fixtures and the known-good module its control runs) for `importlib.import_module(...)` or `__import__(...)` whose module a VALUE names. Only the run that first loads such a module in a process keys its source; a later one is served it from `sys.modules` and keys nothing. A literal name is resolved into the code closure and is not named (admission review, round 2, c) |
+| `requirements` | FAIL / warn | architecture phase 1: a claim naming a requirement no file holds, or a requirement id that is also a claim's (FAIL, as a milestone requiring a missing claim is); else a requirement no claim serves (warn: it reads Gap) |
+| `mechanisms` | warn | architecture phase 1: an evaluator a claim's mechanism names that is not registered here, or does not cover that claim (`claims.mechanism_problems`). Never a FAIL: a cross-check is not an integrity fault, and it moves no status |
 | `sealed-fixtures` | FAIL | invariant 5 at runtime: every pack control run against this project's params through `packs.seal_findings`, into a temp `out_dir`; a control that reads its host is named with the paths it read |
 
 The four static detectors measured zero hits on the 54 bundled gates before they landed
@@ -3838,7 +3993,44 @@ sections above.
   never glue to a word (`report._REPRODUCE_COLUMN`); `doctor` resolves a generator
   bound any way at module level (`cli._bound_at_module`).
 
+## What phase 1 of the architecture moved
+
+Claims say how they settle (`docs/SPEC.md` §7 step 1: decisions 12, 13, 37's paths, the
+vocabulary of §0.9, METHOD's three edits). The spine digest moved (models, verdicts);
+every entry re-keys once, and the bracket's committed cache was regenerated with it.
+
+- **The mechanism** (`"mechanism": {"by", "how", "evaluators"}` in a claim file,
+  `models.CLAIM_MECHANISM`): `by` is the terminal, held to `TERMINALS_BY_KIND` as
+  `terminal` was; `how` is the older `note`; `evaluators` a cross-check that warns in
+  `check` and `doctor` and never covers. The older keys still read; one member under
+  both names is refused; the writer writes the new form. In memory the claim stays
+  flat, so `claims.claim_digest` — the seal under every recorded physical pass and
+  judgment — keeps its value for an unchanged claim in either spelling.
+- **Requirements** (`requirements/<id>.json`, `Requirement`): the person's words and
+  where they came from; claims point at them with `requirements`. A requirement's
+  status is the worst of its claims (`claims.requirement_statuses`), Gap with none,
+  shown in `status`, `why`, the report's `## Requirements`, the JSON summaries and
+  `state.json`; *ready* never reads it.
+- **`gap`** lists every claim whose mechanism has yet to run, physical and assumption
+  claims included, and `--propose` searches with the `how` text.
+- **Words.** Failing's hint and a control handed the live design say *the current
+  design* (GLOSSARY §1: a *candidate* is an alternative design with a disposition);
+  the three strings that named `"note"` name `"mechanism": {"how": …}`; a C5 with its
+  test written down no longer reads `; no test written down`.
+
 ## Limits: what the spine cannot see, named
+
+- **A mechanism's `how` is words, and nothing checks it (architecture phase 1).** It
+  says what would settle a claim, and for a physical claim it is the written test a
+  pass needs; nothing reads it for sense, so "looks fine" is a test as far as the spine
+  can tell. Review reads it.
+- **A mechanism's `evaluators` is a cross-check (architecture phase 1).** Coverage
+  stays the registry's id-or-tag rule, so a broad tag still files an adjacent evaluator
+  under a claim whatever its mechanism names; the list only warns about the evaluators
+  it names.
+- **A requirement's words are the person's only as the agent wrote them (architecture
+  phase 1).** Nothing records that the person said them until the interview (phase 6);
+  a `source` of `"interview"` is the agent's word.
 
 - **Ready on `status` and the page is as last evaluated (P2.5b).** It reads the
   verdict cache, which the inner loop never re-executes and can be forged (below);

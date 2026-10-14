@@ -10,5 +10,16 @@
   "rationale": "past ~0.5 mm the droop is visible against a level shelf edge; this is a product decision, not a physics one",
   "tags": [
     "stiffness"
+  ],
+  "mechanism": {
+    "by": "closed_form",
+    "how": "Euler-Bernoulli tip deflection of the arm as a cantilever under the rated 15 N, from the model's section and PETG's conservative modulus, once the arm is shown slender enough for that beam theory",
+    "evaluators": [
+      "bracket.deflection",
+      "bracket.model_validity"
+    ]
+  },
+  "requirements": [
+    "R1"
   ]
 }

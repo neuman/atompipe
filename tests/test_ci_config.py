@@ -598,7 +598,7 @@ def _oracle():
 
 def _report(*, exit_code: str = "1", deflection: str = '<failure type="fail" message="m"/>',
             extra_gate: str = "",
-            c5: str = '<skipped message="pending build: needs an article; no test written down"/>'
+            c5: str = '<skipped message="pending build: needs an article"/>'
             ) -> str:
     return textwrap.dedent(f"""\
         <?xml version="1.0" encoding="UTF-8"?>
@@ -698,8 +698,7 @@ class SignatureIsExact(_env.EnvCase):
                           "not-admitted": [], "skipped": []},
                 "claims.critical": {"fail": {"C1": "fail", "C6": "unclaimed",
                                              "C7": "unclaimed"},
-                                    "skipped": {"C5": "pending build: needs an article; "
-                                                      "no test written down"}},
+                                    "skipped": {"C5": "pending build: needs an article"}},
             })
 
 

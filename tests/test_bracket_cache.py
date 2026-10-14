@@ -73,6 +73,10 @@ NOT_PORTABLE = ("the canonical AST walk is not portable to Python {version}: "
 #: phase-1.md's `claims/C1.json`, as (key, value) pairs so key ORDER is compared
 #: too, nested included: the record writer writes dataclass field order, and a
 #: file that reads the same but orders its keys otherwise was not written by it.
+#: The committed C1 has grown past that example since (architecture phase 1,
+#: SPEC decisions 12 and 13): its mechanism, folded where `note` sat, and the
+#: requirement it serves, last. `test_records.PHASE_1_C1` stays the old example:
+#: the legacy migration's output is unchanged.
 C1_PAIRS = [
     ("statement", "Tip sags no more than 0.5 mm at rated load"),
     ("kind", "measurable"),
@@ -81,6 +85,13 @@ C1_PAIRS = [
     ("rationale", "past ~0.5 mm the droop is visible against a level shelf edge; "
                   "this is a product decision, not a physics one"),
     ("tags", ["stiffness"]),
+    ("mechanism", [("by", "closed_form"),
+                   ("how", "Euler-Bernoulli tip deflection of the arm as a cantilever under "
+                           "the rated 15 N, from the model's section and PETG's conservative "
+                           "modulus, once the arm is shown slender enough for that beam "
+                           "theory"),
+                   ("evaluators", ["bracket.deflection", "bracket.model_validity"])]),
+    ("requirements", ["R1"]),
 ]
 
 #: The claims the bracket's ledger held, migrated one file each.
@@ -443,7 +454,8 @@ class BracketIsMigrated(unittest.TestCase):
 
     def test_the_records_and_the_marker_are_committed(self):
         for rel in (".nopekit/project.json", ".nopekit/.gitignore", ".gitignore",
-                    ".gitattributes", *(f"claims/{c}.json" for c in CLAIM_IDS)):
+                    ".gitattributes", *(f"claims/{c}.json" for c in CLAIM_IDS),
+                    *(f"requirements/R{n}.json" for n in range(1, 5))):
             self.assertIn(rel, self.files, f"{rel} is not committed ({self.source} listing)")
         self.assertEqual(json.loads(self.read(".nopekit/project.json"))["schema"], 2)
 

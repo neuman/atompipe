@@ -128,13 +128,21 @@ class TheClaimDigestIgnoresAbsentFields(unittest.TestCase):
 
     def test_the_bracket_claims_digest_as_on_d23ff8e(self):
         ledger = store.load(os.path.join(_env.REPO, "examples", "bracket"))
-        got = {c.id: verdicts._claim_digest(c) for c in ledger.claims}
+        # Architecture phase 1: the committed claims gained a mechanism and the
+        # requirements they serve — on purpose, so a gate reading claims whole,
+        # or one of them, re-keys once. Taken back out (every legacy `note` and `terminal` was
+        # empty), each digests as on d23ff8e: the new fields, empty, move none.
+        claims = [dataclasses.replace(c, terminal="", note="", evaluators=[], requirements=[])
+                  for c in ledger.claims]
+        got = {c.id: verdicts._claim_digest(c) for c in claims}
         self.assertEqual(got, CLAIM_DIGESTS)
         fields = {f.name for f in dataclasses.fields(Claim)}
-        for claim in ledger.claims:
-            # P2.5b (R-6, a strengthening): `expected_latency` empty moves none.
+        for claim in claims:
+            # P2.5b (R-6, a strengthening): `expected_latency` empty moves none;
+            # architecture phase 1: nor `evaluators` and `requirements` empty.
             extra = {name: value for name, value in (("terminal", ""), ("authority", ""),
-                                                     ("expected_latency", {}))
+                                                     ("expected_latency", {}),
+                                                     ("evaluators", []), ("requirements", []))
                      if name in fields}
             with self.subTest(claim.id):
                 self.assertEqual(verdicts._claim_digest(dataclasses.replace(claim, **extra)),
@@ -144,6 +152,7 @@ class TheClaimDigestIgnoresAbsentFields(unittest.TestCase):
         claim = store.load(os.path.join(_env.REPO, "examples", "bracket")).claim("C5")
         if "terminal" not in {f.name for f in dataclasses.fields(Claim)}:
             self.fail("Claim.terminal does not exist yet")
+        claim = dataclasses.replace(claim, note="", requirements=[])
         moved = dataclasses.replace(claim, terminal="human", authority="Dana")
         self.assertNotEqual(verdicts._claim_digest(moved), CLAIM_DIGESTS["C5"])
 
@@ -318,7 +327,7 @@ class SignedMeansSomething(_env.EnvCase):
 
     def test_i_the_claim_half_moved(self):
         self._record(self._entry())
-        P.edit_claim(self.root, "C5", note=None)
+        P.edit_claim(self.root, "C5", mechanism=None)
         try:
             status, cause, reason = self._reads()
             self.assertEqual((status, cause), ("stale", "claim-moved"))
@@ -326,7 +335,7 @@ class SignedMeansSomething(_env.EnvCase):
             with mock.patch.object(verdicts, "_fact_claim", lambda *a, **k: ""):
                 self.assertEqual(self._reads()[:2], ("verified", "on-article"))
         finally:
-            P.edit_claim(self.root, "C5", note=P.C5_NOTE)
+            P.edit_claim(self.root, "C5", mechanism={"how": P.C5_NOTE})
 
     def test_j_a_measured_value_its_acceptance_refutes(self):
         self._record(self._entry("C9", measured=0.7, units="mm", evidence=[P.EVIDENCE]),
@@ -495,7 +504,7 @@ class APhysicalFailNeverLosesItsPowerToFail(_env.EnvCase):
             "kind edited to assumption": lambda root: P.edit_claim(root, "C5",
                                                                    kind="assumption"),
             "statement edited": lambda root: P.edit_claim(root, "C5", statement="Lasts"),
-            "note edited": lambda root: P.edit_claim(root, "C5", note="a look"),
+            "note edited": lambda root: P.edit_claim(root, "C5", mechanism={"how": "a look"}),
             "terminal and authority edited": lambda root: P.edit_claim(
                 root, "C5", terminal="human", authority=P.NAME),
             "the model made not to load": _break_model,
@@ -650,14 +659,14 @@ class AMovedArticleReadsStale(_env.EnvCase):
 
     def test_the_claim_moved_and_the_model_not_loading(self):
         root = self._checked()
-        P.edit_claim(root, "C5", note="a different test")
+        P.edit_claim(root, "C5", mechanism={"how": "a different test"})
         status, cause, reason = _status(root, "C5")
         self.assertEqual((status, cause), ("stale", "claim-moved"))
         self.assertRegex(reason, r"^C5 changed since article [0-9a-f]{12} was tested — test it "
                                  r"again")
         doc = json.loads(P.run(root, "status", "--json", code=0).stdout)
         self.assertEqual(doc.get("rebuild"), [])
-        P.edit_claim(root, "C5", note=P.C5_NOTE)
+        P.edit_claim(root, "C5", mechanism={"how": P.C5_NOTE})
         text = _model_text(root)
         _break_model(root)
         self.assertEqual(_status(root, "C5")[:2], ("stale", "article-unjudged"))
@@ -1410,7 +1419,10 @@ class ATerminalCannotLowerTheBar(_env.EnvCase):
     def test_a_declared_automated_terminal_composes_as_undeclared(self):
         root = P.project(os.path.join(self.tmp(), "b"))
         before = _status(root, "C1")
-        P.edit_claim(root, "C1", terminal="solver")
+        # C1 declares its mechanism's `by` (architecture phase 1), so the
+        # declaration moves there: a `terminal` beside it would be refused.
+        mechanism = P.read_json(os.path.join(root, "claims", "C1.json"))["mechanism"]
+        P.edit_claim(root, "C1", mechanism=dict(mechanism, by="solver"))
         self.assertEqual(_status(root, "C1"), before)
         listed = P.run(root, "claim", "list", code=0).stdout
         row = next(ln for ln in listed.splitlines() if " C1 " in ln)

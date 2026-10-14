@@ -88,7 +88,8 @@ class Terminal(StrEnum):
     identifiers, never words: the words are ``report.HUMAN["terminal"]``'s, and in
     P2.5a every automated one prints *automated* (P2.5a-D1).
 
-    Declared on a claim (``Claim.terminal``) or derived from its kind
+    Declared on a claim as ``mechanism.by`` (or the legacy ``terminal``; in
+    memory ``Claim.terminal``) or derived from its kind
     (``claims.terminal_of``). A declaration can raise the bar, never lower it,
     and never stands in for an evaluator: a measurable claim declared
     ``closed_form`` with no evaluator still reads Gap. *Rejected:* "external
@@ -105,7 +106,8 @@ class Terminal(StrEnum):
 
 
 #: The terminals each kind may declare (P2.5a §4.1). A pair outside this table
-#: is refused by the strict reader, and only when ``terminal`` is present (R-10:
+#: is refused by the strict reader, and only when ``mechanism.by`` (or the legacy
+#: ``terminal``) is present (R-10:
 #: a refusal binds a new declaration). Here, in the type contract, because
 #: ``store`` refuses by it and ``claims`` derives by it. *Rejected:* measurable
 #: + measurement (that is a physical claim, and the kind already says so);
@@ -640,6 +642,9 @@ class Claim(Record):
     critical: bool = True            # false = not required, never blocks a spend
     physical_result: PhysicalResult | None = None
     note: str = ""
+    """On disk ``mechanism.how`` (SPEC decision 13): in words, what would settle
+    this claim; for a physical claim its written test. A file's top-level
+    ``note`` is the older spelling and reads the same."""
     owner: str = ""
     """Who an ASSUMPTION's owner is NAMED to be — a nominee, never an
     attribution. GLOSSARY §3: Assumed needs a reason and an owner; PLAN-v0.14
@@ -679,7 +684,9 @@ class Claim(Record):
     carrying it (as P2.1's ``owner``); no command writes it, and an empty one
     digests as before (``verdicts._ABSENT_WHEN_EMPTY``). The LAST field (R-2)."""
     terminal: str = ""
-    """Where this claim's evidence bottoms out, DECLARED (``Terminal``), or
+    """On disk ``mechanism.by`` (SPEC decision 13); a file's top-level
+    ``terminal`` is the older spelling and reads the same.
+    Where this claim's evidence bottoms out, DECLARED (``Terminal``), or
     ``""`` — derived from the kind (``claims.terminal_of``: physical ->
     measurement, assumption -> none, measurable -> automated). Validated by the
     strict reader only when present (R-10), against ``TERMINALS_BY_KIND``; a
@@ -706,6 +713,22 @@ class Claim(Record):
     retest), and empty it digests as before (``verdicts._ABSENT_WHEN_EMPTY``).
     *Rejected:* in the milestone (a claim two milestones require would carry two
     numbers); on an automated claim (its latency is measured on every run)."""
+    evaluators: list[str] = field(default_factory=list)
+    """The evaluators this claim's mechanism expects, by id (SPEC decision 13) — a
+    CROSS-CHECK, never coverage: which evaluators settle a claim stays the
+    registry's (`claims.covers`), because a claim file that held coverage was
+    rewritten by `check` on every run (S-37). On disk only as
+    `"mechanism": {"evaluators": [...]}` (a top-level key is refused). `check` and
+    `doctor` warn when one is not registered or does not cover this claim; no
+    status moves. Not in `claims.claim_digest` (a person attests the claim, not
+    this list); empty, it digests as before (`verdicts._ABSENT_WHEN_EMPTY`)."""
+    requirements: list[str] = field(default_factory=list)
+    """The requirement ids this claim serves (SPEC decision 12), in the file's
+    order, each a `store.REQUIREMENT_ID`. A pointer to a requirement no file holds
+    is read, never refused (the milestone precedent, P2.5b-D3: a renamed record
+    must not refuse every command); the index and `doctor` name it. Not in
+    `claim_digest` (serving a requirement asks no re-test); empty, it digests as
+    before."""
     results: tuple = ()
     """In memory only (``FORBIDDEN_KEYS``): every entry of
     ``results/<id>.json``'s ``results``, oldest first, assembled by ``store``;
@@ -724,6 +747,13 @@ class Claim(Record):
     def from_dict(cls, data: dict[str, Any]) -> "Claim":
         names = {f.name for f in dataclasses.fields(cls)}
         kw = {k: v for k, v in (data or {}).items() if k in names}
+        # The mechanism as a record file spells it (SPEC decision 13): it wins
+        # over a legacy key here; only the strict reader refuses both.
+        mechanism = (data or {}).get("mechanism")
+        if isinstance(mechanism, dict):
+            for member, attr in CLAIM_MECHANISM:
+                if member in mechanism:
+                    kw[attr] = mechanism[member]
         kw["kind"] = ClaimKind(kw.get("kind") or ClaimKind.MEASURABLE)
         kw["acceptance"] = Acceptance.from_dict(kw.get("acceptance") or {})
         pr = kw.get("physical_result")
@@ -1370,6 +1400,27 @@ class ExportRecord(Record):
 
 
 # --------------------------------------------------------------------------- #
+# requirements (SPEC decision 12)
+# --------------------------------------------------------------------------- #
+@dataclass
+class Requirement(Record):
+    """What the person asked for, in their words (SPEC decision 12): one file,
+    `requirements/<id>.json`, whose stem is its id (`R1`, `R2`, …,
+    `store.REQUIREMENT_ID`). `statement` — the words, verbatim (a claim is the
+    sharpened form, never this); `source` — where they came from: "interview", or
+    an input id. Its status is never stored: `claims.requirement_statuses` derives
+    it on every read — the worst of the claims that name it, Gap with none.
+    Readiness never reads it: milestones require claims. *Rejected:* a `claims`
+    list here (two lists that drift — S-37's shape); a stored `status` (a second
+    producer, R-5); requirements nested in a claim (a requirement no claim serves
+    yet is the one most worth showing)."""
+
+    id: str
+    statement: str = ""
+    source: str = ""
+
+
+# --------------------------------------------------------------------------- #
 # packs
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -1528,6 +1579,9 @@ class Ledger(Record):
     oldest first, milestones in natural order. Hidden from every gate
     (``verdicts._LEDGER_HIDDEN``): a gate that read the boundary's record would
     key on its own spend — a staleness that feeds itself."""
+    requirements: list = field(default_factory=list)
+    """``requirements/*.json`` (SPEC decision 12), natural id order; read whole by
+    a gate, traced (``verdicts._LEDGER_WHOLE``), like ``milestones``."""
 
     def to_dict(self) -> dict[str, Any]:
         out = super().to_dict()
@@ -1536,6 +1590,9 @@ class Ledger(Record):
 
     def milestone(self, name: str) -> "Milestone | None":
         return next((m for m in self.milestones if m.id == name), None)
+
+    def requirement(self, rid: str) -> "Requirement | None":
+        return next((r for r in self.requirements if r.id == rid), None)
 
     # -- lookups ---------------------------------------------------------- #
     def claim(self, cid: str) -> Claim | None:
@@ -1577,6 +1634,7 @@ class Ledger(Record):
             views=[View.from_dict(v) for v in data.get("views") or []],
             milestones=[Milestone.from_dict(m) for m in data.get("milestones") or []],
             exports=[ExportRecord.from_dict(e) for e in data.get("exports") or []],
+            requirements=[Requirement.from_dict(r) for r in data.get("requirements") or []],
         )
 
 
@@ -1595,7 +1653,8 @@ class Ledger(Record):
 #: `views/` holds viewgens too; only its `*.json` files are records. P2.5b adds
 #: `milestones/<name>.json` (a declared spend) and `exports/<name>.json` (that
 #: spend's export records, sealed and chained like a results file), last, so
-#: every kind before them keeps its place.
+#: every kind before them keeps its place. SPEC decision 12 adds `requirements/`
+#: last, for the same reason.
 #: The order is `store.RECORD_DIRS`' and a test holds the two equal. Rejected: a
 #: `ledger.json` sharded by kind (`claims.json`, …) — the same conflict per kind.
 RECORD_KINDS: dict[str, type] = {
@@ -1608,6 +1667,7 @@ RECORD_KINDS: dict[str, type] = {
     "views": View,
     "milestones": Milestone,
     "exports": ExportRecord,
+    "requirements": Requirement,
 }
 
 #: Keys a record FILE may never carry, per kind (the class name), each with the
@@ -1642,6 +1702,12 @@ FORBIDDEN_KEYS: dict[str, dict[str, str]] = {
     "InputArtifact": {
         "bytes": "computed from the file",
     },
+    "Requirement": {
+        "status": "a requirement's status is derived on every read — the worst of the "
+                  "claims that serve it (claims.requirement_statuses)",
+        "claims": "a claim names the requirements it serves (\"requirements\" in "
+                  "claims/<id>.json); a requirement never lists its claims",
+    },
     "*": {
         "independence": "derived from origin (pack, human, agent session, external "
                         "solver), never a field the proposer fills in",
@@ -1660,6 +1726,16 @@ ALWAYS_WRITTEN: frozenset[tuple[str, str]] = frozenset({
     ("Acceptance", "comparator"),
 })
 
+#: A claim's mechanism as its record file spells it (SPEC decision 13): each
+#: member, and the in-memory field that holds it. One object on disk, three flat
+#: fields in memory, so every reader of `terminal` and `note` — and the sealed
+#: `claims.claim_digest` — reads them unchanged. *Rejected:* a nested Mechanism
+#: dataclass (every reader and ~105 test constructions rewritten, and a leftover
+#: getattr(claim, "note", "") reads "" silently); keeping `terminal`/`note` beside
+#: a nested copy (two in-memory homes that `dataclasses.replace` desyncs).
+CLAIM_MECHANISM: tuple[tuple[str, str], ...] = (
+    ("by", "terminal"), ("how", "note"), ("evaluators", "evaluators"))
+
 
 __all__ = [
     "StrEnum", "ClaimKind", "ClaimStatus", "BLOCKING_STATUSES", "Tier", "ViewKind",
@@ -1671,5 +1747,5 @@ __all__ = [
     "ToolCandidate", "Need", "Extraction", "InputArtifact", "Decision",
     "Locator", "View", "PackManifest", "KeyCollision", "ProjectMeta", "Ledger",
     "RECORD_KINDS", "FORBIDDEN_KEYS", "ALWAYS_WRITTEN", "Milestone", "ExportRecord",
-    "LATENCY_UNITS",
+    "LATENCY_UNITS", "Requirement", "CLAIM_MECHANISM",
 ]

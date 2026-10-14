@@ -66,7 +66,7 @@ import re
 from collections.abc import Iterable as _IterableABC
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any, Collection, Iterable, Mapping, NamedTuple
+from typing import Any, Collection, Iterable, Mapping, NamedTuple, Sequence
 
 from .models import (
     BLOCKING_STATUSES,
@@ -136,6 +136,14 @@ __all__ = [
     "unresolved",
     "Latency",
     "latency",
+    "RequirementStatus",
+    "requirement_statuses",
+    "MechanismProblem",
+    "mechanism_problems",
+    "MECHANISM_YET_TO_RUN",
+    "yet_to_run",
+    "proposal_query",
+    "need_how",
 ]
 
 
@@ -1380,10 +1388,13 @@ def find_gaps(ledger: Ledger, registry: Any) -> list[Need]:
 
     This is the trigger for the extension protocol, and it is a *growth*
     signal, not a failure: the system is admitting there is a physical quantity
-    it cannot currently check. PHYSICAL and ASSUMPTION claims are never gaps —
-    no tool will ever settle "the seam is watertight", and an assumption is
-    already honest about being unevidenced. Inventing a simulation for either is
-    how a project launders an unknown into green.
+    it cannot currently check. These are the Need half of `nopekit gap`: an
+    automated claim no registered evaluator covers, which the extension
+    protocol can close with a tool. Every claim whose mechanism has yet to run,
+    physical and assumption included, is `yet_to_run`'s — but no tool will ever
+    settle "the seam is watertight", and inventing a simulation for a physical
+    or an assumed claim is how a project launders an unknown into green, so
+    neither becomes a Need here.
 
     Coverage is judged from the **registry only**, not `claim.gates`: a claim
     remembering a gate id from a pack that is no longer installed is not covered,
@@ -1450,6 +1461,93 @@ def find_gaps(ledger: Ledger, registry: Any) -> list[Need]:
             )
         )
     return out
+
+
+# --------------------------------------------------------------------------- #
+# the mechanism (SPEC decision 13): a cross-check, and what has yet to run
+# --------------------------------------------------------------------------- #
+class MechanismProblem(NamedTuple):
+    """One evaluator a claim's mechanism names that does not settle it here:
+    ``kind`` is ``unregistered`` (no registered evaluator has that id) or
+    ``uncovered`` (registered, and ``covers`` does not bind it to the claim);
+    ``filed`` the evaluator's ``GateSpec.claims`` when registered."""
+
+    claim: str
+    evaluator: str
+    kind: str          # "unregistered" | "uncovered"
+    filed: tuple = ()
+
+
+def mechanism_problems(ledger: Ledger, registry: Any) -> list[MechanismProblem]:
+    """Every evaluator a claim's mechanism names that is not registered, or is
+    registered and does not cover that claim (`covers`). SPEC decision 13's
+    cross-check: it adds no evaluator to a claim and moves no status (S-37: a
+    claim file that held coverage was rewritten by `check` on every run).
+    `registry=None` -> [] (unregistered cannot be told from unrun). Claim order,
+    then the mechanism's order. *Rejected:* reading a named, unregistered
+    evaluator as Gap (an earlier reading of decision 13; a word in a claim file
+    would then move a status, and coverage would have two homes)."""
+    if registry is None:
+        return []
+    specs = {s.id: s for s in _specs(registry) if s.id}
+    out: list[MechanismProblem] = []
+    for claim in ledger.claims:
+        for gate in getattr(claim, "evaluators", None) or ():
+            spec = specs.get(gate)
+            if spec is None:
+                out.append(MechanismProblem(claim.id, gate, "unregistered"))
+            elif not covers(spec, claim):
+                out.append(MechanismProblem(claim.id, gate, "uncovered",
+                                            tuple(spec.claims or ())))
+    return out
+
+
+#: The statuses that say a claim's mechanism has yet to run (SPEC decision 13):
+#: Gap (nothing that can settle it has settled it — no evaluator, an unqualified
+#: or out-of-context one, an owner or authority not recorded), Pending build (no
+#: article settles it) and Assumed (carried, not settled). *Rejected:* Open,
+#: Stale and Skipped (an evaluator exists and runs or ran: `check`, a rebuild or
+#: a tool is the step `status` names); Failing and Checked (it ran); a separate
+#: "has a result entry" rule over `results` (a second producer of resolution
+#: facts beside `compose`, R-5).
+MECHANISM_YET_TO_RUN: frozenset = frozenset({ClaimStatus.UNCLAIMED, ClaimStatus.UNVERIFIED,
+                                             ClaimStatus.ASSERTED})
+
+
+def yet_to_run(ledger: Ledger, composed: Mapping[str, Composed]) -> list[Claim]:
+    """Every claim whose mechanism has yet to run, record order — physical,
+    judged and assumption claims included, never only the automated ones
+    `find_gaps` turns into Need records. Read off the composition the caller
+    already holds (`MECHANISM_YET_TO_RUN`), never re-derived."""
+    return [claim for claim in ledger.claims
+            if claim.id in composed and composed[claim.id].status in MECHANISM_YET_TO_RUN]
+
+
+def need_how(ledger: Ledger, need: Need) -> str:
+    """The ``how`` of every claim ``need`` names, record order, joined — what
+    `gap --propose` searches with below a gap record's quantity."""
+    named = set(need.claim_ids or ())
+    return " ".join(how for c in ledger.claims if c.id in named
+                    if (how := str(getattr(c, "note", "") or "").strip()))
+
+
+def proposal_query(claim: Claim, gaps: Sequence[Need],
+                   ledger: Ledger | None = None) -> tuple[Need, str]:
+    """The Need `gap --propose` searches with for `claim`: the one `find_gaps`
+    produced naming it, with `need_how` over ``ledger`` (the gap record's own
+    search, so its row and the claim's cannot list two pack sets), else a
+    transient ``Need(id="", claim_ids=[claim.id], quantity=_gap_quantity(claim))``
+    that is never written, with the claim's ``how`` (`claim.note`). The search
+    weighs the how below the quantity. What slipped through (review of phase
+    1): a gap record was searched without any how, so `gap --json --propose`
+    listed no pack under N-C7 and four under C7 — one need, two answers."""
+    need = next((n for n in gaps if claim.id in (n.claim_ids or ())), None)
+    if need is None:
+        return (Need(id="", claim_ids=[claim.id], quantity=_gap_quantity(claim)),
+                str(getattr(claim, "note", "") or ""))
+    if ledger is None:
+        return need, str(getattr(claim, "note", "") or "")
+    return need, need_how(ledger, need)
 
 
 def blocking(
@@ -1567,6 +1665,10 @@ def summarise(
     reader shipped text never names. *Rejected:* flipping it now, a key
     changing meaning under every reader at once.
 
+    * `requirements` (SPEC decision 12) — `{id: {status, key, errored, claims,
+      worst}}`, tokens only, from `requirement_statuses`, the one producer: the
+      worst of the claims that serve each, Gap with none. *ready* never reads it.
+
     `n_gaps` counts gap RECORDS (`find_gaps`' Needs: an automated claim no
     registered evaluator covers), not claims reading Gap — `counts["gap"]` is
     those. Input-artifact counts are deliberately absent; `artifacts.unextracted()`
@@ -1653,6 +1755,10 @@ def summarise(
         # predicate, with the export records each has. From the verdicts on
         # record, as every summary is: `export <m> --dry-run` re-runs them.
         "milestones": milestones,
+        # SPEC decision 12: each requirement, from the one producer.
+        "requirements": {rid: {"status": s.status.value, "key": s.key, "errored": s.errored,
+                               "claims": list(s.claims), "worst": list(s.worst)}
+                         for rid, s in requirement_statuses(ledger, composed).items()},
     }
 
 
@@ -1845,6 +1951,58 @@ def unresolved(ledger: Ledger, composed: Mapping[str, Composed],
     unbound = [c for c in required if composed[c.id].cause is ClaimCause.PHYSICAL_PASS]
     return Unresolved(required, left, missing, unbound,
                       bool(required or missing) and not left and not missing)
+
+
+# --------------------------------------------------------------------------- #
+# requirements (SPEC decision 12): the worst of the claims that serve one
+# --------------------------------------------------------------------------- #
+class RequirementStatus(NamedTuple):
+    """One requirement's status (SPEC decision 12): the worst composition among
+    the claims that serve it, in `SEVERITY_ORDER` (a crash's Skipped above a plain
+    one: invariant 2 carries up). `status` and `errored` are those of `worst[0]`;
+    `claims` every serving claim id, record order; `worst` the ids at the worst
+    rank. A requirement no claim serves reads Gap (UNCLAIMED) with no ClaimCause —
+    causes stay a claim's (test_invariants requires every cause reachable through
+    `compose`). `disagree` is always empty here: `report.requirement_statuses`
+    fills it with the serving claims whose status and evidence disagree (D18
+    carried up — this module cannot see the report's cross-check)."""
+
+    id: str
+    status: ClaimStatus
+    errored: bool
+    claims: tuple
+    worst: tuple
+    disagree: tuple = ()
+
+    @property
+    def key(self) -> str:
+        return STATUS_KEY[self.status]
+
+
+def requirement_statuses(ledger: Ledger, composed: Mapping[str, Composed]
+                         ) -> dict[str, RequirementStatus]:
+    """THE producer of a requirement's status (SPEC decision 12; invariant 12):
+    status, why, the report, `summarise`, `state.json` and every JSON row ask
+    this over the compositions they already hold, and never fold statuses
+    themselves (R-5/S-69: a second producer drifts). Requirements in ledger
+    order; Checked only when every serving claim reads Checked; a pointer to a
+    requirement no file holds serves nothing here (an index problem, doctor's).
+    *Rejected:* the best of its claims (a requirement Checked over a failing
+    claim); readiness over requirements (milestones require claims, and a
+    requirement's words are not a test)."""
+    out: dict[str, RequirementStatus] = {}
+    for requirement in getattr(ledger, "requirements", None) or ():
+        rid = requirement.id
+        serving = [c.id for c in ledger.claims
+                   if rid in (getattr(c, "requirements", None) or ()) and c.id in composed]
+        if not serving:
+            out[rid] = RequirementStatus(rid, ClaimStatus.UNCLAIMED, False, (), ())
+            continue
+        rank = min(severity(composed[cid]) for cid in serving)
+        worst = tuple(cid for cid in serving if severity(composed[cid]) == rank)
+        first = composed[worst[0]]
+        out[rid] = RequirementStatus(rid, first.status, first.errored, tuple(serving), worst)
+    return out
 
 
 # --------------------------------------------------------------------------- #

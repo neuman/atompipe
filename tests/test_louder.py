@@ -1081,7 +1081,8 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
     ("ingest",): "files an input; reads no verdict",
     ("inputs",): "lists inputs; reads no verdict",
     ("extract",): "records what an input says; reads no verdict",
-    ("gap",): "lists claims with no evaluator; an errored claim has one",
+    ("gap",): "lists claims whose mechanism has yet to run — Gap, Pending build, Assumed; "
+              "an errored claim reads Skipped and is never listed",
     ("gate", "list"): "describes registered gates from their specs; reads no verdict",
     ("gate", "selftest"): "prints known-bad control outcomes, not a claim's status: "
                           "a control that crashes is invariant 9's (test_admission)",

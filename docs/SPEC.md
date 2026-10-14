@@ -509,6 +509,73 @@ decisions above. Overturn any of them here.
   its tests, its `INVARIANT_CLASSES` row and its `CLAUDE.md` row.
 - **The fast tier** keeps its 90-second rule: a phase that adds time pays it back.
 
+**Phase 1** (claims say how they settle), decided while building it:
+
+- **The claim stays flat in memory.** `Claim.terminal` is `by`, `Claim.note` is `how`,
+  `Claim.evaluators` is new; only the file spells one `"mechanism"` object
+  (`models.CLAIM_MECHANISM`). A nested `Mechanism` dataclass was rejected: every reader
+  and about 105 test constructions rewritten for nothing phase 3 needs.
+- **One home per member.** `terminal` beside `mechanism.by`, or `note` beside
+  `mechanism.how`, is refused even when equal; different members in different
+  spellings read; a top-level `evaluators` is refused; `"mechanism": {}` reads as absent.
+- **The writer folds** the mechanism at `note`'s slot, members in `by`/`how`/`evaluators`
+  order, and writes `requirements` last; index rows show that form, `to_dict` stays flat.
+- **Not sealed:** `evaluators` and `requirements` are out of `claims.claim_digest`, and
+  out of a gate's read of a claim while empty. `requirements` is read whole and traced.
+  `how` stays sealed (it is `note`): editing it moves a judged or tested claim to Gap or
+  Stale, as editing `note` did.
+- **Requirement ids** are `R` and a number from 1 (`store.REQUIREMENT_ID`), on the file
+  stem and every pointer. Fields: `statement` (required) and `source`. `status` and
+  `claims` are forbidden keys naming their homes.
+- **A pointer to a missing requirement is read**, an index problem and a doctor FAIL
+  (the milestone precedent), as is a requirement id equal to a claim id; a requirement
+  no claim serves is a doctor warning.
+- **Requirement status** is `RequirementStatus(id, status, errored, claims, worst)`: the
+  worst claim by `claims.severity`, a crash above a plain skip, ties in record order;
+  Gap with no new cause when no claim serves it. A crash rolled up reads `skipped,
+  errored` (`report.status_word`), since a rolled-up line prints no tag.
+- **Status prints one untagged line**, `requirements N — R1 failing (C1) · …`, after the
+  claim rows, only when requirements exist, capped at eight.
+- **The report's `## Requirements`** comes after Failing and before Reproduce, only when
+  requirements exist; no JUnit suite.
+- **JSON:** `summarise()["requirements"]` (tokens); `status --json`, `report --json` and
+  `state.json` gain `requirements` rows (`report.requirement_json`); `claim_json` gains
+  `mechanism` and drops the flat `evaluators`.
+- **"Yet to run"** means Gap, Pending build or Assumed (`claims.MECHANISM_YET_TO_RUN`);
+  `gap` resolves the cache exactly as `status` does.
+- **`gap`'s output:** status-tagged rows in severity order, each with its mechanism
+  line, mechanism warnings and its gap record; a footer counting them; `--json` adds
+  `yet_to_run`. `--propose` weighs the `how` words at half the quantity's, searches a
+  claim with no Need through a transient Need never written, and says a pack checks
+  only a modelled part of a physical, judged or assumed claim.
+- **Mechanism warnings** are `unregistered` and `uncovered`, on `check`'s stdout after
+  the limit warnings and in `check --json`; `doctor` has a `mechanisms` row that never
+  FAILs; `why` shows none.
+- **`reason()` is unchanged:** the `how` text is not appended to Gap reasons; it shows in
+  `gap`, `why`, the report's gap section and the page's "Mechanism" field.
+- **`why`** resolves requirement ids after exact params and claims, takes the caller's
+  compositions, and a claim's `why` gains `serves:` and a MECHANISM section.
+- **The bracket's requirements** are R1 to R4 in invented interview words; C1–C4 and C7
+  declare `by: closed_form`, C5 and C6 leave `by` to their kind; every claim gets a `how`;
+  C1–C4 name their tag-covering evaluators.
+- **Legacy bracket copies** in the tests exclude `requirements/`
+  (`tests/_projects._ADDED_AFTER_MIGRATION`).
+- **The chain** `requirements -> claims -> gates -> packs -> readiness report` is also in
+  README, CLAUDE.md and the skill; README's rule 1 follows METHOD's.
+- **CLAUDE.md** invariants 4, 7, 11 and 12 each gained a clause, invariant 8's record list
+  `requirements/`; the new classes map to rows 4, 7, 8, 11 and 12.
+- **GLOSSARY:** requirement, mechanism, proposer and basis in §1; round record and board
+  in §4 with italic Never-says; *candidate* is an alternative design with a disposition,
+  and the current design is never one.
+- **Human strings:** Failing's hint and a live-design control say "the current design";
+  the three `"note"` strings name `mechanism.how`; the tool-option fallback word is
+  "option"; the page's "Note" label is "Mechanism".
+- **The plugin test** checks braces under `skills/`, `.claude-plugin/` and `hooks/`, that
+  every METHOD.md or docs path a skill names is `${CLAUDE_PLUGIN_ROOT}`-rooted and
+  exists, and that there is no `bin/`.
+- **The fast tier's pay-back:** `test_status_table.UnqualifiedReadsGap` and one
+  `check` run in `test_renderers` moved to the full suite.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

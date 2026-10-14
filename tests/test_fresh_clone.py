@@ -666,7 +666,9 @@ _PLAN_OUTPUT = {
                         "[gap  ] C6 The load is static and centred on the arm — "
                         "no owner recorded\n"
                         "[build] C5 Survives two winters outdoors without UV "
-                        "embrittlem… — needs an article; no test written down\n"
+                        "embrittlem… — needs an article\n"
+                        "requirements 4 — R1 failing (C1) · R2 gap (C7) · R3 pending build "
+                        "(C5) · R4 checked\n"
                         "invalidated: none   (6 verdicts current)\n"
                         "last check run: 2026-09-27T14:02:11Z (3m ago)\n"),
     "status-stale": (0, "bracket — 7 claims, 6 gates\n"

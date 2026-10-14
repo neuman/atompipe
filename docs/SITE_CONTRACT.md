@@ -266,13 +266,20 @@ was the one a reader of the contract would never look for.
                   "verdicts": [ … ], "evidence": [ … ],
                   "unproven": [ { "gate": …, "why": "fail: 0.700 mm …" } ],
                   "compared": ["bracket.deflection"], "not_compared": [ ],
-                  "terminal": "", "terminal_word": "automated", "authority": "",
+                  "terminal": "closed_form", "terminal_word": "automated", "authority": "",
                   "article": "", "standing": "", "contradicts": [ ],          // P2.5a
+                  "mechanism": { "by": "closed_form", "how": "Euler-Bernoulli tip …",
+                                 "evaluators": ["bracket.deflection", …] },  // phase 1
+                  "requirements": ["R1"],                                    // phase 1
                   "physical_result": { "passed": true, …, "counts": false,
                                        "why": "a pass recorded from an agent session does not count",
                                        "recorded": "recorded by Dana, from an agent session",
                                        "heading": "A physical result was recorded:" },
                   … } ],
+  "requirements": [ { "id": "R1", "statement": "…", "source": "interview",   // phase 1
+                      "status": "fail", "key": "failing", "word": "failing",
+                      "errored": false, "claims": ["C1", "C2", "C3", "C6"],
+                      "worst": ["C1"], "disagree": [ ] } ],
   "verdicts": [ { "gate": …, "passed": …, "ok": false, "status": "fail", "detail": …,
                   "measured": …, "limit": …, "comparator": "<=", "settles": "tip deflection",
                   "margin": -0.3994, "margin_why": "", "locators": [ … ], "views": [ … ],
@@ -357,6 +364,20 @@ an agent can read the site's state without a browser.
   no word naming its authority). A claim whose file is gone and whose results file
   holds a fail is a row too (`standing: "removed"`, `store`'s `Ledger.removed`): its
   fail still counts.
+- **Requirements and mechanisms (architecture phase 1).** `requirements` is every
+  `requirements/<id>.json` in record order, each row `report.requirement_json` over
+  `claims.requirement_statuses` — the worst of the claims that serve it (`worst`, by
+  severity, a crash's Skipped above a plain one), Gap with none — so the page never
+  folds a status itself; `word` carries `skipped, errored` for a crash. *Ready* never
+  reads it. The page draws no requirement until the map (phase 5). A claim row gains
+  `mechanism` (`{by, how, evaluators}` as declared: `by` the terminal, `how` what would
+  settle it, `evaluators` a cross-check, never coverage) and `requirements` (the ids it
+  serves); the flat `note` stays and is the same text as `mechanism.how`, which the
+  claim panel labels "Mechanism" (it was "Note"), and the flat `terminal` is always
+  `mechanism.by` — one field, two spellings, never two answers. A requirement row's
+  `disagree` names the serving claims whose `disagree` is true (D18 carried up:
+  empty under the composition, and a requirement over one is never a clean
+  Checked).
 - **No `partial` (P2.1).** Under GLOSSARY §3's composition a Checked claim has no
   covering evaluator that did not pass, so PARTIAL went. `unproven` names each
   covering gate that produced no pass that counts, its reason led by the fact
