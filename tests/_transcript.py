@@ -201,6 +201,21 @@ ROUND_RECORD = re.compile(
     r"|does not read \(.+\) — `nopekit round` writes it again"
     r"|written by a newer nopekit \(schema \d+\) — this one neither reads nor rewrites it)$")
 
+#: `status`: the trace's state when it is not the current design's
+#: (architecture phase 3b) — printed only then, so a clean clone prints none.
+TRACE_LINE = re.compile(
+    r"^trace: (?:not traced for this design — `nopekit round` starts it in the background; "
+    r"`nopekit model trace` runs it here"
+    r"|running \(process \d+; log \S+\)"
+    r"|incomplete for this design — \d+ build\(s\) did not finish; `nopekit model trace "
+    r"--timeout \d+` tries again"
+    r"|\S+ reads \S+ — nothing reads it; delete it and run `nopekit model trace`"
+    r"|not traced — .+)$")
+
+#: `status`: amber beside Checked, only when a Checked claim's amber is not
+#: `holds` (architecture phase 3b).
+AMBER_LINE = re.compile(r"^amber: \S+ (?:flips|not current|could not tell|not traced).*$")
+
 #: `status`: an instrument recorded under another library version (Q1.3).
 NOTE_INSTRUMENT = re.compile(
     r"^note: (?P<gate>\S+) — recorded under (?P<module>\S+) (?P<recorded>\S+); "
@@ -486,12 +501,18 @@ STEPS: Tuple[Step, ...] = (
         line(r"^requirements 4 — R1 failing \(C1\) · R2 gap \(C7\) · R3 pending build \(C5\) "
              r"· R4 checked$"),
         line(r"^invalidated: none   \(6 verdicts current\)$"),
+        # Architecture phase 3b: the clone's committed trace is its design's.
+        no_line_containing("trace: not traced"),
     )),
     Step("edit-bed-xy", (1, 2),
          Edit("model/bracket.py", "bed_xy: float = 220.0", "bed_xy: float = 250.0"), ()),
     Step("status-stale", (1, 2), Nopekit(("status",)), (
         line(r"^invalidated: bracket\.bed_fit — config\.bed_xy 220\.0 -> 250\.0   "
              r"\(5 verdicts current\)$"),
+        # Architecture phase 3b: a choice edit is another design, which has no
+        # trace until one is run; the committed one is never drawn for it.
+        line(r"^trace: not traced for this design — `nopekit round` starts it in the "
+             r"background; `nopekit model trace` runs it here$"),
     )),
     Step("check-after-edit", (1, 2), CHECK, (
         exit_code(1),

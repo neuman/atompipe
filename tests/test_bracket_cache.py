@@ -61,7 +61,8 @@ BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearin
 #: regeneration is idempotent; examples/bracket/README.md spells out every step.
 REGENERATE = ("the committed bracket cache was written by another spine or model: in "
               "examples/bracket run `rm -rf .nopekit/verdicts && nopekit check; "
-              "nopekit gate selftest; nopekit round` and commit the result "
+              "nopekit gate selftest; nopekit model trace; nopekit round` and commit the "
+              "result "
               "(examples/bracket/README.md, \"The committed cache\"); a status change "
               "also needs `nopekit site stamp --all` after reading the text again")
 
@@ -70,8 +71,25 @@ REGENERATE = ("the committed bracket cache was written by another spine or model
 #: `report.requirement_statuses`), `graph.py`, `rounds.py` or a bracket record —
 #: ends with `nopekit round` in examples/bracket.
 ROUND_FIX = ("the committed round record is not the bracket's round record now: in "
-             "examples/bracket run `nopekit round` and commit .nopekit/round.json "
-             "(examples/bracket/README.md, \"The committed cache\")")
+             "examples/bracket run `nopekit model trace` (it writes nothing when the trace "
+             "is current), then `nopekit round`, and commit .nopekit/trace/ and "
+             ".nopekit/round.json (examples/bracket/README.md, \"The committed cache\")")
+
+#: What a stale committed trace says (architecture phase 3b): an edit to the
+#: bracket's model, or to how the trace observes, leaves the committed trace
+#: keyed to another design.
+TRACE_FIX = ("the committed trace is not the bracket's design now: in examples/bracket run "
+             "`nopekit model trace`, then `nopekit round`, and commit .nopekit/trace/ and "
+             ".nopekit/round.json (examples/bracket/README.md, \"The committed cache\")")
+
+#: What it says when the trace is current and its amber is not: a gate that
+#: covers C2 or C3, or their acceptance condition, moved (review of phase 3b:
+#: TRACE_FIX said the trace was not the design's, and `round` alone only starts
+#: the trace in the background).
+AMBER_FIX = ("the committed trace is the bracket's design, and its amber file is not current "
+             "(C2's or C3's evaluator or acceptance condition moved: {why}): in "
+             "examples/bracket run `nopekit model trace` in the foreground, then `nopekit "
+             "round`, and commit .nopekit/trace/ and .nopekit/round.json")
 
 #: What it says instead when the walk, not the cache, is what moved.
 NOT_PORTABLE = ("the canonical AST walk is not portable to Python {version}: "
@@ -504,6 +522,55 @@ class TheCommittedRoundRecordIsCurrent(_env.EnvCase):
                          [f"{rounds.ROUND_REL}: computed_from is not what `nopekit round` "
                           f"writes now"])
         self.assertIn("nopekit round", ROUND_FIX)
+
+
+class TheCommittedTraceIsCurrent(_env.EnvCase):
+    """(architecture phase 3b) The bracket commits its trace and its amber file:
+    the trace is keyed to the committed design, amber reads `holds` for C2 and
+    C3, and on a fresh copy `model trace` writes nothing and says current."""
+
+    def test_the_trace_is_the_designs_and_amber_holds(self):
+        from nopekit import derivation, graph
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        ledger = cli._load(project)
+        registry, _ = cli._registry(project, ledger)
+        model, projection, error = cli._projection_safe(project, ledger)
+        view, resolution = cli._resolved(project, ledger, registry, projection, error,
+                                         now="2026-10-15T00:00:00Z", model=model)
+        traced = cli._trace_for(project, model, projection, resolution)
+        if traced.state != "current":
+            self.fail(f"trace reads {traced.state} {traced.problems}\n{TRACE_FIX}")
+        built = graph.of(project, view, resolution, registry, projection=projection,
+                         model=model, trace=traced.trace)
+        amber = cli._amber_for(project, view, registry, built,
+                               graph.tokens(view, resolution, registry).claims, traced)
+        self.assertEqual({cid: a.state for cid, a in amber.items()},
+                         {"C2": "holds", "C3": "holds"},
+                         AMBER_FIX.format(why="; ".join(f"{cid}: {a.state} {a.why}".strip()
+                                                         for cid, a in amber.items())))
+        self.assertEqual(derivation.needed(traced, amber), "")
+
+    def test_an_acceptance_edit_is_named_as_amber(self):
+        """The message a red build gives when only amber moved names amber
+        and the foreground run, never "not the design"."""
+        from nopekit import report
+        self.assertNotIn("is not the bracket's design", AMBER_FIX)
+        self.assertIn("in the foreground", AMBER_FIX)
+        self.assertIn(report.HUMAN["trace"]["amber_why"]["acceptance"],
+                      AMBER_FIX.format(why=report.HUMAN["trace"]["amber_why"]["acceptance"]))
+        with open(os.path.join(_env.REPO, "CLAUDE.md"), encoding="utf-8") as fh:
+            text = " ".join(fh.read().split())
+        self.assertIn("or to their acceptance condition runs `nopekit model trace` and then "
+                      "`nopekit round`", text)
+
+    def test_a_fresh_copy_traces_to_nothing(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True,
+                                         git=True)
+        proc = _env.nopekit(["model", "trace", "--json"], cwd=project)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertEqual(_json(proc)["state"], "current", TRACE_FIX)
+        porcelain = _env.git(["status", "--porcelain"], cwd=project)
+        self.assertEqual(porcelain.stdout, "", TRACE_FIX)
 
 
 class BracketIsMigrated(unittest.TestCase):

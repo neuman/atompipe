@@ -83,6 +83,15 @@ class _Stub(NamedTuple):
     derives: tuple
 
 
+class _Full(NamedTuple):
+    """A trace as `derivation.TraceFile` hands it (architecture phase 3b)."""
+
+    key: str
+    round: int
+    derives: tuple
+    after: tuple
+
+
 class _Registry:
     """A registry stand-in over ``specs`` — the duck type `claims._specs` reads."""
 
@@ -347,6 +356,37 @@ class EveryEdgeHasItsSource(_env.EnvCase):
         self.assertEqual(g.via("C2", "C6"), (("bracket.bending_stress", "stress_root",
                                                "load_n"),))
         self.assertIsNone(self.graph.trace)
+        # Schema 2 (architecture phase 3b): the trace is an object; a stub with
+        # no round and no after edges still slots in.
+        self.assertEqual(g.to_dict()["schema"], 2)
+        self.assertEqual(g.to_dict()["trace"], {"key": "k" * 64, "round": None})
+        self.assertEqual(g.to_dict()["edges"]["after"], {})
+
+    def test_after_edges_order_and_never_mean(self):
+        """`after` (architecture phase 3b) orders derived values for drawing:
+        `upstream`, `depths` and `direct_derives` read it; `rests_on` does
+        not — the same edges with and without it."""
+        derives = (("load_n", "stress_root"), ("thickness", "inertia"),
+                   ("width", "inertia"), ("thickness", "stress_root"),
+                   ("width", "stress_root"))
+        bare = graph_of(self.world, trace=_Stub("k" * 64, derives))
+        full = graph_of(self.world, trace=_Full("k" * 64, 4, derives,
+                                                (("inertia", "stress_root"),)))
+        self.assertEqual(edges_of(full, "after"), {("value:inertia", "value:stress_root")})
+        self.assertEqual(full.to_dict()["trace"], {"key": "k" * 64, "round": 4})
+        self.assertEqual(full.trace_round, 4)
+        self.assertEqual(edges_of(full, "rests_on"), edges_of(bare, "rests_on"))
+        self.assertEqual(graph.upstream(full, "value:stress_root"), ["value:inertia"])
+        self.assertEqual(graph.depths(full)["stress_root"], 1)
+        self.assertEqual(graph.depths(full)["inertia"], 0)
+        direct = graph.direct_derives(full)
+        self.assertIn(("load_n", "stress_root"), direct)
+        self.assertIn(("thickness", "inertia"), direct)
+        self.assertNotIn(("thickness", "stress_root"), direct,
+                         "a choice that moves the value before it feeds that value")
+        self.assertEqual(full.moves("thickness"), ("inertia", "stress_root"))
+        self.assertEqual(full.moved_by("inertia"), ("thickness", "width"))
+        self.assertEqual(graph.ties_of(full), [])
 
 
 # --------------------------------------------------------------------------- #
@@ -546,8 +586,11 @@ _WHY_LINES = (
 
 
 def why_project(dest: str) -> str:
-    """A bracket copy whose physical claim C5 resolves assumption C6."""
+    """A bracket copy whose physical claim C5 resolves assumption C6, without
+    its committed trace: these are the untraced words (architecture phase 3b's
+    traced ones are `test_derivation`'s)."""
     root = _projects.bracket_copy(dest, migrated=True)
+    _env._rmtree(os.path.join(root, ".nopekit", "trace"))
     path = os.path.join(root, "claims", "C5.json")
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
@@ -716,6 +759,13 @@ class PointersAreChecked(_env.EnvCase):
         code, out, err = _main(root, "doctor", "--json")
         rows = [r for r in json.loads(out)["checks"] if r["check"] == "graph"]
         self.assertEqual([r["status"] for r in rows], ["ok"], rows)
+        # The committed trace (architecture phase 3b): C1, C2 and C3 rest on
+        # C6 through the values its load moves.
+        self.assertIn("3 rests on", rows[0]["detail"])
+        self.assertIn("derivation traced at round", rows[0]["detail"])
+        _env._rmtree(os.path.join(root, ".nopekit", "trace"))
+        code, out, err = _main(root, "doctor", "--json")
+        rows = [r for r in json.loads(out)["checks"] if r["check"] == "graph"]
         self.assertIn("1 rests on", rows[0]["detail"])
         self.assertIn("derivation not traced yet", rows[0]["detail"])
         with open(os.path.join(root, "params", "load_n.json"), "w", encoding="utf-8") as fh:

@@ -222,6 +222,8 @@ details.floor > summary { cursor: pointer; font-size: 14px; font-weight: 600; co
 .cb-rel { font-size: 14px; }
 .cb-cmds, .step-cmds { display: flex; flex-wrap: wrap; gap: 6px; }
 .cb-physical { border-left: 3px solid var(--tone, var(--axis)); padding-left: 10px; }
+.cb-amber { border-left: 3px solid var(--axis); padding-left: 10px; }
+.cb-amber.flips { border-left-color: var(--amber); background: var(--amber-soft); border-radius: 0 8px 8px 0; padding: 6px 10px; }
 
 /* ---- next steps ------------------------------------------------------------ */
 .next-body { display: grid; gap: 14px; margin-top: 14px; }
@@ -270,6 +272,8 @@ footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--grid);
 .dr-claim:hover { border-color: var(--accent); }
 .dr-values li { font-size: 14px; border-bottom: 1px solid var(--grid); padding-bottom: 6px; }
 .dr-values p { margin: 2px 0 0; }
+.dr-feeds { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; font-size: 14px; }
+.dr-est { color: var(--amber-ink); font-weight: 600; }
 @media (min-width: 1180px) { body.drawer-open main { margin-right: calc(var(--drawer-w) + 8px); } }
 @media (max-width: 759px) { :root { --drawer-w: 100vw; } }
 @media (prefers-reduced-motion: reduce) { #nk-drawer, #nk-drawer.is-open { transition: none; } }

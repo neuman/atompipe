@@ -32,7 +32,7 @@ from unittest import mock
 import _env
 import _projects
 from nopekit import claims as claims_mod
-from nopekit import cli, graph, report as report_mod, rounds, util
+from nopekit import cli, derivation, graph, report as report_mod, rounds, util
 from nopekit.models import ClaimStatus
 
 NOW = "2026-10-15T00:00:00Z"
@@ -197,9 +197,11 @@ _RECORD_ACCESS = frozenset({"read", "state", "write", "path_of", "ROUND_REL", "R
 #: it too), and `_round_commit` names the record's path twice: it stages the file
 #: as the round's own, and reads HEAD's copy for one number — which rounds the
 #: commit also holds ("rounds 2 to 3 were not committed") — never a status.
+#: `_round_label` reads the record's round number alone, to label a trace
+#: "traced at round N" (architecture phase 3b, decision 39) — never a status.
 _RECORD_ACCESS_ALLOWED = frozenset({("cli", "cmd_round"), ("cli", "_round_run"),
                                     ("cli", "_round_commit"), ("cli", "_round_state"),
-                                    ("cli", "build_parser")})
+                                    ("cli", "build_parser"), ("cli", "_round_label")})
 
 
 def round_reader_problems(sources: dict[str, str]) -> list[str]:
@@ -492,7 +494,10 @@ def _edit_model(root: str) -> None:
         fh.write(text.replace("    bed_xy: float = 220.0", "    bed_xy: float = 250.0", 1))
 
 
-_MOVES = ((_edit_record, ("records",)), (_new_entry, ("verdicts",)), (_edit_model, ("design",)))
+#: A model edit moves the design and, since the trace is keyed by the
+#: choices' values, the trace the design has (architecture phase 3b: none now).
+_MOVES = ((_edit_record, ("records",)), (_new_entry, ("verdicts",)),
+          (_edit_model, ("design", "trace")))
 
 
 def behind_problems(make: Any) -> list[str]:
@@ -844,7 +849,11 @@ class RoundSummary(_env.EnvCase):
         self.assertEqual(code, 0, err)
         doc = json.loads(out)
         self.assertEqual(set(doc), {"round", "written", "path", "previous", "changes",
-                                    "counts", "readiness", "check", "site", "summary"})
+                                    "counts", "readiness", "check", "site", "summary",
+                                    "trace"})
+        # Architecture phase 3b: the committed trace is the design's, so no
+        # background trace starts.
+        self.assertEqual(doc["trace"]["state"], "current")
         self.assertEqual((doc["round"], doc["written"], doc["path"]),
                          (R, False, rounds.ROUND_REL))
         self.assertEqual(set(doc["changes"]), {"compared", "replaced", "claims", "requirements",
@@ -1584,6 +1593,73 @@ class TheStopHookInProcess(_InProcessGit):
         self.assertTrue(doc["systemMessage"].startswith("nopekit round not run: "), doc)
         self.assertTrue(doc["systemMessage"].endswith("Nothing was committed."), doc)
         self.assertEqual(stamp(root), before)
+
+
+class TheTraceStartsAfterTheCommit(_InProcessGit):
+    """Phase 3b's background start in phase 6's seam (`cli._round_start_trace`,
+    the merge of the two): after the commit and outside the build lock, its
+    sentence after the commit's, never quiet in the Stop hook, and `--json`
+    holding both objects. What the merge had to join: phase 6 moved
+    `cmd_round`'s body to `_round_run` and left the seam returning "", and phase
+    3b started the trace at the end of the old `cmd_round`."""
+
+    def _fake_start(self, seen: list):
+        def fake(root, *, round_, key, popen=None):
+            seen.append({"locked": os.path.exists(os.path.join(root, ".nopekit",
+                                                               cli.LOCK_NAME)),
+                         "head": self.head(root), "round": round_})
+            return "started", derivation.LOG_REL
+        return mock.patch.object(derivation, "start_background", fake)
+
+    def _hook(self, root: str) -> dict:
+        out = io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"cwd": root}).encode("utf-8")),
+                                 encoding="utf-8")
+        with mock.patch.object(cli.sys, "stdin", stdin), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["round", "--hook"]), 0)
+        return json.loads(out.getvalue())
+
+    def _untraced(self) -> tuple[str, str]:
+        repo = self.repo()
+        project = self.project_in(repo)
+        _env._rmtree(os.path.join(project, ".nopekit", "trace"))
+        return repo, project
+
+    def test_after_the_commit_and_outside_the_lock(self):
+        repo, project = self._untraced()
+        base = self.head(repo)
+        seen: list = []
+        with self._fake_start(seen):
+            code, out, err = main(project, "round", "--commit", "--json")
+        self.assertEqual(code, 0, err)
+        doc = json.loads(out)
+        self.assertEqual((doc["trace"]["state"], doc["trace"]["log"]),
+                         ("started", derivation.LOG_REL))
+        self.assertEqual((doc["commit"]["made"], doc["commit"]["why"]), (True, "committed"))
+        self.assertEqual(len(seen), 1, seen)
+        self.assertFalse(seen[0]["locked"], "the trace started under the build lock")
+        self.assertNotEqual(seen[0]["head"], base, "the trace started before the commit")
+        self.assertEqual(seen[0]["round"], doc["round"])
+        said = doc["summary"]
+        self.assertLess(said.index("Committed "),
+                        said.index(" Tracing the derivation in the background"))
+        self.assertNotIn("Tracing the derivation",
+                         self.git(repo, "log", "-1", "--format=%B"),
+                         "the commit's body said a trace it had not started")
+
+    def test_the_hook_is_never_quiet_over_a_trace(self):
+        _repo, project = self._untraced()
+        self.assertEqual(main(project, "round", "--commit")[0], 0)
+        # Nothing moved since, and the switch is off in tests: quiet.
+        self.assertEqual(self._hook(project), {})
+        seen: list = []
+        with self._fake_start(seen):
+            said = self._hook(project).get("systemMessage", "")
+        self.assertEqual(len(seen), 1, seen)
+        self.assertIn("Nothing to commit", said)
+        self.assertTrue(said.endswith("Tracing the derivation in the background "
+                                      f"(log {derivation.LOG_REL})."), said)
 
 
 if __name__ == "__main__":

@@ -126,7 +126,11 @@ _ADDED_AFTER_MIGRATION = ("requirements/", "decisions/print-in-petg.json",
                           # Architecture phase 5 (SPEC 17, 30): the page's boards,
                           # zones and stations, and its text — a legacy bracket
                           # holding them would show groups no legacy ledger knew.
-                          "groups/", "site/")
+                          "groups/", "site/",
+                          # Architecture phase 3b (SPEC 39): the trace and its amber
+                          # file, which `nopekit model trace` writes and the legacy
+                          # bracket never had — a legacy copy stays untraced.
+                          ".nopekit/trace/")
 
 #: The thickness default in `model/bracket.py`, as the model spells it. Exactly
 #: one line may match: a second match (a comment quoting the line, a second

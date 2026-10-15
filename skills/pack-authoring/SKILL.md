@@ -75,6 +75,10 @@ claim has an order-of-magnitude answer sitting in a textbook.
 
 ### 3b. Write the gate for the context it actually gets
 
+Amber (`nopekit model trace`) runs your gate on designs rebuilt in a temp copy of the
+project, through the check run's own rules, writing nothing: read everything through
+`ctx` (`ctx.root` is the copy), never a path you computed from the project.
+
 A gate never sees the sweep's context. It gets a traced view of its own, and every
 read it makes — a parameter, a claim, a file, a question about a path — is recorded,
 because the verdict cache keys each verdict by exactly what it read. Write for that:

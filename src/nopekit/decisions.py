@@ -579,6 +579,12 @@ class _Evidence:
     prose: Mapping[str, str] | None = None
     """``{subject: stamp state}`` of ``site/content/`` (architecture phase 5),
     for a board's ``text:`` line."""
+    trace: Any = None
+    """The current design's trace (`derivation.TraceFile`, architecture phase
+    3b): with it, a choice says what it moves and a derived value what it is
+    derived from and where the trace orders it; None says neither."""
+    amber: Mapping[str, Any] | None = None
+    """``{claim id: derivation.Amber}`` — a Checked claim's amber line."""
 
     def word(self, ledger: Ledger, cid: str) -> str:
         """`cid`'s status word, from the caller's compositions."""
@@ -948,6 +954,7 @@ def _why_view(ledger: Ledger, view: Any, views: Sequence[Any], evidence: _Eviden
         out += _wrap("feeds: " + ", ".join(feeds), indent="  ")
     if evidence.graph is not None:
         out += _value_graph_lines(ledger, view.read_by, view.sourced_from, evidence)
+        out += _choice_trace_lines(view.name, evidence)
     if view.source:
         out += _wrap(f"source: {view.source}", indent="  ")
     moved_in = changed_in(ledger, view.name)
@@ -1008,6 +1015,150 @@ def _value_graph_lines(ledger: Ledger, read_by: Sequence[str], sourced_from: Seq
     return lines
 
 
+def _round_of(trace: Any) -> str:
+    """``traced at round N``, or ``traced`` when no round record named one."""
+    from . import report                             # a reader's module: not at import
+    return traced_words(getattr(trace, "round", None))
+
+
+def traced_words(number: Any) -> str:
+    from . import report                             # a reader's module: not at import
+    said = report.HUMAN["round"]
+    return said["traced_at"].format(r=number) if number is not None else said["traced"]
+
+
+def _move_words(move: Any) -> str:
+    from . import report                             # a reader's module: not at import
+    if isinstance(move, (int, float)) and not isinstance(move, bool):
+        pct = move * 100.0
+        text = f"{pct:+.0f}%" if abs(pct) >= 1 else f"{pct:+.2g}%"
+        return text.replace("-", "\u2212")
+    return report.HUMAN["round"]["changed"]
+
+
+def _pair_words(pair: Any) -> str:
+    found = [_move_words(m) for m in (pair or ()) if m is not None]
+    return ", ".join(found)
+
+
+def _choice_trace_lines(name: str, evidence: _Evidence) -> list[str]:
+    """A choice's ``moves:`` line (architecture phase 3b): the derived values
+    the trace saw it move, the largest first, each with its two moves; or why
+    the trace did not move it. Nothing without a trace."""
+    from . import derivation, report                 # a reader's module: not at import
+    trace = evidence.trace
+    if trace is None:
+        return []
+    said = report.HUMAN["round"]
+    if name in trace.skipped:
+        word = report.HUMAN["trace"]["skip"].get(trace.skipped[name], trace.skipped[name])
+        return _wrap(said["not_moved"].format(word=word), indent="  ", hanging="    ")
+    if name not in trace.observed:
+        return []
+    # A raised build observed nothing: said as raised, never as "nothing
+    # moved" (review of phase 3b: both builds raised, and `why` said "moves:
+    # nothing at ±10%").
+    row = trace.observed.get(name) or {}
+    raised = list(row.get("raised") or [None, None]) + [None, None]
+    change = row.get("change")
+    out: list[str] = []
+    if raised[0] and raised[1]:
+        kinds = raised[0] if raised[0] == raised[1] else f"{raised[0]}, {raised[1]}"
+        return _wrap(said["moves_raised"].format(type=kinds), indent="  ", hanging="    ")
+    for direction in (0, 1):
+        if raised[direction]:
+            out += _wrap(said["moves_raised_one"].format(
+                step=derivation.step_word(direction, change, minus="\u2212"),
+                type=raised[direction]), indent="  ", hanging="    ")
+    moves = {k: v for k, v in trace.moves(name).items() if k not in set(trace.unsteady)}
+    if not moves:
+        return _wrap(said["moves_none"], indent="  ", hanging="    ") + out
+    ranked = sorted(moves, key=lambda k: (-max(derivation.magnitude(m) for m in moves[k]
+                                                if m is not None), k))
+    items = [f"{k} ({_pair_words(moves[k])})" for k in ranked[:8]]
+    text = ", ".join(items) + (f", and {len(ranked) - 8} more" if len(ranked) > 8 else "")
+    if isinstance(change, list):
+        text += said["moves_size"].format(lo=derivation.step_word(0, change, minus="\u2212"),
+                                          hi=derivation.step_word(1, change))
+    return _wrap(said["moves"].format(items=text, traced=_round_of(trace)), indent="  ",
+                 hanging="    ") + out
+
+
+def _derived_trace_lines(name: str, evidence: _Evidence) -> list[str]:
+    """A derived value's trace lines (architecture phase 3b): what moved it,
+    where the trace orders it (inferred), the values it ties with, or that no
+    move moved it — never that it is independent."""
+    from . import report                             # a reader's module: not at import
+    trace = evidence.trace
+    said = report.HUMAN["round"]
+    if trace is None:
+        return _wrap(said["derived_from_untraced"], indent="  ")
+    out: list[str] = []
+    movers = sorted(trace.movers(name), key=_natural_key)
+    if not movers:
+        if name in trace.unmoved:
+            return _wrap(said["unmoved"], indent="  ", hanging="    ")
+        return []
+    items = [f"{c} ({_pair_words((trace.observed.get(c) or {}).get('moves', {}).get(name))})"
+             for c in movers]
+    out += _wrap(said["derived_from"].format(items=", ".join(items), traced=_round_of(trace)),
+                 indent="  ", hanging="    ")
+    before = sorted({a for a, b in trace.after if b == name}, key=_natural_key)
+    after = sorted({b for a, b in trace.after if a == name}, key=_natural_key)
+    if before or after:
+        out += _wrap(said["after_of"].format(before=", ".join(before) or "none",
+                                             after=", ".join(after) or "none"),
+                     indent="  ", hanging="    ")
+    tie = next((t for t in trace.ties if name in t), None)
+    if tie:
+        out += _wrap(said["ties"].format(ids=", ".join(x for x in tie if x != name)),
+                     indent="  ", hanging="    ")
+    if name in trace.singles:
+        out += _wrap(said["single"], indent="  ", hanging="    ")
+    return out
+
+
+def _natural_key(text: str) -> Any:
+    from .store import _natural
+    return _natural(text)
+
+
+def _amber_lines(claim: Claim, evidence: _Evidence) -> list[str]:
+    """A Checked claim's ``amber:`` line (architecture phase 3b): flips,
+    holds, could not tell, not current or not traced — shown beside Checked,
+    never instead of it (invariant 12)."""
+    found = (evidence.amber or {}).get(claim.id)
+    if found is None:
+        return []
+    return _wrap(amber_text(found), indent="  ", hanging="    ")
+
+
+def amber_text(found: Any) -> str:
+    """One claim's amber (`derivation.Amber`) in `why`'s words — the report's
+    ``## Amber`` lines say the same."""
+    from . import report                             # a reader's module: not at import
+    said = report.HUMAN["round"]
+    if found.state == "flips" and found.flips:
+        aid, choice, direction, gate, measured, limit, units = found.flips[0]
+        text = said["amber_flips"].format(
+            choice=choice, step=found.step(choice, direction, minus="\u2212"), aid=aid,
+            evaluator=gate or "its evaluator", measured=_view_value(measured, ""),
+            limit=_view_value(limit, ""), units=units or "")
+    elif found.state == "holds":
+        text = said["amber_holds"].format(
+            choices=", ".join(dict.fromkeys(c for _a, c in found.via)),
+            aids=", ".join(dict.fromkeys(a for a, _c in found.via)))
+    elif found.state == "unclear" and found.unclear:
+        token, choice, direction = found.unclear[0]
+        text = said["amber_unclear"].format(token=token, choice=choice,
+                                            step=found.step(choice, direction, minus="\u2212"))
+    elif found.state == "not-current":
+        text = said["amber_not_current"].format(why=found.why)
+    else:
+        text = said["amber_untraced"].format(why=found.why)
+    return " ".join(text.split())
+
+
 def _claim_graph_lines(ledger: Ledger, claim: Claim, evidence: _Evidence) -> list[str]:
     """`rests on:`, `resolves:` and `resolved by:` (architecture phase 3a, SPEC
     19), each only when there is one — from the graph, never recomputed here —
@@ -1038,6 +1189,7 @@ def _claim_graph_lines(ledger: Ledger, claim: Claim, evidence: _Evidence) -> lis
     # a Checked claim read as standing on nothing unconfirmed.
     if built.trace is None and built.into(f"claim:{claim.id}", "settles"):
         lines += _wrap(said["rests_on_untraced"], indent="  ", hanging="    ")
+    lines += _amber_lines(claim, evidence)
     resolves = list(getattr(claim, "resolves", None) or ())
     if resolves:
         items = [said["item"].format(id=aid, word=evidence.word(ledger, aid)) if aid in held
@@ -1067,6 +1219,8 @@ def _why_value_node(ledger: Ledger, node: Any, evidence: _Evidence) -> str:
     out += _value_graph_lines(ledger, built.read_by(name), built.sourced_from(name), evidence)
     if built.trace is None:
         out += _wrap(said["derived_from_untraced"], indent="  ")
+    else:
+        out += _derived_trace_lines(name, evidence)
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -1430,7 +1584,8 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
         rows: Iterable[Any] | None = None,
         bases: Mapping[str, str] | None = None,
         graph: Any = None, entry: str = "",
-        prose: Mapping[str, str] | None = None) -> str:
+        prose: Mapping[str, str] | None = None, trace: Any = None,
+        amber: Mapping[str, Any] | None = None) -> str:
     """Everything known about one parameter, claim, requirement or decision, as
     one dense plain-text block.
 
@@ -1500,7 +1655,7 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
                          rows=None if rows is None else {(r.decision, r.index): r
                                                          for r in rows},
                          bases=bases, graph=graph, composed=composed, entry=entry,
-                         prose=prose)
+                         prose=prose, trace=trace, amber=amber)
     views = _as_views(view)
 
     def param_named(match) -> str | None:

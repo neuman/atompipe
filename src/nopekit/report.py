@@ -400,6 +400,53 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "disagree": "The status and the evidence of this claim disagree. This is a defect "
                     "in nopekit. Report it.",
     }),
+    # Architecture phase 3b: the map's middle (the trace) and amber, in the
+    # site's register. "Assumption", never decision 39's "estimate": one word
+    # for one thing, and the baked kind word is already "Assumption".
+    "trace": MappingProxyType({
+        "notice_traced": "At round {round}, the model was built again with each choice "
+                         "changed by 10%. A thin line joins a group of choices to each shared "
+                         "value that moved.",
+        "notice_traced_no_round": "The model was built again with each choice changed by "
+                                  "10%. A thin line joins a group of choices to each shared "
+                                  "value that moved.",
+        "notice_untraced": "The links from the choices are not measured yet. Each line starts "
+                           "at the values that its evaluators read.",
+        "running": "The links from the choices are being measured now.",
+        "skipped": "The test did not change {n} choices: {names}. The map cannot show what "
+                   "they change.",
+        "skipped_one": "The test did not change the choice {names}. The map cannot show what "
+                       "it changes.",
+        "unmoved": "The test did not see {n} shared values change: {names}. This does not "
+                   "show that no choice changes them.",
+        "unmoved_one": "The test did not see the shared value {names} change. This does not "
+                       "show that no choice changes it.",
+        "caption": "Each line is one claim. It goes through the shared values that its "
+                   "evaluators read, in the order that the test found. It ends on its board.",
+        "amber_legend": "Amber: passes if the assumptions hold.",
+        "amber_flips": "This pass changes to a fail if an assumption is wrong by 10%.",
+        "amber_holds": "This pass stays a pass if an assumption is wrong by 10%.",
+        "amber_unclear": "The assumption test for this pass did not give an answer.",
+        "amber_not_current": "The assumption test for this pass is out of date.",
+        "amber_untraced": "The assumptions under this pass are not tested yet.",
+        "amber_item": "If {choice} changes by {step} ({assumption}), {evaluator} gives "
+                      "{value_text}.",
+        "rides": "Rides",
+        "fed_by": "Fed by",
+        "upstream_stop": "The test puts this value before the values that this claim reads.",
+        "upstream_rides": "Before them, from the test",
+        "unseen_line": "The test did not see a change in the values that this claim reads.",
+        "sets": "This assumption sets choices that change these shared values.",
+        "settles": "This test on the real part settles the assumptions at these shared values.",
+        "zones_summary": "{n} choices in {z} groups. The bar shows where each number comes "
+                         "from.",
+        "zone_idle": "No line uses these choices.",
+        "zone_unmeasured": "The test did not measure what these choices change.",
+        "feeds_key": "A thin line shows which shared values a group of choices changes.",
+        "sources": MappingProxyType({"chosen": "Design choice", "datasheet": "Datasheet",
+                                     "estimate": "Estimate", "assumption": "Assumption",
+                                     "unrecorded": "No source recorded"}),
+    }),
     # The words beside evidence that is not on the page. They depend only on
     # the path: why a file inside the project was not copied (its size, a
     # directory, gone) reads one machine's disk, so the build warns with it
@@ -1554,7 +1601,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "instructions_unrecorded": "instructions not recorded (the model does not load)",
         "no_status": "no status moved ({what} moved)",
         "moved": MappingProxyType({"records": "the records", "verdicts": "the verdict cache",
-                                   "design": "the design",
+                                   "design": "the design", "trace": "the trace",
                                    "resolution": "the resolution (an evaluator's code, its "
                                                  "controls, a pack or a tool)"}),
         "state_head": "round record: {line}",
@@ -1569,6 +1616,37 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
                        "nor rewrites it",
         "graph_ok": "{n} nodes, {m} edges ({k} rests on, {r} resolves)",
         "graph_untraced": "; derivation not traced yet — each rests-on edge is a direct read",
+        "graph_traced": "; derivation {traced}",
+        "traced_at": "traced at round {r}",
+        "traced": "traced (no round record named it)",
+        # Architecture phase 3b: what the trace observed, and amber, in `why`.
+        "amber_flips": "amber: flips — {choice} {step} ({aid}, not confirmed) gives "
+                       "{evaluator} {measured} against {limit} {units}; shown beside Checked, it "
+                       "changes no status",
+        "amber_holds": "amber: holds — ±10% on {choices} ({aids}) leaves it Checked",
+        "amber_unclear": "amber: could not tell — {token} at {choice} {step}",
+        "amber_not_current": "amber: not current — {why}; `nopekit model trace`",
+        "amber_untraced": "amber: not traced — {why}",
+        "moves": "moves: {items} — {traced}",
+        "moves_none": "moves: nothing at ±10%",
+        "moves_raised": "moves: not observed — both moved builds raised {type}",
+        "moves_raised_one": "the {step} build raised {type}: nothing observed that way",
+        "moves_size": " (an integer: moved {lo} and {hi})",
+        "not_moved": "not moved by the trace: {word}",
+        "derived_from": "derived from: {items} — {traced}",
+        "after_of": "after: {before} · before: {after} (inferred from the trace: it moves with "
+                    "every choice that moves each of them, and with more)",
+        "ties": "moves together with: {ids}; the trace cannot order them",
+        "single": "moved by one choice only; the trace does not order it",
+        "unmoved": "not seen to move under any ±10% move; that does not show that it depends "
+                   "on nothing",
+        "changed": "changed",
+        "trace_started": " Tracing the derivation in the background (log {log}).",
+        "trace_amber": " Re-running amber in the background (log {log}).",
+        "trace_running": " A trace is running already (log {log}).",
+        "trace_incomplete": " The last trace stopped before it finished; `nopekit model trace` "
+                            "tries again.",
+        "trace_failed": " The trace did not start: {why}.",
         # `why`'s lines (SPEC 10, 19): what reads a value, what sources it, and
         # what a claim rests on, resolves or is resolved by.
         "read_by": "read by: {ids}",
@@ -1620,6 +1698,117 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "timeout_help": "seconds before it is stopped (default 600)",
         "args_help": "what the script is handed; a flag of the script's goes after --, as in "
                      "nopekit propose <id> -- --limit 5",
+    }),
+    # `nopekit model trace` and every reader of the trace and of amber
+    # (architecture phase 3b, SPEC 39). Never "independent": a value not seen
+    # to move under a ±10% move is said as not seen to move, and the trace is
+    # one point of a nonlinear model (invariant 16).
+    "trace": MappingProxyType({
+        "help": "rebuild the model in copies with each choice moved -10% and +10%, and record "
+                "which derived values moved (the trace) and which passes an assumption's move "
+                "flips (amber)",
+        "choices_help": "trace only these choices (comma-separated, repeatable); the trace "
+                        "file is written when every choice is traced",
+        "workers_help": "builds at once (default: {n}, the cores less one, at most 8)",
+        "timeout_help": "seconds a build may take (default: the larger of {floor:.0f} and "
+                        "{factor:.0f}x the base build)",
+        "skip": MappingProxyType({
+            "yes-no": "a yes/no choice", "word": "a word", "none": "no value",
+            "structure": "a structure", "zero": "zero: no relative move",
+            "not-finite": "not a finite number", "fixed": "not settable (init=False)"}),
+        "refuse": MappingProxyType({
+            "legacy": "this project's records are still in the legacy ledger: `nopekit check` "
+                      "migrates them first",
+            "no_model": "the model does not load, so nothing can be traced: {why}",
+            "unrecorded": "the model's code was not recorded (code loaded from a string or "
+                          "exec), so no trace can be keyed to it",
+            "unknown_choice": "--choices names {name}, which is not a choice of {entry} (its "
+                              "Config){hint}",
+            "hint": "; did you mean {hint}?",
+            "workers": "--workers must be 1 or more",
+            "inside": "its temp directory {base} is inside {clash}: a build's copy would land "
+                      "in the tree the trace may not write (set TMPDIR outside the project)",
+            "running": "a trace is already running for this project (process {pid}; log "
+                       "{log}); wait for it",
+            "big": "the project is {size} without .git, out/, site/ and caches, more than the "
+                   "1 GiB a trace copies; the largest directories are {dirs}",
+            "base_raised": "the design does not build in a copy of the project: {line}",
+            "edited": "{path} reads {state}: {line}. Delete it to trace this design again",
+            "wrote": "{choice} {step}: the build wrote inside the project: {paths} — the "
+                     "trace keeps every build in a copy; make build() write under its own "
+                     "directory",
+            "wrote_base": "the base build wrote inside the project: {paths} — the trace "
+                          "keeps every build in a copy; make build() write under its own "
+                          "directory",
+        }),
+        "head": "trace: {entry}, design {key12} — {n} choices to move by ±10% ({builds} builds "
+                "on {workers} workers)",
+        "not_nudged": "  not moved: {items}",
+        "and_more": " and {n} more",
+        "steady": "  base built twice: steady",
+        "unsteady": "  base built twice: {names} differ between builds; the trace draws no "
+                    "edge to them",
+        "progress": "  [{done:>4}/{total}] {choice} {step}: {n} values moved",
+        "progress_raised": "  [{done:>4}/{total}] {choice} {step}: raised {type}: {line}",
+        "timed_out": "{choice} {step}: no result in {s:.0f} s (timed out)",
+        "dead": "{choice} {step}: the build process exited {code} with no result {why}",
+        "base_timed_out": "the base build gave no result in {s:.0f} s (timed out)",
+        "base_dead": "the base build exited {code} with no result: {why}",
+        "environmental": "{choice} {step}: raised {a}, then {b} when run alone — an "
+                         "environmental failure",
+        "written": "traced: {n} choices moved both ways; {moved} derived values moved, "
+                   "{unmoved} not seen to move ({names})",
+        "order": "  derives {d} edges · after {a} edges · {t} groups move together · {s} "
+                 "values moved by one choice",
+        "amber": "amber: {n} automated claims evaluated on {k} assumption-sourced choices; "
+                 "{flips}",
+        "amber_flip_item": "{id} flips",
+        "amber_none": "none flips",
+        "wrote": "written: {paths} ({seconds:.0f} s)",
+        "current": "trace: current for this design ({path}); amber current — nothing to "
+                   "observe",
+        "partial": "traced {done} of {total} choices for this design; the trace is written "
+                   "when every choice is traced — `nopekit model trace`",
+        "incomplete": "trace not written: {n} build(s) did not finish ({items}). The {k} that "
+                      "finished are kept for the next run",
+        "retry": "  run again with --timeout {suggest:.0f}",
+        # amber's reasons, said after "not traced —" or "not current —"
+        "amber_why": MappingProxyType({
+            "no_trace": "the design has no trace yet",
+            "skipped": "the trace does not move {name} ({word})",
+            "no_file": "no amber run holds it yet",
+            "not_run": "amber did not run on {name}",
+            "evaluators": "the evaluators changed",
+            "acceptance": "the acceptance condition changed",
+            "gate": "{gate} changed",
+        }),
+        # `status`
+        "status_none": "trace: not traced for this design — `nopekit round` starts it in the "
+                       "background; `nopekit model trace` runs it here",
+        "status_running": "trace: running (process {pid}; log {log})",
+        "status_incomplete": "trace: incomplete for this design — {k} build(s) did not "
+                             "finish; `nopekit model trace --timeout {s:.0f}` tries again",
+        "status_edited": "trace: {path} reads {state} — nothing reads it; delete it and run "
+                         "`nopekit model trace`",
+        "status_unrecorded": "trace: not traced — {why}",
+        "unrecorded_why": "the model's code was not recorded",
+        "amber_head": "amber: {items}",
+        "status_flips": "flips ({aid} {choice} {step})",
+        "status_not_current": "not current ({why})",
+        "status_unclear": "could not tell ({token} at {choice} {step})",
+        "status_untraced": "not traced",
+        "status_item": "{id} {words}",
+        # `doctor`
+        "doctor_ok": "current for this design: {n} choices moved, {k} not moved; after {a} "
+                     "edges, {t} groups move together",
+        "doctor_others": "{m} trace files for other designs ({size}); git keeps them; `git rm` "
+                         "the ones you do not need",
+        # `site build`
+        "map_traced": "map: {lines} lines, {boards} boards, {zones} zones, {stations} stations "
+                      "in {layers} layers, {feeds} feeds; derivation {traced}",
+        # the report's `## Amber`
+        "report_heading": "Amber",
+        "report_line": "Amber changes no status.",
     }),
     # Architecture phase 5: the front page's words, in ASD-STE100 (`_SITE_WORDS`).
     "site": _SITE_WORDS,
@@ -2653,12 +2842,15 @@ def _round_changes(changes: Any) -> str:
 
 def round_paragraph(shape: str, number: Any, changes: Any, *, view: Ledger,
                     composed: Mapping[str, Any], check: Mapping[str, Any],
-                    site: Mapping[str, Any], wrote: bool, schema: Any, path: str) -> str:
+                    site: Mapping[str, Any], wrote: bool, schema: Any, path: str,
+                    trace: Mapping[str, Any] | None = None) -> str:
     """`nopekit round`'s one paragraph (architecture phase 3a): what changed since
     the last round record (``shape``: ``written``, ``first``, ``replaced``,
     ``unchanged`` or ``newer``), the count line, *ready* as last evaluated
     (`claims.unresolved`, through `readiness`), what the tier-0 check did, the
-    site, and the write. One paragraph, because it is the Stop hook's message
+    site, the write, and (phase 3b) the background trace when one was started
+    or is running — ``trace`` ``{"state", "log", "why"}``; nothing when the
+    trace is current. One paragraph, because it is the Stop hook's message
     (phase 6)."""
     said = HUMAN["round"]
     if shape == "newer":
@@ -2695,7 +2887,26 @@ def round_paragraph(shape: str, number: Any, changes: Any, *, view: Ledger,
     else:
         built = said["site_failed"].format(why=str(site.get("why") or "").rstrip("."))
     tail = said["wrote"].format(path=path) if wrote else ""
-    return f"{opening} {count_line(composed)}. {ready} {ran}{built}{tail}"
+    return f"{opening} {count_line(composed)}. {ready} {ran}{built}{tail}" \
+        f"{round_trace_sentence(trace)}"
+
+
+def round_trace_sentence(trace: Mapping[str, Any] | None) -> str:
+    """The background trace's sentence in `round`'s paragraph (architecture
+    phase 3b), with its leading space: ``trace`` ``{"state", "log", "why"}``,
+    the state `cli._round_start_trace` returns — ``started``, ``amber``,
+    ``running``, ``incomplete`` or ``failed`` — else ``""``. One home for the
+    words, because phase 6 appends it after the commit's sentence, where
+    `round_paragraph` cannot."""
+    said = HUMAN["round"]
+    state = str((trace or {}).get("state") or "")
+    log = str((trace or {}).get("log") or "")
+    return {"started": said["trace_started"].format(log=log),
+            "amber": said["trace_amber"].format(log=log),
+            "running": said["trace_running"].format(log=log),
+            "incomplete": said["trace_incomplete"],
+            "failed": said["trace_failed"].format(
+                why=str((trace or {}).get("why") or "").rstrip("."))}.get(state, "")
 
 
 # --------------------------------------------------------------------------- #
@@ -4843,7 +5054,8 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
                     params: Sequence[Any] | None = None,
                     stale_reasons: Mapping[str, str] | None = None,
                     milestone: Any = None, boundary: bool = False,
-                    article: str = "", test_card: Sequence[str] = ()) -> str:
+                    article: str = "", test_card: Sequence[str] = (),
+                    amber: Sequence[str] | None = None) -> str:
     """The full readiness report as markdown — the project's public deliverable.
 
     Sections, in the order a sceptical reader needs them: the readiness
@@ -4963,6 +5175,7 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
         out.append("")
 
     out += _section_proven(ledger, composed, cover, stale=stale, registry=registry)
+    out += _section_amber(amber)
     out += _section_pending_build(ledger, composed, article=article)
     out += _section_gaps(ledger, composed, registry, stale_reasons=stale_reasons)
     out += _section_assumed(ledger, composed, params, model_error)
@@ -4978,6 +5191,19 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
                "Do not hand-edit: it is an output, not a source. If a line here is "
                "wrong, the ledger is wrong.*")
     return "\n".join(out).rstrip() + "\n"
+
+
+def _section_amber(amber: Sequence[str] | None) -> list[str]:
+    """``## Amber`` (architecture phase 3b): after the Checked section, only
+    when a Checked claim's amber flips or is not current — one line per claim
+    in `why`'s words, and the sentence that amber changes no status. The
+    lines are the caller's (`decisions.amber_text` over
+    `derivation.amber_states`): this module computes no amber."""
+    if not amber:
+        return []
+    said = HUMAN["trace"]
+    return [f"## {said['report_heading']}", "", *[f"- {line}" for line in amber], "",
+            said["report_line"], ""]
 
 
 def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
@@ -5135,7 +5361,8 @@ def _with_gates(claim: Claim, gates: list[str]) -> Claim:
 def write_report(root: str, ledger: Ledger, registry: Any, *,
                  stale: bool = False, stale_gates: Collection[str] = (),
                  model_error: str = "", params: Sequence[Any] | None = None,
-                 stale_reasons: Mapping[str, str] | None = None) -> str:
+                 stale_reasons: Mapping[str, str] | None = None,
+                 amber: Sequence[str] | None = None) -> str:
     """Render the markdown report to `REPORT.md` at the project root — an output
     git ignores (P2.5b-D17, PLAN D-14) — and return its path. What slipped
     through while it was the tracked `docs/readiness.md` (S-41): it drifted from
@@ -5163,7 +5390,7 @@ def write_report(root: str, ledger: Ledger, registry: Any, *,
     atomic_write_text(path, render_markdown(ledger, registry, stale=stale,
                                             stale_gates=stale_gates, root=root,
                                             model_error=model_error, params=params,
-                                            stale_reasons=stale_reasons))
+                                            stale_reasons=stale_reasons, amber=amber))
     return path
 
 
@@ -5618,6 +5845,7 @@ __all__ = [
     # architecture phase 3a: the round's summary
     "status_token_word",
     "round_paragraph",
+    "round_trace_sentence",
     "round_moved",
     # architecture phase 6: the round's commit and the Stop hook
     "COMMIT_SUBJECT_MAX",

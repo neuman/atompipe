@@ -104,8 +104,8 @@ part of it.
 
 ## 3. What stays
 
-1. **The invariants** in `CLAUDE.md` (numbered 1 to 15; 14 landed in phase 5, see
-   section 8) and the tests that hold them. Nothing below weakens one.
+1. **The invariants** in `CLAUDE.md` (numbered 1 to 16; 14 landed in phase 5 and 16 in
+   phase 3b, see section 8) and the tests that hold them. Nothing below weakens one.
 2. **Git is the groundspace.** A checkout is one state; commits are the history. No
    second history store, no snapshot per check. Reason: git already has parent
    pointers, authorship, signing and merges; a copy of that inside the tree is the
@@ -1220,6 +1220,263 @@ above stand where these do not change them):
   file once in `test_meta.InvariantClassesNeverSkip` (1.8 s to 0.6 s with the modules
   loaded, the same assertions). Two interleaved pairs on a loaded machine measured
   127.2 s and 138.7 s wall against 161.2 s and 149.4 s for 63e9cef (`tests/fast.py`).
+
+**Phase 3b** (the trace and a transit layout), decided while building it (the data
+side):
+
+- **Overturns phase 5's straight tracks.** After the author's verdict on the phase 5
+  map ("so simplistic looking"), the map gains a middle: every zone drawn, feeds from
+  zones to stations, stations in layers, and lines that ride stations in the trace's
+  order. Per-project routing is avoided: the order is baked from observed data and a
+  fixed rule, and the geometry is the renderer's (the template side's list).
+- **`derivation.py`, not `trace.py`.** "Trace" already names `GateTrace`/`ParamTrace`
+  in code. Non-spine and clock-free; no spine edit, so no verdict re-keys.
+- **The key.** `seal({harness, step, instructions, choices})`: the instructions are
+  `_model_code` plus every `*.py` under the model's directory, spelled as
+  `_model_code` spells them (bare under the root: the first cut spelled the extra
+  files `<root>/…` and doubled the entry); every `Config` field's digest, skipped
+  ones included; computed after a build wherever it is computed.
+- **Moves.** Ints move by `max(1, round(0.1·|v|))`; the skip tokens are `yes-no,
+  word, none, structure, zero, not-finite, fixed`; relative changes to 4 s.f., a zero
+  base as `abs`, a structure by 16 hex of its digest; a raise as its type only. The
+  base is built twice; a value that differs is unsteady and draws no edge. One
+  BLAS/OpenMP thread per build.
+- **Written only whole.** A trace file only when every numeric choice moved both ways;
+  scratch under `.nopekit/cache/trace/<k16>/` resumes a run; a timeout, a dead
+  worker, a raise that differs when run alone, or a write into the project leaves no
+  tracked file and exits 1 — a write by the base build too (the design refused it
+  with exit 2; it is the same refusal, so it reads the same). Base-1 runs alone first
+  (its key decides the scratch and whether anything is to do), then base-2 and the
+  moves in the pool.
+- **Copies.** One snapshot per run under the project lock (`.git`, `out/`, `site/`,
+  `.nopekit/{out,obs,cache,trace}`, `*.lock` there, `__pycache__`, `node_modules` and
+  venvs left out; ignored files kept), then a fresh copy per job; an audit hook,
+  active per thread, names a write into the project.
+- **Defaults.** Workers `min(8, cpu−1)`; timeout `max(900 s, 10× the base build)`.
+- **The `after` rule** is a strict subset of movers with a two-mover floor,
+  Hasse-reduced on classes, computed on read and never stored. Not tuned per project.
+- **A station's depth is the upper median of its read members' depths** (of every
+  moved member when no line reads one). The design said the lower median of every
+  moved member; on PETGasus that put Total thrust (members at depths 0, 0, 2, 6, 6)
+  in layer 2, before Printed frame and Total weight, though the value C1 reads there
+  (thrust to weight) comes after both. With the read members' upper median the
+  layers are Layout 0, Assembly and Hover 1, Printed frame 2, Total weight and Frame
+  vibration 3, Total thrust 4.
+- **A trace is served only for the current key.** The map is untraced until the
+  background trace lands, and says so. The trace's unmoved values are value nodes, so
+  `why` can say "not seen to move" of them.
+- **Amber** is evaluated in the worker builds of the assumption-sourced choices'
+  moves (and base-1 evaluates the unmoved design, so `model trace`'s summary names
+  as flipping only a claim Checked there), for every automated claim with a covering
+  evaluator, by `verdicts.sweep(record=False)` in the copy and the one composition;
+  flips are `failing` or `gap`. Its file is never rewritten; each claim carries its
+  acceptance and evaluator digests, read back per claim. **Amber does not move a
+  board's stamp** (the design said it would): stamps are computed by `site stamp`,
+  `status`, `why` and `doctor` from statuses alone, and threading amber into all of
+  them for a display token was not worth a second home for it.
+- **Graph schema 2**: the `after` edge type, `trace: {key, round}`, derives and after
+  inline in the round record; `rests_on` closes over `derives` only. The round record
+  gains `computed_from.trace` and `amber`; its schema stays 1.
+- **map.json `MAP_SCHEMA` 2** (the data the renderer reads): requirements and zones
+  are no longer stops; every zone record is drawn with `count`, `moved`, `ground`
+  (phase 5's three) and `sources` (`chosen`, `datasheet`, `estimate`, `assumption`,
+  from the records: an assumption claim, an input of a published or measured kind,
+  any other input, nothing — `page.SOURCE_OF_KIND`), `estimate` (its unconfirmed
+  assumptions), `idle`, `feeds` and `taps`; feeds are the direct derives grouped zone
+  × station with their `estimate`; a line carries `stops` (read and `upstream`
+  stations in layer, column and station order), `stop_kind`, `taps`, `fed_by`,
+  `serves`, `board` and `amber`; a station `layer`, `column`, `depth`, `head`,
+  `fed_by`, `stop_kinds`. **Crossings**: zones, requirements and each layer's
+  stations carry a `rank` from one barycentre pass against the claims' rows (ties in
+  record order); on PETGasus the zones' pass cuts the crossings between feeds (zone
+  rank against each station's mean row) from 281 in record order to 206, and the build
+  reports both counts (`site build --json` `map.crossings`).
+- **Status** prints a `trace:` line only when the trace is not current, and an
+  `amber:` line only for flips, not-current and unclear claims (an untraced claim is
+  named only when the design has a trace: otherwise the `trace:` line says it). The
+  report's `## Amber` only for flips and not-current. JUnit, `check`, `export` and exit
+  codes never read amber.
+- **The background start.** `NOPEKIT_TRACE_BACKGROUND=0` turns it off; `tests/_env`
+  sets it in its own process too, so an in-process `round` in a test starts nothing.
+  `round` does not start again after an incomplete background run, and never kills a
+  running trace.
+- **Invariant 16** is "The trace says what it saw, and no more", with clauses in 7, 8,
+  12 and 15.
+- **The bracket** gains the `section` station, a committed trace (11 numeric choices
+  moved, `material` skipped as a word, `E`, `material` and `yield` not seen to move;
+  55 derives, 27 after, 5 ties, 2 singles) and an amber file (C2 and C3 hold: the
+  load moved ±10% gives a utilisation of 0.22/0.269 and a bearing stress of
+  0.175/0.214 MPa), labelled round 2, and round 3. All its stations sit in one layer
+  (each reads at depth 0): the bracket shows an upstream stop (Arm section on C1, C2,
+  C4), not layers.
+- **The fast tier**: the phase added ~2.1 s of in-process rows and paid ~3.6 s
+  (test_meta.InvariantClassesNeverSkip and test_meta.NoGitOutsideVcs, harness guards,
+  to the full suite); interleaved pairs against e27e1a7 under a load of 1.5-3.0 read
+  +8 s and -5 s wall — within the noise, and no idle run was had, so the 90 s line is
+  not shown met (`tests/fast.py`).
+- **PETGasus** (a scratch copy, test data only, with its six assumptions written as
+  `params/<name>.json` `grounded_by` records — the copy had none, so nothing rested on
+  an assumption): 106 of 110 choices moved (three yes/no and `plate_layout`, a word,
+  skipped), 214 builds on 8 workers in 19 min 38 s; 56 derived values moved, 9 not
+  seen to move; 892 derives, 160 after, 7 ties, 4 singles; a 68 KB trace and a 39 KB
+  amber file. The map: 10 zones (Screws and Parts list idle), 39 feeds, 10 stations in
+  5 layers; C1 rides Layout, Assembly, Printed frame, Total weight, Total thrust — the
+  reference shows Layout, Frame, Mass, Thrust, so Assembly is the one stop it does not
+  draw (an upstream stop: the frame's volume moves with the interference the assembly
+  computes). Amber: C1 flips at `duct_thrust_factor` -10% (A1: thrust to weight 2.72
+  against 3), C4 at `fc_board_side` +10% (A4: first mode 199.3 Hz against 200), C5 at
+  `motor_h` -10% (A3: an interference), C6 at `motor_body_d` -10% (A3: the mesh is no
+  longer a solid); C2, C3 and C12 hold.
+
+**Phase 3b**, decided while building it (the template side: `lib/map.js`, `map.css`,
+`lib/drawer.js`, `page.js`):
+
+- **The transit drawing.** Three columns: requirement cards and every zone box on
+  the left (x 12-248), the stations in the middle (x 286-800), the boards on the right
+  (x 872-1392, unchanged). A station's x is its (layer, column) of `map.layers`, one
+  equal column each (64 units on PETGasus's 8). Its lines sit side by side at a pitch
+  of 7 in the order of their rows, centred on the mean of those rows; capsules in one
+  column keep 34 apart. A line starts 22 left of its first station, bends once just
+  after each station it leaves, and fans into its row in a band from the last column
+  to x 854; in each bend zone risers turn top-first and fallers bottom-first (pitch 7,
+  shrinking to 3 when crowded), with 45-degree runs of 9 and corners of radius 10 (the
+  reference's `trunkPath` and `rounded`). *Rejected:* the design's 300-840 middle (it
+  left 33 units for the final fan of ten lines), and bending just before the next
+  station (lines then ran at their old height through the stations between, and
+  crossed more capsules).
+- **Zone boxes sit where they feed.** A box (236 x 46, grown with its text below 1400
+  px) sits at the mean height of the stations and line starts it feeds, in its baked
+  `rank`, pushed down 10 below the box above; idle boxes last, faded. *Rejected:* the
+  design's even pitch down the column (Parts list sat 900 units from anything it
+  feeds). Below the boxes: the summary, a key of the four `sources` and the feeds key,
+  stacked as wrapped.
+- **Halos and amber.** Every line has a surface-coloured halo under its stroke, drawn
+  line by line in row order, so a crossing reads over and under. The amber band (11
+  wide, 0.7) sits between a line's own halo and its stroke: in the casing layer under
+  all tracks, the halos cut each band into two thin yellow edges.
+- **Station titles go where they cross least.** A title tries above, below, then
+  beside its capsule (fourteen spots) and takes the one crossing the fewest
+  tracks and no other title or capsule; it is shortened (room 3 columns, 180 at
+  least) only when no spot holds it. *Rejected:* phase 5's "above, nudged up twice":
+  on the bundled map a line passing just above a capsule struck its title through.
+- **Requirement cards** are three lines tall whatever their text (a measured width
+  never moves a box); a row's second line names the requirements it serves, and an
+  amber diamond when the line carries the mark.
+- **Hover** lights, for a line, its stations' feeds and its zones; for a station,
+  every line through it and its feeds; for a zone, its feeds, taps and every line it
+  feeds; for an assumption's diamond or row, the feeds it sets. A click opens the
+  drawer, which keeps the same set lit.
+- **The caption** over the drawing is `words.trace.caption`, written by `page.js`
+  (`index.html` is the project's own); the note under it is `map.trace.notice`,
+  `map.trace.text` and, while a trace runs, `words.trace.running`. The legend's amber
+  chip shows only when a line carries the mark.
+- **Not drawn:** the station drawer's "comes after / comes before" — map.json carries
+  no `after` edges (`page.MAP_EDGE_TYPES` drops them), and the renderer computes no
+  order; it lists the claims for which the station is an upstream stop instead.
+- **What the screenshots show** (PETGasus copy with its trace, 1400 wide): all 10
+  zones with counts, bars and the six assumption diamonds; 39 feeds and 5 taps; 10
+  stations in 8 columns; C1 rides Layout, Assembly, Printed frame, Total weight, Total
+  thrust (Assembly is the stop the reference does not draw); the trunk bundles seven
+  lines from Layout through Assembly and fans to three boards; C1, C4, C5 and C6 wear
+  the amber band from the station their flip enters (C1 from Total thrust). The
+  bracket: four cards, four zones, three stations in one layer, C1, C2 and C4 riding
+  Arm section as an upstream (hollow) stop. Ties 7 and singles 4 on PETGasus, 5 and 2
+  on the bracket (the data side's counts).
+
+**Phase 3b, its review** (twenty-five confirmed findings, fixed before the merge):
+
+- **The key holds the data `build()` read.** The worker records every file its base
+  build opened to read inside its copy (not `.nopekit/`, not Python, not a file the
+  build also wrote) as `keyed_on.data`, and `trace_for` serves a trace only while its
+  instructions and choices are the current ones and those files hold the same bytes on
+  disk. A reader cannot name such a key, so it scans `.nopekit/trace/`; the scratch
+  lives under the key with no data (`current_key`), each row naming its full key.
+  *Rejected:* the base build's derived values in the key (the worker builds with one
+  BLAS thread, a reader with many: a last-bit difference would serve no trace).
+- **`HARNESS` 2.** An integer moves toward zero and away by its own size, direction 0
+  the factor below one for both signs; a field annotated `float` moves as a real
+  whatever its value's type; the trace stores a non-10% move's `change`, and every
+  label says it (`step_word`: `n_bolts -50%`). Two equal numbers are no move. A file a
+  value names (absolute, or relative with a separator), a mesh and an array compare by
+  their bytes (`_content`): on PETGasus `mesh_path`, `meshes` and `assembly_parts` now
+  move, and the not-seen-to-move values fell from nine to five.
+- **The order.** A move under `FAINT` (0.1%) does not count toward `after`; Y comes
+  before X when Y's strong movers (two at least) all move X and X has more movers,
+  strong or of any size; a cycle is dropped, the rest reduced to its covering edges.
+  Both "more" readings are needed on PETGasus: a rounded hover power drops the
+  clearances' 0.022% moves of the weight, and the weight dilutes the frame's strong
+  moves into faint ones. C3 now rides Layout, Assembly, Printed frame, Total weight,
+  Hover power; C1 Layout, Assembly, Printed frame, Total weight, Total thrust. An
+  upstream stop after a line's last read stop is not drawn.
+- **Scratch rows** are written only for a pair that wrote nothing into the project and
+  whose raises were confirmed alone, and an amber row only reused at the subjects
+  (`amber_for`, sealed) it ran against. While an in-process job runs, the run's other
+  threads open no file (`_IN_PROCESS`, re-entrant: `modelio`'s import recording is
+  process-global, and a test row flaked on it). A subprocess worker watches every
+  thread; a process the build spawns is a named limit.
+- **Amber** stores the claim's acceptance in each run (`accept`), and a flip the
+  cross-check decided is said against it ("0.214 against 0.2 MPa"); the reason amber
+  is not current is read off the closest file.
+- **The map.** `trace.unmoved` and its sentence; a zone is `idle` only when the trace
+  measured every member, else it lists them as `unmeasured`; an assumption's row
+  draws springs to the stations its choices move (`sets`; a physical claim's, to those
+  of the assumptions it resolves — PETGasus records none, so its five P rows stay
+  stubs); a line that joins nothing and reads an unmoved value is `unseen`; the source
+  `unrecorded` replaces "design choice" for a value whose records name no loser
+  (PETGasus records few: most of its bars read *no source recorded*), and the key shows
+  only the sources some bar draws; a station's head is its most-read finite number,
+  shown only with units its param or an evaluator's verdict gave; the inferred part of
+  a line is faded; hovering an assumption lights every claim resting on it; the phone
+  list names upstream stops apart. **Not changed:** the `after` rule still orders two
+  values that share their inputs (the bracket's slenderness before its bounding box):
+  no observation at one point tells them apart, so it is said as inferred and drawn
+  faded.
+- **Re-measured.** The bracket: same counts (55 derives, 27 after, 5 ties, 2 singles),
+  re-recorded as `e3c84dbb3b68ac62`, labelled round 3, and round 4. PETGasus: 214 builds
+  on 8 workers in 14 min 49 s; 60 derived values moved, 5 not seen to move; 1067
+  derives, 134 after, 6 ties, 4 singles; 31 data files keyed (its meshes and topology
+  cache); the map has 30 feeds, 10 stations in 7 layers, no idle zone; amber flips C1,
+  C4, C5, C6 and C7.
+
+**Phase 3b merged into phase 6** (built in parallel from e27e1a7), decided while
+joining them:
+
+- **The trace's seam takes the round's resolution.** `cli._round_start_trace(root,
+  done, *, traced, view, resolution, registry, built, composed, model_error) -> dict`,
+  where phase 6 left `(root, changes) -> str`: phase 3b's start asks
+  `derivation.needed` over the round's own trace read, graph and statuses (amber needs
+  them), and recomputing them after the lock would resolve the project twice. It still
+  runs after the lock and the commit, and starts on phase 3b's rule (no trace for the
+  current key, or amber not current), not on `changes.instructions`, which a choice's
+  or a data file's edit never moves. A refusal inside it reads `failed`: a round never
+  exits 2. `test_round.TheTraceStartsAfterTheCommit` holds the order and the hook's
+  message; the trace's own `-m` start from the project's root is a named limit.
+- **One home for the trace's words.** `report.round_trace_sentence`, factored out of
+  `round_paragraph` (which keeps `trace=`), is appended after the commit's and the
+  board text's sentences; `round --json` keeps phase 3b's `trace` object
+  (`RoundOutcome.trace_state`) beside phase 6's `commit`. The hook prints `{}` only
+  when there is no trace sentence: a trace started, re-running amber, running, stopped
+  short or refused reaches the person.
+- **The skill stays under 260 lines.** Phase 3b's paragraph became a loop bullet
+  (`round` starts the trace; run it yourself after a gate or acceptance edit; never
+  edit `.nopekit/trace/`), amber joined "Never move a limit", and the table names
+  `model [trace]`. To pay for it, the table's `packs list` and `site stamp` rows went
+  (the loop and the turn's end spell both out), the claim example's `requirements`
+  joined the line above it, the review bullet takes two lines, and the two one-line
+  rules share a paragraph. *Rejected:* raising the limit (phase 6 set it so the skill
+  is read whole).
+- **The bracket's round record is round 5**, regenerated from phase 3b's (round 4):
+  one past the higher of the two, so no new round number names two records in the
+  history. Its verdict cache is phase 6's (no spine module moved on phase 3b's side),
+  and its trace and amber stayed current (`model trace` found nothing to observe);
+  they keep their label, round 3 of phase 3b's line, since a trace file is never
+  rewritten.
+- **The fast tier** is the union of both lists: both phases paid with
+  test_meta.NoGitOutsideVcs, and phase 3b's move of test_meta.InvariantClassesNeverSkip
+  to the full suite leaves phase 6's speed-up of it outside the tier. Two interleaved
+  pairs measured about 4 s over 3d8eaaf (122.9 s and 119.5 s against 118.1 s and
+  114.4 s wall, load 1.4-2.4): the next change that touches the tier pays that first
+  (`tests/fast.py`).
 
 ## 9. Retired
 

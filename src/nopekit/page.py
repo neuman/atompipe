@@ -41,6 +41,7 @@ import shlex
 from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 from . import claims as claim_logic
+from . import derivation as trace_logic
 from . import graph as graph_logic
 from . import prose as prose_logic
 from . import report as report_logic
@@ -54,14 +55,23 @@ from .store import _natural
 OUTLINE = 1
 SCHEMA = 1
 
+#: ``map.json``'s own schema (architecture phase 3b): zones and requirements
+#: are no longer stops, stations carry a layer, feeds and taps are new.
+#: ``page.json`` stays at `SCHEMA`.
+MAP_SCHEMA = 2
+
 #: The map's lanes, left to right: what was asked, the choices, the values
 #: several lines share, the claims on their boards (SPEC 29).
 LANES: tuple[str, ...] = ("requirements", "zones", "stations", "boards")
 
 #: The graph's edge types the map carries. `requires` (a milestone's claims) is
-#: next steps' and `decides` the technical record's: neither is drawn.
+#: next steps' and `decides` the technical record's: neither is drawn. Nor are
+#: `derives` and `after` (architecture phase 3b): the feeds and the station
+#: layers carry them, and on PETGasus about 2,000 derives edges would sit in
+#: map.json for nothing the renderer reads.
 MAP_EDGE_TYPES: tuple[str, ...] = tuple(t for t in graph_logic.EDGE_TYPES
-                                        if t not in ("requires", "decides"))
+                                        if t not in ("requires", "decides", "derives",
+                                                     "after"))
 
 #: The generated board (claims on no board) and zone (choices in no zone).
 OTHER = "other"
@@ -104,7 +114,12 @@ RECORD_KEYS = frozenset({
     "unit", "unmatched", "register", "problems", "lanes", "members", "claims", "marks",
     "stops", "values", "unread", "evaluators", "requirements", "rests_on", "resolves",
     "resolved_by", "commands", "legend", "nodes", "edges", "via", "steps", "milestones",
-    "assumptions"})
+    "assumptions",
+    # architecture phase 3b: the trace's structure and amber's tokens
+    "stop_kind", "stop_kinds", "taps", "fed_by", "serves", "feeds", "layers", "layer",
+    "depth", "head", "ties", "singles", "skipped", "choices", "to", "estimate", "idle",
+    "moved", "enters", "amber", "assumption", "choice", "sign", "evaluator", "count",
+    "source", "sources", "state", "rank", "sets", "unmoved", "unmeasured"})
 
 
 class Board(NamedTuple):
@@ -135,7 +150,13 @@ class Layout(NamedTuple):
     """The map's structure: ``boards``, ``zones`` and ``stations`` in order;
     ``board_of`` (claim id -> board id), ``zone_of`` and ``station_of`` (value
     name -> node id); ``lines``, one per claim in board-row order; ``unread``,
-    the choices no line touches; ``warnings``, in the CLI's register."""
+    the choices no line reads and no feed carries; ``warnings``, in the CLI's
+    register. From architecture phase 3b: ``feeds`` (zone -> station, the
+    direct derives), ``layers`` (columns per station layer), each station's
+    ``station_layer``, ``station_column`` and ``station_depth``, ``traced``,
+    ``ties``, the barycentre ``zone_rank``, ``station_rank`` (within its
+    layer) and ``requirement_rank``, the ``idle`` zones (no feed, no tap) and
+    the feed ``crossings`` before and after the zones' pass."""
 
     boards: tuple
     zones: tuple
@@ -146,6 +167,19 @@ class Layout(NamedTuple):
     lines: tuple
     unread: tuple
     warnings: tuple
+    feeds: tuple = ()
+    layers: tuple = ()
+    station_layer: Mapping = {}
+    station_column: Mapping = {}
+    station_depth: Mapping = {}
+    traced: bool = False
+    ties: tuple = ()
+    zone_rank: Mapping = {}
+    station_rank: Mapping = {}
+    requirement_rank: Mapping = {}
+    idle: tuple = ()
+    crossings: Mapping = {}
+    trace_key: str | None = None
 
 
 def _site_words() -> Mapping[str, Any]:
@@ -194,8 +228,10 @@ def boards_of(view: Any) -> tuple:
 
 def _reads_of(cid: str, built: Any, reads: Mapping[str, tuple], choices: list,
               derived: tuple) -> tuple[list[str], str | None]:
-    """The value names claim ``cid``'s settling evaluators read by a named path,
-    closed upward over ``derives``; and ``reads_all`` for a whole read."""
+    """The value names claim ``cid``'s settling evaluators read by a named
+    path — directly: what the trace adds is drawn as stations upstream and
+    feeds from the zones, never as more reads (architecture phase 3b) — and
+    ``reads_all`` for a whole read."""
     named: set[str] = set()
     whole: str | None = None
     for ev in built.into(graph_logic.node_id("claim", cid), "settles"):
@@ -207,9 +243,7 @@ def _reads_of(cid: str, built: Any, reads: Mapping[str, tuple], choices: list,
             if path[0] == "config" and len(path) == 1:
                 whole = whole or "choices"
                 continue
-            for name in graph_logic.value_names(path, choices, derived):
-                for nid in graph_logic.upward(built, graph_logic.node_id("value", name)):
-                    named.add(_split(nid)[1])
+            named.update(graph_logic.value_names(path, choices, derived))
     return sorted(named, key=_natural), whole
 
 
@@ -236,20 +270,110 @@ def _columns(nodes: list[str], spans: Mapping[str, list[int]]) -> dict[str, int]
     return out
 
 
+def _mean(values: Iterable[float]) -> float | None:
+    found = list(values)
+    return (sum(found) / len(found)) if found else None
+
+
+def _barycentre_order(ids: list[str], centre: Mapping[str, float | None]) -> list[str]:
+    """``ids`` sorted by their barycentre (the mean row of what they connect
+    to), those with none after, ties and the rest in the stable order given:
+    one layered barycentre pass, which reduces crossings between a fixed layer
+    (the claims' rows) and the free one. *Rejected:* iterated sweeps (the
+    claims' rows never move, so a second pass moves nothing) and a crossing
+    minimiser (NP-hard, and its answer would move with a tie)."""
+    index = {nid: i for i, nid in enumerate(ids)}
+    return sorted(ids, key=lambda n: (centre.get(n) is None,
+                                      centre.get(n) if centre.get(n) is not None else 0.0,
+                                      index[n]))
+
+
+def _crossings(pairs: list[tuple[int, float]]) -> int:
+    """How many pairs of ``(left position, right position)`` segments cross."""
+    count = 0
+    for i, (a1, b1) in enumerate(pairs):
+        for a2, b2 in pairs[i + 1:]:
+            if (a1 - a2) * (b1 - b2) < 0:
+                count += 1
+    return count
+
+
+#: An input's kind -> the source a value it grounds shows on the map (the
+#: zone's bar, a choice's row). Provenance: the reference map's four grounds
+#: (design choice, datasheet, estimate, assumption), read off the records —
+#: never typed by hand: a value an assumption claim sources is an assumption;
+#: one an input of a published or measured kind sources is "datasheet" (its
+#: word says datasheet or measurement); one any other input sources (a sketch,
+#: a photo, a link) is an estimate; one whose records name what lost to it (a
+#: loser in the model's ``PARAMS`` or its param record) is a design choice;
+#: and one with none of these has no source recorded. What slipped through
+#: (review of phase 3b): "nothing sources it" read as a design choice, so a
+#: motor mass from a vendor listing and a guessed margin were drawn as
+#: deliberate choices. *Rejected:* a `ground` field on the param record (a
+#: self-stated trust property launders itself, the reason `independence` is a
+#: forbidden key); the rationale's text as the mark of a choice (it often says
+#: "vendor listing").
+SOURCE_OF_KIND: Mapping[str, str] = {
+    "datasheet": "datasheet", "standard": "datasheet", "spec": "datasheet",
+    "measurement": "datasheet", "data": "datasheet",
+    "sketch": "estimate", "reference": "estimate", "screenshot": "estimate",
+    "link": "estimate", "cad": "estimate", "other": "estimate"}
+
+#: The sources, in the order a zone's bar draws them.
+SOURCES: tuple[str, ...] = ("chosen", "datasheet", "estimate", "assumption", "unrecorded")
+
+
+def source_of(built: Any, name: str, kinds: Mapping[str, str],
+              params: Mapping[str, Any] | None = None) -> str:
+    """A value's source category (`SOURCES`): ``assumption`` when an
+    assumption claim sources it, else ``datasheet`` or ``estimate`` by the
+    kind of the inputs that source it (`SOURCE_OF_KIND`), else ``chosen`` when
+    its records name a loser (``params``' view ``rejected``), else
+    ``unrecorded``."""
+    found = built.into(graph_logic.node_id("value", name), "sources")
+    split = [_split(s) for s in found]
+    if any(kind == "claim" for kind, _key in split):
+        return "assumption"
+    categories = {SOURCE_OF_KIND.get(kinds.get(key, "other"), "estimate")
+                  for kind, key in split if kind == "input"}
+    if "datasheet" in categories:
+        return "datasheet"
+    if categories:
+        return "estimate"
+    if getattr((params or {}).get(name), "rejected", None):
+        return "chosen"
+    return "unrecorded"
+
+
 def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = (),
            registry: Any = None, resolution: Any = None) -> Layout:
     """The map's structure (SPEC 17, 29) from the records, the graph and the
     reads the resolution served — never from a status, so a flip moves no row.
 
-    Boards as `boards_of`. Zones: zone records by ``(order, id)`` with their
-    members (a choice in a second zone stays in the first), then the generated
-    zone of the choices no zone holds that a line touches or an assumption
-    sources, in ``Config`` order; no zones with no model. Stations: station
-    records, then a generated ``station:@<name>`` for each derived value no
-    record holds that the settling evaluators of two or more claims read by a
-    named path (a whole read never makes one). A line stops at its
-    requirements, the zones and the stations of the values it reads, then its
-    claim."""
+    Boards as `boards_of`. Zones: every zone record by ``(order, id)`` with
+    its members (a choice in a second zone stays in the first), then the
+    generated zone of the choices no zone holds that a line reads directly,
+    that feed a station or that an assumption sources, in ``Config`` order; no
+    zones with no model. Stations: station records, then a generated
+    ``station:@<name>`` for each derived value no record holds that the
+    settling evaluators of two or more claims read by a named path (a whole
+    read never makes one).
+
+    Traced (architecture phase 3b): each station's depth is the upper median
+    of the `graph.depths` of the members its lines read directly (of every
+    moved member when no line reads one), its layer the dense rank of the
+    depths (a station nothing moved takes the last), its column the interval
+    packing within its layer in barycentre order; a line stops at the stations
+    holding what its evaluators read directly (``read``) and those holding
+    what the trace puts before them (``upstream``), ordered by layer, column
+    and station order, then its claim; a zone feeds a station when one of its
+    choices moves one of the station's members directly
+    (`graph.direct_derives`), and taps a line that reads a choice directly or
+    a derived value no station holds. Untraced, the layer is phase 5's column
+    and every station's column 0, so an untraced map keeps phase 5's order.
+    The zones, the stations within a layer and the requirements carry a
+    ``rank``: one barycentre pass against the claims' rows, ties in record
+    order."""
     said = _site_words()
     warnings: list[str] = []
     config = dict(projection.get("config") or {}) if isinstance(projection, Mapping) else {}
@@ -266,6 +390,7 @@ def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = ()
     groups = getattr(view, "groups", None) or ()
     claim_list = list(getattr(view, "claims", None) or ())
     by_id = {c.id: c for c in claim_list}
+    traced = getattr(built, "trace", None) is not None
 
     boards = boards_of(view)
     held = set(by_id)
@@ -276,6 +401,7 @@ def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = ()
                                 f"claims/{cid}.json")
     board_of = {cid: board.id for board in boards for cid in board.members}
     rows = [cid for board in boards for cid in board.members]
+    row_of = {cid: i for i, cid in enumerate(rows)}
 
     values_of: dict[str, list[str]] = {}
     whole_of: dict[str, str | None] = {}
@@ -284,6 +410,8 @@ def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = ()
     touched = {name for names in values_of.values() for name in names}
     sourced = {_split(e.target)[1] for e in built.edges
                if e.type == "sources" and _split(e.source)[0] == "claim"}
+    direct = graph_logic.direct_derives(built) if traced else set()
+    fed_choices = {c for c, _v in direct}
 
     zones: list[Zone] = []
     zone_of: dict[str, str] = {}
@@ -304,13 +432,14 @@ def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = ()
                 members.append(name)
             zones.append(Zone(group.id, group.title, group.line or "", False, tuple(members)))
         rest = tuple(c for c in choices
-                     if c not in zone_of and (c in touched or c in sourced))
+                     if c not in zone_of and (c in touched or c in sourced or c in fed_choices))
         if rest:
             zones.append(Zone(OTHER, said["other_zone" if records else "all_zone"], "", True,
                               rest))
             for name in rest:
                 zone_of[name] = f"zone:{OTHER}"
-        unread = tuple(sorted((c for c in choices if c not in touched), key=_natural))
+        unread = tuple(sorted((c for c in choices if c not in touched and c not in fed_choices),
+                              key=_natural))
 
     stations: list[Station] = []
     station_of: dict[str, str] = {}
@@ -340,27 +469,197 @@ def layout(view: Any, built: Any, *, projection: Any, params: Iterable[Any] = ()
         warnings.append(f"{len(generated)} shared values became stations on the map: name the "
                         f"ones that matter in groups/<id>.json (\"kind\": \"station\")")
 
+    station_ids = [f"station:{s.id}" for s in stations]
+    station_rec = {f"station:{s.id}": s for s in stations}
+    station_order = {nid: i for i, nid in enumerate(station_ids)}
+
+    # -- each line's stops, read and upstream -------------------------------- #
+    read_stops: dict[str, dict[str, list[str]]] = {}
+    up_stops: dict[str, dict[str, list[str]]] = {}
+    for cid in rows:
+        here: dict[str, list[str]] = {}
+        for name in values_of[cid]:
+            sid = station_of.get(name)
+            if sid is not None:
+                here.setdefault(sid, []).append(name)
+        read_stops[cid] = here
+        ups: dict[str, list[str]] = {}
+        if traced:
+            for name in values_of[cid]:
+                for nid in graph_logic.upstream(built, graph_logic.node_id("value", name)):
+                    up = _split(nid)[1]
+                    sid = station_of.get(up)
+                    if sid is not None and sid not in here and up not in ups.get(sid, []):
+                        ups.setdefault(sid, []).append(up)
+        up_stops[cid] = ups
+    spans: dict[str, list[int]] = {}
+    for cid in rows:
+        for sid in list(read_stops[cid]) + list(up_stops[cid]):
+            spans.setdefault(sid, []).append(row_of[cid])
+    centre = {sid: _mean(spans.get(sid) or ()) for sid in station_ids}
+
+    # -- layers, columns and depths ------------------------------------------ #
+    station_layer: dict[str, int] = {}
+    station_column: dict[str, int] = {}
+    station_depth: dict[str, int | None] = {}
+    station_rank: dict[str, int] = {}
+    if traced:
+        value_depth = graph_logic.depths(built)
+        read_here: dict[str, set[str]] = {}
+        for cid in rows:
+            for sid, names in read_stops[cid].items():
+                read_here.setdefault(sid, set()).update(names)
+        for sid in station_ids:
+            members = [m for m in station_rec[sid].members
+                       if m in value_depth and built.moved_by(m)]
+            drawn = [m for m in members if m in read_here.get(sid, ())] or members
+            found = sorted(value_depth[m] for m in drawn)
+            station_depth[sid] = found[len(found) // 2] if found else None
+        distinct = sorted({d for d in station_depth.values() if d is not None})
+        last = len(distinct)
+        for sid in station_ids:
+            depth = station_depth[sid]
+            station_layer[sid] = distinct.index(depth) if depth is not None else last
+        layer_ids = sorted(set(station_layer.values()))
+        dense = {layer: i for i, layer in enumerate(layer_ids)}
+        station_layer = {sid: dense[layer] for sid, layer in station_layer.items()}
+        layers: list[int] = []
+        for layer in range(len(layer_ids)):
+            members = [sid for sid in station_ids if station_layer[sid] == layer]
+            ordered = _barycentre_order(members, centre)
+            for i, sid in enumerate(ordered):
+                station_rank[sid] = i
+            cols = _columns(ordered, spans)
+            station_column.update(cols)
+            layers.append((max(cols.values()) + 1) if cols else 1)
+    else:
+        cols = _columns(station_ids, spans)
+        for sid in station_ids:
+            station_layer[sid] = cols[sid]
+            station_column[sid] = 0
+            station_depth[sid] = None
+        layers = [1] * ((max(cols.values()) + 1) if cols else 0)
+        for layer in range(len(layers)):
+            members = [sid for sid in station_ids if station_layer[sid] == layer]
+            for i, sid in enumerate(_barycentre_order(members, centre)):
+                station_rank[sid] = i
+
+    def stop_key(sid: str) -> tuple:
+        return (station_layer.get(sid, 0), station_column.get(sid, 0), station_order[sid])
+
+    # -- feeds: the direct derives, zone by station -------------------------- #
+    choice_index = {c: i for i, c in enumerate(choices)}
+    zone_ids = [f"zone:{z.id}" for z in zones]
+    feeds_found: dict[tuple[str, str], list[str]] = {}
+    for c, v in sorted(direct):
+        zid = zone_of.get(c)
+        sid = station_of.get(v)
+        if zid is None or sid is None:
+            continue
+        found = feeds_found.setdefault((zid, sid), [])
+        if c not in found:
+            found.append(c)
+    zone_index = {zid: i for i, zid in enumerate(zone_ids)}
+    feeds = tuple({"zone": zid, "to": sid,
+                   "choices": sorted(cs, key=lambda c: choice_index.get(c, 10 ** 6))}
+                  for (zid, sid), cs in sorted(feeds_found.items(),
+                                               key=lambda kv: (zone_index.get(kv[0][0], 10 ** 6),
+                                                               station_order[kv[0][1]])))
+
+    # -- what an assumption sets, and what a physical claim settles --------- #
+    # An assumption's row joins the stations its sourced choices move
+    # directly, and a physical claim's the stations of the assumptions it
+    # resolves (``sets``): drawn as springs, never as stops, so they move no
+    # station. What slipped through (review of phase 3b): eleven rows of
+    # PETGasus ended in a stub that joined nothing.
+    sourced_by: dict[str, set[str]] = {}
+    for e in built.edges:
+        if e.type == "sources" and _split(e.source)[0] == "claim":
+            sourced_by.setdefault(_split(e.source)[1], set()).add(_split(e.target)[1])
+    sets_of: dict[str, list[str]] = {}
+    for cid in rows:
+        found = {station_of[v] for c, v in direct
+                 if c in sourced_by.get(cid, ()) and v in station_of}
+        sets_of[cid] = sorted(found, key=stop_key)
+    for cid in rows:
+        resolved = [_split(t)[1] for t in built.out(graph_logic.node_id("claim", cid),
+                                                    "resolves")]
+        if resolved and not sets_of[cid]:
+            found = {sid for aid in resolved for sid in sets_of.get(aid, ())}
+            sets_of[cid] = sorted(found, key=stop_key)
+
     requirement_ids = [r.id for r in getattr(view, "requirements", None) or ()]
     requirement_set = set(requirement_ids)
-    zone_ids = [f"zone:{z.id}" for z in zones]
-    station_ids = [f"station:{s.id}" for s in stations]
     lines: list[dict] = []
     for order, cid in enumerate(rows):
         claim = by_id[cid]
         values = values_of[cid]
-        stops = [f"requirement:{rid}" for rid in getattr(claim, "requirements", None) or ()
-                 if rid in requirement_set]
-        via: dict[str, list[str]] = {}
-        for nid in zone_ids + station_ids:
-            names = [n for n in values if zone_of.get(n) == nid or station_of.get(n) == nid]
-            if names:
-                stops.append(nid)
-                via[nid] = names
-        stops.append(f"claim:{cid}")
-        lines.append({"claim": cid, "order": order, "board": board_of[cid], "stops": stops,
-                      "via": via, "values": values, "reads_all": whole_of[cid]})
+        # An upstream stop is drawn only where it can sit before what the
+        # line reads: one the layers put after its last read stop is left out
+        # (review of phase 3b: C7 read the print mesh, then rode three
+        # stations the order put "before" it to the right of it).
+        last = max((stop_key(sid) for sid in read_stops[cid]), default=None)
+        ups = [sid for sid in up_stops[cid] if last is None or stop_key(sid) < last]
+        stops = sorted(list(read_stops[cid]) + ups, key=stop_key)
+        stop_kind = {sid: ("read" if sid in read_stops[cid] else "upstream") for sid in stops}
+        via = {sid: list(read_stops[cid].get(sid) or up_stops[cid].get(sid) or ())
+               for sid in stops}
+        taps: dict[str, list[str]] = {}
+        for name in values:
+            if name in config:
+                zid = zone_of.get(name)
+                if zid is not None and name not in taps.get(zid, []):
+                    taps.setdefault(zid, []).append(name)
+            elif name not in station_of:
+                for c, v in sorted(direct):
+                    if v == name and zone_of.get(c) is not None:
+                        found = taps.setdefault(zone_of[c], [])
+                        if c not in found:
+                            found.append(c)
+        tap_rows = [{"zone": zid, "choices": sorted(cs, key=lambda c: choice_index.get(c, 0))}
+                    for zid, cs in sorted(taps.items(), key=lambda kv: zone_index.get(kv[0], 0))]
+        fed = {t["zone"] for t in tap_rows} | {f["zone"] for f in feeds if f["to"] in stops}
+        lines.append({"claim": cid, "order": order, "board": board_of[cid],
+                      "stops": stops + [f"claim:{cid}"], "stop_kind": stop_kind, "via": via,
+                      "values": values, "reads_all": whole_of[cid], "taps": tap_rows,
+                      "serves": [rid for rid in getattr(claim, "requirements", None) or ()
+                                 if rid in requirement_set],
+                      "fed_by": sorted(fed, key=lambda z: zone_index.get(z, 0)),
+                      "sets": list(sets_of.get(cid) or ()) if not stops else []})
+
+    # -- one barycentre pass for the zones and the requirements -------------- #
+    zone_y: dict[str, list[float]] = {}
+    for feed in feeds:
+        if centre.get(feed["to"]) is not None:
+            zone_y.setdefault(feed["zone"], []).append(centre[feed["to"]])
+    for line in lines:
+        for tap in line["taps"]:
+            zone_y.setdefault(tap["zone"], []).append(float(line["order"]))
+    zone_centre = {zid: _mean(zone_y.get(zid) or ()) for zid in zone_ids}
+    ranked_zones = _barycentre_order(zone_ids, zone_centre)
+    zone_rank = {zid: i for i, zid in enumerate(ranked_zones)}
+    before = _crossings([(zone_index[f["zone"]], centre[f["to"]]) for f in feeds
+                         if centre.get(f["to"]) is not None])
+    after_ = _crossings([(zone_rank[f["zone"]], centre[f["to"]]) for f in feeds
+                         if centre.get(f["to"]) is not None])
+    req_centre = {rid: _mean(row_of[c.id] for c in claim_list
+                             if rid in (getattr(c, "requirements", None) or ())
+                             and c.id in row_of) for rid in requirement_ids}
+    requirement_rank = {rid: i for i, rid in enumerate(_barycentre_order(requirement_ids,
+                                                                          req_centre))}
+    idle = tuple(zid for zid in zone_ids
+                 if not any(f["zone"] == zid for f in feeds)
+                 and not any(t["zone"] == zid for line in lines for t in line["taps"]))
+    found_trace = getattr(built, "trace", None)
     return Layout(tuple(boards), tuple(zones), tuple(stations), board_of, zone_of,
-                  station_of, tuple(lines), unread, tuple(warnings))
+                  station_of, tuple(lines), unread, tuple(warnings), feeds=feeds,
+                  layers=tuple(layers), station_layer=station_layer,
+                  station_column=station_column, station_depth=station_depth,
+                  traced=traced, ties=tuple(graph_logic.ties_of(built)) if traced else (),
+                  zone_rank=zone_rank, station_rank=station_rank,
+                  requirement_rank=requirement_rank, idle=idle,
+                  crossings={"before": before, "after": after_},
+                  trace_key=found_trace)
 
 
 # --------------------------------------------------------------------------- #
@@ -420,7 +719,9 @@ def words_block() -> dict:
             "by": dict(said["by"]), "basis": dict(said["basis"]),
             "outcome": dict(said["outcome"]), "headings": dict(said["headings"]),
             "notices": dict(said["notices"]),
-            "ready": {"ready": said["ready_word"], "not-ready": said["not_ready_word"]}}
+            "ready": {"ready": said["ready_word"], "not-ready": said["not_ready_word"]},
+            "trace": {k: (dict(v) if isinstance(v, Mapping) else v)
+                      for k, v in said["trace"].items()}}
 
 
 def _word(token: str) -> str:
@@ -429,13 +730,34 @@ def _word(token: str) -> str:
     return report_logic.words(status, errored=token == "errored").word
 
 
-def _marks(toks: Any) -> dict[str, list[str]]:
+def _marks(toks: Any, amber: Mapping[str, Any] | None = None) -> dict[str, list[str]]:
     """Each claim's marks: tokens shown beside its status, never instead of it
-    (``disagree`` today; phase 3b's ``amber``)."""
+    — ``disagree``, then ``amber`` (architecture phase 3b) for a claim whose
+    amber flips: a Checked pass that a ±10% move of an unconfirmed
+    assumption's choice turns to a fail."""
     out: dict[str, list[str]] = {}
     for cid in (getattr(toks, "disagree", None) or {}).get("claims") or ():
         out.setdefault(cid, []).append("disagree")
+    for cid, found in sorted((amber or {}).items(), key=lambda kv: _natural(kv[0])):
+        if getattr(found, "state", None) == "flips":
+            out.setdefault(cid, []).append("amber")
     return out
+
+
+def _group_marks(members: Iterable[str], marks: Mapping[str, list[str]]) -> list[str]:
+    """A board's or a requirement's marks: each mark one of its claims
+    carries, in `_marks`' order."""
+    found: list[str] = []
+    for mark in ("disagree", "amber"):
+        if any(mark in (marks.get(c) or ()) for c in members):
+            found.append(mark)
+    return found
+
+
+def amber_word(state: str) -> str:
+    """Amber's site word for ``state``."""
+    said = _site_words()["trace"]
+    return said.get(f"amber_{state.replace('-', '_')}", "")
 
 
 def _outcome_word(status: str) -> str:
@@ -849,78 +1171,218 @@ def _tally(members: Iterable[str], composed: Mapping[str, Any]) -> list[dict]:
     return report_logic.count_bits({cid: composed[cid] for cid in members if cid in composed})
 
 
+def _amber_node(found: Any, line: Mapping[str, Any] | None, built: Any) -> dict | None:
+    """A claim's baked amber: ``{state, word, enters}`` — ``enters`` the first
+    stop of its line holding a value a flipping choice moves (null: the whole
+    line) — or None when the claim has no amber."""
+    if found is None:
+        return None
+    enters = None
+    if found.state == "flips" and line is not None:
+        moving = {f[1] for f in found.flips}
+        for stop in line["stops"]:
+            if not stop.startswith("station:"):
+                continue
+            names = line["via"].get(stop) or ()
+            if any(any(c in moving for c in built.moved_by(n)) or n in moving for n in names):
+                enters = stop
+                break
+    return {"state": found.state, "word": amber_word(found.state), "enters": enters}
+
+
+def _amber_summary(amber: Mapping[str, Any]) -> str:
+    states = [getattr(a, "state", "") for a in amber.values()]
+    current = [s for s in states if s in ("flips", "unclear", "holds")]
+    if not states or not current:
+        return "none"
+    return "current" if len(current) == len(states) else "partial"
+
+
+def _estimate(built: Any, names: Iterable[str], toks: Any) -> list[str]:
+    """The unconfirmed assumptions that source any of ``names``."""
+    tokens = getattr(toks, "claims", None) or {}
+    found: set[str] = set()
+    for name in names:
+        for source in built.into(graph_logic.node_id("value", name), "sources"):
+            kind, key = _split(source)
+            if kind == "claim" and trace_logic.unconfirmed(built, tokens, key):
+                found.add(key)
+    return sorted(found, key=_natural)
+
+
+def trace_block(lay: Layout, built: Any, amber: Mapping[str, Any], trace: Any) -> dict:
+    """``map.json``'s ``trace``: the key's first 12 hex, the round that traced
+    it, ``traced``/``untraced``, the choices it did not move, the derived values
+    it did not see move (``unmoved``), the counts of tied and single-mover
+    values, amber's currency, and the notice and the sentences on what the
+    trace did not move and did not see move, in the site's words. What slipped
+    through (review of phase 3b): the map named the skipped choices and not the
+    nine values no move changed, so a claim reading only those drew unjoined
+    with no word why."""
+    said = _site_words()["trace"]
+    found = getattr(trace, "trace", None) if trace is not None else None
+    traced = lay.traced and found is not None
+    number = getattr(found, "round", None) if traced else None
+    skipped = dict(getattr(found, "skipped", {}) or {}) if traced else {}
+    unmoved = sorted(getattr(found, "unmoved", ()) or (), key=_natural) if traced else []
+    if traced:
+        notice = (said["notice_traced"].format(round=number) if number is not None
+                  else said["notice_traced_no_round"])
+    else:
+        notice = said["notice_untraced"]
+    names = sorted(skipped, key=_natural)
+    parts = []
+    if names:
+        parts.append(said["skipped_one" if len(names) == 1 else "skipped"].format(
+            n=len(names), names=", ".join(names)))
+    if unmoved:
+        parts.append(said["unmoved_one" if len(unmoved) == 1 else "unmoved"].format(
+            n=len(unmoved), names=", ".join(unmoved)))
+    return {"key": (getattr(built, "trace", None) or "")[:12] or None, "round": number,
+            "state": "traced" if traced else "untraced", "skipped": skipped,
+            "unmoved": unmoved,
+            "ties": len(getattr(found, "ties", ()) or ()) if traced else 0,
+            "singles": len(getattr(found, "singles", ()) or ()) if traced else 0,
+            "amber": _amber_summary(amber), "notice": notice, "text": " ".join(parts)}
+
+
+def _unseen(line: Mapping[str, Any], trace: Any) -> bool:
+    """Whether a line joins nothing (no station, no zone feeds it) while it
+    reads a value the trace did not see move: it then joins no zone because
+    the trace saw nothing change, never because nothing reaches it (review of
+    phase 3b: C10, reading the parts list, drew as an orphan stub)."""
+    found = getattr(trace, "trace", None) if trace is not None else None
+    if found is None or line.get("fed_by") or any(
+            str(s).startswith("station:") for s in line.get("stops") or ()):
+        return False
+    unmoved = set(getattr(found, "unmoved", ()) or ())
+    return any(v in unmoved for v in line.get("values") or ())
+
+
+def _unmeasured(members: Iterable[str], trace: Any, traced: bool) -> list[str]:
+    """The choices of a zone the trace did not measure: every one untraced;
+    traced, the ones it did not move (a yes/no, a word) and the ones whose
+    moved builds raised."""
+    found = getattr(trace, "trace", None) if trace is not None else None
+    if not traced or found is None:
+        return list(members)
+    out = []
+    for name in members:
+        row = (getattr(found, "observed", None) or {}).get(name)
+        if name in (getattr(found, "skipped", None) or {}) or row is None \
+                or any(row.get("raised") or ()):
+            out.append(name)
+    return out
+
+
 def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[str, Any], *,
              projection: Any, params: Iterable[Any] = (), registry: Any = None,
              payload: Mapping[str, Any] | None = None, name: str = "",
-             records_digest: str = "", resolution_digest: str = "") -> dict:
-    """``map.json`` (SPEC 29): nodes with kind, lane, order and column, lines
-    with their stops, the values, the evaluators and the typed edges — tokens
-    and words beside them, never a position."""
+             records_digest: str = "", resolution_digest: str = "",
+             amber: Mapping[str, Any] | None = None, trace: Any = None) -> dict:
+    """``map.json`` (SPEC 29, map schema 2): nodes with kind, lane, order and
+    rank, lines with their stops, taps and the requirements they serve, the
+    feeds, the values, the evaluators and the typed edges — tokens and words
+    beside them, never a position. ``amber`` (`derivation.amber_states`) and
+    ``trace`` (`derivation.TraceRead`) are architecture phase 3b's: a claim
+    whose amber flips carries the ``amber`` mark, beside its status."""
     said = _site_words()
-    marks = _marks(toks)
+    amber = dict(amber or {})
+    marks = _marks(toks, amber)
     params = {p.name: p for p in params or ()}
     config = dict(projection.get("config") or {}) if isinstance(projection, Mapping) else {}
     derived = dict(projection.get("derived") or {}) if isinstance(projection, Mapping) else {}
     by_id = {c.id: c for c in getattr(view, "claims", None) or ()}
     floor = _floor_values(view, composed, registry)
+    kinds = {a.id: str(getattr(a.kind, "value", a.kind) or "other")
+             for a in getattr(view, "inputs", None) or ()}
+    line_of = {line["claim"]: line for line in lay.lines}
+    view_verdicts = list(getattr(view, "verdicts", None) or ())
 
-    def spans(prefix: str) -> dict[str, list[int]]:
-        out: dict[str, list[int]] = {}
-        for line in lay.lines:
-            for stop in line["stops"]:
-                if stop.startswith(prefix):
-                    out.setdefault(stop, []).append(line["order"])
-        return out
+    def units_of(name: str) -> str:
+        return _units_of(name, config, derived, params, built, view_verdicts)
 
     nodes: list[dict] = []
-    requirement_ids = [f"requirement:{r.id}" for r in getattr(view, "requirements", None) or ()]
-    req_cols = _columns(requirement_ids, spans("requirement:"))
     for i, requirement in enumerate(getattr(view, "requirements", None) or ()):
         nid = f"requirement:{requirement.id}"
-        serving = [line["claim"] for line in lay.lines if nid in line["stops"]]
+        serving = [line["claim"] for line in lay.lines if requirement.id in line["serves"]]
         token = toks.requirements.get(requirement.id, "gap")
-        found = ["disagree"] if any(marks.get(c) for c in serving) or requirement.id in (
-            toks.disagree.get("requirements") or ()) else []
+        found = _group_marks(serving, marks)
+        if requirement.id in (toks.disagree.get("requirements") or ()) \
+                and "disagree" not in found:
+            found.insert(0, "disagree")
         nodes.append({"id": nid, "kind": "requirement", "key": requirement.id,
-                      "lane": "requirements", "order": i, "column": req_cols[nid],
+                      "lane": "requirements", "order": i,
+                      "rank": lay.requirement_rank.get(requirement.id, i),
                       "title": requirement.statement, "token": token, "word": _word(token),
                       "errored": token == "errored", "marks": found, "claims": serving})
-    zone_ids = [f"zone:{z.id}" for z in lay.zones]
-    zone_cols = _columns(zone_ids, spans("zone:"))
+    traced_now = lay.traced and getattr(trace, "trace", None) is not None
+    unmeasured_of = {f"zone:{z.id}": _unmeasured(z.members, trace, traced_now)
+                     for z in lay.zones}
     for i, zone in enumerate(lay.zones):
         nid = f"zone:{zone.id}"
         ground = {"chosen": 0, "input": 0, "assumption": 0}
+        sources = {key: 0 for key in SOURCES}
         assumptions: list[str] = []
         for member in zone.members:
             ground[_ground(built, member)] += 1
+            sources[source_of(built, member, kinds, params)] += 1
             for source in built.into(graph_logic.node_id("value", member), "sources"):
                 kind, key = _split(source)
                 if kind == "claim" and key not in assumptions:
                     assumptions.append(key)
+        fed = [line["claim"] for line in lay.lines if nid in line["fed_by"]]
         nodes.append({"id": nid, "kind": "zone", "key": zone.id, "lane": "zones", "order": i,
-                      "column": zone_cols[nid], "title": zone.title, "line": zone.line,
-                      "generated": zone.generated, "members": list(zone.members),
-                      "ground": ground, "assumptions": sorted(assumptions, key=_natural),
-                      "claims": [line["claim"] for line in lay.lines if nid in line["stops"]]})
-    station_ids = [f"station:{s.id}" for s in lay.stations]
-    station_cols = _columns(station_ids, spans("station:"))
+                      "rank": lay.zone_rank.get(nid, i), "title": zone.title,
+                      "line": zone.line, "generated": zone.generated,
+                      "members": list(zone.members), "count": len(zone.members),
+                      "moved": [m for m in zone.members if built.moves(m)],
+                      "ground": ground, "sources": sources,
+                      "assumptions": sorted(assumptions, key=_natural),
+                      "estimate": _estimate(built, zone.members, toks),
+                      # idle only when the trace measured every choice: a
+                      # zone the trace could not see into is not measured
+                      # (review of phase 3b: an untraced map said "no line uses
+                      # these choices" of six zones the claims ride)
+                      "idle": nid in lay.idle and not unmeasured_of[nid],
+                      "unmeasured": unmeasured_of[nid] if nid in lay.idle else [],
+                      "feeds": [f["to"] for f in lay.feeds if f["zone"] == nid],
+                      "taps": [line["claim"] for line in lay.lines
+                               if any(t["zone"] == nid for t in line["taps"])],
+                      "claims": fed})
     for i, station in enumerate(lay.stations):
         nid = f"station:{station.id}"
-        text = ""
-        if len(station.members) == 1:
-            text = _value_text(station.members[0], config, derived, params)
+        riders = [line for line in lay.lines if nid in line["stops"]]
+        counts = {m: sum(1 for line in lay.lines if m in line["values"])
+                  for m in station.members}
+        # The head is the most-read member that is a finite number (a
+        # structure shows no value); with none, the most-read member.
+        # What slipped through (review of phase 3b): a list was chosen over a
+        # scalar beside it, and three stations showed no value.
+        ordered = sorted(station.members, key=lambda m: (
+            _finite(derived.get(m, config.get(m))) is None, -counts[m],
+            station.members.index(m)))
+        head = ordered[0] if ordered else None
+        depth = lay.station_depth.get(nid)
         nodes.append({"id": nid, "kind": "station", "key": station.id, "lane": "stations",
-                      "order": i, "column": station_cols[nid], "title": station.title,
-                      "line": station.line, "generated": station.generated,
-                      "members": list(station.members), "value_text": text,
-                      "claims": [line["claim"] for line in lay.lines if nid in line["stops"]]})
+                      "order": i, "layer": lay.station_layer.get(nid, 0),
+                      "column": lay.station_column.get(nid, 0),
+                      "rank": lay.station_rank.get(nid, 0),
+                      "depth": depth, "title": station.title, "line": station.line,
+                      "generated": station.generated, "members": list(station.members),
+                      "head": head,
+                      "value_text": (_value_text(head, config, derived, params,
+                                                 units=units_of(head), bare=False)
+                                     if head is not None else ""),
+                      "fed_by": [f["zone"] for f in lay.feeds if f["to"] == nid],
+                      "claims": [line["claim"] for line in riders],
+                      "stop_kinds": {line["claim"]: line["stop_kind"][nid] for line in riders}})
     for i, board in enumerate(lay.boards):
         token, errored = _board_token(board.members, composed)
         nodes.append({"id": f"board:{board.id}", "kind": "board", "key": board.id,
                       "lane": "boards", "order": i, "title": board.title, "line": board.line,
                       "generated": board.generated, "token": token, "word": _word(token),
-                      "errored": errored,
-                      "marks": ["disagree"] if any(marks.get(c) for c in board.members) else [],
+                      "errored": errored, "marks": _group_marks(board.members, marks),
                       "claims": list(board.members), "tally": _tally(board.members, composed)})
     rows_in: dict[str, int] = {}
     for line in lay.lines:
@@ -937,14 +1399,21 @@ def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[st
                       "critical": bool(claim.critical), "token": token, "word": _word(token),
                       "errored": token == "errored", "marks": list(marks.get(cid) or ()),
                       "value_text": next((v["value_text"] for v in floor.get(cid, ())
-                                          if v["binding"]), "")})
+                                          if v["binding"]), ""),
+                      "amber": _amber_node(amber.get(cid), line, built)})
 
-    lines = [{"claim": line["claim"], "order": line["order"],
+    lines = [{"claim": line["claim"], "order": line["order"], "board": line["board"],
               "token": toks.claims[line["claim"]],
               "errored": toks.claims[line["claim"]] == "errored",
               "marks": list(marks.get(line["claim"]) or ()), "stops": list(line["stops"]),
-              "via": {k: list(v) for k, v in line["via"].items()}, "values": list(line["values"]),
-              "reads_all": line["reads_all"]} for line in lay.lines]
+              "stop_kind": dict(line["stop_kind"]),
+              "via": {k: list(v) for k, v in line["via"].items()},
+              "taps": [dict(t) for t in line["taps"]], "fed_by": list(line["fed_by"]),
+              "serves": list(line["serves"]), "values": list(line["values"]),
+              "reads_all": line["reads_all"], "sets": list(line.get("sets") or ()),
+              "unseen": _unseen(line, trace),
+              "amber": _amber_node(amber.get(line["claim"]), line, built)}
+             for line in lay.lines]
 
     names = set(lay.zone_of) | set(lay.station_of)
     for line in lay.lines:
@@ -955,10 +1424,11 @@ def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[st
         node = built.node(graph_logic.node_id("value", vname))
         values[vname] = {
             "role": (node.attrs.get("role") if node is not None else "absent"),
-            "value_text": _value_text(vname, config, derived, params),
-            "units": str(getattr(params.get(vname), "units", "") or ""),
+            "value_text": _value_text(vname, config, derived, params, units=units_of(vname)),
+            "units": units_of(vname),
             "zone": lay.zone_of.get(vname), "station": lay.station_of.get(vname),
-            "ground": _ground(built, vname), "read": vname in touched}
+            "ground": _ground(built, vname), "source": source_of(built, vname, kinds, params),
+            "read": vname in touched}
 
     rows = {r.get("gate"): r for r in (payload or {}).get("verdicts") or ()}
     evaluators: dict[str, dict] = {}
@@ -982,21 +1452,22 @@ def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[st
     for token in claim_logic.SEVERITY_ORDER:
         if counted.get(token):
             legend.append({"token": token, "n": counted[token]})
+    requirement_ids = [r.id for r in getattr(view, "requirements", None) or ()]
     lanes = ["requirements"] if requirement_ids else []
     if lay.zones:
         lanes.append("zones")
     if lay.stations:
         lanes.append("stations")
     lanes.append("boards")
-    columns = {"requirements": (max(req_cols.values()) + 1) if req_cols else 0,
-               "zones": (max(zone_cols.values()) + 1) if zone_cols else 0,
-               "stations": (max(station_cols.values()) + 1) if station_cols else 0}
-    doc = {"schema": SCHEMA, "generated": said["generated"],
+    feeds = [{"zone": f["zone"], "to": f["to"], "choices": list(f["choices"]),
+              "estimate": _estimate(built, f["choices"], toks)} for f in lay.feeds]
+    doc = {"schema": MAP_SCHEMA, "generated": said["generated"],
            "meta": {"name": name, "records_digest": records_digest,
                     "resolution_digest": resolution_digest},
-           "trace": built.trace, "lanes": lanes, "columns": columns, "legend": legend,
-           "nodes": nodes, "lines": lines, "values": values, "evaluators": evaluators,
-           "edges": edges, "unread": list(lay.unread)}
+           "trace": trace_block(lay, built, amber, trace), "lanes": lanes,
+           "columns": {"requirements": 0}, "layers": list(lay.layers), "legend": legend,
+           "nodes": nodes, "lines": lines, "feeds": feeds, "values": values,
+           "evaluators": evaluators, "edges": edges, "unread": list(lay.unread)}
     return doc
 
 
@@ -1006,7 +1477,43 @@ def _ground(built: Any, name: str) -> str:
     return "assumption" if "claim" in kinds else "input" if "input" in kinds else "chosen"
 
 
-def _value_text(name: str, config: Mapping, derived: Mapping, params: Mapping) -> str:
+def _finite(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _units_of(name: str, config: Mapping, derived: Mapping, params: Mapping, built: Any,
+              verdicts: Iterable[Any]) -> str:
+    """A value's units: its param's, else those of a served verdict whose
+    evaluator read it (a ``reads`` edge) and reported it as its measured value
+    or its limit — what an evaluator said of it, never a guess from its
+    name; ``""`` when nothing says."""
+    stated = str(getattr(params.get(name), "units", "") or "")
+    if stated:
+        return stated
+    value = _finite(derived.get(name, config.get(name)))
+    if value is None:
+        return ""
+    readers = {_split(nid)[1] for nid in built.into(graph_logic.node_id("value", name),
+                                                     "reads")}
+    for verdict in verdicts:
+        if getattr(verdict, "gate", None) not in readers or not getattr(verdict, "units", ""):
+            continue
+        for found in (getattr(verdict, "measured", None), getattr(verdict, "limit", None)):
+            number = _finite(found)
+            if number is not None and math.isclose(number, value, rel_tol=1e-9,
+                                                    abs_tol=1e-12):
+                return str(verdict.units)
+    return ""
+
+
+def _value_text(name: str, config: Mapping, derived: Mapping, params: Mapping, *,
+                units: str | None = None, bare: bool = True) -> str:
+    """A value as a label shows it: the number and its units. ``bare=False``
+    (a station's label) leaves a number with no units out, rather than show a
+    bare number under the station's name (review of phase 3b: "Layout 22.5"
+    was a radius in mm)."""
     if name in config:
         value = config[name]
     elif name in derived:
@@ -1015,7 +1522,10 @@ def _value_text(name: str, config: Mapping, derived: Mapping, params: Mapping) -
         return ""
     if isinstance(value, (dict, list, tuple)) or value is None:
         return ""
-    units = str(getattr(params.get(name), "units", "") or "")
+    if units is None:
+        units = str(getattr(params.get(name), "units", "") or "")
+    if not units and not bare:
+        return ""
     return f"{_num(value)} {units}".strip()
 
 
@@ -1126,17 +1636,42 @@ def _step(claim: Any, found: Any, *, milestone: str | None, cover: Mapping[str, 
             "commands": done["commands"]}
 
 
+def _amber_items(found: Any) -> list[dict]:
+    """A claim's amber runs for the drawer and the floor: each flipping run's
+    assumption, choice, direction, evaluator and value, in the site's
+    words."""
+    said = _site_words()["trace"]
+    items = []
+    for aid, choice, direction, gate, measured, limit, units in getattr(found, "flips", ()):
+        sign = "-" if direction == 0 else "+"
+        shown = value_text(measured, units or "", (f"{_num(limit)} {units or ''}".strip()
+                                                   if isinstance(limit, (int, float))
+                                                   and not isinstance(limit, bool) else ""),
+                           None) if isinstance(measured, (int, float)) \
+            and not isinstance(measured, bool) else ""
+        items.append({"assumption": aid, "choice": choice, "sign": sign, "evaluator": gate,
+                      "text": said["amber_item"].format(choice=choice,
+                                                        step=found.step(choice, direction),
+                                                        assumption=aid,
+                                                        evaluator=gate or "its evaluator",
+                                                        value_text=shown or "a fail")})
+    return items
+
+
 def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
               composed: Mapping[str, Any], *, registry: Any = None,
               payload: Mapping[str, Any] | None = None, plan: Iterable[Evidence] = (),
-              records_digest: str = "", resolution_digest: str = "") -> dict:
+              records_digest: str = "", resolution_digest: str = "",
+              amber: Mapping[str, Any] | None = None) -> dict:
     """``page.json`` (SPEC 28, 30): the outline's data, every claim's floor
     row once (the floor and the drawer read it), the next steps and the
-    words. The prose objects are filled by `bake_prose`."""
+    words. The prose objects are filled by `bake_prose`. A claim's ``amber``
+    (architecture phase 3b) is its amber state and flipping runs, or None."""
     said = _site_words()
     payload = payload or {}
     meta = getattr(view, "meta", None)
-    marks = _marks(toks)
+    amber = dict(amber or {})
+    marks = _marks(toks, amber)
     cover = claim_logic.effective_gates(view, registry)
     tiers = {spec.id: int(spec.tier) for spec in report_logic._specs(registry)}
     floor = _floor_values(view, composed, registry)
@@ -1206,7 +1741,9 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                                                               "resolves")],
             "settle": settle(claim, found, milestone=next(
                 (m.id for m in first_milestone if cid in (getattr(m, "requires", None) or ())),
-                None), cover=cover.get(cid) or (), tiers=tiers)}
+                None), cover=cover.get(cid) or (), tiers=tiers),
+            "amber": ({"state": amber[cid].state, "word": amber_word(amber[cid].state),
+                       "items": _amber_items(amber[cid])} if cid in amber else None)}
 
     sections = []
     for board in lay.boards:
@@ -1214,8 +1751,7 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
         sections.append({"board": board.id, "title": board.title, "line": board.line,
                          "generated": board.generated, "token": token, "word": _word(token),
                          "errored": errored,
-                         "marks": ["disagree"] if any(marks.get(c) for c in board.members)
-                         else [],
+                         "marks": _group_marks(board.members, marks),
                          "tally": _tally(board.members, composed),
                          "claims": list(board.members), "prose": None})
 
@@ -1362,7 +1898,8 @@ def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> 
 def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, Any] | None,
                     view: Any, composed: Mapping[str, Any], toks: Any, *,
                     prose_as_of: Mapping[str, str | None] | None = None,
-                    pool: Any = None) -> list[str]:
+                    pool: Any = None, amber: Mapping[str, Any] | None = None,
+                    feeds: Iterable[Mapping[str, Any]] | None = None) -> list[str]:
     """Every place ``map_doc`` or ``page_doc`` says a status, a *ready*, a word
     or a mark the resolution does not: a claim's token on the map, a line, a
     floor row, a board's section or a next step against `graph.tokens`; a
@@ -1379,11 +1916,20 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     build refuses a page this names; `site status`, `status` and `doctor` read
     a hand-edited page with it (invariant 14).
 
+    With ``amber`` (architecture phase 3b: the live `derivation.amber_states`)
+    an ``amber`` mark must sit exactly on the claims whose amber flips now,
+    and every baked amber state (a claim node, a line, a page claim) must be
+    the live one; with ``feeds`` (the live `layout`'s) each baked feed's
+    ``estimate`` must be the live one — amber on a pass the trace does not
+    flip, or a feed drawn as resting on a confirmed assumption, is the page
+    saying more than the resolution.
+
     What slipped through before the words, the prose and the values were held
     here (review of phase 5): a milestone baked ``ready`` in green beside
     ``ready: false``, a failing board's chip worded *checked*, and a resealed
     page that showed stale prose as current, all read current."""
     problems: list[str] = []
+    problems += _amber_problems(map_doc, page_doc, amber, feeds)
     want = dict(getattr(toks, "claims", None) or {})
     disagree = set((getattr(toks, "disagree", None) or {}).get("claims") or ())
     said_site = _site_words()
@@ -1498,6 +2044,48 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     return problems
 
 
+def _amber_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, Any] | None,
+                    amber: Mapping[str, Any] | None,
+                    feeds: Iterable[Mapping[str, Any]] | None) -> list[str]:
+    out: list[str] = []
+    if amber is not None:
+        live = {cid: getattr(found, "state", None) for cid, found in amber.items()}
+
+        def held(where: str, cid: str, row: Mapping[str, Any]) -> None:
+            if "marks" in row and ("amber" in (row.get("marks") or ())) != (
+                    live.get(cid) == "flips"):
+                out.append(f"{where} amber mark reads {'amber' in (row.get('marks') or ())}, "
+                           f"amber now is {live.get(cid) or 'none'}")
+            if "amber" in row:
+                baked = (row.get("amber") or {}).get("state") if row.get("amber") else None
+                if baked != live.get(cid):
+                    out.append(f"{where} amber reads {baked}, amber now is {live.get(cid)}")
+
+        for node in (map_doc or {}).get("nodes") or ():
+            if node.get("kind") == "claim":
+                held(f"claim:{node.get('key')}", str(node.get("key")), node)
+        for line in (map_doc or {}).get("lines") or ():
+            held(f"line {line.get('claim')}", str(line.get("claim")), line)
+        for cid, row in ((page_doc or {}).get("claims") or {}).items():
+            held(f"page claim {cid}", str(cid), row)
+    if feeds is not None and map_doc is not None:
+        want = {(f["zone"], f["to"]): list(f.get("estimate") or ()) for f in feeds}
+        for feed in map_doc.get("feeds") or ():
+            key = (feed.get("zone"), feed.get("to"))
+            if key not in want:
+                out.append(f"feed {key[0]} -> {key[1]} is on the map and the trace draws none")
+            elif list(feed.get("estimate") or ()) != want[key]:
+                out.append(f"feed {key[0]} -> {key[1]} rests on {feed.get('estimate')}, the "
+                           f"resolution says {want[key]}")
+    return out
+
+
+def live_feeds(lay: Layout, built: Any, toks: Any) -> list[dict]:
+    """The feeds as `bake_map` bakes them, for `status_problems`' ``feeds``."""
+    return [{"zone": f["zone"], "to": f["to"], "choices": list(f["choices"]),
+             "estimate": _estimate(built, f["choices"], toks)} for f in lay.feeds]
+
+
 def _prose_pieces(page_doc: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
     pieces = [(str(s.get("board")), s["prose"]) for s in page_doc.get("sections") or ()
               if s.get("prose")]
@@ -1548,7 +2136,9 @@ def _prose_problems(page_doc: Mapping[str, Any], view: Any, toks: Any, *,
 
 
 __all__ = [
-    "OUTLINE", "SCHEMA", "LANES", "MAP_EDGE_TYPES", "OTHER", "IMPLICIT_STATIONS_WARN",
+    "OUTLINE", "SCHEMA", "MAP_SCHEMA", "LANES", "MAP_EDGE_TYPES", "OTHER",
+    "IMPLICIT_STATIONS_WARN", "SOURCE_OF_KIND", "SOURCES", "source_of", "trace_block",
+    "amber_word", "live_feeds",
     "EVIDENCE_MAX_BYTES", "EVIDENCE_DIR", "PROSE_SUBJECTS", "WORD_KEYS", "RECORD_KEYS",
     "Board", "Zone", "Station", "Layout", "Evidence",
     "token_of", "boards_of", "layout", "value_text", "words_block", "evidence_plan",

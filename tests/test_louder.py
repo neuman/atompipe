@@ -1147,6 +1147,10 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
     # Architecture phase 6 (SPEC 37).
     ("packs", "skills"): "prints the live packs' PACK.md and skill files; reads no verdict",
     ("model",): "prints the model's projection",
+    # Architecture phase 3b: the trace prints what moved and amber's flips by
+    # claim id, never a status word; amber is a display token beside Checked.
+    ("model", "trace"): "observes the derivation and amber; prints moves and claim ids, "
+                        "never a claim's status",
     ("site", "serve"): "serves the files `site build` wrote; the page is held through "
                        "`site init` and `site build` above",
     ("site", "vendor"): "downloads the page's libraries",
@@ -1160,7 +1164,9 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
 
 
 def command_paths(parser: argparse.ArgumentParser) -> set[tuple[str, ...]]:
-    """Every leaf command path the parser accepts, aliases folded to the first name."""
+    """Every leaf command path the parser accepts, aliases folded to the first name
+    — and a command whose subcommand is optional (`model`, architecture phase
+    3b's `model trace` beside it), which runs on its own too."""
     out: set[tuple[str, ...]] = set()
 
     def walk(p: argparse.ArgumentParser, prefix: tuple[str, ...]) -> None:
@@ -1169,6 +1175,11 @@ def command_paths(parser: argparse.ArgumentParser) -> set[tuple[str, ...]]:
             if prefix:
                 out.add(prefix)
             return
+        own = p.get_default("func")
+        children = {c.get_default("func") for a in subs for c in a.choices.values()}
+        if prefix and not any(a.required for a in subs) and own not in children \
+                and getattr(own, "__name__", "<lambda>") != "<lambda>":
+            out.add(prefix)
         seen: set[int] = set()
         for action in subs:
             for name, child in action.choices.items():

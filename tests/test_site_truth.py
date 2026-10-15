@@ -64,9 +64,11 @@ class _Res(NamedTuple):
 
 
 def bake(view: Any, resolution: Any, registry: Any = None, *, projection: Any = None,
-         root: str = "", built: Any = None, params: Any = ()) -> Baked:
+         root: str = "", built: Any = None, params: Any = (), amber: Any = None,
+         trace: Any = None) -> Baked:
     """`map.json` and `page.json` of ``view`` under ``resolution``, in process,
-    as `site.build` bakes them (no prose, no evidence copy)."""
+    as `site.build` bakes them (no prose, no evidence copy); ``amber`` and
+    ``trace`` the current design's (architecture phase 3b)."""
     composed = claims_mod.compositions(view, registry=registry,
                                        stale_gates=frozenset(resolution.stale_gates))
     toks = graph.tokens(view, resolution, registry, composed=composed)
@@ -77,9 +79,10 @@ def bake(view: Any, resolution: Any, registry: Any = None, *, projection: Any = 
                       resolution=resolution)
     payload = {"meta": {"stale": bool(resolution.stale_gates)}, "verdicts": [], "views": []}
     map_doc = page.bake_map(view, lay, built, toks, composed, projection=projection,
-                            params=params, registry=registry, payload=payload)
+                            params=params, registry=registry, payload=payload, amber=amber,
+                            trace=trace)
     page_doc = page.bake_page(root or tempfile.gettempdir(), view, lay, built, toks, composed,
-                              registry=registry, payload=payload)
+                              registry=registry, payload=payload, amber=amber)
     return Baked(view, composed, toks, lay, map_doc, page_doc)
 
 
@@ -87,6 +90,10 @@ def bake(view: Any, resolution: Any, registry: Any = None, *, projection: Any = 
 #: it (every variant is a `dataclasses.replace`), and resolving the bracket is
 #: most of what a row costs (the fast tier's budget).
 _WORLDS: dict[str, tuple] = {}
+
+#: Each project's trace read and amber, beside its world (architecture phase
+#: 3b): the bracket draws its committed trace.
+_TRACES: dict[str, tuple] = {}
 
 
 def resolved(root: str, *, fresh: bool = False) -> tuple:
@@ -102,9 +109,13 @@ def resolved(root: str, *, fresh: bool = False) -> tuple:
                                      model=model)
     params = cli._shown_params(root, ledger, model, error, resolution, registry,
                                projection=projection)
+    traced = cli._trace_for(root, model, projection, resolution)
     built = graph.of(root, view, resolution, registry, projection=projection, model=model,
-                     views=params, bases=cli._input_bases(root, ledger))
+                     views=params, bases=cli._input_bases(root, ledger), trace=traced.trace)
+    amber = cli._amber_for(root, view, registry, built,
+                           graph.tokens(view, resolution, registry).claims, traced)
     _WORLDS[root] = (view, resolution, registry, projection, built, params)
+    _TRACES[root] = (traced, amber)
     return _WORLDS[root]
 
 
@@ -114,8 +125,9 @@ def bake_project(root: str, *, fresh: bool = False, **changes: Any) -> Baked:
         view = changes.pop("view")(view)
     if "resolution" in changes:
         resolution = changes.pop("resolution")(resolution)
+    traced, amber = _TRACES.get(root, (None, None))
     return bake(view, resolution, registry, projection=projection, root=root, built=built,
-                params=params)
+                params=params, amber=amber, trace=traced)
 
 
 # -- the test's own answers ------------------------------------------------- #
@@ -1297,6 +1309,30 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertTrue(phone, "no phone caption")
         self.assertNotRegex(phone.group(1), r"\b(?:line|Point)\b")
         self.assertIn("body.map-phone .maptools .cap-desk { display: none; }", self.css["map.css"])
+
+    def test_the_map_draws_what_the_trace_baked(self):
+        """The transit layout (architecture phase 3b) draws the bake's middle:
+        every zone, the feeds and taps, stations by `layers`, hollow stops by
+        `stop_kind`, amber from the line's `enters`, and the phone list's
+        Rides and Fed by in the bake's words. What slipped through (the author's
+        verdict on phase 5's map, "so simplistic looking"): the renderer drew a
+        zone only where a line stopped, four of PETGasus's ten, no feed at all,
+        and every line level at its row."""
+        map_js = self.js["lib/map.js"]
+        body = map_js[map_js.index("export function renderMap"):map_js.index("export function mapList")]
+        for read in ("map.feeds", "map.layers", "stop_kind", "line.amber.enters", ".taps",
+                     "z.sources", "z.estimate"):
+            self.assertIn(read, body, f"the map does not read {read}")
+        zones = re.search(r"const zones = nodes\.filter\(\(n\) => n\.kind === \"zone\"\)([^;]*);", body)
+        self.assertTrue(zones, "the zones are not every zone node")
+        self.assertNotIn("filter", zones.group(1).replace(".sort(BY_RANK)", ""),
+                         "a zone is dropped from the drawing")
+        self.assertIn("rounded(", body, "the lines bend without rounded corners")
+        listed = map_js[map_js.index("export function mapList"):]
+        self.assertIn("traceWords.rides", listed)
+        self.assertIn("traceWords.fed_by", listed)
+        self.assertIn("row.amber ? amberBlock(row.amber)", self.js["lib/drawer.js"],
+                      "the drawer and the floor drop amber")
 
     def test_an_unmatched_number_is_said_in_words(self):
         """The mark is not the gap glyph, stays with its number, and the text

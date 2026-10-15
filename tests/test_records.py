@@ -50,7 +50,9 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
+import tempfile
 import textwrap
 import time
 import unittest
@@ -61,7 +63,7 @@ import _env
 import _projects
 import _transcript
 from nopekit import claims as claims_mod
-from nopekit import cli, modelio, models, rounds, store, util
+from nopekit import cli, derivation, modelio, models, rounds, store, util
 from nopekit.models import (
     Acceptance,
     Claim,
@@ -1988,9 +1990,27 @@ _ROUND_WRITE = ("write {path} (event {i}): the round record, written by a comman
                 "the state after the run")
 
 
+#: A trace file or an amber file (architecture phase 3b), by name.
+_TRACE_FILE = re.compile(r"^\.nopekit/trace/[0-9a-f]{16}(?:\.amber\.[0-9a-f]{16})?\.json$")
+
+
+def _trace_licensed(run: _Run, path: str) -> bool:
+    """`model trace`'s licence: a path of `_TRACE_FILE`'s shape, absent before
+    the run, whose file after it reads ``ok`` (its seal verifies, its name is its
+    key's) — a new, whole trace or amber file, never a rewrite."""
+    if not _TRACE_FILE.fullmatch(path) or path in run.before or path not in run.after:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.join(tmp, path.rsplit("/", 1)[-1])
+        with open(target, "wb") as fh:
+            fh.write(run.after[path])
+        reader = derivation.read_amber if ".amber." in path else derivation.read_trace
+        return reader(target)[0] == "ok"
+
+
 def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
                  carve_out: frozenset = frozenset(),
-                 round_record: bytes | None = None) -> list[str]:
+                 round_record: bytes | None = None, trace_files: bool = False) -> list[str]:
     """Every touch in ``run`` the property does not explain. A path a run writes
     must be
 
@@ -2004,7 +2024,11 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
     * with ``round_record`` (architecture phase 3a: `round`'s run only), ONE
       write of `.nopekit/round.json` whose bytes moved and are exactly
       ``round_record`` — the round record of the state after the run, computed
-      by the test. Never a path allowance: any other write of it is named.
+      by the test. Never a path allowance: any other write of it is named;
+    * with ``trace_files`` (architecture phase 3b: `model trace`'s run only), a
+      write of an absent `.nopekit/trace/<16 hex>[.amber.<16 hex>].json` whose
+      file after the run reads ``ok`` (`_trace_licensed`) — a new, sealed file,
+      never a rewrite.
 
     A rule file written twice in one run is unexplained whatever it holds."""
     touches = _touches(run)
@@ -2028,6 +2052,8 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
         if name in _GIT_RULE_FILES:
             written[path] = written.get(path, 0) + 1
         if (op, path) in carve_out:
+            continue
+        if trace_files and op == "write" and _trace_licensed(run, path):
             continue
         if (blocks and op == "write" and name in _GIT_RULE_FILES
                 and _BLOCK_BEGIN in run.after.get(path, b"")
@@ -2248,6 +2274,41 @@ class NoCommandWritesARecord(_env.EnvCase):
                 self.assertEqual(_unexplained(self, run), [])
         self.assertTrue(any(_transcript.ENTRY_PATH.fullmatch(p) for p in _tree(project)),
                         "no check wrote a verdict entry: the property held vacuously")
+
+    # -- model trace (architecture phase 3b) ---------------------------------- #
+    def test_model_trace_writes_only_new_whole_trace_files(self):
+        """`model trace` writes no record and no round record: only new, sealed
+        trace and amber files, and what git ignores (its scratch, its lock); a
+        second run writes neither."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        for argv, wrote in ((("model", "trace", "--workers", "2"), True),
+                            (("model", "trace", "--workers", "2"), False)):
+            with self.subTest(argv=argv, wrote=wrote):
+                before = _records(project)
+                round_before = _round_stamp(project)
+                run = _watched(self, project, *argv)
+                self._assert_worked(argv, run.proc, (0,))
+                self.assertEqual(_touched_records(before, _records(project)), [])
+                self.assertEqual(_round_stamp(project), round_before)
+                traced = [p for _i, op, p in _touches(run) if _TRACE_FILE.fullmatch(p)]
+                self.assertEqual(bool(traced), wrote, traced)
+                self.assertEqual(_unexplained(self, run, trace_files=True), [])
+                self.assertEqual(bool(_unexplained(self, run)), wrote,
+                                 "without the licence a trace write is named")
+
+    def test_a_rewritten_or_unsealed_trace_file_is_named(self):
+        """The licence's planted violators: a trace file that existed before the
+        run, and one whose seal does not verify."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        path = ".nopekit/trace/0123456789abcdef.json"
+        events = [["write", path]]
+        for before, after in (({path: b"{}"}, {path: b"{}\n"}), ({}, {path: b'{"self": "x"}'})):
+            with self.subTest(before=before):
+                run = _Run(None, {**_tree(project), **before}, {**_tree(project), **after},
+                           events)
+                self.assertEqual(_unexplained(self, run, trace_files=True),
+                                 [f"write {path} (event 0): not ignored when it was written, "
+                                  f"and not a new verdict entry"])
 
     # -- round (architecture phase 3a) ---------------------------------------- #
     def test_round_writes_what_check_writes_and_its_round_record(self):
@@ -3469,7 +3530,7 @@ class GroupsAreRecords(_env.EnvCase):
         index = store.build_index(root)
         self.assertEqual([row["id"] for row in index["groups"]],
                          ["allowable", "arm", "bolts", "load", "outdoors", "printer", "prints",
-                          "pump", "strength"])
+                          "pump", "section", "strength"])
         self.assertEqual(index["problems"], [])
         _write(os.path.join(root, "groups", "second.json"),
                json.dumps({"kind": "board", "title": "t", "members": ["C1", "C9"]}))

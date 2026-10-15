@@ -120,6 +120,7 @@ function render({ again = false } = {}) {
   // 5. the map
   mount($("#map-title"), headings.map || "");
   mount($("#map-legend"), ...legend(page.map, words));
+  mapCaption(page.map, words);
   drawMap();
 
   // 6. one section per board
@@ -231,7 +232,7 @@ async function representation(rep) {
 function legend(map, words) {
   const tokens = (words.tokens || {});
   const on = new Set();
-  return (map.legend || []).map((item) => {
+  const chips = (map.legend || []).map((item) => {
     const look = lookOf(item.token);
     const said = tokens[item.token] || {};
     const button = el("button", { class: "lgf", type: "button", "aria-pressed": "false",
@@ -247,6 +248,47 @@ function legend(map, words) {
       el("span", { class: "lg-n", text: String(item.n) }));
     return button;
   });
+  return [...chips, amberChip(map, words)].filter(Boolean);
+}
+
+/** The caption over the drawing and the trace's note under it: what the
+ *  lines are, then whether the links from the choices were measured, which
+ *  choices the test did not move, and whether a trace runs now. Every word is
+ *  baked (`words.trace`, `map.trace`); `index.html` is the project's own and
+ *  never regenerated, so the caption is written here. */
+function mapCaption(map, words) {
+  const trace = (map && map.trace) || {};
+  const said = (words && words.trace) || {};
+  const desk = $(".maptools .cap-desk");
+  if (desk && said.caption) {
+    mount(desk, `${said.caption} Point at a line, a station or a group to show its links. Click one to see its evidence.`);
+  }
+  let note = $(".maptools .trace-note");
+  if (!note && desk) {
+    note = el("p", { class: "cap trace-note" });
+    desk.after(note);
+  }
+  if (!note) return;
+  const running = page.build && page.build.tracing && said.running ? said.running : "";
+  mount(note, [trace.notice, trace.text, running].filter(Boolean).join(" "));
+}
+
+/** The amber chip of the legend: shown only when some line carries the
+ *  bake's `amber` mark, and it lights those lines. */
+function amberChip(map, words) {
+  const marked = (map.lines || []).filter((l) => (l.marks || []).includes("amber")).length;
+  const said = ((words.trace || {}).amber_legend) || "";
+  if (!marked || !said) return null;
+  const button = el("button", { class: "lgf lg-amber", type: "button", "aria-pressed": "false",
+    onclick: () => {
+      const on = button.getAttribute("aria-pressed") !== "true";
+      button.setAttribute("aria-pressed", String(on));
+      if (page.mapApi && page.mapApi.showTokens) page.mapApi.showTokens(null, on ? "amber" : "");
+    } },
+    el("span", { class: "lg-amber-band", "aria-hidden": "true" }),
+    el("span", { text: said }),
+    el("span", { class: "lg-n", text: String(marked) }));
+  return button;
 }
 
 function lineSample(look) {
@@ -313,6 +355,7 @@ function showBuild(build) {
       banner.hidden = true;
     }
   }
+  if (page.map && page.doc) mapCaption(page.map, words);
   const built = $("#built");
   if (built) {
     mount(built, build && build.built

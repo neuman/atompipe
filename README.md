@@ -185,6 +185,8 @@ my-project/
   .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
   .nopekit/round.json      the round record: every status as a token and the typed graph,
                            at the end of a round (tracked; written only by `nopekit round`)
+  .nopekit/trace/          the trace: which derived values each choice moves, and amber
+                           (tracked; written once per design by `nopekit model trace`)
   .nopekit/ledger.json     an index of every record, generated (ignored: never edit it)
   .nopekit/cache/  obs/  out/     the last check's statuses, what runs cost, scratch (ignored)
 ```
@@ -296,6 +298,8 @@ nopekit extract <artifact>    what was read out of it, and what that grounds
 nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
 nopekit round [--commit]      end a round: a tier-0 check, the site, the round record; --commit
                               commits the project's own paths as a listed person; never blocks
+nopekit model trace           rebuild with each choice moved ±10%: what moves what, and amber
+                              (`round` starts it in the background when the design has none)
 nopekit packs skills          the live packs' PACK.md and skill files, for the agent to read
 nopekit gap [--propose]       every claim whose mechanism has yet to run, and packs that might run it
 nopekit why <name>            one param's, claim's or requirement's full history

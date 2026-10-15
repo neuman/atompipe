@@ -93,13 +93,21 @@ class TheMapIsBaked(_env.EnvCase):
         doc = self.baked.map_doc
         stations = [n for n in doc["nodes"] if n["kind"] == "station"]
         self.assertEqual([(n["key"], n["generated"]) for n in stations],
-                         [("allowable", False), ("@slenderness", True)],
-                         "a recorded station, then the value two claims' evaluators read")
+                         [("allowable", False), ("section", False), ("@slenderness", True)],
+                         "the recorded stations, then the value two claims' evaluators read")
         self.assertEqual([n["key"] for n in doc["nodes"] if n["kind"] == "board"],
                          ["strength", "prints", "pump", "outdoors"])
+        # Map schema 2 (architecture phase 3b): requirements and zones are no
+        # longer stops; the arm's section sits before the slenderness the
+        # deflection reads, as the committed trace infers it.
         line = next(item for item in doc["lines"] if item["claim"] == "C1")
-        self.assertEqual(line["stops"], ["requirement:R1", "zone:load",
-                                         "station:@slenderness", "claim:C1"])
+        self.assertEqual(line["stops"], ["station:section", "station:@slenderness",
+                                         "claim:C1"])
+        self.assertEqual(line["stop_kind"], {"station:section": "upstream",
+                                             "station:@slenderness": "read"})
+        self.assertEqual((line["serves"], line["fed_by"]), (["R1"], ["zone:arm", "zone:load"]))
+        self.assertEqual(doc["schema"], page.MAP_SCHEMA)
+        self.assertEqual(doc["trace"]["state"], "traced")
         self.assertIn("unread", doc)
         groups = self.baked.page_doc["next"]["milestones"]
         self.assertEqual([g["next"] for g in groups], [True])
@@ -401,7 +409,7 @@ class TheBracketShowsTheOutline(_env.EnvCase):
         self.assertEqual([n["key"] for n in doc["nodes"] if n["kind"] == "board"],
                          ["strength", "prints", "pump", "outdoors"])
         self.assertEqual([n["key"] for n in doc["nodes"] if n["kind"] == "station"],
-                         ["allowable", "@slenderness"])
+                         ["allowable", "section", "@slenderness"])
         self.assertEqual({p["subject"]: p["stamp"] for p in summary["prose"]},
                          {s: "current" for s in ("intro", "next", "outdoors", "prints",
                                                   "pump", "strength")},

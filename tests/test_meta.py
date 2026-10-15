@@ -119,7 +119,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_basis.ABasisIsNeverAKey",
         # Architecture phase 3a: a round record the records, the cache or the
         # design moved past is never shown as current.
-        "test_round.ABehindRoundRecordSaysSo"],
+        "test_round.ABehindRoundRecordSaysSo",
+        # Architecture phase 3b: a trace is served only for its design.
+        "test_derivation.TheTraceIsKeyedToItsDesign"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
@@ -142,7 +144,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # repository `init` starts, are invariant 8's own clauses; unmapped, a
         # skip added to either went unseen.
         "test_round.RoundsCommitOnlyAsAListedPerson",
-        "test_record_commands.InitStartsARepository"],
+        "test_record_commands.InitStartsARepository",
+        # Architecture phase 3b: a trace file is written once, whole.
+        "test_derivation.TheTraceIsWrittenOnce"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -211,7 +215,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_round.NothingReadsTheRoundRecordForTruth",
          "test_graph.AnEdgeChangesNoStatus",
          # Architecture phase 5: next steps on the page are the predicate's.
-         "test_site_truth.NextStepsAreThePredicate"],
+         "test_site_truth.NextStepsAreThePredicate",
+         # Architecture phase 3b: amber is display only.
+         "test_derivation.AmberChangesNoStatus"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and
@@ -229,10 +235,18 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_site_truth.ANumberNoBakedFileHoldsIsFlagged",
          # The template side: no page script computes a status, a margin, a
          # reading order or an age.
-         "test_site_truth.TheBrowserComputesNoTruth"],
+         "test_site_truth.TheBrowserComputesNoTruth",
+         # Architecture phase 3b: the map's feeds, stops and amber are the trace's.
+         "test_derivation.TheMapDrawsWhatTheTraceObserved"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
-    15: "test_mutation.MutationIsSealed",
+    15: ["test_mutation.MutationIsSealed",
+         # Architecture phase 3b: a trace build and an amber run write nothing.
+         "test_derivation.TheTraceBuildsInACopy", "test_derivation.AnAmberRunWritesNothing"],
+    # Architecture phase 3b: the trace says what it saw, and no more.
+    16: ["test_derivation.UntracedIsNeverIndependent",
+         "test_derivation.APartialTraceIsNeverWritten",
+         "test_derivation.AmberOnlyWhileCurrent"],
 }
 
 #: Classes a later checkpoint will make invariants, guarded against skips from
@@ -830,7 +844,10 @@ CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs",
                      # Architecture phase 5: the front page's bake and the prose
                      # scans — a clock in either would move a tracked baked byte
                      # on every build.
-                     "page", "prose")
+                     "page", "prose",
+                     # Architecture phase 3b: the trace's bytes must not move with
+                     # the time it ran (durations are perf_counter's, CLI-only).
+                     "derivation")
 
 
 def _clock_findings(source: str, filename: str = "<planted>") -> list[str]:

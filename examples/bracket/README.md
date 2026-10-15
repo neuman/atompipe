@@ -186,6 +186,8 @@ exports/print-v1.json         tracked   written by `nopekit export print-v1` onl
 .nopekit/round.json          tracked   the round record: every status as a token and
                                         the typed graph, written only by `nopekit round`;
                                         an output — never edit it, never read it for truth
+.nopekit/trace/              tracked   the trace and its amber file, written once per
+                                        design by `nopekit model trace`; never edited
 .gitignore, .gitattributes,   tracked   marked blocks nopekit maintains: bytecode is
 .nopekit/.gitignore                    ignored, line endings are pinned (digests are
                                         over bytes), outputs are ignored
@@ -233,6 +235,7 @@ red until it does, and names these commands. To regenerate, from this directory:
 rm -rf .nopekit/verdicts .nopekit/cache .nopekit/obs .nopekit/out
 nopekit check              # exits 1: bracket.deflection fails on purpose
 nopekit gate selftest      # writes nothing new: the controls were just recorded
+nopekit model trace        # writes nothing when the committed trace is the design's
 nopekit round              # the round record of the regenerated cache
 nopekit site stamp --all   # only when a status moved: read the text again first
 git add -A .
@@ -242,7 +245,17 @@ The bracket also commits its round record, `.nopekit/round.json` — the resolut
 the end of a round, as tokens, with the typed graph. A change that moves what it holds
 without moving the cache (the composition, the graph, a bracket record) ends with
 `nopekit round` alone; `tests/test_bracket_cache.py` (`TheCommittedRoundRecordIsCurrent`)
-goes red until it does. On a fresh clone `nopekit round` writes nothing and `git status`
+goes red until it does.
+
+The bracket commits its trace too, under `.nopekit/trace/`: one file for its design
+(which derived values each of its eleven numeric choices moved at -10% and +10%; the
+material is a word, and is not moved) and one amber file (C2 and C3 re-run with the
+load, which assumption C6 sources, moved: both hold). A change to the model is another
+design: run `nopekit model trace`, then `nopekit round`, and commit both
+(`TheCommittedTraceIsCurrent`). The trace never rewrites a file; the old design's
+stays until you `git rm` it.
+
+On a fresh clone `nopekit round` writes nothing and `git status`
 stays clean.
 
 The bracket lists no `people` in `.nopekit/project.json`, on purpose: `nopekit round

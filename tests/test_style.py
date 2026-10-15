@@ -85,7 +85,10 @@ def baked_word_strings(doc: Any, name: str) -> tuple[list[tuple[str, str]], list
     words: list[tuple[str, str]] = []
     loose: list[str] = []
     id_maps = {"values", "evaluators", "edges", "via", "claims", "tokens", "lanes", "kinds",
-               "by", "basis", "outcome", "headings", "notices", "ready", "columns", "ground"}
+               "by", "basis", "outcome", "headings", "notices", "ready", "columns", "ground",
+               # architecture phase 3b: maps keyed by a station or a claim id,
+               # a choice's name, or a source category
+               "stop_kind", "stop_kinds", "skipped", "sources"}
 
     def walk(node: Any, key: str, path: str, under_words: bool, in_ids: bool) -> None:
         if isinstance(node, dict):

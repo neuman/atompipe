@@ -46,6 +46,9 @@ is `cli.py`'s.
 | the readiness report (P2.5b; was `docs/readiness.md`) | `REPORT.md` at the root | ignored | `report --write` |
 | a milestone's package: what the spend gets (P2.5b) | `out/<milestone>/` at the root | ignored | `export <milestone>` |
 | the round record: the resolution at the end of a round, as tokens, with the typed graph and the digests it was computed from (architecture phase 3a) | `.nopekit/round.json` — an output, never read for truth | tracked | `round` (`rounds.write`); from phase 4 `merge`; never `check` |
+| the trace: which derived values each choice moved at ±10% (architecture phase 3b) | `.nopekit/trace/<k16>.json`, one per traced design, keyed by its instructions, choices and the data its build read, never rewritten | tracked | `model trace` (`derivation.run`); `round` only starts it |
+| amber: each automated claim's evaluators on designs an assumption-sourced choice moved | `.nopekit/trace/<k16>.amber.<s16>.json`, one per evaluation, never rewritten | tracked | `model trace` |
+| a trace's progress, resumable; a background trace's log; its lock | `.nopekit/cache/trace/<k16>/`, `.nopekit/out/trace.log`, `.nopekit/trace.lock` | ignored | `model trace` |
 
 The index and `last_check.json` are the whole project in two reads (D-06); neither
 is read for truth by any spine code, and the index never holds a status, a coverage
@@ -3071,9 +3074,12 @@ def mechanism_problem_words(problem) -> str  # one claims.MechanismProblem, in w
 def status_word(status, *, errored=False) -> str   # word, with ", errored" for a crash's Skipped
 status_token_word = _status_token_word       # phase 3a: a STATUS_KEY token (or "errored") in words
 def round_paragraph(shape, number, changes, *, view, composed, check, site, wrote, schema,
-                    path) -> str             # phase 3a: `round`'s one paragraph — what changed,
+                    path, trace=None) -> str # phase 3a: `round`'s one paragraph — what changed,
                                              #   the count line, ready as last evaluated, the
                                              #   check, the site; HUMAN["round"]'s words
+def round_trace_sentence(trace) -> str       # phase 3b: the background trace's sentence (" ..."),
+                                             #   or ""; round_paragraph's tail, and appended by
+                                             #   cli after phase 6's commit sentence
 def round_moved(moved) -> str                # "the records, the verdict cache and the design"
 COMMIT_SUBJECT_MAX = 72                      # phase 6: a round commit's subject, git's convention
 def round_commit_sentence(commit) -> str     # phase 6: what `round --commit` did, then the
@@ -3296,17 +3302,20 @@ their read sets, never `obs/`. Not in `verdicts.SPINE_MODULES`: an edit here key
 verdict. No clock, no git, no file writes, no words. The site's map (the next phase)
 calls `build` and `tokens` — or `of` — directly, and joins the two by id.
 ```python
-SCHEMA = 1
+SCHEMA = 2                                            # phase 3b: `after`, trace an object
 NODE_KINDS = ("requirement", "claim", "evaluator", "value", "instruction", "input",
               "milestone", "decision")                 # the order nodes sort in
-EDGE_TYPES = ("serves", "settles", "reads", "derives", "sources", "rests_on", "resolves",
-              "contradicts", "needs", "requires", "decides")   # the order edges sort in
+EDGE_TYPES = ("serves", "settles", "reads", "derives", "after", "sources", "rests_on",
+              "resolves", "contradicts", "needs", "requires", "decides")   # the order edges sort in
 VALUE_ROLES = ("choice", "derived", "absent")
 class Node(NamedTuple): id; kind; attrs               # id "<kind>:<key>"; attrs JSON scalars,
                                                       #   one schema per kind (below)
 class Edge(NamedTuple): type; source; target
-class Trace(Protocol): key; derives                   # phase 3b supplies it: (choice, derived)
-class Graph:                                          # frozen: nodes, edges, trace, instructions
+class Trace(Protocol): key; round; derives; after     # derivation.TraceFile: (choice, derived)
+                                                      #   and (earlier, later) pairs; round
+                                                      #   and after read with getattr
+class Graph:                                          # frozen: nodes, edges, trace, instructions,
+                                                      #   trace_round
     def node(self, nid) -> Node | None
     def out(self, nid, type=None) -> tuple[str, ...]  # targets, edge order
     def into(self, nid, type=None) -> tuple[str, ...] # sources, edge order
@@ -3315,7 +3324,10 @@ class Graph:                                          # frozen: nodes, edges, tr
     def sourced_from(self, name) -> tuple[str, ...]   # node ids, node order
     def rests_on(self, cid) -> tuple[str, ...]        # assumption claim ids
     def via(self, cid, aid) -> tuple[tuple[str, str, str], ...]   # (evaluator, read, sourced)
-    def to_dict(self) -> dict                         # {schema, trace, instructions,
+    def moves(self, choice) -> tuple[str, ...]        # the derives targets
+    def moved_by(self, name) -> tuple[str, ...]       # the derives sources
+    def to_dict(self) -> dict                         # {schema, trace: null | {key, round},
+                                                      #   instructions,
                                                       #   nodes: {id: attrs}, edges: {type: {src: [dst]}}}
 class Tokens(NamedTuple): claims; requirements; evaluators; milestones; readiness; counts; disagree
 def node_id(kind, key) -> str
@@ -3337,7 +3349,11 @@ def tokens(view, resolution, registry, *, composed=None) -> Tokens
 def of(root, view, resolution, registry, *, projection, model, views=(), bases=None,
        trace=None) -> Graph                           # build, design = verdicts.design_of
 def upward(graph, value) -> list[str]                 # phase 5: a value node id and every
-                                                      #   value it derives from (the map's lines)
+                                                      #   value it derives from
+def upstream(graph, nid) -> list[str]                 # phase 3b: `after` ancestors, nearest first
+def direct_derives(graph) -> set[tuple[str, str]]     # (choice, value) no earlier value explains
+def depths(graph) -> dict[str, int]                   # longest `after` path to each value
+def ties_of(graph) -> list[tuple[str, ...]]           # values the same choices move
 ```
 **Nodes.** A requirement, a milestone and a decision carry no attrs; a claim
 `{claim_kind, by, critical, removed}` (every `view.claims`, a `Ledger.removed`
@@ -3354,7 +3370,9 @@ basis}`.
 (`claims.effective_gates`: coverage, never the mechanism's list), `reads` (the served
 entry's param paths through `value_names`; a never-run evaluator has none), `derives`
 (the trace's; `{}` and `trace: null` without one), `sources` (an input id as
-`input:<id>`, an assumption's as `claim:<id>`), `rests_on` (computed: a claim rests
+`input:<id>`, an assumption's as `claim:<id>`), `after` (phase 3b: the order the
+trace infers between derived values, `derivation.after_order` — for drawing and `why`
+only, never an edge of meaning), `rests_on` (computed: a claim rests
 on assumption A when an evaluator that settles it read a value A sources, closed
 upward over `derives`), `resolves` (`Claim.resolves`, physical to assumption only),
 `contradicts` (`Resolution.track`), `needs` (`GateSpec.needs`), `requires`
@@ -3378,11 +3396,14 @@ asks git (`vcs`) and hands the answers in.
 ```python
 ROUND_REL = ".nopekit/round.json"; ROUND_NAME = "round.json"; SCHEMA = 1
 HEADER: str                                           # the one sentence it holds
-MOVED = ("records", "verdicts", "design")             # what it is computed from
+MOVED = ("records", "verdicts", "design", "trace")    # what it is computed from
+TRACE = "trace"                                       # phase 3b: derivation.trace_digest
+AMBER_KEYS = ("flips", "holds", "unclear", "not_current", "untraced")
 RESOLUTION = "resolution"                             # what `state` names when none of MOVED
                                                       #   moved and what it records differs
 KEYS = ("generated", "schema", "round", "computed_from", "readiness", "milestones",
-        "counts", "claims", "requirements", "disagree", "evaluators", "graph", "self")
+        "counts", "claims", "requirements", "disagree", "amber", "evaluators", "graph",
+        "self")
 class Previous(NamedTuple): state; doc; round; schema; why   # absent | ok | edited |
                                                       #   unreadable | newer
 class RoundState(NamedTuple): state; round; moved; schema; why   # absent | current | behind |
@@ -3394,8 +3415,9 @@ class Changes(NamedTuple): compared; replaced; claims; requirements; verdicts; i
 class Written(NamedTuple): written; round; previous; changes; refused
 def path_of(root) -> str
 def verdicts_digest(root) -> str                      # every file under .nopekit/verdicts/
-def computed_from(root, design) -> dict               # {records, verdicts, design}
-def body(computed, tokens, graph) -> dict             # the content, round and self unset
+def computed_from(root, design, trace_digest="") -> dict   # {records, verdicts, design, trace}
+def body(computed, tokens, graph, amber=None) -> dict # the content, round and self unset;
+                                                      #   amber {state: [claim ids]}
 def self_digest(doc) -> str                           # util.seal of doc minus "self"
 def sealed(content, round_) -> dict                   # KEYS order, round set, self set
 def render(doc) -> bytes                              # indent 2, UTF-8 as itself, one newline
@@ -3549,8 +3571,12 @@ Every status, word, count, margin and *ready* it bakes is from its one producer:
 `graph.tokens`, `claims.worst_of`, `claims.unresolved`, `claims.margin`.
 ```python
 OUTLINE = 1; SCHEMA = 1
+MAP_SCHEMA = 2                               # map.json's own (phase 3b)
 LANES = ("requirements", "zones", "stations", "boards")
-MAP_EDGE_TYPES: tuple[str, ...]              # graph.EDGE_TYPES less requires, decides
+MAP_EDGE_TYPES: tuple[str, ...]              # graph.EDGE_TYPES less requires, decides,
+                                             #   derives, after (the feeds carry those)
+SOURCE_OF_KIND: Mapping[str, str]            # an input's kind -> datasheet | estimate
+SOURCES = ("chosen", "datasheet", "estimate", "assumption")
 OTHER = "other"                              # the generated board and zone
 IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
 EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
@@ -3561,7 +3587,9 @@ class Board(NamedTuple): id; title; line; generated; members
 class Zone(NamedTuple): id; title; line; generated; members
 class Station(NamedTuple): id; title; line; generated; members   # id "@<name>" when generated
 class Layout(NamedTuple): boards; zones; stations; board_of; zone_of; station_of; lines;
-                          unread; warnings
+                          unread; warnings; feeds; layers; station_layer; station_column;
+                          station_depth; traced; ties; zone_rank; station_rank;
+                          requirement_rank; idle; crossings; trace_key
 class Evidence(NamedTuple): gate; entry; path; name; source; dest; href; missing; action;
                             reason   # why it is not on the page: the build's warning, never baked
 def token_of(composed) -> str                # STATUS_KEY, or errored
@@ -3587,13 +3615,19 @@ def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, cu
 def content_digest(root) -> str              # a seal over site/content/
 def seal(doc) -> str                         # map.json's and page.json's `self`
 def representation(views) -> dict            # the first model3d, else image or diagram
+def source_of(built, name, kinds) -> str     # a value's source category (SOURCES)
+def trace_block(lay, built, amber, trace) -> dict   # map.json's `trace`
+def amber_word(state) -> str                 # amber's site word
+def live_feeds(lay, built, toks) -> list     # the feeds as bake_map bakes them
 def bake_map(view, lay, built, toks, composed, *, projection, params=(), registry=None,
-             payload=None, name="", records_digest="", resolution_digest="") -> dict
+             payload=None, name="", records_digest="", resolution_digest="", amber=None,
+             trace=None) -> dict
 def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
-              plan=(), records_digest="", resolution_digest="") -> dict
+              plan=(), records_digest="", resolution_digest="", amber=None) -> dict
 def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
 def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
-                    pool=None) -> list[str]   # invariant 14: tokens, words, marks, ready,
+                    pool=None, amber=None, feeds=None) -> list[str]   # invariant 14: tokens,
+                                             #   words, marks, ready, amber, feeds,
                                              #   a compared value's words, prose stamps;
                                              #   with prose_as_of and pool, each as_of
                                              #   and each number's match
@@ -3604,8 +3638,17 @@ a status flip moves none of them. `status_problems` is invariant 14's one checke
 build refuses a page it names, and `cli._site_state` reads an on-disk page with it — a
 token the resolution does not say, while both documents' `resolution_digest` equal
 now's, reads *edited by hand* (a resealed forgery). A line's values are its settling
-evaluators' named reads (`graph.served_reads`), closed upward over `derives`
-(`graph.upward`): the trace adds edges and no code.
+evaluators' named reads (`graph.served_reads`), direct. **Map schema 2** (phase 3b):
+requirements and zones are no longer stops; every zone record is drawn with its count,
+its sources and its unconfirmed assumptions (`estimate`); a feed joins a zone to a
+station when one of its choices moves one of the station's members directly
+(`graph.direct_derives`); a line stops at the stations holding what it reads (`read`)
+and those the trace puts before them (`upstream`), in layer, column and station order;
+a station's depth is the upper median of the `graph.depths` of the members its lines
+read (of every moved member when none is read), its layer the dense rank, a station
+nothing moved last; zones, requirements and the stations of a layer carry a `rank`, one
+barycentre pass against the claims' rows. Untraced, the layer is phase 5's column. A
+claim whose amber flips carries the `amber` mark beside its token.
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure
@@ -3699,6 +3742,94 @@ directory and swapped in whole; a file in `out/<m>/` that no export recorded is 
 person's (`foreign`), and one whose bytes moved since its export is `edited` — either
 refuses, named. Two exports of one state write byte-identical packages.
 
+### `derivation.py`  (deps: models, util, store, modelio, verdicts, gates, claims, graph; cli only inside the worker; report only for words)
+The trace (SPEC 39, architecture phase 3b): each numeric `Config` field moved -10% and
++10% in a fresh copy of the project, each build in a subprocess
+(`python -m nopekit.derivation <job>`) that imports the model from its copy, under an
+audit hook that names a write into the project. Not a spine module (it keys no
+verdict); clock-free (`time.perf_counter` for durations only, never in a file).
+```python
+SCHEMA = 1; HARNESS = 2; STEP = 0.1; MOVE_FLOOR = 1e-9; SIGNIFICANT = 4; AFTER_FLOOR = 2
+FAINT = 1e-3                                  # a smaller move does not count toward the order
+BUILD_TIMEOUT_FLOOR = 900.0; TIMEOUT_FACTOR = 10.0; SNAPSHOT_MAX_BYTES = 1 << 30
+THREAD_ENV: Mapping[str, str]                 # one BLAS/OpenMP thread per build
+BACKGROUND_ENV = "NOPEKIT_TRACE_BACKGROUND"   # "0": round starts no trace
+TRACE_DIR = "trace"; SCRATCH_REL; LOCK_REL; LOG_REL
+SKIP = ("yes-no", "word", "none", "structure", "zero", "not-finite", "fixed")
+FLIP_TOKENS = ("failing", "gap"); AMBER_STATES = ("untraced", "not-current", "flips",
+                                                  "unclear", "holds")
+HEADER; AMBER_HEADER; TRACE_KEYS; AMBER_KEYS
+class Nudge(NamedTuple): name; value; steps; skipped    # .change: each step's factor less one
+class Order(NamedTuple): after; ties; singles
+class TraceFile: key; round; entry; path; keyed_on; skipped; observed; unmoved; unsteady;
+                 derives; after; ties; singles; raised; moved   # implements graph.Trace
+    def movers(self, name) -> frozenset
+    def moves(self, choice) -> dict
+class AmberFile(NamedTuple): path; trace; round; choices; claims
+class TraceRead(NamedTuple): state; key; trace; problems; ambers   # current | none |
+                                              #   unrecorded | no-model
+class Launched(NamedTuple): code; timed_out; tail
+class Ran(NamedTuple): state; key; round; written; observed; total; skipped; unmoved;
+                       unsteady; raised; incomplete; amber; builds; problems; order; timeout
+class Amber(NamedTuple): state; flips; unclear; via; why; rerun; changes
+    def step(self, choice, direction, *, minus="-") -> str   # "-10%", or an integer's size
+def default_workers() -> int                  # min(8, cpus - 1)
+def nudges(name, value, *, settable=True, real=False) -> Nudge   # real: a float field
+def plan_of(config) -> list[Nudge]            # real from each field's annotation
+def step_word(direction, change=None, *, minus="-") -> str
+def apply(model, name, step) -> LoadedModel   # dataclasses.replace; CONFIG rebound
+def instructions_of(root, model, anchors) -> dict | None   # _model_code + *.py under model/
+                                              #   that a snapshot copies
+def choice_digests(config, anchors) -> dict   # every field, skipped ones too
+def keyed_on(instructions, choices, data=None) -> dict
+def key_of(keyed) -> str                      # seal({harness, step, instructions, choices, data})
+def current_keyed(root, model, anchors) -> dict | None   # data {}: a reader cannot know it
+def current_key(root, model, projection, anchors) -> str | None   # where the scratch lives
+def data_current(root, data) -> bool          # a trace's data files hold the same bytes
+def anchors_for(root, resolution=None) -> Anchors
+def observe_values(projection, anchors) -> dict   # {derived: [digest, scalar]}; files,
+                                              #   meshes and arrays by their bytes
+def move_of(base, new); def moves_between(base, new) -> dict; def magnitude(move) -> float
+def render(doc) -> bytes                      # indent 1, scalar lists on one line
+def self_digest(doc) -> str
+def after_order(movers, strong=None) -> Order # strict subset of strong movers, two-mover
+                                              #   floor, Hasse
+def trace_dir(root); def trace_path(root, key); def amber_paths(root, key)
+def read_trace(path) -> (state, TraceFile | None, line)   # absent | unreadable | edited |
+                                              #   newer | mismatch | ok
+def read_amber(path) -> (state, AmberFile | None, line)
+def trace_for(root, model, projection, anchors) -> TraceRead   # only the current design's:
+                                              #   its inputs, and its data on disk
+def trace_digest(root, key) -> str            # the round record's computed_from.trace
+def other_designs(root, key) -> (files, bytes)
+def worker_main(argv) -> int; def worker_env(environ=None) -> dict
+def subprocess_launch(job, job_path, timeout) -> Launched; def in_process(job, job_path, timeout)
+def lock_path(root); def live_holder(root) -> int | None
+def scratch_dir(root, key); def scratch_state(root, key) -> dict
+def snapshot_size(root) -> (bytes, [(bytes, dir)])
+def amber_current(ambers, subjects, amber_choices) -> bool
+def amber_subjects(root, ledger, registry) -> dict   # {cid: {acceptance, evaluators}}
+def run(root, *, plan, entry, amber_choices={}, choices=None, workers=None, timeout=None,
+        round_=None, now="", quiet_if_running=False, background=False, on_line=None,
+        launch=None, project_lock=None, pack_dirs=()) -> Ran
+def unconfirmed(built, tokens, aid) -> bool
+def amber_states(read, *, built, tokens, subjects) -> dict[str, Amber]
+def amber_now(root, view, registry, built, tokens, read) -> dict[str, Amber]
+def state_payload(read, built, amber) -> dict # state.json's trace and amber
+def needed(read, states) -> str               # "trace" | "amber" | ""
+def amber_words(amber) -> str
+def start_background(root, *, round_, key, popen=None) -> (state, detail)
+```
+**The key** is computed after a build, wherever it is computed, and covers every
+`Config` field's value and the data files the base build read; a trace whose key is
+not the current design's is never served (`trace_for`). **A trace file is written only whole** — every numeric choice moved both
+ways — under the project lock and only when its path is absent; a timeout, a dead
+worker, a raise that differs when run alone or a write into the project leaves none,
+and the scratch keeps what finished. **Amber** runs `verdicts.sweep(record=False)` and
+`claims.compositions` in the copy — the check run's rules, never a second composition —
+and is read back per claim against the current acceptance and evaluator digests; it
+moves no status (`claims.py` never imports this module).
+
 ### `cli.py`  (deps: everything)
 `argparse`, subcommands, `main(argv=None) -> int`, and `build_parser()` — the whole
 command surface as one `argparse.ArgumentParser`, so a test can check a command
@@ -3779,17 +3910,24 @@ def _site_build(root, ledger, registry, model, projection, view, resolution, *,
 def _round_inputs(root, ledger, registry, model, projection, view, resolution, *,
                   model_error="", shown=None) -> tuple[dict, dict]   # (rounds.body, computed_from)
 def _round_state(root, ledger, model, projection, resolution, registry, view, *,
-                 model_error="", shown=None) -> rounds.RoundState
+                 model_error="", shown=None, traced=None) -> rounds.RoundState
+def _trace_for(root, model, projection, resolution=None) -> derivation.TraceRead
+                                            # phase 3b: the trace every graph.of/build takes
+def _amber_for(root, view, registry, built, tokens_, found) -> dict   # derivation.amber_now
+def _round_label(root) -> int | None        # the round record's number alone, for a trace
+def cmd_model_trace(args) -> int            # `nopekit model trace`
 # architecture phase 6: the round's commit and the Stop hook
 ROUND_LOCK_WAIT_S = 60.0                    # --hook only: how long it waits for the build lock
 class CommitOutcome(NamedTuple): made; oid; who; why; detail; staged; outside; too_large;
                                  earlier; subject
 class RoundOutcome(NamedTuple): not_run; done; content; check; site; view; composed; prose;
-                                commit; trace; summary
+                                commit; trace; summary; trace_state
 def _round_run(root, *, commit, wait_s, now) -> RoundOutcome   # cmd_round's body; never raises
                                             #   a NopekitError (not_run instead)
 def _round_commit(root, ledger, done, paragraph) -> CommitOutcome   # under the build lock
-def _round_start_trace(root, changes) -> str   # the trace's seam: "" until phase 3b fills it
+def _round_start_trace(root, done, *, traced, view, resolution, registry, built, composed,
+                       model_error) -> dict   # the trace's seam, phase 3b's background start
+                                            #   after the lock: {state, key, log, why}
 def _round_hook(args) -> int                # Claude Code's Stop hook; always 0
 ```
 **`round --commit`** (architecture phase 6, SPEC 24 with §0.3) runs the round, then,
@@ -3813,7 +3951,9 @@ process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with std
 Python stream and fd 1) and stderr sent nowhere, rebuilds the index itself
 (`args._index_done`, so `_after` writes nothing after it), and prints one JSON object:
 `{"systemMessage": report.round_hook_message(...)}`, or `{}` outside a project or when
-the record stood, nothing changed, no board's text is behind and no trace started. It
+the record stood, nothing changed, no board's text is behind and the trace has no
+sentence (`report.round_trace_sentence`: none started, running, stopped short or
+refused). It
 always exits 0 and never prints `"decision": "block"`; a crash is a one-line message.
 The plugin runs it through `hooks/stop.py`, a script, never `python3 -m`: `-m` puts the
 session's cwd first on `sys.path`, and a `difflib.py` there ran as code at every turn's
@@ -3829,6 +3969,22 @@ ignores the project it says so. Its next steps follow decision 21.
 **`packs skills`** (`cmd_packs_skills`) prints each live, found pack's PACK.md, its
 `lenses.md` and its `skills/<name>/SKILL.md` files (or `--pack` names'); a live pack not found is a FAIL
 line and exit 1. **`doctor`** gains a warn-only `people` row (`_doctor_people_row`).
+`model trace` (`cmd_model_trace`, architecture phase 3b) refuses a legacy project, no
+model entry, a model that does not load, an unknown `--choices` name (with a
+suggestion) and `--workers` below 1; plans from the model as loaded (never built in the
+project); names the amber choices from `graph.value_sources`; and hands
+`derivation.run` the project lock to snapshot and to write under. Exit 0 written,
+current or partial; 1 incomplete; 2 refused. `--from-round N` (hidden) is the
+background run `round` starts with `NOPEKIT_TRACE_BACKGROUND` unset or not `"0"`
+(`derivation.start_background`, from phase 6's seam `_round_start_trace`, after the
+round's lock and its commit, so a trace still writing lands in the next round's
+commit): a live trace makes it exit 0 silently. `status` prints a `trace:` line only when the trace is not the current
+design's, and an `amber:` line only when a Checked claim's amber is not `holds`;
+`status --json`, `report --json` and `state.json` gain `trace`/`amber`; `report` a
+`## Amber` section for flips and not-current; `why` a choice's `moves:`, a derived
+value's `derived from:`, `after:` and ties, and a claim's `amber:`; `doctor` a warn-only
+`trace` row; `round --json` a `trace` object. JUnit, `check`, `export` and exit codes
+never read amber.
 `propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
 non-zero exit, a timeout or any project file outside its directory that moved
 (`_project_files`, a stat of the project but its ignored scratch, each path named),
@@ -4765,6 +4921,42 @@ page is published. Invariant 8 gained the round's commit
 `vcs.committer_ident` and `vcs.in_repository`, `cli._round_ignored`, and the root
 ignore block's `/.vscode/launch.json`.
 
+## What phase 3b of the architecture moved
+
+The trace and amber (`docs/SPEC.md` §7 step 3b, decision 39), and the map's middle.
+No spine module moved, so no verdict re-keys. The bracket gains a `section` station, a
+committed trace and amber file, and round 3. Merged after phase 6, `round` starts the
+trace from phase 6's seam (`cli._round_start_trace`, after the commit and outside the
+lock, its words `report.round_trace_sentence`), and the bracket's round record was
+regenerated at the merge (round 5).
+
+- **`derivation.py`** (new): the key, the moves, the strict readers, the order
+  (`after_order`), the subprocess worker and its audit, the run, amber, the background
+  start.
+- **`graph.py`**: schema 2, the `after` edge type, `trace: {key, round}`, `upstream`,
+  `direct_derives`, `depths`, `ties_of`, `moves`, `moved_by`; the trace's unmoved values
+  are value nodes, so `why` can say they were not seen to move.
+- **`rounds.py`**: `MOVED` gains `trace`, `KEYS` gains `amber`.
+- **`page.py`**: map schema 2 (`MAP_SCHEMA`), feeds, taps, layers, ranks, sources, amber
+  marks; `status_problems` holds amber and feeds. **`site.py`**: `state.json` gains
+  `trace` and `amber` (inside its resolution digest); `build.json` gains `tracing`.
+- **Commands**: `model trace`; `round` starts it in the background; `status`, `why`,
+  `report`, `doctor` and `site build` say what the trace observed and amber.
+- **In its review** (`HARNESS` 2, the bracket's trace re-recorded): the key holds the
+  data the base build read (`keyed_on.data`), and `trace_for` serves a trace only while
+  those files hold the same bytes; the reader's code walk skips what a snapshot skips;
+  an integer moves toward zero and away by its own size, said at that size (`change`,
+  `step_word`); two equal numbers are no move; a file, a mesh and an array compare by
+  their bytes (`_content`); a move under `FAINT` does not count toward the order; a
+  scratch row is written only for a pair whose raises were confirmed alone and that
+  wrote nothing into the project, and carries its full key and, for amber, the subjects
+  it ran against; a worker watches every thread; an amber run carries the claim's
+  acceptance, and a flip the composition decided is said against it; the reason amber
+  is not current is read off the closest file. The map bakes `unmoved`, a zone's
+  `unmeasured` choices (idle only when every one was measured), a line's `sets` (an
+  assumption's springs) and `unseen`, the `unrecorded` source, a scalar station head
+  and units an evaluator reported.
+
 ## Limits: what the spine cannot see, named
 
 - **`people` guards against surprise, not against the agent (architecture phase 6).**
@@ -4787,6 +4979,36 @@ ignore block's `/.vscode/launch.json`.
 - **`changed_paths` sees what git sees.** A file git ignores is never staged and never
   named; a project that does not ignore its outputs names them as "not staged" on
   every round that commits.
+
+- **The trace sees one point at ±10% (architecture phase 3b).** A nonlinear model is
+  seen locally only: a `max()` hides a dependence there (the bracket's
+  `thickness -> bbox_max`). Not seen to move never means independent. `after` is
+  inferred: the two-mover floor drops single-mover evidence, and values the same
+  choices move tie and cannot be ordered; two values that share their inputs without
+  one feeding the other are ordered too (the bracket's slenderness before its bounding
+  box), so the map draws a stop the order puts before a claim's reads faded, and the
+  phone list names it apart. A move under 0.1% (`FAINT`) draws its edge and does not
+  count toward the order. Choices outside `Config`, and yes/no and word choices, are not
+  moved; a structure is compared by digest; a file a value names and a mesh or array are
+  compared by their bytes, any other object by its type. The key holds the files the
+  base build opened to read through Python (`_data_read`): a C extension's read, an
+  environment variable and the network are not in it. Writes by a C extension or a
+  subprocess of the build are not audited (a worker watches every thread of its own
+  process).
+  Amber's currency leaves out the spine digest, and a tool missing on one machine makes
+  amber unclear there, so two machines can write different amber files for one design
+  (an add/add conflict, resolved by keeping either); two people tracing one design at
+  different rounds conflict on its `round`. A snapshot leaves out `.git`, `out/`,
+  `site/`, `.nopekit/{out,obs,cache,trace}`, bytecode and environments. A background
+  trace outlives the agent's turn; its lock is pid-checked.
+- **The background trace imports from the project's root (the merge of phase 3b into
+  phase 6).** `derivation.start_background` runs `python -m nopekit model trace` with
+  the project as its cwd, which `-m` puts first on `sys.path`: a module the root holds
+  under a standard library name is imported before the library's, as the Stop hook's
+  own launcher (`hooks/stop.py`) no longer allows. The hook still never blocks — the
+  trace is detached and its output goes to `.nopekit/out/trace.log` — and the trace
+  runs the project's model code in any case; a trace that fails at import starts again
+  at the next round.
 
 - **The site's number scan is a floor, not a proof (architecture phase 5).** It is
   sign-insensitive (prose says "40% past the limit" over a margin of −0.3994); blind to

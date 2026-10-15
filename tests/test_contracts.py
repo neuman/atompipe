@@ -453,7 +453,10 @@ def site_problems(state_keys, data_files, site_contract: str) -> list[str]:
 #: their keys are never looked up in SITE_CONTRACT; what lies under them is.
 _BAKED_ID_MAPS = frozenset({"values", "evaluators", "edges", "via", "claims", "tokens",
                             "lanes", "kinds", "by", "basis", "outcome", "headings", "notices",
-                            "ready", "columns", "ground", "verdicts"})
+                            "ready", "columns", "ground", "verdicts",
+                            # architecture phase 3b: keyed by a station or claim id,
+                            # or a choice's name
+                            "stop_kind", "stop_kinds", "skipped"})
 
 #: Each baked file and the SITE_CONTRACT sections that document its keys (a
 #: prose piece's blocks and runs are in "Prose and the stamp").

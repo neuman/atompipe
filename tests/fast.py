@@ -13,7 +13,14 @@ least one violation test of every invariant runs every iteration, and a break
 that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
-The budget is 90 s as ONE process on an otherwise idle machine. The review of
+The budget is 90 s as ONE process on an otherwise idle machine. The merge of phase 3b
+into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
+test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
+tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
+3d8eaaf (load average 1.4-2.4, not idle): 122.9 s and 119.5 s wall (89.9 s and 87.3 s
+user) for its 685 tests, against 118.1 s and 114.4 s (85.9 s and 83.7 s user) for
+3d8eaaf's 662 — about 4 s over its base, which is over the line: the next change that
+touches the tier pays that first. The review of
 architecture phase 6 added ~1.2 s in the tier (invariant 8's identity and `init`
 clauses: three in-process identity rows, two `init` rows, and the nested repository
 in the staging class) and paid ~1.2 s by parsing each test file once in
@@ -35,7 +42,18 @@ NoContextMovesNothing). Measured on 2026-10-15 as two interleaved pairs against
 e27e1a7 (load average 0.8-1.5, not idle): 123.8 s and 123.1 s wall (91.0 s and 91.7 s
 user) for its 656 tests, against 120.0 s and 134.5 s (88.8 s and 97.9 s user) for
 e27e1a7's 665 — flat within this machine's noise, and over the line here as its base
-is; the next change that adds pays first. The review of
+is; the next change that adds pays first. Architecture
+phase 3b (the trace) added ~2.1 s of in-process rows (the trace's key, its writer,
+amber's currency on the committed amber file, the map's checker, an amber
+evaluation's writes, one CLI refusal) and paid ~3.6 s: test_meta.InvariantClassesNeverSkip
+and test_meta.NoGitOutsideVcs (harness guards, no invariant) to the full suite; its
+real workers and the bracket traced afresh are the gate's. Measured on 2026-10-15 as
+interleaved pairs against e27e1a7 on a machine other sessions were loading (load
+average 1.5-3.0, not idle): 134.4 s and 116.4 s wall (100.0 s and 86.4 s user) for
+its 674 tests against 126.3 s and 121.1 s (93.7 s and 89.1 s user) for e27e1a7's 665
+— +8 s in one pair and -5 s in the other, within that machine's noise and not shown
+under the line; an earlier pair before the pay-back read 112.5 s against 106.4 s.
+The review of
 architecture phase 5 added ~0.3 s (its in-process rows: a Failing claim never worded
 inside its limit, the project's group, a claim named from another board, the checker
 over baked prose, the scan's units) and paid ~2.9 s: the two records-sweep rows
@@ -326,10 +344,14 @@ FAST: list[str] = [
     # paid with a third of the same kind, ~1.1 s: test_meta.NoSubprocessOutsideRun
     # (an AST walk over every test module for a process started outside
     # `_env.run`); an iteration that adds a test which starts a process runs
-    # test_meta whole.)
+    # test_meta whole. Architecture phase 3b paid with two more of the kind,
+    # ~3.6 s: test_meta.InvariantClassesNeverSkip (an AST walk over every
+    # invariant class for a skip, 2.0 s) and test_meta.NoGitOutsideVcs (an AST
+    # walk over the spine and the tests for git outside `vcs`, 1.6 s) — harness
+    # guards, no invariant; an iteration that adds a test to an invariant class,
+    # or a git call, runs test_meta whole.)
     "test_meta.EveryInvariantHasItsTest",
     "test_meta.TheInvariantTableIsTheMap",
-    "test_meta.InvariantClassesNeverSkip",
     "test_meta.NoWallClockBelowTheEdge",
     # (Architecture phase 6's pay-back: test_meta.NoGitOutsideVcs, an AST walk
     # over every spine module for a git process outside `vcs`, ~0.9 s, to the
@@ -968,6 +990,36 @@ FAST: list[str] = [
     "test_records.GroupsAreRecords",
     "test_style",
     "test_map.TheMapIsBaked",
+    # -- architecture phase 3b: the trace and amber, in process ------------ #
+    # Every build through `derivation.in_process` on its own copy (~1.4 s; the
+    # map's rows read test_site_truth's shared bracket, and nothing here traces
+    # the bracket afresh but one `--choices` run): the key and what is never served (7), a second
+    # run and other bytes at the path (8), amber moving nothing and claims.py
+    # never importing it (12), the map's feeds, stops and amber against the
+    # checker (14), an amber evaluation's writes (15), and what untraced, a
+    # skipped choice and an unmoved value say (16).
+    "test_derivation.TheTraceIsKeyedToItsDesign.test_the_key_moves_with_what_it_is_keyed_on",
+    "test_derivation.TheTraceIsKeyedToItsDesign.test_the_reader_and_the_worker_digest_the_same_files",
+    "test_derivation.TheTraceIsKeyedToItsDesign.test_the_committed_trace_is_served_and_another_designs_never",
+    "test_derivation.TheTraceIsKeyedToItsDesign.test_a_file_that_does_not_read_is_never_served",
+    "test_derivation.TheTraceIsWrittenOnce.test_a_second_run_writes_nothing",
+    "test_derivation.TheTraceIsWrittenOnce.test_other_bytes_at_its_path_are_refused_and_untouched",
+    "test_derivation.AnAmberRunWritesNothing",
+    # (one CLI process that is refused before any build: a temp dir inside the
+    # project, 0.2 s — invariant 15's subprocess half has this one row here)
+    "test_derivation.TheTraceBuildsInACopy.test_a_temp_directory_inside_the_project_is_refused",
+    "test_derivation.APartialTraceIsNeverWritten.test_choices_alone_write_no_tracked_file",
+    "test_derivation.UntracedIsNeverIndependent",
+    "test_derivation.AmberChangesNoStatus.test_claims_never_imports_the_trace",
+    "test_derivation.AmberOnlyWhileCurrent.test_an_acceptance_edit_beside_the_committed_amber",
+    "test_derivation.TheMapDrawsWhatTheTraceObserved",
+    # The review of phase 3b, in process and cheap (~0.3 s): the reason amber
+    # is not current read off the closest file, the order past a faint move,
+    # and what the map says the trace did not measure, see or only infers.
+    "test_derivation.AmberOnlyWhileCurrent.test_the_reason_comes_from_the_closest_file",
+    "test_derivation.TheOrderIsObserved.test_a_move_the_rounding_hides_does_not_reverse_the_order",
+    "test_derivation.TheMapSaysWhatTheTraceDidNotSee",
+    "test_records.NoCommandWritesARecord.test_a_rewritten_or_unsealed_trace_file_is_named",
 ]
 
 
@@ -1006,6 +1058,43 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_records.IndexNeverDisagreesWithRecords.test_packs_skills_and_the_rounds_commit_leave_the_index_agreeing",
     "test_records.NoCommandWritesARecord.test_packs_skills_writes_no_record",
     "test_records.NoCommandWritesARecord.test_the_rounds_commit_writes_what_round_writes",
+    # Architecture phase 3b's real workers and its costlier in-process rows
+    # (~9 s): `model trace` through real subprocesses (a build writing beside
+    # its model, one writing into the project, the model run from its copy, a
+    # temp dir inside — "spawns real workers; the in-process row of the same
+    # invariant is in FAST"), the watched `model trace` run of the records sweep,
+    # one worker against three byte for byte, the timeout's resume, the raise
+    # that differs alone, round's refusal to start again, and the bracket traced
+    # with C3 tightened (a flip, every surface with and without the amber file,
+    # a confirmed assumption, and an acceptance, a gate and a choice edit read
+    # back). The
+    # rules they hold run in FAST above: the key, the writer's refusal, the
+    # partial run, amber's currency, the map's checker.
+    "test_derivation.TheTraceBuildsInACopy.test_a_build_that_writes_beside_its_model_writes_in_its_copy",
+    "test_derivation.TheTraceBuildsInACopy.test_a_build_that_writes_into_the_project_is_refused_and_named",
+    "test_derivation.TheTraceBuildsInACopy.test_the_model_runs_from_its_copy",
+    "test_derivation.TheTraceIsWrittenOnce.test_one_worker_and_three_give_the_committed_bytes",
+    "test_derivation.APartialTraceIsNeverWritten.test_a_timeout_leaves_no_file_and_a_resume_completes",
+    "test_derivation.APartialTraceIsNeverWritten.test_a_raise_that_differs_alone_is_incomplete",
+    "test_derivation.APartialTraceIsNeverWritten.test_round_does_not_start_again_after_an_incomplete_background_run",
+    "test_derivation.AmberChangesNoStatus.test_nothing_moves_without_it",
+    "test_derivation.AmberChangesNoStatus.test_it_flips",
+    "test_derivation.AmberChangesNoStatus.test_a_confirmed_assumption_carries_no_amber",
+    "test_derivation.AmberOnlyWhileCurrent.test_an_acceptance_edit",
+    "test_derivation.AmberOnlyWhileCurrent.test_a_gate_edit",
+    "test_derivation.AmberOnlyWhileCurrent.test_a_choice_edit",
+    # The review of phase 3b's rows that trace the bracket in process (~6 s):
+    # data build() reads, traced twice; a refused build's row never reused
+    # (environmental, confirmed, a nudge's write, a dead worker); amber re-run
+    # after an acceptance edit. The key's other rows and the closest file run
+    # in FAST above.
+    "test_derivation.TheTraceIsKeyedToItsDesign.test_data_build_reads_is_in_the_key",
+    "test_derivation.APartialTraceIsNeverWritten.test_an_environmental_raise_is_never_kept",
+    "test_derivation.APartialTraceIsNeverWritten.test_a_raise_confirmed_alone_is_kept",
+    "test_derivation.APartialTraceIsNeverWritten.test_a_nudge_that_writes_into_the_project_leaves_no_row",
+    "test_derivation.APartialTraceIsNeverWritten.test_a_worker_that_dies_leaves_no_file",
+    "test_derivation.AmberOnlyWhileCurrent.test_a_retrace_after_an_acceptance_edit_runs_again",
+    "test_records.NoCommandWritesARecord.test_model_trace_writes_only_new_whole_trace_files",
     # Architecture phase 5's subprocess halves: a hand-edited map read back
     # through `site status`, `status` and `doctor` (~2.8 s), the map against the
     # round record after `nopekit round` (~0.6 s), and `site stamp` run as a

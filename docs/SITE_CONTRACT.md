@@ -360,6 +360,11 @@ was the one a reader of the contract would never look for.
                                     "who": "", "when": "" } } ],
   "rebuild":  [ { "article": "<64 hex>", "claims": ["C5"],
                   "moved": ["config.thickness 7.0 -> 7.5"] } ],             // P2.5a
+  "trace":    { "key": "fb145d48c5a8", "round": 2, "state": "traced" },  // phase 3b;
+                                     // null when the caller has none
+  "amber":    { "C2": "holds", "C3": "holds" },   // phase 3b: each Checked claim on an
+                                     // unconfirmed assumption — both inside the
+                                     // resolution digest, so an amber move stales the page
   "words":    { "pass": { "key": "checked", "word": "checked", "term": "Checked",
                           "plural": "checked", "hint": "every evaluator passed on the current
                           inputs — checked does not mean true" }, …,
@@ -639,25 +644,62 @@ there; `technical.html` is drawn by `app.js` from `state.json`, as before.
   `verdict.stale` is true. A `model3d` representation runs `lib/viewer3d.js` with the
   PETGasus explode pill (hidden when the view has nothing to explode).
 - **The map** (`lib/map.js`, `renderMap(host, map, page, {onSelect, onBoard,
-  onRescale, worstFirst})`) is plain SVG at a native width of 1400 units. Drawn
-  narrower, its text grows to 12 px on screen at least, and its row and header
-  heights grow with the text (`metricsFor` at the drawn scale); a resize to another
-  size calls `onRescale`, and the page draws the map again. The title and the second
-  line of a row start after its id as measured, so an id never runs into its title. The boards lane is a
-  fixed 520 units at the right; a board is a header (title, line, the token's glyph
-  and word, its tally) and one two-line row per claim (glyph, id, statement; word and
-  `value_text`, or the claim's `cause_text` when it has no value). The rows fix every
-  track's height: one horizontal track per line, from its first stop to its row. The
-  other lanes share what is left, in the baked `columns`: a requirement is a capsule
-  with its id and statement wrapped to its left; a zone or a station is a capsule
-  over the rows its lines span, its title above it (a zone's ground bar under the
-  title, a station's `value_text` after it, a generated station in italic mono). A
-  line that stops at a capsule has a dot in it; a line that only crosses a capsule's
-  span is drawn over it on a bridge, so it never reads as a stop. A node no line
-  stops at is listed under the map, in its lane ("No line stops here yet."). Text is
-  measured after placement (`getComputedTextLength`): a capsule's title may take two
-  columns of room and moves up a line, at most twice, to clear an earlier title
-  before it is shortened; a shortened text keeps the full text as its tooltip.
+  onRescale, worstFirst})`) is plain SVG at a native width of 1400 units, drawn as a
+  transit map (architecture phase 3b, the template side; it overturns phase 5's
+  straight tracks). Drawn narrower, its text grows to 12 px on screen at least, and
+  its row, header and zone-box heights grow with the text (`metricsFor` at the drawn
+  scale); a resize to another size calls `onRescale`, and the page draws the map
+  again. Three columns:
+  - **Left** (x 12-248): a card per requirement (the token's glyph and colour bar,
+    the bold id, the statement in three lines at most, its full text as the
+    tooltip), then **every zone** as a box: its name and count, a 96-unit bar of
+    `sources` (design choice, datasheet, estimate, assumption, no source
+    recorded), and an amber diamond with its id for each `estimate` id. A box sits at the mean height of
+    the stations and line starts it feeds, in its baked `rank`, pushed down when
+    it meets the box above; an `idle` box is faded with `words.trace.zone_idle`
+    as its tooltip. Under the boxes, `words.trace.zones_summary`, a key of the
+    sources some bar draws and `words.trace.feeds_key`.
+  - **Middle** (x 286-800): the stations, one equal column per (layer, column)
+    of `map.layers`, so a station's x is its trace order. A station's lines sit
+    side by side at a pitch of 7, in the order of their rows, centred on the mean
+    of those rows; two capsules in one column never meet (a gap of 34 holds the
+    lower title). A line rides its `stops` in their baked order with a filled dot
+    where it reads (`stop_kind` `read`) and a hollow one where the trace puts the
+    value first (`upstream`); it starts 22 units left of its first station (a
+    tap circle when a zone feeds it), bends once just after each station it
+    leaves, and fans into its row late, in a band right of the last column. In
+    each bend zone the lines that rise turn top-first and the lines that fall
+    turn bottom-first, with 45-degree runs and rounded corners (radius 10), so
+    lines that share a bundle never cross. The part of a line before its first
+    `read` stop is faded under `words.trace.upstream_stop` (an inferred order).
+    A line with no station is a stub on its row (a longer one, with a halt, when a
+    zone taps it; a dashed circle titled `words.trace.unseen_line` when `unseen`),
+    and its `sets` are springs: thin dotted curves from the stub back to each
+    station, amber for an assumption, titled `words.trace.sets`, and pending blue
+    for a physical claim, titled `words.trace.settles`. A line that only
+    passes a capsule is drawn over it on a bridge, and every line has a halo
+    under its stroke, so where two cross the later one reads over. **Feeds** are
+    thin curves from a zone's right edge to the left edge of each station in
+    `map.feeds` (amber and dashed when its `estimate` is not empty), and taps
+    from a zone to the start of each line it feeds directly (`lines[].taps`).
+    A station's title and `value_text` go where they cross the fewest tracks
+    and no other title or capsule (above, below, then beside), shortened with
+    a tooltip only when no spot holds them.
+  - **Right** (x 872-1392): the boards, a fixed 520 units: a board is a header
+    (title, line, the token's glyph and word, its tally) and one two-line row per
+    claim (glyph, id, statement; word, an amber diamond when the line carries
+    the `amber` mark, the requirements it `serves`, and `value_text`, or the
+    claim's `cause_text` when it has no value). The rows fix each line's end.
+  A station no line stops at is listed under the map ("No line stops here
+  yet."). Text is measured after placement (`getComputedTextLength`); it never
+  moves a capsule, a box or a track. `amber` draws as a band under the line from
+  the station its `enters` names (the whole line when null); `disagree` as a red
+  casing. The caption above the drawing is `words.trace.caption` (written by
+  `page.js`, as `index.html` is the project's own), and the line under it is
+  `map.trace.notice`, `map.trace.text` and, while `build.json`'s `tracing` is
+  true, `words.trace.running`. The legend gains an amber chip
+  (`words.trace.amber_legend`, the count of marked lines) only when a line
+  carries the mark; it lights those lines.
 - **Every token's look is one table**, `TOKEN_LOOK` in `lib/format.js`: checked ✓
   green solid, failing ✕ red heavy, errored ! red heavy dashed, stale ≈ dim dashed,
   skipped ⊘, gap ?, open ◌, pending build ◻ and assumed ≡ dotted; an unknown token a
@@ -670,13 +712,21 @@ there; `technical.html` is drawn by `app.js` from `state.json`, as before.
   the drawer say that notice in words.
 - **Interaction.** Hovering a line, a row or a capsule lights its lines (and the
   claims a line `rests_on`, from `edges.rests_on`, wider and in their OWN status
-  colour: the accent is near the pending-build blue) and dims the rest; a board header lights its board and scrolls to its section on a click; a
+  colour: the accent is near the pending-build blue), the feeds into its stations
+  and the zones that feed it, and dims the rest; a station lights every line
+  through it and its feeds; a zone its feeds and taps and every line it feeds
+  (`fed_by`); an assumption's diamond (or its row) the feeds it sets, the stations
+  those feeds enter, and every claim that `rests_on` it; a board header lights its board and scrolls to its section on a click; a
   click on a line, a row or a capsule opens the drawer and keeps its lines lit. The
   legend lights every line of a token. Pan is a drag, zoom a pinch, ctrl or cmd and
   the wheel, or the +, − and fit buttons; `0` resets. "Worst first" sorts the rows
   inside each board by the baked `severity` (then `row`) and draws again; it is off
   by default. Below 760 px the map is `mapList`: the requirements as chips, then each
-  board with its rows, each row with what it reads; the caption above it speaks of
+  board with its rows, each row with its requirements, amber in words when marked,
+  `Rides:` the stations it reads in stop order, the upstream ones apart under
+  `words.trace.upstream_rides` (review of phase 3b: they read as rides), its `sets`
+  after a diamond, `words.trace.unseen_line` when `unseen`, and `Fed by:` its zones
+  (`words.trace.rides`, `words.trace.fed_by`); the caption above it speaks of
   cards (`.cap-phone`), the one above the drawing of lines (`.cap-desk`). With the
   drawer open on a wide screen the map scales into the column beside it, so the
   claims lane, with every glyph and word, stays in view.
@@ -684,9 +734,13 @@ there; `technical.html` is drawn by `app.js` from `state.json`, as before.
   same function, `claimBlocks`): the chip, `cause_text`, each value's `value_text`
   (the binding one bold), the acceptance, the mechanism, each evaluator with its
   outcome, detail, basis and evidence links, a recorded result, what it rests on,
-  and what settles it, then a link to `technical.html#claim=<id>`. A requirement or a
-  board lists its claims; a zone or a station its values with `value_text` and the
-  evaluators that read each (`edges.reads`). `#claim=C1` (and `#zone=…` and so on)
+  and what settles it, then a link to `technical.html#claim=<id>`; a claim with a
+  baked `amber` adds its word and each run that flipped it (the floor too). A
+  requirement or a board lists its claims; a zone its feeds (each station with the
+  choices that move it, and each line it taps) and its values; a station what moves
+  it (each zone with its choices) and its values, with `value_text` and the
+  evaluators that read each (`edges.reads`), and the claims for which it is an
+  upstream stop with `words.trace.upstream_stop`. `#claim=C1` (and `#zone=…` and so on)
   in the URL opens it.
 - **A board's section** (`lib/sections.js`) is its title, line, chip and tally, then
   the prose (its `notice` in a callout above it when `stamp` is not `current`; each
@@ -715,34 +769,55 @@ there; `technical.html` is drawn by `app.js` from `state.json`, as before.
 ## `map.json`
 
 The grounding map (SPEC 29), baked by `page.bake_map` from the live graph
-(`graph.build`) and the groups. **Order is baked, geometry is rendered**: no key named
-`x`, `y`, `cx`, `cy`, `left`, `top`, `width` or `height` appears anywhere. The renderer
-lays the nodes out in their lanes by `order`, `row` and `column`, never by a force
-layout, and never reorders by default.
+(`graph.build`, over the current design's trace) and the groups. **Order is baked,
+geometry is rendered**: no key named `x`, `y`, `cx`, `cy`, `left`, `top`, `width` or
+`height` appears anywhere. The renderer lays the nodes out in their lanes by `order`,
+`rank`, `row`, `layer` and `column`, never by a force layout, and never reorders by
+default. Map schema 2 (architecture phase 3b): requirements and zones are no longer
+stops; the trace gives the middle its feeds, its taps and its station layers.
 
 ```jsonc
 {
-  "schema": 1,
+  "schema": 2,                                   // page.MAP_SCHEMA
   "generated": "<HUMAN.site.generated>",
   "meta": { "name": "...", "records_digest": "<64>", "resolution_digest": "<64>" },
-  "trace": null,                                 // graph.trace: null until phase 3b
+  "trace": { "key": "fb145d48c5a8",              // 12 hex, or null untraced
+             "round": 2,                         // the round that traced it, or null
+             "state": "traced",                  // traced | untraced
+             "skipped": { "material": "word" },  // choices the trace did not move
+             "unmoved": ["E", "material", "yield"],  // values it did not see move
+             "ties": 5, "singles": 2,            // values it cannot order
+             "amber": "current",                 // current | partial | none
+             "notice": "<HUMAN.site.trace.notice_traced>",
+             "text": "<HUMAN.site.trace.skipped, or skipped_one; then unmoved, or unmoved_one>" },
   "lanes": ["requirements", "zones", "stations", "boards"],  // empty lanes omitted
-  "columns": { "requirements": 1, "zones": 2, "stations": 2 },
+  "columns": { "requirements": 0 },              // kept for an older reader
+  "layers": [3],                                 // columns per station layer
   "legend": [ { "token": "failing", "n": 1 }, ... ],          // SEVERITY_ORDER, n > 0
   "nodes": [ <node>, ... ],                      // lane order, then order
-  "lines": [ { "claim": "C1", "order": 0, "token": "failing", "errored": false,
-               "marks": [], "stops": ["requirement:R1", "zone:load",
-               "station:@slenderness", "claim:C1"],
-               "via": { "zone:load": ["load_n"], "station:@slenderness": ["slenderness"] },
-               "values": ["deflection", "load_n", "slenderness"], "reads_all": null } ],
+  "lines": [ { "claim": "C1", "order": 0, "board": "strength", "token": "failing",
+               "errored": false, "marks": [],
+               "stops": ["station:section", "station:@slenderness", "claim:C1"],
+               "stop_kind": { "station:section": "upstream",
+                              "station:@slenderness": "read" },
+               "via": { "station:section": ["area", "inertia", "section_mod"],
+                        "station:@slenderness": ["slenderness"] },
+               "taps": [ { "zone": "zone:load", "choices": ["load_n"] } ],
+               "fed_by": ["zone:arm", "zone:load"], "serves": ["R1"],
+               "values": ["deflection", "load_n", "slenderness"], "reads_all": null,
+               "sets": [],                       // an assumption's or a physical claim's stations
+               "unseen": false,                  // joins nothing, reads an unmoved value
+               "amber": null } ],                // or { state, word, enters }
+  "feeds": [ { "zone": "zone:arm", "to": "station:section",
+               "choices": ["width", "thickness"], "estimate": [] } ],
   "values": { "load_n": { "role": "choice", "value_text": "15", "units": "",
                           "zone": "zone:load", "station": null, "ground": "assumption",
-                          "read": true } },
+                          "source": "assumption", "read": true } },
   "evaluators": { "bracket.deflection": { "basis": "sourced", "pack": "", "tier": 0,
                   "registered": true, "outcome": "fail", "outcome_word": "fail",
                   "current": true, "claims": ["C1"] } },
   "edges": { "<type>": { "<source id>": ["<target id>"] } },  // graph edges, MAP_EDGE_TYPES
-  "unread": ["arm_length", "edge_margin"],       // choices no line touches
+  "unread": ["bed_xy"],                          // choices no line reads, no feed carries
   "self": "<page.seal>"
 }
 ```
@@ -751,17 +826,22 @@ Nodes, each with every key of its kind, `id` `<kind>:<key>`:
 
 ```jsonc
 { "id": "requirement:R1", "kind": "requirement", "key": "R1", "lane": "requirements",
-  "order": 0, "column": 0, "title": "<statement>", "token": "failing", "word": "failing",
+  "order": 0, "rank": 0, "title": "<statement>", "token": "failing", "word": "failing",
   "errored": false, "marks": [], "claims": ["C1", "C2", "C3", "C6"] }
-{ "id": "zone:arm", "kind": "zone", "key": "arm", "lane": "zones", "order": 0, "column": 0,
+{ "id": "zone:arm", "kind": "zone", "key": "arm", "lane": "zones", "order": 0, "rank": 1,
   "title": "Arm shape", "line": "", "generated": false,
-  "members": ["arm_length", "width", "thickness"],
+  "members": ["arm_length", "width", "thickness"], "count": 3,
+  "moved": ["arm_length", "width", "thickness"],
   "ground": { "chosen": 3, "input": 0, "assumption": 0 },
-  "assumptions": ["C6"], "claims": ["C4"] }
-{ "id": "station:@slenderness", "kind": "station", "key": "@slenderness",
-  "lane": "stations", "order": 1, "column": 1, "title": "slenderness", "line": "",
-  "generated": true, "members": ["slenderness"], "value_text": "8.571",
-  "claims": ["C1", "C2"] }
+  "sources": { "chosen": 3, "datasheet": 0, "estimate": 0, "assumption": 0 },
+  "assumptions": [], "estimate": [], "idle": false,
+  "feeds": ["station:section", "station:@slenderness"], "taps": ["C3", "C4"],
+  "claims": ["C1", "C2", "C3", "C4"] }
+{ "id": "station:section", "kind": "station", "key": "section", "lane": "stations",
+  "order": 1, "layer": 0, "column": 1, "rank": 1, "depth": 0, "title": "Arm section",
+  "line": "...", "generated": false, "members": ["area", "inertia", "section_mod"],
+  "head": "area", "value_text": "210 mm^2", "fed_by": ["zone:arm"],
+  "claims": ["C1", "C2", "C4"], "stop_kinds": { "C1": "upstream", "C2": "upstream" } }
 { "id": "board:strength", "kind": "board", "key": "strength", "lane": "boards",
   "order": 0, "title": "Holds the pump", "line": "...", "generated": false,
   "token": "failing", "word": "failing", "errored": false, "marks": [],
@@ -772,33 +852,67 @@ Nodes, each with every key of its kind, `id` `<kind>:<key>`:
   "order": 0, "row": 0, "severity": 0, "title": "<statement>",
   "claim_kind": "measurable", "critical": true, "token": "failing", "word": "failing",
   "errored": false, "marks": [],
-  "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit" }
+  "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit",
+  "amber": null }                                // or { "state", "word", "enters" }
 ```
 
 - A claim's `token` is `graph.tokens`' (`claims.STATUS_KEY` of its composition,
   `errored` for a crash); a requirement's is `graph.tokens`'; a board's is
   `claims.worst_of` over its claims (Gap with none). `word` is `report.words`' for the
-  token. `marks` are shown beside the status and never change it: `disagree` today
-  (the claim's status and its evidence disagree), `amber` from phase 3b. A board or a
-  requirement carries `disagree` when a member does.
-- `order`, `row` (within the board), `column` (an index: greedy interval packing over
-  the rows its lines span) and `severity` (the token's index in `SEVERITY_ORDER`, for
-  the optional "failing first" toggle) come from structure only. A status flip moves
-  none of them.
+  token. `marks` are shown beside the status and never change it: `disagree` (the
+  claim's status and its evidence disagree) and `amber` (architecture phase 3b: a
+  Checked pass that a ±10% move of an unconfirmed assumption's choice flips). A board
+  or a requirement carries a mark when a member does. A claim's `amber` is its live
+  amber state (`untraced`, `not-current`, `flips`, `unclear` or `holds`), its word,
+  and `enters`: the first stop of its line holding a value a flipping choice moves
+  (null: the whole line). `page.status_problems` names a mark or a state that is not
+  the live one, and a feed whose `estimate` is not.
+- `order`, `row` (within the board), `rank`, `layer`, `column` and `severity` (the
+  token's index in `SEVERITY_ORDER`, for the optional "failing first" toggle) come from
+  structure only. A status flip moves none of them.
 - **The layout** (`page.layout`): boards by `(order, id)`, rows in each board's
   `members` order, a claim on a second board drawn on the first, then the generated
   board `other` (every claim on no board, natural order, a removed claim's fail
-  included), titled "Other" beside board records and "Claims" with none. Zones by
-  `(order, id)`, then the generated zone `other` of the choices no zone holds that a
-  line touches or an assumption sources, in `Config` order ("Other choices", or
-  "Choices"); no zones with no model. Stations: the records, then `station:@<name>`
-  for each derived value no record holds that the settling evaluators of two or more
-  claims read by a named path (a whole read, `[]` or `["config"]`, never makes one;
-  past `page.IMPLICIT_STATIONS_WARN` the build warns). A line stops at its
-  requirements, every zone holding a value it reads, every station holding one, then
-  its claim. `values` are the names its settling evaluators read by a named path,
-  closed upward over `derives` (`graph.upward`): with no trace, the direct reads.
-  `reads_all` is `values` when an evaluator read `[]`, `choices` for `["config"]`.
+  included), titled "Other" beside board records and "Claims" with none. Every zone
+  record by `(order, id)`, then the generated zone `other` of the choices no zone holds
+  that a line reads, that feed a station or that an assumption sources, in `Config`
+  order ("Other choices", or "Choices"); no zones with no model. `count` is its
+  members, `moved` those the trace moved, `sources` its members by source (`page.SOURCES`:
+  an assumption claim sources it; an input of a published or measured kind; any other
+  input; a loser its records name (`chosen`); none of these, `unrecorded` —
+  `page.SOURCE_OF_KIND`), `estimate` the unconfirmed assumptions sourcing its members,
+  `idle` true when it feeds no station, taps no line, and the trace measured every
+  member (moved both ways, no raise), and `unmeasured` the members it did not measure
+  when it feeds and taps nothing (every member, untraced): such a box is not faded and
+  says `words.trace.zone_unmeasured` (review of phase 3b: an untraced map called six
+  zones the claims ride unused).
+  Stations: the records, then `station:@<name>` for each derived value no record holds
+  that the settling evaluators of two or more claims read by a named path (a whole
+  read never makes one; past `page.IMPLICIT_STATIONS_WARN` the build warns). `head` is
+  the member most lines read that is a finite number (else the most read), and its
+  `value_text` carries units — its param's, or those a served verdict whose evaluator
+  read it reported it in as its measured value or limit — or is empty: a station never
+  shows a bare number. A value's `units` follow the same rule.
+- **The trace's structure.** A feed joins zone Z to station S when a choice of Z moves
+  a member of S directly (`graph.direct_derives`: no value the trace puts before it is
+  moved by the same choice). A line's `values` are what its settling evaluators read
+  by a named path, direct; it stops at the stations holding them (`read`) and at those
+  holding a value the trace puts before them (`upstream`, `graph.upstream`) and that
+  sit before its last read stop, ordered by layer, column and station order, then at
+  its claim. An assumption's `sets` are the stations its sourced choices move directly,
+  and a physical claim's the stations of the assumptions it `resolves`; `unseen` is
+  true for a line that joins nothing and reads a value in `trace.unmoved`. Its `taps` are the zones of
+  the choices it reads directly, and of the choices that move a derived value it reads
+  that no station holds; `fed_by` the zones of its taps and of the feeds into its
+  stops; `serves` its requirements. A station's `depth` is the upper median of the
+  `graph.depths` of the members its lines read (of every moved member when none is
+  read; null when the trace moved none), its `layer` the dense rank of the depths (a
+  null depth last), its `column` the interval packing within its layer. `rank` is one
+  barycentre pass against the claims' rows: zones by the mean row of what they feed and
+  tap, the stations of a layer by the mean row of their lines, requirements by their
+  claims' — ties in record order. **Untraced**, the layer is phase 5's column, every
+  `column` 0, no stop is `upstream`, there are no feeds, and `trace.notice` says the
+  links are not measured yet.
 
 ## `page.json`
 
@@ -830,7 +944,16 @@ The outline's data (SPEC 28, 30), baked by `page.bake_page` and `page.bake_prose
             "text": "..." } ], "prose": <prose> | null },
   "words": { "tokens": { "failing": { "word", "term", "hint" } }, "lanes": {...},
              "kinds": {...}, "by": {...}, "basis": {...}, "outcome": {...},
-             "headings": {...}, "notices": {...}, "ready": {...} },
+             "headings": {...}, "notices": {...}, "ready": {...},
+             "trace": { "notice_traced", "notice_traced_no_round", "notice_untraced",
+                        "running", "skipped", "skipped_one", "caption", "amber_legend",
+                        "amber_flips", "amber_holds", "amber_unclear",
+                        "amber_not_current", "amber_untraced", "amber_item", "rides",
+                        "fed_by", "upstream_stop", "upstream_rides", "unseen_line",
+                        "sets", "settles", "unmoved", "unmoved_one", "zones_summary",
+                        "zone_idle", "zone_unmeasured", "feeds_key",
+                        "sources": { "chosen", "datasheet", "estimate", "assumption",
+                        "unrecorded" } } },
   "problems": [ "site/content/foo.md names no board: ..." ],
   "self": "<page.seal>"
 }
@@ -858,7 +981,11 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
                                     "href": "assets/evidence/…/deflection.json",
                                     "missing": "" } ] } ],
   "physical": null, "rests_on": ["C6"], "resolves": [], "resolved_by": [],
-  "settle": { "text": "...", "commands": ["nopekit why C1", "nopekit check"] } }
+  "settle": { "text": "...", "commands": ["nopekit why C1", "nopekit check"] },
+  "amber": null }   // architecture phase 3b, a Checked claim resting on an unconfirmed
+                    // assumption: { "state": "flips", "word": "...", "items": [
+                    //   { "assumption": "C6", "choice": "load_n", "sign": "+",
+                    //     "evaluator": "bracket.bearing", "text": "..." } ] }
 ```
 
 A step group (one per milestone, natural order; `project` with no milestone, over the
@@ -1015,7 +1142,8 @@ verdict rows carry `evidence_assets`, aligned with `evidence`.
   "id": "<16 hex: a seal over state.json, map.json, page.json, views/*.json>",
   "ok": true, "error": "",
   "verdicts": { "bracket.deflection": { "when": "...", "age_s": 412.0, "aged": false } },
-  "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] } }
+  "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] },
+  "tracing": false }   // architecture phase 3b: a trace holds its lock now
 ```
 
 `data/build.json` is the clock (SPEC 32), ignored through `site/.gitignore` (`site

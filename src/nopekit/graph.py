@@ -15,6 +15,9 @@ serves         claim -> requirement                ``Claim.requirements``
 settles        evaluator -> claim                  ``claims.effective_gates`` (coverage)
 reads          evaluator -> value                  the served entry's ``reads["params"]``
 derives        value -> value (choice -> derived)  the trace (phase 3b); none without one
+after          value -> value (derived -> derived)  the trace, inferred: Y before X when every
+                                                   choice that moves Y (two at least) moves X,
+                                                   and X moves under more
 sources        input or assumption -> value        ``artifacts.value_grounding``
 rests_on       claim -> assumption claim           computed: reads, closed over derives
 resolves       physical claim -> assumption        ``Claim.resolves``
@@ -45,7 +48,10 @@ machine and every Python (`test_graph.TheGraphIsDeterministic`).
 **The trace slots in.** `derives` edges come from phase 3b's trace (`Trace`),
 and `rests_on` already closes a read value upward over them; with no trace the
 graph says so (`trace: null`, `derives: {}`) and each `rests_on` edge is a
-direct read. What slipped through before this module: no record linked C1's
+direct read. A trace is handed in only when its key is the current design's
+(`derivation.trace_for`). `after` edges order derived values for drawing (the
+map's station layers, `why`'s "after:"), as the trace infers it; they are
+never an edge of meaning: `rests_on` closes over `derives` alone. What slipped through before this module: no record linked C1's
 pass to the assumption its load came from, so an assumption nobody confirmed
 sat under a Checked claim with nothing on any channel saying so.
 
@@ -66,7 +72,7 @@ from .util import seal
 
 #: The graph's schema, in `to_dict` and the round record. Bumped only when a
 #: node's attrs or an edge type change meaning; a reader of a newer one says so.
-SCHEMA = 1
+SCHEMA = 2
 
 #: Node kinds, in the order nodes sort (the map's columns run requirement ->
 #: claim -> evaluator -> value; the rest follow).
@@ -74,8 +80,9 @@ NODE_KINDS: tuple[str, ...] = ("requirement", "claim", "evaluator", "value", "in
                                "input", "milestone", "decision")
 
 #: Edge types, in the order edges sort (SPEC 19's nine, plus `serves` and
-#: `decides`, which the records already hold).
-EDGE_TYPES: tuple[str, ...] = ("serves", "settles", "reads", "derives", "sources",
+#: `decides`, which the records already hold, and `after`, the order the trace
+#: infers between derived values — architecture phase 3b, schema 2).
+EDGE_TYPES: tuple[str, ...] = ("serves", "settles", "reads", "derives", "after", "sources",
                                "rests_on", "resolves", "contradicts", "needs", "requires",
                                "decides")
 
@@ -104,12 +111,18 @@ class Edge(NamedTuple):
 
 
 class Trace(Protocol):
-    """What phase 3b's trace hands the graph: ``key``, the instructions' digest
-    it was observed under, and ``derives``, ``(choice name, derived name)``
-    pairs — which derived values move when a choice moves."""
+    """What phase 3b's trace hands the graph (`derivation.TraceFile`): ``key``,
+    the digest of the instructions and choices it was observed under;
+    ``round``, the round that traced it (or None); ``derives``, ``(choice
+    name, derived name)`` pairs — which derived values move when a choice
+    moves; and ``after``, ``(earlier, later)`` pairs of derived values, the
+    order it infers. ``round`` and ``after`` are read with ``getattr``: a
+    trace without them draws derives edges alone."""
 
     key: str
+    round: int | None
     derives: Iterable[tuple[str, str]]
+    after: Iterable[tuple[str, str]]
 
 
 def node_id(kind: str, key: str) -> str:
@@ -141,6 +154,7 @@ class Graph:
     edges: tuple
     trace: str | None = None
     instructions: str | None = None
+    trace_round: int | None = None
 
     def __post_init__(self) -> None:
         by_id = {n.id: n for n in self.nodes}
@@ -188,6 +202,14 @@ class Graph:
         """The assumption claim ids claim ``cid`` rests on."""
         return tuple(_split(t)[1] for t in self.out(node_id("claim", cid), "rests_on"))
 
+    def moves(self, choice: str) -> tuple[str, ...]:
+        """The derived values the trace saw ``choice`` move, node order."""
+        return tuple(_split(t)[1] for t in self.out(node_id("value", choice), "derives"))
+
+    def moved_by(self, name: str) -> tuple[str, ...]:
+        """The choices the trace saw move value ``name``, node order."""
+        return tuple(_split(s)[1] for s in self.into(node_id("value", name), "derives"))
+
     def via(self, cid: str, aid: str) -> tuple[tuple[str, str, str], ...]:
         """Why ``cid`` rests on ``aid``: ``(evaluator, value read, value sourced)``
         triples, sorted — the read value, and the value the assumption sources
@@ -205,11 +227,14 @@ class Graph:
     def to_dict(self) -> dict:
         """``{"schema", "trace", "instructions", "nodes": {id: attrs},
         "edges": {type: {source: [targets]}}}`` — every edge type present, ``{}``
-        when empty, so one edge is one line of an indented diff."""
+        when empty, so one edge is one line of an indented diff. ``trace`` is
+        ``null`` untraced, else ``{"key", "round"}``: the derives and after
+        edges sit inline with the rest (schema 2)."""
         edges: dict[str, dict[str, list[str]]] = {t: {} for t in EDGE_TYPES}
         for edge in self.edges:
             edges[edge.type].setdefault(edge.source, []).append(edge.target)
-        return {"schema": SCHEMA, "trace": self.trace, "instructions": self.instructions,
+        trace = None if self.trace is None else {"key": self.trace, "round": self.trace_round}
+        return {"schema": SCHEMA, "trace": trace, "instructions": self.instructions,
                 "nodes": {n.id: dict(n.attrs) for n in self.nodes}, "edges": edges}
 
 
@@ -231,6 +256,78 @@ def upward(graph: Graph, value: str) -> list[str]:
 
 #: The private name phase 3a's callers use.
 _upward = upward
+
+
+# --------------------------------------------------------------------------- #
+# the trace's order, read off the edges (architecture phase 3b)
+# --------------------------------------------------------------------------- #
+def upstream(graph: Graph, nid: str) -> list[str]:
+    """The values before value ``nid`` over ``after`` edges, transitively,
+    nearest first (then natural order) — node ids. Inferred from the trace:
+    an order, never a dependence."""
+    seen: list[str] = []
+    frontier = [nid]
+    while frontier:
+        nxt: list[str] = []
+        for here in frontier:
+            for up in graph.into(here, "after"):
+                if up not in seen and up != nid:
+                    seen.append(up)
+                    nxt.append(up)
+        frontier = sorted(set(nxt), key=_node_order)
+    return seen
+
+
+def direct_derives(graph: Graph) -> set[tuple[str, str]]:
+    """``(choice, value)`` names of the ``derives`` edges no earlier value
+    explains: ``(c, v)`` is direct when no value ``u`` with an ``after`` path
+    to ``v`` is moved by ``c`` too — the feeds the map draws, so a choice that
+    moves a whole chain feeds its first station, not every one."""
+    out: set[tuple[str, str]] = set()
+    for edge in graph.edges:
+        if edge.type != "derives":
+            continue
+        ups = upstream(graph, edge.target)
+        if not any(edge.source in graph.into(u, "derives") for u in ups):
+            out.add((_split(edge.source)[1], _split(edge.target)[1]))
+    return out
+
+
+def depths(graph: Graph) -> dict[str, int]:
+    """``{derived name: depth}`` — the longest ``after`` path from a value
+    nothing comes before, for every value a derives or after edge names. Equal
+    for values the trace ties (they have the same predecessors)."""
+    names: set[str] = set()
+    for edge in graph.edges:
+        if edge.type == "derives":
+            names.add(edge.target)
+        elif edge.type == "after":
+            names.update((edge.source, edge.target))
+    memo: dict[str, int] = {}
+
+    def depth(nid: str, trail: frozenset) -> int:
+        if nid in memo:
+            return memo[nid]
+        preds = [p for p in graph.into(nid, "after") if p not in trail]
+        found = 0 if not preds else 1 + max(depth(p, trail | {nid}) for p in preds)
+        memo[nid] = found
+        return found
+
+    return {_split(n)[1]: depth(n, frozenset()) for n in sorted(names, key=_node_order)}
+
+
+def ties_of(graph: Graph) -> list[tuple[str, ...]]:
+    """The groups of derived values the same choices move (two or more
+    members): the trace cannot order them. Natural order."""
+    movers: dict[str, frozenset] = {}
+    for edge in graph.edges:
+        if edge.type == "derives":
+            movers[edge.target] = movers.get(edge.target, frozenset()) | {edge.source}
+    groups: dict[frozenset, list[str]] = {}
+    for nid, found in movers.items():
+        groups.setdefault(found, []).append(_split(nid)[1])
+    return sorted((tuple(sorted(g, key=_natural)) for g in groups.values() if len(g) >= 2),
+                  key=lambda t: _natural(t[0]))
 
 
 # --------------------------------------------------------------------------- #
@@ -436,14 +533,20 @@ def build(view: Any, resolution: Any, registry: Any, *, projection: Any, design:
     # -- value names, from every source that names one -------------------- #
     reads = served_reads(resolution, registry)
     sources = value_sources(view, views)
-    derives = sorted({(str(a), str(b)) for a, b in (getattr(trace, "derives", None) or ())})
+    derives = sorted({(str(a), str(b)) for a, b in (getattr(trace, "derives", None) or ())
+                      if str(a) != str(b)})
+    after = sorted({(str(a), str(b)) for a, b in (getattr(trace, "after", None) or ())
+                    if str(a) != str(b)})
     named: set[str] = set(config)
     for paths in reads.values():
         for path in paths:
             named.update(value_names(path, choices, top_derived))
     named.update(sources)
-    for a, b in derives:
+    for a, b in derives + after:
         named.update((a, b))
+    # A value the trace compared and saw no move change is a node too, so
+    # `why` can say "not seen to move" of it — never that it is independent.
+    named.update(str(n) for n in (getattr(trace, "unmoved", None) or ()))
     named.update(v.name for v in views)
     for decision in getattr(view, "decisions", None) or ():
         named.update(str(n) for n in decision.params_changed or ())
@@ -479,6 +582,8 @@ def build(view: Any, resolution: Any, registry: Any, *, projection: Any, design:
                 edge("reads", node_id("evaluator", gid), node_id("value", name))
     for a, b in derives:
         edge("derives", node_id("value", a), node_id("value", b))
+    for a, b in after:
+        edge("after", node_id("value", a), node_id("value", b))
     for name, found in sources.items():
         for source in found:
             edge("sources", source, node_id("value", name))
@@ -530,10 +635,13 @@ def build(view: Any, resolution: Any, registry: Any, *, projection: Any, design:
                         and kinds.get(aid) == ClaimKind.ASSUMPTION:
                     edges.add(Edge("rests_on", cid, source))
 
+    traced_round = getattr(trace, "round", None) if trace is not None else None
     return Graph(ordered_nodes, tuple(_sorted_edges(edges)),
                  trace=(str(getattr(trace, "key", "") or "") or None) if trace is not None
                  else None,
-                 instructions=seal(code) if code else None)
+                 instructions=seal(code) if code else None,
+                 trace_round=traced_round if isinstance(traced_round, int)
+                 and not isinstance(traced_round, bool) else None)
 
 
 def _sorted_edges(edges: Iterable[Edge]) -> list[Edge]:
@@ -630,5 +738,5 @@ __all__ = [
     "SCHEMA", "NODE_KINDS", "EDGE_TYPES", "VALUE_ROLES",
     "Node", "Edge", "Trace", "Graph", "Tokens",
     "node_id", "value_names", "derived_names", "served_reads", "value_sources", "observe",
-    "build", "tokens", "of", "upward",
+    "build", "tokens", "of", "upward", "upstream", "direct_derives", "depths", "ties_of",
 ]

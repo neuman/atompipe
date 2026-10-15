@@ -59,6 +59,7 @@ export function claimBlocks(row, page, { onClaim } = {}) {
           el("h4", { text: "Evaluators" }),
           el("ul", { class: "cb-evals" }, ...row.evaluators.map((ev) => evaluatorItem(ev, words))))
       : null,
+    row.amber ? amberBlock(row.amber) : null,
     row.physical ? physicalBlock(row.physical) : null,
     (row.rests_on || []).length
       ? el("p", { class: "cb-rel" }, el("span", { class: "muted", text: "Rests on: " }),
@@ -100,6 +101,20 @@ function evaluatorItem(ev, words) {
             ? el("a", { class: "mono", href: item.href, target: "_blank", rel: "noopener", text: item.name })
             : el("span", { class: "mono", text: item.name }),
           item.missing ? el("span", { class: "muted", text: ` ${item.missing}` }) : null)))
+      : null);
+}
+
+/** Amber (architecture phase 3b): the bake's word for what a ±10% move of
+ *  an unconfirmed assumption's choice did to this pass, and each run that
+ *  flipped it. Shown beside the status; it changes none. */
+function amberBlock(amber) {
+  const flips = amber.state === "flips";
+  return el("div", { class: `cb-block cb-amber${flips ? " flips" : ""}` },
+    el("h4", { text: "If an assumption is wrong" }),
+    amber.word ? el("p", { text: amber.word }) : null,
+    (amber.items || []).length
+      ? el("ul", { class: "cb-values" }, ...amber.items.map((item) => el("li", {},
+          el("span", { class: "cb-value", text: item.text || "" }))))
       : null);
 }
 
@@ -237,19 +252,59 @@ export function createDrawer(page, map, { onChange } = {}) {
         el("h4", { text: "Claims" }), claimList(node.claims)];
     }
     if (kind === "zone") {
+      const out = (mapDoc.feeds || []).filter((f) => f.zone === node.id);
+      const taps = (mapDoc.lines || []).flatMap((l) => (l.taps || [])
+        .filter((t) => t.zone === node.id).map((t) => ({ claim: l.claim, choices: t.choices || [] })));
       return [...head,
+        out.length || taps.length ? el("h4", { text: "Feeds" }) : null,
+        out.length || taps.length
+          ? el("ul", { class: "dr-feeds" },
+              ...out.map((f) => {
+                const to = (mapDoc.nodes || []).find((n) => n.id === f.to) || {};
+                return el("li", {},
+                  el("button", { class: "linkish", type: "button", text: to.title || to.key || f.to,
+                    onclick: () => open("station", to.key) }),
+                  el("span", { class: "muted small", text: ` ← ${(f.choices || []).join(", ")}` }),
+                  (f.estimate || []).length
+                    ? el("span", { class: "dr-est small", text: ` ◆ ${f.estimate.join(", ")}` }) : null);
+              }),
+              ...taps.map((t) => el("li", {},
+                el("button", { class: "linkish mono", type: "button", text: t.claim,
+                  onclick: () => open("claim", t.claim) }),
+                el("span", { class: "muted small", text: ` reads ${t.choices.join(", ")}` }))))
+          : null,
+        node.idle && (words.trace || {}).zone_idle ? el("p", { class: "muted small", text: words.trace.zone_idle }) : null,
+        !node.idle && (node.unmeasured || []).length && (words.trace || {}).zone_unmeasured
+          ? el("p", { class: "muted small", text: `${words.trace.zone_unmeasured} ${node.unmeasured.join(", ")}` }) : null,
         el("h4", { text: "Choices" }), valueList(node.members),
         (node.assumptions || []).length
           ? el("div", {}, el("h4", { text: "Assumptions that set a choice here" }), claimList(node.assumptions))
           : null,
-        (node.claims || []).length ? el("h4", { text: "Claims whose line stops here" }) : null,
+        (node.claims || []).length ? el("h4", { text: "Claims fed from here" }) : null,
         (node.claims || []).length ? claimList(node.claims) : null];
     }
     if (kind === "station") {
+      const into = (mapDoc.feeds || []).filter((f) => f.to === node.id);
+      const upstream = Object.keys(node.stop_kinds || {}).filter((c) => node.stop_kinds[c] === "upstream");
       return [...head,
         el("h4", { text: "Values" }), valueList(node.members),
+        into.length ? el("h4", { text: "Moved by" }) : null,
+        into.length
+          ? el("ul", { class: "dr-feeds" }, ...into.map((f) => {
+              const zone = (mapDoc.nodes || []).find((n) => n.id === f.zone) || {};
+              return el("li", {},
+                el("button", { class: "linkish", type: "button", text: zone.title || zone.key || f.zone,
+                  onclick: () => open("zone", zone.key) }),
+                el("span", { class: "muted small", text: `: ${(f.choices || []).join(", ")}` }),
+                (f.estimate || []).length
+                  ? el("span", { class: "dr-est small", text: ` ◆ ${f.estimate.join(", ")}` }) : null);
+            }))
+          : null,
         (node.claims || []).length ? el("h4", { text: "Claims whose line stops here" }) : null,
-        (node.claims || []).length ? claimList(node.claims) : null];
+        (node.claims || []).length ? claimList(node.claims) : null,
+        upstream.length && (words.trace || {}).upstream_stop
+          ? el("p", { class: "muted small" }, `${upstream.join(", ")}: ${words.trace.upstream_stop}`)
+          : null];
     }
     return head;
   }

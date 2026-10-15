@@ -90,8 +90,7 @@ mechanism that would settle it, and the requirements it serves:
  "tags": ["stiffness"],
  "mechanism": {"by": "closed_form",
                "how": "Euler-Bernoulli tip deflection of the arm under the rated load",
-               "evaluators": ["bracket.deflection"]},
- "requirements": ["R1"]}
+               "evaluators": ["bracket.deflection"]}, "requirements": ["R1"]}
 ```
 
 | Kind | Settled by | `by` |
@@ -129,9 +128,10 @@ Change the design, run `nopekit check`, read the verdict lines. Tier 0 takes sec
   it, what it rests on, and what lost to it.
 - **Decisions keep their losers.** `nopekit decide` with each rejected alternative's
   `--type` and, where you can say it, `--returns-if`.
+- **The trace.** `round` starts `nopekit model trace` in the background; run it yourself
+  after a gate or acceptance edit, before your turn ends. Never edit `.nopekit/trace/`.
 - **Review.** Before anything is built, review the design along each live pack's lenses
-  (the `lenses.md` that `nopekit packs skills` prints) and let the findings move the
-  numbers.
+  (`nopekit packs skills` prints each `lenses.md`) and let the findings move the numbers.
 
 **What only the person does**, typed in their own shell — ask them, and give them the
 command; from your shell it records nothing that counts:
@@ -194,7 +194,10 @@ checked. A claim Skipped by a crash (its reason starts `errored:`, its tag is
 evaluator reads it with `ctx.acceptance("<id>")`. Move it in the claim, said why in its
 `rationale`, never in an evaluator's code. `acceptance condition not met` means the
 design misses the claim; `outside operating context` means the evaluator was not
-qualified where the design is — bring the input inside, or find one that is.
+qualified where the design is — bring the input inside, or find one that is. **Amber**
+on a Checked claim means "passes if the assumptions hold": a ±10% move of a choice an
+unconfirmed assumption sources flips it. It moves no status; the owner's `assume` or a
+physical claim that `resolves` the assumption clears it, never a number moved.
 
 **Never record a person's act**: a physical result, an owner, a judgment, a preference,
 going ahead. Never write or edit `results/`, `preferences/` or `exports/`; they are
@@ -205,7 +208,6 @@ known-good one (`selftest/known_good.py`, written before your first evaluator); 
 `nopekit gate selftest` shows both, its claim reads Gap.
 
 **Every claim names its mechanism**: `by`, `how` in words, and the evaluators you expect.
-
 **Prefer established, then sourced, then model-only** evaluators and proposers.
 
 **Never hand-edit a generated file**: `site/data/`, `.nopekit/ledger.json`,
@@ -241,11 +243,9 @@ nopekit export <milestone> --dry-run   # re-runs everything a spend requires
 nopekit why <name>              # one value's, claim's, requirement's or decision's history
 nopekit decide --title '...'    # a decision, with what LOST and why
 nopekit prefer <decision>       # the PERSON's: a preference against an alternative
-nopekit packs list              # every pack; * = live here
 nopekit packs skills            # the live packs' PACK.md, lenses and skills: read them
-nopekit model                   # the model as nopekit sees it
+nopekit model [trace]           # the model as nopekit sees it; trace: what each choice moves
 nopekit site serve --watch      # the live site, rebuilt as the project moves
-nopekit site stamp <board>      # after you read a board's text against the page; --all
 nopekit doctor                  # what is wrong, and what to do; writes nothing
 ```
 

@@ -430,6 +430,17 @@ the gate READS: a fitted range on an intermediate quantity it computes (a Raylei
 number from temperatures and a length) is a guard gate of its own, or a range on its
 inputs.
 
+## Amber runs your evaluators on moved designs
+
+`nopekit model trace` (architecture phase 3b) rebuilds the project's model with each
+choice an unconfirmed assumption sources moved -10% and +10%, and runs every covering
+evaluator on each moved design, to show a Checked pass the assumption's error would
+flip (amber). It runs in a temp copy of the project — `ctx.root` is the copy — through
+the check run's own rules (`verdicts.sweep` with nothing recorded, then the one
+composition), and it writes nothing in the project. An evaluator must therefore read
+through `ctx`: a path built from the project's location rather than `ctx.root`, or a
+file written beside the model, reads or writes the wrong tree. Amber changes no status.
+
 ## The surface a gate sees
 
 Everything a pack can set, read or call, in one place. `tests/test_contracts.py`

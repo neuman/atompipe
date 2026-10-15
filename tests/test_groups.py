@@ -48,7 +48,7 @@ class GroupsOnTheReaders(_env.EnvCase):
         root = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
         row = _doctor_row(root, "groups")
         self.assertEqual(row["status"], "ok", row)
-        self.assertIn("4 board(s), 4 zone(s), 1 station(s)", row["detail"])
+        self.assertIn("4 board(s), 4 zone(s), 2 station(s)", row["detail"])
         proc = _env.nopekit(["why", "strength"], cwd=root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("board strength: Holds the pump   (groups/strength.json)", proc.stdout)

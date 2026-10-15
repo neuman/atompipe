@@ -39,6 +39,11 @@ What a child gets, and why each line:
   ``PYTHONDONTWRITEBYTECODE`` stripped — a user's shell does not set it, and the
   fresh-clone transcript must see the ``__pycache__`` a real run writes.
 
+* ``NOPEKIT_TRACE_BACKGROUND=0`` (architecture phase 3b): `round` starts no
+  detached trace, so no test leaves a process running after it. It is set in
+  this process too, at import, for the in-process `cli.main` rows; a test that
+  wants the background start passes ``env={"NOPEKIT_TRACE_BACKGROUND": None}``.
+
 Anything in ``env=`` is applied last and wins, so a test that WANTS one of the
 stripped variables passes it explicitly; a value of ``None`` removes a key.
 
@@ -57,6 +62,11 @@ import sys
 import tempfile
 import unittest
 from typing import Any, Mapping, Sequence
+
+#: `derivation.BACKGROUND_ENV`, spelled here so this module imports nothing of
+#: nopekit's: "0" keeps `round` from starting a detached trace in any test.
+TRACE_BACKGROUND = "NOPEKIT_TRACE_BACKGROUND"
+os.environ.setdefault(TRACE_BACKGROUND, "0")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(REPO, "src")
@@ -123,6 +133,7 @@ def clean_env(*, home: str, identity: bool = False,
     env["PYTHONPATH"] = _pythonpath()
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env[TRACE_BACKGROUND] = "0"
     if identity:
         env.update(IDENTITY)
     for key, value in (extra or {}).items():

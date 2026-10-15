@@ -100,6 +100,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from . import claims as claim_logic
 from . import decisions as decision_logic
+from . import derivation as trace_logic
 from . import graph as graph_logic
 from . import modelio
 from . import page as page_logic
@@ -1716,15 +1717,18 @@ def _mixed_age(verdicts: Mapping[str, dict]) -> dict:
 
 def write_build_json(root: str, *, now: str, id: str, ok: bool = True, error: str = "",
                      live: bool = False, verdicts: Mapping[str, dict] | None = None,
-                     mixed_age: Mapping[str, Any] | None = None) -> str:
+                     mixed_age: Mapping[str, Any] | None = None,
+                     tracing: bool = False) -> str:
     """Write ``site/data/build.json`` (ignored, SPEC 32-33): the build time, the
     live flag the page polls by, an ``id`` over the tracked baked bytes (the
-    page reloads its data when it moves), ok and error, and each verdict's age.
-    Returns its site path."""
+    page reloads its data when it moves), ok and error, each verdict's age, and
+    ``tracing`` — a trace holds its lock now (architecture phase 3b), so the
+    live page can say its links are being measured. Returns its site path."""
     verdicts = dict(verdicts or {})
     doc = {"schema": 1, "built": now, "live": bool(live), "id": id, "ok": bool(ok),
            "error": str(error or ""), "verdicts": verdicts,
-           "mixed_age": dict(mixed_age) if mixed_age is not None else _mixed_age(verdicts)}
+           "mixed_age": dict(mixed_age) if mixed_age is not None else _mixed_age(verdicts),
+           "tracing": bool(tracing)}
     path = os.path.join(root, SITE_DIR, DATA_DIR, BUILD_NAME)
     ensure_dir(os.path.dirname(path))
     atomic_write_json(path, doc)
@@ -1856,6 +1860,7 @@ def build(
     params: Any = None,
     graph: Any = None,
     live: bool = False,
+    traced: Any = None,
 ) -> dict:
     """Run the viewgens, write ``site/data/`` and ``site/assets/``, return a summary.
 
@@ -1875,7 +1880,9 @@ def build(
     ``params`` as for :func:`state`; handed none, they are the view of the model
     the build already holds. ``graph`` is the caller's `graph.build` over the
     same resolution (`round` hands its own, so the map and the round record
-    share one graph); with none, `graph.of` builds it. ``live`` marks
+    share one graph); with none, `graph.of` builds it over the current
+    design's trace. ``traced`` is the caller's `derivation.TraceRead`; with
+    none, the build reads it (architecture phase 3b). ``live`` marks
     ``data/build.json`` live, so a page served by `site serve --watch` polls it.
 
     What it writes (architecture phase 5, SPEC 28-33), in this order: the
@@ -1960,16 +1967,26 @@ def build(
         params = _param_views(ledger, model, model_error, resolution, registry)
     view = verdict_logic.view(for_state, resolution)
     composed = _composed(view, registry, resolution)
+    # -- the trace and amber (architecture phase 3b), before `state.json`,
+    # which carries them inside its resolution digest ----------------------- #
+    tokens = graph_logic.tokens(view, resolution, registry, composed=composed)
+    if traced is None:
+        try:
+            traced = trace_logic.trace_for(root, model, projection,
+                                           trace_logic.anchors_for(root, resolution))
+        except (NopekitError, OSError, ValueError, TypeError):
+            traced = trace_logic.TraceRead("unrecorded", None, None, (), ())
+    built = graph if graph is not None else graph_logic.of(
+        root, view, resolution, registry, projection=projection, model=model, views=params,
+        bases={}, trace=traced.trace)
+    amber = trace_logic.amber_now(root, view, registry, built, tokens.claims, traced)
     payload = state(root, for_state, registry, resolution=resolution, params=params,
-                    judged=(view, composed))
+                    judged=(view, composed),
+                    trace=trace_logic.state_payload(traced, built, amber))
     stale = bool(payload["meta"]["stale"])
     stale_reason = str(payload["meta"]["stale_reason"])
 
     # -- the front page (page.py): the map, the outline, the floor ---------- #
-    tokens = graph_logic.tokens(view, resolution, registry, composed=composed)
-    built = graph if graph is not None else graph_logic.of(
-        root, view, resolution, registry, projection=projection, model=model, views=params,
-        bases={})
     lay = page_logic.layout(view, built, projection=projection, params=params,
                             registry=registry, resolution=resolution)
     warnings.extend(lay.warnings)
@@ -1983,11 +2000,14 @@ def build(
     map_doc = page_logic.bake_map(view, lay, built, tokens, composed, projection=projection,
                                   params=params, registry=registry, payload=payload,
                                   name=str(view.meta.name or ""), records_digest=records,
-                                  resolution_digest=judged)
+                                  resolution_digest=judged, amber=amber, trace=traced)
     page_doc = page_logic.bake_page(root, view, lay, built, tokens, composed,
                                     registry=registry, payload=payload, plan=plan,
-                                    records_digest=records, resolution_digest=judged)
-    problems_found = page_logic.status_problems(map_doc, page_doc, view, composed, tokens)
+                                    records_digest=records, resolution_digest=judged,
+                                    amber=amber)
+    problems_found = page_logic.status_problems(
+        map_doc, page_doc, view, composed, tokens, amber=amber,
+        feeds=page_logic.live_feeds(lay, built, tokens))
     if problems_found:
         raise NopekitError(
             f"the page would say more than the resolution, so nothing under "
@@ -2109,7 +2129,8 @@ def build(
 
     verdict_ages = ages(resolution, now)
     build_json = write_build_json(root, now=now, id=_baked_id(site), ok=True, live=live,
-                                  verdicts=verdict_ages)
+                                  verdicts=verdict_ages,
+                                  tracing=trace_logic.live_holder(root) is not None)
     stamps = [r["stamp"] for r in prose_rows if r["subject"] is not None]
     return {
         "root": root,
@@ -2140,7 +2161,10 @@ def build(
             "assets": len(ctx.written),
         },
         "map": {"lines": len(lay.lines), "boards": len(lay.boards), "zones": len(lay.zones),
-                "stations": len(lay.stations), "traced": built.trace is not None},
+                "stations": len(lay.stations), "traced": built.trace is not None,
+                "layers": len(lay.layers), "feeds": len(lay.feeds),
+                "round": getattr(built, "trace_round", None),
+                "crossings": dict(lay.crossings)},
         "prose": [{"file": r["file"], "subject": r["subject"], "stamp": r["stamp"],
                    "unmatched": r["unmatched"], "register": r["register"],
                    "problems": r["problems"]} for r in prose_rows],
@@ -2290,6 +2314,7 @@ def state(
     resolution: Any = None,
     params: Any = None,
     judged: tuple | None = None,
+    trace: Mapping[str, Any] | None = None,
 ) -> dict:
     """Everything the page shows, in one inspectable JSON-safe dict.
 
@@ -2628,6 +2653,11 @@ def state(
     # would judge the same (`resolution_digest`). Set last, over the finished
     # document, and by this function, so the build's digest and the reader's are
     # one computation over one producer's output and cannot drift apart.
+    # Architecture phase 3b: the trace's state and amber
+    # (`derivation.state_payload`), inside the resolution digest so an amber
+    # change makes the page stale; null and empty when the caller has none.
+    payload["trace"] = dict((trace or {}).get("trace") or {}) or None
+    payload["amber"] = dict((trace or {}).get("amber") or {})
     payload["meta"]["resolution_digest"] = resolution_digest(payload)
     return payload
 
