@@ -1144,6 +1144,8 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
     ("packs", "list"): "lists packs", ("packs", "show"): "prints a pack's guide",
     ("packs", "validate"): "checks a pack's layout and its own controls, not a claim",
     ("packs", "add"): "opts a project into a pack",
+    # Architecture phase 6 (SPEC 37).
+    ("packs", "skills"): "prints the live packs' PACK.md and skill files; reads no verdict",
     ("model",): "prints the model's projection",
     ("site", "serve"): "serves the files `site build` wrote; the page is held through "
                        "`site init` and `site build` above",

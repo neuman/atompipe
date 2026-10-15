@@ -790,6 +790,37 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         phase 5's rows, `_NON_SHIM_SITE_TEXT`)."""
         self._leaves_the_index_agreeing([argv for argv, _output in _NON_SHIM_SITE_TEXT])
 
+    def test_packs_skills_and_the_rounds_commit_leave_the_index_agreeing(self):
+        """The same, over `packs skills` and `round --commit` (architecture
+        phase 6's rows)."""
+        self._leaves_the_index_agreeing([argv for argv, _output in _NON_SHIM_PACK_SKILLS]
+                                        + [("round", "--commit")])
+
+    def test_the_stop_hook_leaves_the_index_agreeing(self):
+        """The Stop hook sets `_index_done`, so `main`'s rebuild is skipped and
+        the hook's own `_touch_index` is the only one: what slipped through the
+        phase, no row ran it, and deleting that line left every test green
+        while the hook — at every turn's end — left the index behind a hand
+        edit. Its stdout stays one JSON object."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        _env.nopekit(["status"], cwd=project)
+        # A model that does not load: the round's check is refused, so the
+        # check's own rebuild (`_check_run`'s) never runs and only the hook's
+        # can bring the index level. Then a model that loads, as usual.
+        model = os.path.join(project, "model", "bracket.py")
+        source = _read_bytes(model)
+        for n, broken in enumerate((True, False)):
+            with self.subTest(model_loads=not broken):
+                _write(model, b"this is not python(\n" if broken else source)
+                _hand_edit(project, n)
+                self.assertNotEqual(store.agree(project), [])
+                proc = _env.nopekit(["round", "--hook"], cwd=project, identity=True,
+                                    input=json.dumps({"cwd": project}))
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(len(proc.stdout.splitlines()), 1, proc.stdout)
+                self.assertIsInstance(json.loads(proc.stdout), dict)
+                self.assertEqual(store.agree(project), [])
+
     def _leaves_the_index_agreeing(self, commands: list) -> None:
         project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
         index = os.path.join(project, ".nopekit", "ledger.json")
@@ -1245,6 +1276,69 @@ class LegacyLedgerMigrates(_env.EnvCase):
 # --------------------------------------------------------------------------- #
 # the store's own writers on the new layout
 # --------------------------------------------------------------------------- #
+class PeopleAreRead(_env.EnvCase):
+    """Architecture phase 6 (SPEC §0.3): `.nopekit/project.json`'s `people`, each
+    `{name, email}` as git prints them — read strictly, absent as `[]`, and
+    written last, so a project.json an earlier phase wrote keeps its key order."""
+
+    def _project(self) -> tuple[str, str, dict]:
+        root = self.tmp()
+        store.init(root, ProjectMeta(name="people", created="2026-10-15T00:00:00Z"))
+        path = os.path.join(root, ".nopekit", "project.json")
+        return root, path, json.loads(_read_bytes(path))
+
+    def test_absent_reads_empty_and_a_round_trip_writes_it_last(self):
+        root, path, good = self._project()
+        good.pop("people")
+        _write(path, json.dumps(good))
+        self.assertEqual(store.read_project(root).people, [])
+        meta = store.read_project(root)
+        meta.people = [models.Person(name="Robin Okafor", email="robin@example.invalid")]
+        store.write_project(root, meta)
+        written = json.loads(_read_bytes(path))
+        self.assertEqual(list(written)[-1], "people")
+        self.assertEqual(written["people"], [{"name": "Robin Okafor",
+                                              "email": "robin@example.invalid"}])
+        self.assertEqual(store.read_project(root), meta)
+
+    def test_each_refusal_names_the_file_and_the_fix(self):
+        root, path, good = self._project()
+        rows = (
+            ("a string", "Robin <r@x>", "must be a list of objects"),
+            ("an entry not an object", ["Robin <r@x>"], "people[0] must be an object"),
+            ("a typo", [{"name": "Robin", "emial": "r@x"}],
+             'unknown key "emial" at people[0].emial (did you mean "email"?)'),
+            ("no email", [{"name": "Robin"}], 'people[0] has no "email"'),
+            ("no name", [{"email": "r@x"}], 'people[0] has no "name"'),
+            ("an empty name", [{"name": " ", "email": "r@x"}], "people[0].name must be"),
+            ("a name with an address", [{"name": "Robin <r@x>", "email": "r@x"}],
+             "people[0].name must be"),
+            ("a number for a name", [{"name": 7, "email": "r@x"}], "people[0].name must be"),
+            ("an email with a space", [{"name": "Robin", "email": "r @x"}],
+             "people[0].email must be"),
+            ("an email in brackets", [{"name": "Robin", "email": "<r@x>"}],
+             "people[0].email must be"),
+            ("the same email twice", [{"name": "Robin", "email": "r@x"},
+                                      {"name": "R. Okafor", "email": "R@X"}],
+             "people[1] repeats R@X (people[0])"),
+        )
+        for label, value, needle in rows:
+            with self.subTest(label):
+                data = dict(good, people=value)
+                _write(path, json.dumps(data))
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_project(root)
+                self._names(str(caught.exception), "project.json", needle)
+
+    def test_the_pure_check_reads_what_the_reader_would(self):
+        self.assertIsNone(store.people_problem(None, "p"))
+        self.assertIsNone(store.people_problem([], "p"))
+        self.assertIsNone(store.people_problem([{"name": "A", "email": "a@x"}], "p"))
+        self.assertIn('"people" must be a list', store.people_problem("A <a@x>", "p"))
+
+    _names = StrictReader._names
+
+
 class InitIsTheNewLayout(_env.EnvCase):
     def test_init_writes_the_layout_and_never_a_ledger(self):
         root = self.tmp()
@@ -1634,6 +1728,16 @@ _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
 #: line and one block, by test_site_truth's and test_groups' rows of their own.
 _NON_SHIM_SITE_TEXT: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("site", "stamp", "--all"), True), (("site", "badge"), True),
+)
+
+#: Architecture phase 6's reader, `packs skills` (it prints PACK.md, lenses and
+#: skill files, and writes nothing), swept by tests of its own in each class, as
+#: phase 5's rows are; the round's `--commit` and `--hook`, which write what
+#: `round` writes, have rows of their own beside `round`'s. What slipped through
+#: the phase: the command shipped with no row, so a `packs skills` that wrote
+#: under the project would have left every "every command" sweep green.
+_NON_SHIM_PACK_SKILLS: tuple[tuple[tuple[str, ...], bool], ...] = (
+    (("packs", "skills"), False), (("packs", "skills", "--json"), False),
 )
 
 #: The exit codes each command may end with while doing its work: 1 is a
@@ -2044,6 +2148,47 @@ class NoCommandWritesARecord(_env.EnvCase):
         project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
         self._no_record_written(project, legacy=False, watched=True, rows=_NON_SHIM_SITE_TEXT)
 
+    def test_packs_skills_writes_no_record(self):
+        """`packs skills` on a migrated project, watched as every other command
+        is (architecture phase 6's rows)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self._no_record_written(project, legacy=False, watched=True,
+                                rows=_NON_SHIM_PACK_SKILLS)
+
+    def test_the_rounds_commit_writes_what_round_writes(self):
+        """`round --commit` and the Stop hook's `round --hook`, watched in a
+        repository whose identity `people` lists, so each commits: no record,
+        the round record at most once, and nothing git would track beyond what
+        `round` writes (invariant 8, architecture phase 6)."""
+        repo = self.tmp()
+        project = _migrated_bracket(os.path.join(repo, "proj"))
+        path = os.path.join(project, ".nopekit", "project.json")
+        data = json.loads(_read_bytes(path))
+        data["people"] = [{"name": _env.IDENTITY["GIT_AUTHOR_NAME"],
+                           "email": _env.IDENTITY["GIT_AUTHOR_EMAIL"]}]
+        _write(path, json.dumps(data, indent=2) + "\n")
+        for argv in (["-c", "init.defaultBranch=main", "init", "-q"], ["add", "-A"],
+                     ["commit", "-q", "-m", "base"]):
+            self.assertEqual(_env.git(argv, cwd=repo, identity=True).returncode, 0, argv)
+        for n, argv in enumerate((("round", "--commit"), ("round", "--hook"))):
+            with self.subTest(argv=argv):
+                claim = os.path.join(project, "claims", "C1.json")
+                data = json.loads(_read_bytes(claim))
+                data["rationale"] = f"edited by hand before round {n}"
+                _write(claim, json.dumps(data, indent=3))
+                head = _env.git(["rev-parse", "HEAD"], cwd=repo).stdout
+                before = _records(project)
+                previous = (_round_stamp(project) or (None,))[0]
+                run = _watched(self, project, *argv)
+                self._assert_worked(argv, run.proc, (0,))
+                self.assertIn("Committed ", run.proc.stdout)
+                self.assertNotEqual(_env.git(["rev-parse", "HEAD"], cwd=repo).stdout, head,
+                                    "no commit: the row would be vacuous")
+                self.assertEqual(_touched_records(before, _records(project)), [],
+                                 f"`nopekit {' '.join(argv)}` wrote a record")
+                after = round_record_after(project, previous)
+                self.assertEqual(_unexplained(self, run, round_record=after), [])
+
     def test_the_phase_2_writers_write_their_one_record(self):
         """(architecture phase 2) `prefer` from a pipe writes nothing; `decide`
         with typed rejections, `propose` and `ingest --proposer` each write the
@@ -2081,7 +2226,7 @@ class NoCommandWritesARecord(_env.EnvCase):
         it, as it was."""
         project = _legacy_bracket(os.path.join(self.tmp(), "legacy"))
         self._no_record_written(project, legacy=True, watched=False,
-                                rows=_NON_SHIM + _NON_SHIM_SITE_TEXT)
+                                rows=_NON_SHIM + _NON_SHIM_SITE_TEXT + _NON_SHIM_PACK_SKILLS)
 
     # -- check -------------------------------------------------------------- #
     def test_check_writes_only_ignored_paths_and_new_entries(self):

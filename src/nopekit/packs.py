@@ -94,6 +94,10 @@ __all__ = [
     "find_proposer",
     "proposer_basis",
     "proposer_problems",
+    # architecture phase 6 (SPEC 37): a pack's skills, read, never installed
+    "SKILLS_DIR",
+    "SKILL_NAME",
+    "skill_files",
 ]
 
 
@@ -110,6 +114,13 @@ GENERATORS_DIR = "generators"
 #: by the spine and never registered as an evaluator: a proposal settles nothing.
 PROPOSERS_DIR = "proposers"
 SELFTEST_DIR = "selftest"
+#: A pack's skills (SPEC 37): ``skills/<name>/SKILL.md``, one per task the
+#: domain needs. READ by the agent (`nopekit packs skills` prints the live
+#: packs'), never installed as Claude Code skills: an installed skill would be
+#: there in every project on the machine, live pack or not, and a second copy
+#: of the pack's guidance that its PACK.md cannot see.
+SKILLS_DIR = "skills"
+SKILL_NAME = "SKILL.md"
 BASELINE_NAME = "baseline.json"
 """A plausible-good projection every gate in the pack passes, so its negative
 controls can actually be exercised. See docs/PACK_FORMAT.md."""
@@ -502,6 +513,28 @@ def pack_doc(name: str, root: str | None = None) -> str:
     if not os.path.isfile(path):
         raise NopekitError(f"pack {name!r} has no {DOC_NAME} (expected at {path})")
     return _read_text(path, f"pack {name!r} {DOC_NAME}")
+
+
+def _natural_key(text: str) -> list:
+    return [int(part) if part.isdigit() else part.lower()
+            for part in re.split(r"(\d+)", text)]
+
+
+def skill_files(pack_dir: str) -> list[tuple[str, str]]:
+    """``[(name, path)]`` for each ``skills/<name>/SKILL.md`` the pack holds, in
+    natural order of ``<name>``; ``[]`` with no ``skills/``. A ``skills/<name>/``
+    without a SKILL.md is not listed here (`validate` names it)."""
+    base = os.path.join(pack_dir, SKILLS_DIR)
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return []
+    out = []
+    for name in sorted(names, key=_natural_key):
+        path = os.path.join(base, name, SKILL_NAME)
+        if not name.startswith(".") and os.path.isfile(path):
+            out.append((name, path))
+    return out
 
 
 def references(name: str, root: str | None = None) -> list[str]:
@@ -1131,6 +1164,19 @@ def validate(pack_dir: str, *, tier: int = Tier.BUILD,
                 f"{DOC_NAME} never says what this pack CANNOT settle — that section prevents "
                 f"more damage than the gate list, because it names what a reader will otherwise assume"
             )
+
+    # -- the pack's skills (architecture phase 6, SPEC 37) ---------------- #
+    skills_base = os.path.join(pack_dir, SKILLS_DIR)
+    if os.path.isdir(skills_base):
+        for entry in sorted(os.listdir(skills_base), key=_natural_key):
+            if entry.startswith("."):
+                continue
+            if os.path.isdir(os.path.join(skills_base, entry)) and not os.path.isfile(
+                    os.path.join(skills_base, entry, SKILL_NAME)):
+                problems.append(
+                    f"{SKILLS_DIR}/{entry}/ holds no {SKILL_NAME} — `nopekit packs skills` "
+                    f"prints each skills/<name>/{SKILL_NAME}, and a directory without one "
+                    f"teaches the agent nothing")
 
     if not os.path.isfile(os.path.join(pack_dir, LENSES_NAME)):
         problems.append(

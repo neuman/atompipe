@@ -2272,6 +2272,14 @@ def clean_assets(root: str, keep: Iterable[str]) -> list:
 # --------------------------------------------------------------------------- #
 # the state the page reads
 # --------------------------------------------------------------------------- #
+
+#: `ProjectMeta` fields `state.json`'s `meta` never carries (architecture phase
+#: 6): `people` lists the names and email addresses a round may commit as, and a
+#: page deployed to Pages would publish them to anyone. *Rejected:* baking them
+#: (nothing on the page reads them; git's own history already names each
+#: commit's author to whoever can read the repository).
+_UNPUBLISHED_META = frozenset({"people"})
+
 def state(
     root: str,
     ledger: Ledger,
@@ -2529,7 +2537,11 @@ def state(
 
     payload = {
         "meta": {
-            **view.meta.to_dict(),
+            # Every ProjectMeta field but `people` (architecture phase 6): the
+            # page is published as committed, and the names and addresses a
+            # round may commit as are the project's, not the page's to publish.
+            **{key: value for key, value in view.meta.to_dict().items()
+               if key not in _UNPUBLISHED_META},
             "stale": everything or bool(stale_gates),
             "stale_reason": (_MARKED_STALE if everything
                              else _stale_reason(resolution, stale_gates)),

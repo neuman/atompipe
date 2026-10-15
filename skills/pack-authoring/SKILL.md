@@ -293,6 +293,14 @@ verdicts and provenance. But if your domain has geometry and you skip this, ever
 failure it finds stays a sentence about coordinates. Contract:
 `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md`.
 
+**Your pack on the site.** A pack's part of the site is its views (`provides_views`,
+the viewgens above) and the evidence its evaluators write: a file a verdict names as
+evidence is copied into the board posters (`site/assets/evidence/<gate>/…`), under the
+claim it settles. Write evidence a reader can open — a plot, a cross-section, a log
+with the number on its first line — into the gate's out directory. There is no other
+site partial format: the page's words, statuses and layout are the build's, never a
+pack's.
+
 ### 4c. Get the tag vocabulary right
 
 A gate's `claims` list is the set of vocabularies its result is relevant evidence
@@ -364,12 +372,23 @@ sentence that saves the next person a week.
 ### 7. Write `lenses.md`
 
 The angles an adversarial reviewer should attack this domain from, before anything is
-built. Specific and uncomfortable beats general and polite. Compare:
+built; `nopekit packs skills` prints it after PACK.md for the agent working in a project
+where your pack is live. Specific and uncomfortable beats general and polite. Compare:
 
 - *weak:* "consider manufacturability"
 - *strong:* "this part is a cantilever loaded at its tip — what is the free span,
   measured from the actual weld and not from the wish? And is the root block real
   material or a fillet you drew?"
+
+### 7b. Teach the agent: `skills/`
+
+What an agent needs to work in your domain beyond PACK.md — how to set up the solver's
+case, how to read its log, which settings to try first — goes in
+`skills/<name>/SKILL.md`, one skill per task the domain needs (`skills/meshing/`,
+`skills/reading-results/`). They are read, never installed as Claude Code skills:
+`nopekit packs skills` prints each live pack's PACK.md and then its skill files, and
+the nopekit skill tells the agent to read them before it works in a pack's domain.
+`pack validate` refuses a `skills/<name>/` directory with no SKILL.md in it.
 
 ### 8. `sourcing.md`, if the domain has real-world procurement
 

@@ -50,9 +50,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import dataclasses
 import difflib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -666,8 +668,11 @@ def _touch_index(root: str, *, quiet: bool = False) -> None:
 
 
 def _after(args: argparse.Namespace, *, quiet: bool = False) -> None:
-    """`_touch_index` for the project this command ran in, when it should run."""
-    if getattr(args, "command", None) in _INDEX_UNTOUCHED or getattr(args, "no_record", False):
+    """`_touch_index` for the project this command ran in, when it should run —
+    never twice: the Stop hook rebuilds it under its own redirect, so nothing
+    reaches stdout after its one JSON object (`_index_done`)."""
+    if getattr(args, "command", None) in _INDEX_UNTOUCHED or getattr(args, "no_record", False) \
+            or getattr(args, "_index_done", False):
         return
     try:
         root = store.find_root(getattr(args, "dir", None))
@@ -984,7 +989,8 @@ def _readme_bytes(root: str) -> bytes | None:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Create the records layout, and print the next three steps.
+    """Create the records layout, start a git repository when there is none, and
+    print the next four steps.
 
     Born migrated (checkpoint 1.3): `store.init` writes `.nopekit/project.json`
     LAST, the empty record directories, the input buckets, and the three marked
@@ -995,18 +1001,35 @@ def cmd_init(args: argparse.Namespace) -> int:
     (phase-1.md's V row: `init` then `status` prints no notice). The index is a
     command's output, never `init`'s (`_INDEX_UNTOUCHED`).
 
+    Architecture phase 6: `people` is git's configured identity, when one is set
+    (the person a round may commit as, SPEC §0.3), and a project that sits in no
+    repository gets one (`vcs.init_repo`, after `store.init`, so a refused init
+    starts none) — a first session must not stall on git, and every round
+    commits into it. Inside an existing repository nothing about git changes.
+    `--no-git` starts none.
+
     The last part is not decoration. `init` that prints "initialised." leaves a
-    new user staring at eight empty directories with no idea which one is theirs,
-    and the most common outcome is a project whose model gets written before any
-    evidence is gathered — which is how numbers arrive with no provenance and
-    stay that way. The three steps are printed in the order that produces a
-    project with grounds: ask for evidence, write the claims it supports, then
-    the model. The third names the file edit that records the model's entry — it
-    named `model --set-entry` until PLAN A-8 removed the flag, and
+    new user staring at empty directories with no idea which one is theirs. The
+    steps are decision 21's order, the skill's: interview the person and write
+    their requirements in their words, write the model, reach first light and
+    hand over the live site's URL, and only then write claims beside the first
+    verdicts — most claims cannot be stated precisely before a model exists.
+    The model step names the file edit that records the model's entry:
     `project.json` is the one home of the entry.
     """
     root = os.path.abspath(getattr(args, "dir", None) or os.getcwd())
     name = (args.name or os.path.basename(root.rstrip(os.sep)) or "project").strip()
+    os.makedirs(root, exist_ok=True)
+    # `git var` answers outside a repository too, so the identity is known
+    # before one exists.
+    person = rounds.person_of(vcs.ident(root))
+    # Listed only when the strict reader will read it back. What slipped
+    # through (review of phase 6): git accepts `user.email = "a b@x.org"`, init
+    # listed it, and every later command refused the project.json init wrote.
+    unlisted = (store.people_problem([{"name": person.name, "email": person.email}],
+                                     "git's identity") if person else None)
+    if unlisted:
+        person = None
     meta = ProjectMeta(
         name=name,
         summary=(args.summary or "").strip(),
@@ -1015,9 +1038,27 @@ def cmd_init(args: argparse.Namespace) -> int:
         model_entry=(args.model or "").strip(),
         packs=_collect(args.pack),
         spine_version=__version__,
+        people=[person] if person else [],
     )
     readme_before = _readme_bytes(root)
     ledger = store.init(root, meta)
+    # A repository is started only on git's positive "no repository here"
+    # (`vcs.in_repository`): `is_repo` reads every failure as "no", and a
+    # refused or slow git answer started a nested repository inside an
+    # existing one (review of phase 6). `inside` is None when git did not say.
+    inside, unanswered = vcs.in_repository(root)
+    git_info = {"started": False, "inside": inside, "why": "", "ignored": False}
+    if inside is None:
+        git_info["why"] = f"git did not answer: {unanswered}"
+    elif not inside and not getattr(args, "no_git", False):
+        made = vcs.init_repo(root)
+        git_info.update(started=made.ok, why=made.why)
+    elif not inside:
+        git_info["why"] = "--no-git"
+    else:
+        # Inside a repository that ignores the project, no round ever lists a
+        # change (`_round_ignored`): said now, at the start, not on every turn.
+        git_info["ignored"] = _round_ignored(root)
     # SPEC 36: `store.init` writes the Made-with-nopekit block at the bottom of
     # README.md; said here only when it wrote.
     readme = "README.md" if _readme_bytes(root) != readme_before else None
@@ -1026,11 +1067,23 @@ def cmd_init(args: argparse.Namespace) -> int:
     # only when absent, so `init` in an existing repo leaves the person's own untouched.
     launch = site.ensure_launch(root, name)
     entry = ledger.meta.model_entry
-    model_step = (f"write {entry} — a dataclass CONFIG plus build(config) -> dict — "
-                  f"then: nopekit check" if entry else
-                  f"write model/<thing>.py — a dataclass CONFIG plus build(config) -> dict "
-                  f"— then record it as \"model_entry\": \"model/<thing>.py\" in {project}, "
-                  f"and: nopekit check")
+    model_step = (f"write {entry} — a dataclass CONFIG plus build(config) -> dict" if entry
+                  else f"write model/<thing>.py — a dataclass CONFIG plus build(config) -> "
+                       f"dict — then record it as \"model_entry\": \"model/<thing>.py\" in "
+                       f"{project}")
+    # `--json`'s steps, each one line: the commands in code spans, as every
+    # printed command a reader may copy (test_docs_commands reads them so).
+    steps = [
+        "interview the person in their words; write each thing they ask for as "
+        "requirements/R1.json: {\"statement\": \"...\", \"source\": \"interview\"}, and show "
+        "the list for a yes. Ask for sketches, photos, links, measurements, datasheets: "
+        "`nopekit ingest <files> --kind sketch --desc '...'`",
+        model_step,
+        "first light: `nopekit check`, then `nopekit site init` and "
+        "`nopekit site serve --watch` — give the person the URL it prints",
+        "write claims/C1.json beside the first verdicts, each naming its requirements",
+    ]
+    people = ledger.meta.people
 
     if args.json:
         _dump({
@@ -1039,17 +1092,15 @@ def cmd_init(args: argparse.Namespace) -> int:
             "meta": ledger.meta.to_dict(),
             "launch": launch,
             "readme": readme,
-            "next": [
-                "nopekit ask",
-                "write claims/C1.json: {\"statement\": ..., \"acceptance\": "
-                "{\"quantity\": ..., \"comparator\": \"<=\", \"limit\": ...}}",
-                model_step,
-            ],
+            "git": git_info,
+            "people_refused": unlisted or None,
+            "next": steps,
         })
         return 0
 
     _say(f"initialised nopekit project {name!r} at {root}")
-    _say(f"  {project:<24} the project: its name, model entry and packs")
+    _say(f"  {project:<24} the project: its name, model entry, packs and people")
+    _say(f"  {'requirements/':<24} one file per thing the person asked for, in their words")
     _say(f"  {'claims/':<24} one file per claim — what must be true")
     _say(f"  {'inputs/':<24} evidence you put in by hand ({len(store.INPUT_BUCKETS)} buckets),"
          f" one record per artifact")
@@ -1059,22 +1110,38 @@ def cmd_init(args: argparse.Namespace) -> int:
         _say(f"  {launch:<24} Run and Debug: builds and opens this project's site")
     if readme:
         _say(f"  {readme:<24} Made-with-nopekit badge, at the bottom")
+    if git_info["started"]:
+        _say(f"  {'.git/':<24} a new git repository: each round commits here")
+    _say("")
+    if people:
+        _say(f"people: {people[0].name} <{people[0].email}> — a round commits only as a "
+             f"person listed in {project}")
+    elif unlisted:
+        _say(f"people: none — {unlisted}; rounds make no commit until git's identity is "
+             f"fixed and the person is listed in {project}")
+    else:
+        _say(f"people: none — git has no user.name and user.email here; rounds make no "
+             f"commit until they are set and the person is listed in {project}")
+    if not inside and not git_info["started"]:
+        _say(f"git: no repository started ({git_info['why'] or 'git did not answer'}) — "
+             f"rounds make no commit until the project is in one")
+    if git_info["ignored"]:
+        _say("git: the enclosing repository ignores this directory — rounds make no commit "
+             "until it is un-ignored there, or the project has a repository of its own")
     _say("")
     _say("next, in this order:")
-    _say("  1. nopekit ask                 — what evidence to ask for, then")
+    _say("  1. interview the person in their words; write each thing they ask for as")
+    _say('     requirements/R1.json: {"statement": "...", "source": "interview"}, and show')
+    _say("     the list for a yes. Ask for sketches, photos, links, measurements, datasheets:")
     _say("     nopekit ingest <files> --kind sketch --desc '...'")
-    _say("     nopekit extract <id> --what '...' --grounds <param>   (an artifact with")
-    _say("     no extraction is decoration)")
-    _say("  2. write claims/C1.json — one claim per file, what must be true:")
-    _say('       {"statement": "floats with the full payload at <=60% draft",')
-    _say('        "acceptance": {"quantity": "draft fraction", "comparator": "<=", "limit": 0.6}}')
     if entry:
-        _say(f"  3. write {entry} — a dataclass CONFIG plus build(config) -> dict —")
-        _say("     then: nopekit check")
+        _say(f"  2. write {entry} — a dataclass CONFIG plus build(config) -> dict")
     else:
-        _say("  3. write model/<thing>.py — a dataclass CONFIG plus build(config) -> dict —")
-        _say(f'     then record it as "model_entry": "model/<thing>.py" in {project},')
-        _say("     and: nopekit check")
+        _say("  2. write model/<thing>.py — a dataclass CONFIG plus build(config) -> dict —")
+        _say(f'     then record it as "model_entry": "model/<thing>.py" in {project}')
+    _say("  3. first light: nopekit check, then nopekit site init and")
+    _say("     nopekit site serve --watch — give the person the URL it prints")
+    _say("  4. write claims/C1.json beside the first verdicts, each naming its requirements")
     return 0
 
 
@@ -2038,51 +2105,213 @@ def _first_line(exc: BaseException) -> str:
     return (str(exc).strip().splitlines() or [""])[0]
 
 
-def cmd_round(args: argparse.Namespace) -> int:
-    """End a round (SPEC decisions 18 and 24, without the hook and the commit,
-    which phase 6 adds): a tier-0 check exactly as `check --tier 0` runs it
-    (verdicts recorded, the one-time migration included), the site rebuilt when
-    `site/` exists, and `.nopekit/round.json` written when anything it records
-    moved — the round number one past the last — then ONE short paragraph: what
-    changed since the last round record, the count line, readiness as last
-    evaluated, and what the check and the site did.
+#: Seconds the Stop hook waits for the build lock before it says "round not run"
+#: (architecture phase 6). `site serve --watch` rebuilds the moment a round
+#: writes, and an agent's last `check` may still hold the lock when its turn
+#: ends; a round that gave up at once would miss the turn it exists for. Why 60:
+#: a site build or a tier-0 check takes seconds, and the hook's whole budget is
+#: 300 s (`hooks/hooks.json`), the commit's own `vcs.VCS_WRITE_TIMEOUT_S` 120 of
+#: them. *Rejected:* waiting in plain `round` too (a person who types it wants the
+#: held lock named now — `RoundNeverBlocks` holds that); no wait (the hook would
+#: say "not run" whenever the watcher was mid-build).
+ROUND_LOCK_WAIT_S = 60.0
+_ROUND_LOCK_POLL_S = 0.5
 
-    **It never blocks.** It is the Stop hook's future body, and Claude Code
-    reads a hook's exit 2 as "block the turn": every `NopekitError` is caught
-    here and said in one line, exit 0 — a held lock, a record that does not
-    read, a model that does not load (the check is refused, no site is built —
-    `site build` refuses that model too — and the record is still written: a
-    round that cannot build the model says so), failing claims, outside a
-    project. Only a traceback (a crash) exits 1. A pack that
-    does not import writes no record: one built over an import error would list
-    every claim it covers as a gap, the artefact `site build` refuses to
-    publish.
+
+@contextlib.contextmanager
+def _round_locked(root: str, wait_s: float):
+    """`_lock(root)`, retried every `_ROUND_LOCK_POLL_S` until ``wait_s`` runs
+    out; with ``wait_s`` 0 the first refusal is raised, as `_lock` raises it."""
+    lock = _lock(root)
+    deadline = time.monotonic() + max(0.0, float(wait_s))
+    while True:
+        try:
+            lock.acquire()
+            break
+        except NopekitError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_ROUND_LOCK_POLL_S)
+    try:
+        yield lock
+    finally:
+        lock.release()
+
+
+class CommitOutcome(NamedTuple):
+    """What `round --commit` did with git (architecture phase 6, SPEC 24 with
+    §0.3). ``why``: ``committed``, ``nothing-changed``, ``ignored``,
+    ``no-repository``, ``no-identity``, ``no-people``, ``not-listed``,
+    ``committer-not-listed`` (``who`` is then the committer), ``in-progress``,
+    ``detached``, ``newer-record``, ``unlisted``, ``add-failed``, ``refused``
+    or ``timeout``; ``detail`` the operation, git's line or the timeout;
+    ``staged`` what the commit holds (or would have); ``outside`` and
+    ``too_large`` what it named instead; ``earlier`` ``(a, b)`` when rounds a to
+    b were never committed and this commit holds them."""
+
+    made: bool
+    oid: str | None
+    who: str | None
+    why: str
+    detail: str
+    staged: tuple
+    outside: tuple
+    too_large: tuple
+    earlier: tuple | None
+    subject: str
+
+
+def _no_commit(why: str, *, who: str | None = None, detail: str = "", staged: tuple = (),
+               outside: tuple = (), too_large: tuple = ()) -> CommitOutcome:
+    return CommitOutcome(False, None, who, why, detail, tuple(staged), tuple(outside),
+                         tuple(too_large), None, "")
+
+
+class RoundOutcome(NamedTuple):
+    """What `_round_run` did: ``not_run`` (why, or ``""``), the round record's
+    `rounds.Written`, the record's ``content``, the tier-0 ``check``, the
+    ``site``, the resolved ``view`` and its ``composed`` statuses, each board's
+    text's stamp (``prose``, `page.stamp_states`' rows), the ``commit`` (a
+    `CommitOutcome`, or None without ``--commit``), the ``trace`` sentence, and
+    the ``summary`` paragraph."""
+
+    not_run: str
+    done: Any = None
+    content: Any = None
+    check: Any = None
+    site: Any = None
+    view: Any = None
+    composed: Any = None
+    prose: tuple = ()
+    commit: Any = None
+    trace: str = ""
+    summary: str = ""
+
+
+def _round_start_trace(root: str, changes: rounds.Changes) -> str:
+    """Phase 3b (the trace) fills this: start `nopekit model trace` in the background
+    when the instructions changed (`changes.instructions`, or the first round), and
+    return one sentence for the round's paragraph, or "". Called after the commit and
+    outside it, so a trace still writing `.nopekit/trace/` lands in the next round's
+    commit, whole. Until phase 3b: returns ""."""
+    return ""
+
+
+def _round_ignored(root: str) -> bool:
+    """Whether the repository ignores the project itself: its project file
+    untracked and ignored. What slipped through (review of phase 6): a project
+    under a directory its enclosing repository ignores (a dotfiles repository
+    in ``$HOME`` with ``*``, a repo's ignored ``scratch/``) never had a change
+    listed, and every round said "Nothing to commit: no file in the project's
+    paths changed" over files that had. Asked only when nothing is staged.
+    *Rejected:* asking about every record directory too (a person's own rule
+    over a big scan in ``inputs/`` would then turn every quiet round into a
+    message)."""
+    return bool(vcs.ignored(root, [f"{store.NOPEKIT_DIR}/{store.PROJECT_NAME}"]))
+
+
+def _round_commit(root: str, ledger: Ledger, done: rounds.Written,
+                  paragraph: str) -> CommitOutcome:
+    """Commit the round (SPEC 24 with §0.3): only the project's own paths
+    (`rounds.stage_plan`), only when `people` lists both its author and its
+    committer, never pushed.
+    Every refusal before the staging leaves the index as it was; a commit git
+    refuses leaves the round's files staged and says so. A round whose claims
+    fail commits all the same: the commit is history, not a quality gate."""
+    if done.refused == "newer":
+        return _no_commit("newer-record")
+    if not vcs.is_repo(root):
+        return _no_commit("no-repository")
+    doing = vcs.operation(root)
+    if doing is None:
+        return _no_commit("no-repository")
+    if doing == "detached":
+        return _no_commit("detached")
+    if doing:
+        return _no_commit("in-progress", detail=doing)
+    who = vcs.ident(root)
+    committer = vcs.committer_ident(root)
+    if who is None or committer is None:
+        return _no_commit("no-identity")
+    people = list(getattr(ledger.meta, "people", None) or [])
+    if not people:
+        return _no_commit("no-people", who=who)
+    if rounds.listed(people, who) is None:
+        return _no_commit("not-listed", who=who)
+    # The committer too (review of phase 6): `committer.*` config or
+    # `GIT_COMMITTER_*` put an identity `people` never named on a round's
+    # commit, and the paragraph named only the author.
+    if rounds.listed(people, committer) is None:
+        return _no_commit("committer-not-listed", who=committer)
+    changed = vcs.changed_paths(root)
+    if changed is None:
+        return _no_commit("unlisted", who=who)
+    plan = rounds.stage_plan(root, changed)
+    if not plan.staged:
+        if _round_ignored(root):
+            return _no_commit("ignored", who=who, outside=plan.outside,
+                              too_large=plan.too_large)
+        return _no_commit("nothing-changed", who=who, outside=plan.outside,
+                          too_large=plan.too_large)
+    added = vcs.add(root, plan.staged)
+    if not added.ok:
+        return _no_commit("add-failed", who=who, detail=added.why, staged=plan.staged,
+                          outside=plan.outside, too_large=plan.too_large)
+    # A file whose mtime moved and whose bytes did not is staged as nothing and
+    # drops out here, so "nothing changed" stays true of a round that moved
+    # nothing.
+    staged = tuple(sorted(set(vcs.staged_paths(root) or ()) & set(plan.staged)))
+    if not staged:
+        return _no_commit("nothing-changed", who=who, outside=plan.outside,
+                          too_large=plan.too_large)
+    number = done.round
+    earlier = None
+    if number is not None:
+        last = rounds.last_committed_round(vcs.show(root, rounds.ROUND_REL)) or 0
+        if number - last >= 2:
+            earlier = (last + 1, number - 1)
+    subject, body = report.round_commit_message(
+        number, _round_shape(done), done.changes, staged, plan.outside, plan.too_large,
+        earlier, paragraph, round_rel=rounds.ROUND_REL)
+    made = vcs.commit(root, staged, subject, body)
+    if not made.ok:
+        why = "timeout" if made.why == "timeout" else "refused"
+        detail = str(vcs.VCS_WRITE_TIMEOUT_S) if why == "timeout" else made.why
+        return CommitOutcome(False, None, who, why, detail, staged, plan.outside,
+                             plan.too_large, earlier, subject)
+    return CommitOutcome(True, made.oid, who, "committed", "", staged, plan.outside,
+                         plan.too_large, earlier, subject)
+
+
+def _round_run(root: str, *, commit: bool, wait_s: float, now: str) -> RoundOutcome:
+    """The round's work (SPEC decisions 18 and 24): a tier-0 check exactly as
+    `check --tier 0` runs it (verdicts recorded, the one-time migration
+    included), the site rebuilt when `site/` exists, and `.nopekit/round.json`
+    written when anything it records moved — then, with ``commit``, the commit
+    of the project's own paths (`_round_commit`), still under the build lock so
+    no writer lands between the staging and the commit; then the trace's seam.
+
+    **It never blocks.** Every `NopekitError` becomes ``not_run`` or a reason in
+    the paragraph — a held lock, a record that does not read, a model that does
+    not load (the check is refused, no site is built — `site build` refuses
+    that model too — and the record is still written: a round that cannot build
+    the model says so). A pack that does not import writes no record: one
+    built over an import error would list every claim it covers as a gap, the
+    artefact `site build` refuses to publish.
 
     The record is computed from `_resolved` with no sweep overlay — what
     `status` shows — after the check and the site, and the site and the record
-    share that one resolution. What `round` writes: what `check` writes, what
-    `site build` writes when `site/` exists, the round record at most once and
-    only when its bytes change, and the index (`main`'s `_after`)."""
-    said = report.HUMAN["round"]
-    root = store.find_root(getattr(args, "dir", None))
-    if root is None:
-        text = said["no_project"]
-        if args.json:
-            _dump({"round": None, "written": False, "path": None, "summary": text})
-        else:
-            _say(text)
-        return 0
-    now = utcnow_iso()
+    share that one resolution."""
     check = {"ran": False, "why": "", "executed": 0, "cached": 0}
     site_info = {"present": site.scaffolded(root),
                  "built": False, "warnings": 0, "why": ""}
     try:
-        with _lock(root):
+        with _round_locked(root, wait_s):
             ledger = _migrate(root, apply=True, now=now)
             try:
                 registry, _ = _registry(root, ledger, strict=True)
             except NopekitError as exc:
-                return _round_not_run(args, _first_line(exc))
+                return RoundOutcome(_first_line(exc))
             try:
                 ran = _check_run(root, ledger, tier=0, only=None, force=False, record=True,
                                  now=now, on_row=None, quiet=True, registry=registry)
@@ -2126,17 +2355,66 @@ def cmd_round(args: argparse.Namespace) -> int:
                                                view, resolution, model_error=model_error,
                                                shown=shown, built=built)
             done = rounds.write(root, content)
+            composed = claims.compositions(view, registry=registry,
+                                           stale_gates=resolution.stale_gates)
+            text = report.round_paragraph(
+                _round_shape(done), done.round, done.changes, view=view, composed=composed,
+                check=check, site=site_info, wrote=done.written,
+                schema=done.previous.schema, path=rounds.ROUND_REL)
+            prose_rows: tuple = ()
+            committed = None
+            if commit:
+                # Board text the results have moved past (architecture phase 5's
+                # stamp), named so the person sees which boards to rewrite.
+                if os.path.isdir(page.content_dir(root)):
+                    prose_rows = tuple(page.stamp_states(
+                        root, view, graph.tokens(view, resolution, registry)))
+                behind = report.round_prose_sentence(prose_rows)
+                committed = _round_commit(root, ledger, done, text + behind)
+                text += report.round_commit_sentence(committed) + behind
     except NopekitError as exc:
-        return _round_not_run(args, _first_line(exc))
-    composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
-    text = report.round_paragraph(
-        _round_shape(done), done.round, done.changes, view=view, composed=composed,
-        check=check, site=site_info, wrote=done.written, schema=done.previous.schema,
-        path=rounds.ROUND_REL)
+        return RoundOutcome(_first_line(exc))
+    trace = _round_start_trace(root, done.changes)
+    if trace:
+        text += " " + trace
+    return RoundOutcome("", done, content, check, site_info, view, composed, prose_rows,
+                        committed, trace, text)
+
+
+def cmd_round(args: argparse.Namespace) -> int:
+    """End a round (SPEC decisions 18 and 24): `_round_run`, then ONE short
+    paragraph — what changed since the last round record, the count line,
+    readiness as last evaluated, what the check and the site did and, with
+    `--commit`, what the commit did. `--hook` is Claude Code's Stop hook
+    (`_round_hook`).
+
+    **It never blocks.** It is the Stop hook's body, and Claude Code reads a
+    hook's exit 2 as "block the turn": every `NopekitError` is said in one line,
+    exit 0 — failing claims and outside a project included. Only a traceback (a
+    crash) exits 1, and under `--hook` not even that. What `round` writes: what
+    `check` writes, what `site build` writes when `site/` exists, the round
+    record at most once and only when its bytes change, the index (`main`'s
+    `_after`), and with `--commit` one local commit of the project's own paths
+    — never a record, never a push."""
+    if getattr(args, "hook", False):
+        return _round_hook(args)
+    said = report.HUMAN["round"]
+    root = store.find_root(getattr(args, "dir", None))
+    if root is None:
+        text = said["no_project"]
+        if args.json:
+            _dump({"round": None, "written": False, "path": None, "summary": text})
+        else:
+            _say(text)
+        return 0
+    outcome = _round_run(root, commit=bool(getattr(args, "commit", False)), wait_s=0.0,
+                         now=utcnow_iso())
+    if outcome.not_run:
+        return _round_not_run(args, outcome.not_run)
+    done, content = outcome.done, outcome.content
     if args.json:
         changes = done.changes
-        _dump({
+        found = {
             "round": done.round, "written": done.written,
             "path": rounds.ROUND_REL if done.round is not None else None,
             "previous": {"state": done.previous.state, "round": done.previous.round},
@@ -2152,10 +2430,145 @@ def cmd_round(args: argparse.Namespace) -> int:
                               if changes.readiness else None),
                 "moved": list(changes.moved)},
             "counts": content["counts"], "readiness": content["readiness"],
-            "check": check, "site": site_info, "summary": text,
-        })
+            "check": outcome.check, "site": outcome.site, "summary": outcome.summary,
+        }
+        if outcome.commit is not None:
+            found["commit"] = _commit_json(outcome.commit)
+        _dump(found)
     else:
-        _say(text)
+        _say(outcome.summary)
+    return 0
+
+
+def _commit_json(commit: CommitOutcome) -> dict:
+    return {"made": commit.made, "oid": commit.oid, "subject": commit.subject,
+            "who": commit.who, "why": commit.why, "detail": commit.detail,
+            "staged": list(commit.staged), "outside": list(commit.outside),
+            "too_large": [{"path": p, "bytes": n} for p, n in commit.too_large],
+            "earlier": list(commit.earlier) if commit.earlier else None}
+
+
+#: The most the Stop hook reads of its stdin: the payload is a few hundred
+#: bytes (cwd, session id, transcript path); a megabyte is a payload gone wrong.
+_HOOK_STDIN_MAX = 1 << 20
+
+
+def _hook_payload() -> dict:
+    """The Stop hook's JSON from stdin, or ``{}`` — empty, not JSON, not an
+    object, or a terminal (no hook typed into a terminal)."""
+    stream = sys.stdin
+    try:
+        if stream is None or stream.isatty():
+            return {}
+    except (AttributeError, ValueError, OSError):
+        return {}
+    try:
+        buffer = getattr(stream, "buffer", None)
+        raw = buffer.read(_HOOK_STDIN_MAX) if buffer is not None \
+            else stream.read(_HOOK_STDIN_MAX)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", "replace")
+        data = json.loads(raw) if raw and raw.strip() else {}
+    except (OSError, ValueError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _hook_root(args: argparse.Namespace, payload: Mapping[str, Any]) -> str | None:
+    """The project the hook ends a round in: the first of `-C`, the payload's
+    ``cwd``, ``$CLAUDE_PROJECT_DIR`` and the process's cwd that is inside one
+    (walking up, as every command does)."""
+    candidates = [getattr(args, "dir", None), payload.get("cwd"),
+                  os.environ.get("CLAUDE_PROJECT_DIR")]
+    try:
+        candidates.append(os.getcwd())
+    except OSError:
+        pass
+    for start in candidates:
+        if not isinstance(start, str) or not start.strip() or not os.path.isdir(start):
+            continue
+        try:
+            found = store.find_root(start)
+        except (NopekitError, OSError, ValueError):
+            continue
+        if found is not None:
+            return found
+    return None
+
+
+@contextlib.contextmanager
+def _quiet_fd(fd: int):
+    """Point file descriptor ``fd`` at the null device for the block, then put
+    it back: a gate's solver or a commit hook writes to the inherited stdout
+    directly, below any `redirect_stdout`, and one stray line there breaks the
+    Stop hook's JSON."""
+    saved = None
+    try:
+        saved = os.dup(fd)
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, fd)
+        finally:
+            os.close(null)
+    except OSError:
+        saved = None
+    try:
+        yield
+    finally:
+        if saved is not None:
+            try:
+                os.dup2(saved, fd)
+            finally:
+                os.close(saved)
+
+
+def _hook_quiet(outcome: RoundOutcome) -> bool:
+    """A round the person need not hear about: the record stood, nothing was
+    committed because nothing changed, no board's text is behind, and no trace
+    started. A standing misconfiguration (not listed, no people, no identity,
+    no repository) is never quiet: it is the one thing the person must know."""
+    commit = outcome.commit
+    return (not outcome.not_run and outcome.done is not None and not outcome.done.written
+            and not outcome.done.refused
+            and commit is not None and commit.why == "nothing-changed"
+            and not report.round_prose_sentence(outcome.prose) and not outcome.trace)
+
+
+def _round_hook(args: argparse.Namespace) -> int:
+    """Claude Code's Stop hook (architecture phase 6, SPEC 24): read the hook's
+    JSON on stdin, find the project from its ``cwd`` (then
+    ``$CLAUDE_PROJECT_DIR``, then the process's cwd), run `round --commit`
+    with nothing reaching stdout, rebuild the index, and print ONE JSON object
+    — ``{"systemMessage": "<the paragraph>"}``, or ``{}`` outside a project or
+    when nothing happened. Plain stdout from a Stop hook is shown to nobody, and
+    a stray line would break the parse.
+
+    Always exit 0, and never ``"decision": "block"``: Claude Code reads exit 2 or
+    a block as "continue the turn", and a round that kept the agent working
+    would loop. ``stop_hook_active`` changes nothing for the same reason: this
+    hook never blocks, so it can never be the reason a turn continues. A crash
+    becomes one line of ``systemMessage``."""
+    args._index_done = True
+    try:
+        payload = _hook_payload()
+        root = _hook_root(args, payload)
+        if root is None:
+            message: dict = {}
+        else:
+            args.dir = root
+            with _quiet_fd(1), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                outcome = _round_run(root, commit=True, wait_s=ROUND_LOCK_WAIT_S,
+                                     now=utcnow_iso())
+                _touch_index(root, quiet=True)
+            message = {} if _hook_quiet(outcome) else \
+                {"systemMessage": report.round_hook_message(outcome)}
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # noqa: BLE001 — the hook never fails the turn
+        message = {"systemMessage": report.round_hook_crash(exc)}
+    sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
     return 0
 
 
@@ -5683,6 +6096,68 @@ def cmd_packs_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_packs_skills(args: argparse.Namespace) -> int:
+    """The live packs' PACK.md, lenses and skill files (architecture phase 6,
+    SPEC 37): each ``skills/<name>/SKILL.md`` a pack holds, printed whole after
+    its PACK.md and its ``lenses.md`` (the review dimensions SPEC §0.1's agent
+    reads to find the claims it missed — no other command printed them, review
+    of phase 6), for the agent to read before it works in that domain. Read, never
+    installed: a skill installed into Claude Code would be there in every
+    project, live pack or not. The packs are ``--pack`` names, else the
+    project's live packs (`packs.installed`) that are found here, in project
+    order. A live pack that is not found is a FAIL line and exit 1, as `packs
+    list` says it."""
+    root = _root(args)
+    named = [str(n).strip() for n in (getattr(args, "pack", None) or []) if str(n).strip()]
+    names = named or packs.installed(root, ledger=_load(root))
+    found: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for name in names:
+        directory = packs.find(name, root)
+        if directory:
+            found.append((name, directory))
+        else:
+            missing.append(name)
+    rows = []
+    for name, directory in found:
+        doc_path = os.path.join(directory, packs.DOC_NAME)
+        doc = packs.pack_doc(name, root) if os.path.isfile(doc_path) else ""
+        lenses_path = os.path.join(directory, packs.LENSES_NAME)
+        lenses = (packs._read_text(lenses_path, f"{name} {packs.LENSES_NAME}")
+                  if os.path.isfile(lenses_path) else "")
+        rows.append({"name": name, "dir": directory,
+                     "pack_md": {"path": doc_path, "text": doc},
+                     "lenses": {"path": lenses_path, "text": lenses} if lenses else None,
+                     "skills": [{"name": skill, "path": path,
+                                 "text": packs._read_text(path, f"{name} skill {skill}")}
+                                for skill, path in packs.skill_files(directory)]})
+    if args.json:
+        _dump({"packs": rows, "missing": missing})
+        return 1 if missing else 0
+    if not rows and not missing:
+        _say("no live packs in this project — `nopekit packs list` shows what exists, "
+             "`nopekit packs add <name>` makes one live")
+        return 0
+    for row in rows:
+        if row["pack_md"]["text"]:
+            _say(f"== {row['name']}/{packs.DOC_NAME}  ({row['pack_md']['path']})")
+            text = row["pack_md"]["text"]
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        if row["lenses"]:
+            _say(f"== {row['name']}/{packs.LENSES_NAME}  ({row['lenses']['path']})")
+            text = row["lenses"]["text"]
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        for skill in row["skills"]:
+            _say(f"== {row['name']}/{packs.SKILLS_DIR}/{skill['name']}/{packs.SKILL_NAME}  "
+                 f"({skill['path']})")
+            text = skill["text"]
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+    for name in missing:
+        _say(f"{_tag('FAIL')} {name} is not on any search path" if named else
+             f"{_tag('FAIL')} {name} is in meta.packs but was not found on any search path")
+    return 1 if missing else 0
+
+
 def cmd_packs_validate(args: argparse.Namespace) -> int:
     """Run the same checks CI runs on a pack. Exit 1 if anything is wrong.
 
@@ -7926,6 +8401,36 @@ def _doctor_requirement_rows(results: list[dict], ledger: Ledger) -> None:
         _check(results, "requirements", "ok", said["doctor_none"])
 
 
+def _doctor_people_row(results: list[dict], root: str, ledger: Ledger) -> None:
+    """`doctor`'s `people` row (architecture phase 6, SPEC §0.3), always present,
+    writing nothing, never a FAIL: whether a round here would commit — the
+    people listed, and whether git's identity here is one of them. A project
+    that commits nothing is not broken; it is a project whose history the
+    person must keep by hand, and they should know."""
+    said = report.HUMAN["round"]
+    people = list(getattr(ledger.meta, "people", None) or [])
+    names = ", ".join(f"{p.name} <{p.email}>" for p in people[:4]) \
+        + (f", +{len(people) - 4} more" if len(people) > 4 else "")
+    if not people:
+        _check(results, "people", "warn", said["people_none"])
+        return
+    if not vcs.is_repo(root):
+        _check(results, "people", "warn", said["people_no_repo"].format(n=len(people)))
+        return
+    who = vcs.ident(root)
+    committer = vcs.committer_ident(root)
+    if who is None or committer is None:
+        _check(results, "people", "warn", said["people_no_identity"].format(n=len(people)))
+    elif rounds.listed(people, who) is None:
+        _check(results, "people", "warn", said["people_not_listed"].format(
+            n=len(people), names=names, who=who))
+    elif rounds.listed(people, committer) is None:
+        _check(results, "people", "warn", said["people_committer_not_listed"].format(
+            n=len(people), names=names, who=committer))
+    else:
+        _check(results, "people", "ok", said["people_ok"].format(n=len(people), names=names))
+
+
 def _doctor_graph_rows(results: list[dict], root: str, ledger: Ledger, view: Ledger,
                        registry: Any, resolution: verdicts.Resolution, model: Any,
                        projection: Any, model_error: str) -> Any:
@@ -8325,6 +8830,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     _doctor_results_rows(results, root, ledger)
     _doctor_milestone_rows(results, root, ledger)
     _doctor_requirement_rows(results, ledger)
+    _doctor_people_row(results, root, ledger)
 
     paths = store.project_paths(root)
     missing = [key for key in ("out", "inputs", "docs", "model")
@@ -8661,6 +9167,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--revision", default="v0.1")
     p.add_argument("--model", default="", help="model entry, e.g. model/bracket.py")
     p.add_argument("--pack", action="append", default=[], help="pack to install (repeatable)")
+    p.add_argument("--no-git", action="store_true",
+                   help="start no git repository here (rounds make no commit outside one)")
     p.set_defaults(func=cmd_init)
 
     # -- status ----------------------------------------------------------- #
@@ -8686,9 +9194,12 @@ def build_parser() -> argparse.ArgumentParser:
     _junit_flag(p, "this run")
     p.set_defaults(func=cmd_check)
 
-    # -- round (architecture phase 3a: no hook, no commit yet) -------------- #
-    round_help = report.HUMAN["round"]["help"].format(path=rounds.ROUND_REL)
+    # -- round (architecture phase 3a; the commit and the hook, phase 6) ---- #
+    said = report.HUMAN["round"]
+    round_help = said["help"].format(path=rounds.ROUND_REL)
     p = sub.add_parser("round", parents=[common], help=round_help, description=round_help)
+    p.add_argument("--commit", action="store_true", help=said["commit_help"])
+    p.add_argument("--hook", action="store_true", help=said["hook_help"])
     p.set_defaults(func=cmd_round)
 
     # -- ask -------------------------------------------------------------- #
@@ -8926,6 +9437,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("--ref", default="", help="a tier-3 reference instead of PACK.md")
     p.set_defaults(func=cmd_packs_show)
+
+    p = pack_sub.add_parser("skills", parents=[common],
+                            help="print the live packs' PACK.md and skill files "
+                                 "(skills/<name>/SKILL.md) — read them before working in a "
+                                 "pack's domain")
+    p.add_argument("--pack", action="append", default=[], metavar="NAME",
+                   help="this discoverable pack instead of the live ones (repeatable)")
+    p.set_defaults(func=cmd_packs_skills)
 
     p = pack_sub.add_parser("validate", parents=[common],
                             help="the checks CI runs; exit 1 on any problem")

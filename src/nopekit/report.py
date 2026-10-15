@@ -1454,7 +1454,77 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
     # was re-run at a boundary.
     "round": MappingProxyType({
         "help": "end a round: a tier-0 check, the site rebuilt when site/ exists, and {path} "
-                "written when anything it records moved; never blocks",
+                "written when anything it records moved; with --commit, a commit of the "
+                "project's own paths as a listed person; never blocks",
+        # Architecture phase 6 (SPEC 24 with §0.3): the round's commit, the Stop
+        # hook's message, the commit message, and doctor's `people` row.
+        "commit_help": "then commit the project's own paths, only when git's identity is one "
+                       "of .nopekit/project.json's people; never pushes",
+        "hook_help": "Claude Code's Stop hook: read the hook's JSON on stdin, run --commit, "
+                     "print one JSON object; always exits 0",
+        "committed": " Committed {oid} as {who}: {n} {files}.",
+        "nothing": " Nothing to commit: no file in the project's paths changed.",
+        "no_repository": " Not committed: the project is in no git repository (`git init` "
+                         "starts one), or git is not on PATH.",
+        "no_identity": " Not committed: git has no user.name and user.email configured here.",
+        "no_people": " Not committed: .nopekit/project.json lists no people; a round commits "
+                     "only as a person listed there.",
+        "not_listed": " Not committed: git's identity here, {who}, is not in "
+                      ".nopekit/project.json's people.",
+        "committer_not_listed": " Not committed: git's committer here, {who} "
+                                "(committer.name and committer.email, or GIT_COMMITTER_*), "
+                                "is not in .nopekit/project.json's people.",
+        "ignored": " Not committed: the enclosing git repository ignores this project "
+                   "(.nopekit/project.json is ignored), so no change here is ever listed; "
+                   "un-ignore the project's directory, or `git init` in it.",
+        "in_progress": " Not committed: a {operation} is in progress in this repository; the "
+                       "next round commits after it ends.",
+        "detached": " Not committed: HEAD is detached; a round commits only on a branch.",
+        "newer_record": " Not committed: the round record was written by a newer nopekit.",
+        "add_failed": " Not committed: git did not stage the round's files ({why}).",
+        "refused": " Not committed: git refused the commit ({why}); the round's files are "
+                   "left staged.",
+        "unlisted_changes": " Not committed: git did not answer when asked which files "
+                            "changed.",
+        "timeout": " Not committed: git commit did not finish in {s} s (a slow commit hook?); "
+                   "the round's files are left staged.",
+        "outside": " Not staged, outside the project's paths: {paths}.",
+        "too_large": " Not staged, over 50 MiB: {paths}.",
+        "prose_behind": " Board text written before the latest results: {subjects} — read it "
+                        "against the page, rewrite it, then `nopekit site stamp <board>`.",
+        "paths_more": ", and {k} more",
+        "hook_not_run": "nopekit round not run: {why}. Nothing was committed.",
+        "hook_crash": "nopekit round crashed ({kind}: {line}); the round may be incomplete. "
+                      "Run `nopekit round` in the project to see the traceback.",
+        "commit_subject": "round {n}: {what}",
+        "commit_first": "the first round record",
+        "commit_compact": MappingProxyType({
+            "statuses": "{k} {statuses} moved", "verdicts": "{v} new {verdicts}",
+            "instructions": "instructions moved"}),
+        "commit_files": "{n} {files} committed: {groups}.",
+        "commit_earlier_one": "Round {a} was not committed; this commit holds it too.",
+        "commit_earlier_many": "Rounds {a} to {b} were not committed; this commit holds them "
+                               "too.",
+        "commit_outside": "Not committed, outside the project's paths: {paths}.",
+        "commit_too_large": "Not committed, over 50 MiB: {paths}.",
+        "commit_parts": MappingProxyType({
+            "records": "records", "model": "the model", "evaluators": "evaluators",
+            "generators": "generators", "verdicts": "verdicts", "site_text": "site text",
+            "site": "the site", "trace": "the trace", "packs": "packs",
+            "project": "project files", "round": "the round record"}),
+        "commit_changed": "{parts} changed",
+        "people_ok": "{n} listed ({names}); git's identity here is listed, so rounds commit",
+        "people_none": "none listed — rounds make no commit; the person adds themselves to "
+                       "\"people\" in .nopekit/project.json as {{\"name\": \"...\", "
+                       "\"email\": \"...\"}}",
+        "people_not_listed": "{n} listed ({names}); git's identity here, {who}, is not one of "
+                             "them — rounds make no commit",
+        "people_no_identity": "{n} listed; git has no user.name and user.email here — rounds "
+                              "make no commit",
+        "people_committer_not_listed": "{n} listed ({names}); git's committer here, {who}, "
+                                       "is not one of them — rounds make no commit",
+        "people_no_repo": "{n} listed; the project is in no git repository — rounds make no "
+                          "commit (`git init`)",
         "written": "round {n}: {changes}.",
         "first": "round 1: the first round record.",
         "replaced": "round {n}: the last round record was {how}, so nothing is compared.",
@@ -2626,6 +2696,240 @@ def round_paragraph(shape: str, number: Any, changes: Any, *, view: Ledger,
         built = said["site_failed"].format(why=str(site.get("why") or "").rstrip("."))
     tail = said["wrote"].format(path=path) if wrote else ""
     return f"{opening} {count_line(composed)}. {ready} {ran}{built}{tail}"
+
+
+# --------------------------------------------------------------------------- #
+# the round's commit (architecture phase 6, SPEC 24 with §0.3)
+# --------------------------------------------------------------------------- #
+#: How many paths a not-staged sentence names before ", and k more", and how many
+#: boards the prose sentence names. One short paragraph is the hook's whole
+#: message. *Rejected:* every path (a stray build directory of a thousand files
+#: would be the message); none (the person must see what the round left out).
+_ROUND_PATHS = 3
+_ROUND_SUBJECTS = 4
+
+#: The commit subject's limit: git's own convention (`git log --oneline` and
+#: every forge cut a longer one). *Rejected:* no limit (a thirty-claim flip list
+#: as a subject); 50 (most rounds' first flip would not fit).
+COMMIT_SUBJECT_MAX = 72
+
+
+def _paths_words(paths: Sequence[str], limit: int = _ROUND_PATHS) -> str:
+    shown = ", ".join(str(p) for p in paths[:limit])
+    if len(paths) > limit:
+        shown += HUMAN["round"]["paths_more"].format(k=len(paths) - limit)
+    return shown
+
+
+def _sized(items: Sequence[Any]) -> list[str]:
+    out = []
+    for item in items:
+        path, size = (item[0], item[1]) if isinstance(item, (tuple, list)) else \
+            (item.get("path"), item.get("bytes"))
+        size = int(size)
+        out.append(f"{path} ({size / (1024 * 1024):.0f} MiB)" if size >= 1024 * 1024
+                   else f"{path} ({size / 1024:.0f} KiB)")
+    return out
+
+
+def round_commit_sentence(commit: Any) -> str:
+    """The sentences `round --commit` adds to the paragraph: what the commit
+    did (``commit.why``: ``committed``, ``nothing-changed``, or why not), then
+    the changed paths it named instead of staging. ``commit`` is
+    `cli.CommitOutcome`'s shape."""
+    said = HUMAN["round"]
+    why = getattr(commit, "why", "")
+    if why == "committed":
+        n = len(commit.staged)
+        text = said["committed"].format(oid=(commit.oid or "")[:7], who=commit.who,
+                                        n=n, files=_plural(n, "file"))
+    elif why == "nothing-changed":
+        text = said["nothing"]
+    elif why == "no-repository":
+        text = said["no_repository"]
+    elif why == "no-identity":
+        text = said["no_identity"]
+    elif why == "no-people":
+        text = said["no_people"]
+    elif why == "not-listed":
+        text = said["not_listed"].format(who=commit.who)
+    elif why == "committer-not-listed":
+        text = said["committer_not_listed"].format(who=commit.who)
+    elif why == "ignored":
+        text = said["ignored"]
+    elif why == "in-progress":
+        text = said["in_progress"].format(operation=commit.detail)
+    elif why == "detached":
+        text = said["detached"]
+    elif why == "newer-record":
+        text = said["newer_record"]
+    elif why == "add-failed":
+        text = said["add_failed"].format(why=commit.detail)
+    elif why == "unlisted":
+        text = said["unlisted_changes"]
+    elif why == "timeout":
+        text = said["timeout"].format(s=commit.detail)
+    else:
+        text = said["refused"].format(why=commit.detail or why)
+    if getattr(commit, "outside", ()):
+        text += said["outside"].format(paths=_paths_words(list(commit.outside)))
+    if getattr(commit, "too_large", ()):
+        text += said["too_large"].format(paths=_paths_words(_sized(commit.too_large)))
+    return text
+
+
+def round_prose_sentence(prose: Iterable[Mapping[str, Any]]) -> str:
+    """`" Board text written before the latest results: strength — …"`, or ``""``
+    when every board's text is stamped against the current results (``prose``:
+    `page.stamp_states`' rows). A file that names no board is not on the page,
+    and `doctor` says so; it is not a board to restamp."""
+    behind = [str(row.get("subject")) for row in prose
+              if row.get("subject") and row.get("stamp") != "current"]
+    if not behind:
+        return ""
+    return HUMAN["round"]["prose_behind"].format(
+        subjects=_paths_words(behind, _ROUND_SUBJECTS))
+
+
+#: Which `commit_parts` word a staged path falls under, by its first path part
+#: (two parts under `.nopekit/`), in the order the subject names them.
+_PART_ORDER = ("records", "model", "evaluators", "generators", "verdicts", "trace", "packs",
+               "site_text", "site", "round", "project")
+
+
+def _commit_part(rel: str, round_rel: str = "") -> str:
+    parts = str(rel).split("/")
+    if round_rel and rel == round_rel:
+        return "round"
+    if parts[0] == store.NOPEKIT_DIR and len(parts) > 1:
+        second = parts[1]
+        if second == store.VERDICTS_NAME:
+            return "verdicts"
+        if second == "trace":
+            return "trace"
+        if second == store.PACKS_NAME:
+            return "packs"
+        return "project"
+    head = parts[0]
+    if len(parts) == 1:
+        return "project"
+    if head == "model":
+        return "model"
+    if head in ("gates", "selftest"):
+        return "evaluators"
+    if head == "generators":
+        return "generators"
+    if head == "site":
+        return "site_text" if len(parts) > 2 and parts[1] == "content" else "site"
+    return "records"
+
+
+def _commit_group(rel: str) -> str:
+    parts = str(rel).split("/")
+    if parts[0] == store.NOPEKIT_DIR and len(parts) > 2:
+        return "/".join(parts[:2])
+    return parts[0]
+
+
+def _and_list(items: Sequence[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _wrap_message(text: str, width: int = COMMIT_SUBJECT_MAX) -> str:
+    """One paragraph wrapped at ``width``, never leaving a line that starts with
+    one token and a colon: `git interpret-trailers` reads such a line in the
+    last paragraph as a trailer, and the commit carries none (the house rule:
+    no attribution, nothing trailer-shaped)."""
+    import textwrap
+    lines = textwrap.wrap(" ".join(text.split()), width=width, break_long_words=False,
+                          break_on_hyphens=False)
+    out: list[str] = []
+    for line in lines:
+        if out and re.match(r"^[^\s:]+:(\s|$)", line):
+            out[-1] = out[-1] + " " + line
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def round_commit_message(number: Any, shape: str, changes: Any, staged: Sequence[str],
+                         outside: Sequence[str], too_large: Sequence[Any],
+                         earlier: tuple | None, paragraph: str, *,
+                         round_rel: str = "") -> tuple[str, str]:
+    """``(subject, body)`` of a round's commit (SPEC 24): ``round N: <what
+    changed>`` — the flips and new verdicts when the record was written, ``the
+    first round record`` for round 1, else which kinds of the project's files
+    changed (a standing round's later work is still that round, so its number
+    is reused); compacted to counts, then cut, past `COMMIT_SUBJECT_MAX`. The
+    body: the paragraph the person saw, the files grouped by directory, the
+    earlier rounds this commit also holds, and what it left out. No trailer
+    and no attribution. ``round_rel`` is `rounds.ROUND_REL`, handed in: the
+    round record's file name has one home, and only `cli` imports `rounds`."""
+    said = HUMAN["round"]
+    if shape == "written":
+        what = _round_changes(changes)
+    elif shape == "first":
+        what = said["commit_first"]
+    else:
+        kinds = {_commit_part(rel, round_rel) for rel in staged}
+        words = [said["commit_parts"][k] for k in _PART_ORDER if k in kinds]
+        what = said["commit_changed"].format(parts=_and_list(words))
+    subject = said["commit_subject"].format(n=number, what=what)
+    if len(subject) > COMMIT_SUBJECT_MAX and shape == "written":
+        compact = said["commit_compact"]
+        bits = []
+        flips = len(getattr(changes, "claims", ())) + len(getattr(changes, "requirements", ()))
+        if flips:
+            bits.append(compact["statuses"].format(k=flips,
+                                                   statuses=_plural(flips, "status", "statuses")))
+        if getattr(changes, "verdicts", ()):
+            n = len(changes.verdicts)
+            bits.append(compact["verdicts"].format(v=n, verdicts=_plural(n, "verdict")))
+        if getattr(changes, "instructions", ()):
+            bits.append(compact["instructions"])
+        if bits:
+            subject = said["commit_subject"].format(n=number, what="; ".join(bits))
+    if len(subject) > COMMIT_SUBJECT_MAX:
+        subject = subject[:COMMIT_SUBJECT_MAX - 1].rstrip() + "…"
+    paragraphs = [paragraph.strip()]
+    groups: dict[str, int] = {}
+    for rel in staged:
+        key = _commit_group(rel)
+        groups[key] = groups.get(key, 0) + 1
+    group_words = ", ".join(f"{key} ({n})" for key, n in groups.items())
+    paragraphs.append(said["commit_files"].format(n=len(staged),
+                                                  files=_plural(len(staged), "file"),
+                                                  groups=group_words))
+    if earlier:
+        a, b = earlier
+        paragraphs.append(said["commit_earlier_one"].format(a=a) if a == b
+                          else said["commit_earlier_many"].format(a=a, b=b))
+    if outside:
+        paragraphs.append(said["commit_outside"].format(paths=", ".join(outside)))
+    if too_large:
+        paragraphs.append(said["commit_too_large"].format(paths=", ".join(_sized(too_large))))
+    body = "\n\n".join(_wrap_message(p) for p in paragraphs if p)
+    return subject, body
+
+
+def round_hook_message(outcome: Any) -> str:
+    """The Stop hook's ``systemMessage`` (SPEC 24): ``nopekit `` and the
+    paragraph `round --commit` prints, or, for a round that did not run, why
+    and that nothing was committed. ``outcome`` has ``not_run`` and
+    ``summary``."""
+    if getattr(outcome, "not_run", ""):
+        return HUMAN["round"]["hook_not_run"].format(
+            why=str(outcome.not_run).rstrip(".") or "it did not run")
+    return "nopekit " + str(getattr(outcome, "summary", "") or "").strip()
+
+
+def round_hook_crash(exc: BaseException) -> str:
+    """The Stop hook's message for a crash: its type and first line."""
+    line = (str(exc).strip().splitlines() or [""])[0]
+    return HUMAN["round"]["hook_crash"].format(kind=type(exc).__name__,
+                                               line=line or "no message")
 
 
 def return_words(row: Any, ledger: Ledger | None = None) -> str:
@@ -5315,4 +5619,11 @@ __all__ = [
     "status_token_word",
     "round_paragraph",
     "round_moved",
+    # architecture phase 6: the round's commit and the Stop hook
+    "COMMIT_SUBJECT_MAX",
+    "round_commit_sentence",
+    "round_prose_sentence",
+    "round_commit_message",
+    "round_hook_message",
+    "round_hook_crash",
 ]

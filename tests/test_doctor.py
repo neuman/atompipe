@@ -917,5 +917,69 @@ class DecisionsAndBasis(_env.EnvCase):
                       rows["basis"]["detail"])
 
 
+class DoctorPeopleRow(_env.EnvCase):
+    """(architecture phase 6, SPEC §0.3) `doctor`'s `people` row says whether a
+    round here would commit — the people listed and whether git's identity is
+    one of them. Five states, and it never FAILs: a project that commits no
+    round is not broken. (Not in ROWS: the bracket lists no one on purpose.)"""
+
+    IDENT = f"{_env.IDENTITY['GIT_AUTHOR_NAME']} <{_env.IDENTITY['GIT_AUTHOR_EMAIL']}>"
+
+    def setUp(self):
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        for name in list(os.environ):
+            if name.startswith(("GIT_", "CLAUDE")) or name in ("EMAIL", "XDG_CONFIG_HOME"):
+                del os.environ[name]
+        home = self.tmp()
+        os.environ.update({"HOME": home, "XDG_CONFIG_HOME": home,
+                           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                           **_env.IDENTITY})
+
+    def _row(self, project: str) -> dict:
+        code, rows = _doctor_in_process(project)
+        self.assertNotEqual(rows["people"]["status"], "FAIL")
+        return rows["people"]
+
+    def _project(self, *extra: str) -> str:
+        root = os.path.join(self.tmp(), "p")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli_mod.main(["init", "--name", "p", "-C", root, *extra]), 0)
+        return root
+
+    def test_the_five_states(self):
+        root = self._project()
+        row = self._row(root)
+        self.assertEqual((row["status"], row["detail"]),
+                         ("ok", f"1 listed ({self.IDENT}); git's identity here is listed, "
+                                f"so rounds commit"))
+        os.environ["GIT_AUTHOR_NAME"] = "Someone Else"
+        row = self._row(root)
+        self.assertEqual(row["status"], "warn")
+        self.assertIn("git's identity here, Someone Else <tests@nopekit.invalid>, is not one "
+                      "of them — rounds make no commit", row["detail"])
+        for name in _env.IDENTITY:
+            os.environ.pop(name)
+        row = self._row(root)
+        self.assertEqual((row["status"], row["detail"]),
+                         ("warn", "1 listed; git has no user.name and user.email here — "
+                                  "rounds make no commit"))
+        os.environ.update(_env.IDENTITY)
+        bare = self._project("--no-git")
+        self.assertEqual(self._row(bare)["detail"],
+                         "1 listed; the project is in no git repository — rounds make no "
+                         "commit (`git init`)")
+        path = os.path.join(bare, ".nopekit", "project.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["people"] = []
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        row = self._row(bare)
+        self.assertEqual(row["status"], "warn")
+        self.assertTrue(row["detail"].startswith("none listed — rounds make no commit"), row)
+
+
 if __name__ == "__main__":
     unittest.main()

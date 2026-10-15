@@ -455,9 +455,11 @@ class CheckServesTheCache(unittest.TestCase):
 
     def test_every_reader_resolves_through_one_helper(self):
         """cli:H3, R-5: every command that shows a verdict gets it from `_resolved`."""
+        # Architecture phase 6: `round`'s body is `_round_run`, which `cmd_round`
+        # and the Stop hook (`_round_hook`) both call.
         readers = {"cmd_status", "cmd_claim_list", "cmd_claim_show", "cmd_report",
                    "cmd_site_build", "cmd_gate_show", "cmd_why", "cmd_doctor", "cmd_check",
-                   "cmd_round"}
+                   "_round_run"}
         source = _read(CLI_PY)
         callers = _callers_of(source, "_resolved")
         # Architecture phase 3a: `check`'s locked body is `_check_run`, which

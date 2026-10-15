@@ -34,9 +34,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Mapping, NamedTuple
+import stat
+from typing import Any, Iterable, Mapping, NamedTuple
 
 from . import store
+from .models import Person
 from .util import NopekitError, atomic_write_text, seal
 
 #: Where the round record lives, relative to the project root.
@@ -371,10 +373,173 @@ def write(root: str, content: Mapping[str, Any]) -> Written:
     return Written(True, number, previous, found, "")
 
 
+# --------------------------------------------------------------------------- #
+# the round's commit (architecture phase 6, SPEC 24 with §0.3)
+# --------------------------------------------------------------------------- #
+# Which paths are the project's own, and whose identity a round may commit as:
+# decided here, pure — no clock, no git. `cli` asks git (`vcs`) and hands the
+# answers in.
+
+#: The project's own directories: what `round --commit` stages, relative to the
+#: project root (SPEC 24). A closed list: anything else that changed is named in
+#: the round's paragraph, never staged. `site/` is staged as its ignore files
+#: allow (`site/data/build.json` never reaches git); `views` is already a record
+#: directory. *Rejected:* `docs/` (the person's own) and `.vscode/`
+#: (`launch.json` holds this machine's absolute `src` path, `site.ensure_launch`):
+#: a round that committed either would publish what the person never chose to.
+ROUND_DIRS: tuple[str, ...] = (*store.RECORD_DIRS, "model", "gates", "selftest",
+                               "generators", "site")
+
+#: The project's own paths under `.nopekit/`: exact files, and directories
+#: ending in `/`. The round record is named through `ROUND_REL` (its file name
+#: has one home). The index, `cache/`, `obs/` and `out/` are outputs the
+#: project's ignore file keeps out; one that is not ignored is still never
+#: staged, because it is not on this list.
+ROUND_NOPEKIT: tuple[str, ...] = (f"{store.NOPEKIT_DIR}/{store.PROJECT_NAME}", ROUND_REL,
+                                  f"{store.NOPEKIT_DIR}/.gitignore",
+                                  f"{store.NOPEKIT_DIR}/{store.VERDICTS_NAME}/",
+                                  f"{store.NOPEKIT_DIR}/trace/",
+                                  f"{store.NOPEKIT_DIR}/{store.PACKS_NAME}/")
+
+#: The project root's own files. `init` writes all three (the marked ignore and
+#: attribute blocks, the badge block at the bottom of the README): leaving them
+#: out would make every first commit miss the ignore files the project depends
+#: on, and `git status` would never be clean.
+ROUND_ROOT_FILES: tuple[str, ...] = (".gitignore", ".gitattributes", "README.md")
+
+#: The largest file a round stages, in bytes; a larger one is named, not staged.
+#: Why 50 MiB: GitHub warns at 50 MB and refuses a push over 100 MB. *Rejected:*
+#: no cap (a 2 GB scan dropped into `inputs/` would be committed by a turn
+#: ending, and every clone pays for it forever); the 100 MB hard limit (the push
+#: fails long after the commit, and the person must rewrite history to undo it).
+ROUND_MAX_BYTES = 50 * 1024 * 1024
+
+
+class StagePlan(NamedTuple):
+    """What a round stages of what changed: ``staged`` (the project's own paths,
+    deletions included), ``outside`` (every other changed path, named instead)
+    and ``too_large`` (``(path, bytes)`` over `ROUND_MAX_BYTES`). Each sorted."""
+
+    staged: tuple
+    outside: tuple
+    too_large: tuple
+
+
+def in_round_paths(rel: str) -> bool:
+    """Whether ``rel`` (POSIX, relative to the project root) is one of the
+    project's own paths a round may stage. A directory entry (``name/``, an
+    untracked nested repository as git lists it) never is: staging it would add
+    a submodule pointer nobody chose."""
+    path = str(rel or "").replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    if not path or path.endswith("/") or path.startswith("/"):
+        return False
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if path in ROUND_ROOT_FILES:
+        return True
+    if parts[0] in ROUND_DIRS and len(parts) > 1:
+        return True
+    for entry in ROUND_NOPEKIT:
+        if entry.endswith("/") and path.startswith(entry):
+            return True
+        if path == entry:
+            return True
+    return False
+
+
+def stage_plan(root: str, changed: Iterable[str]) -> StagePlan:
+    """Split ``changed`` (paths relative to ``root``, as `vcs.changed_paths`
+    lists them) into what a round stages, what it names instead, and what is
+    too large. A path no longer on disk is a deletion and is staged when it is
+    the project's; a link is staged as a link (its own size); a directory is
+    named, never staged."""
+    staged, outside, too_large = set(), set(), set()
+    for rel in changed:
+        rel = str(rel)
+        if not in_round_paths(rel):
+            outside.add(rel)
+            continue
+        try:
+            info = os.lstat(os.path.join(root, *rel.split("/")))
+        except FileNotFoundError:
+            staged.add(rel)
+            continue
+        except OSError:
+            outside.add(rel)
+            continue
+        if stat.S_ISDIR(info.st_mode):
+            # A directory is never a path a round stages, slash or no slash:
+            # `git add` of a nested repository (or of a submodule whose HEAD
+            # moved) records a 160000 gitlink. What slipped through (review of
+            # architecture phase 6): `vcs.changed_paths` dropped the slash
+            # `in_round_paths` refuses, and `generators/cadlib`, an untracked
+            # clone, was committed as a submodule pointer nobody chose.
+            outside.add(rel if rel.endswith("/") else rel + "/")
+            continue
+        size = info.st_size
+        if size > ROUND_MAX_BYTES:
+            too_large.add((rel, int(size)))
+        else:
+            staged.add(rel)
+    return StagePlan(tuple(sorted(staged)), tuple(sorted(outside)),
+                     tuple(sorted(too_large)))
+
+
+def person_of(ident: str | None) -> Person | None:
+    """``Name <email>`` (`vcs.ident`'s shape) as a `Person`, split at its last
+    ``<``; None when it is not that shape or either half is empty."""
+    text = str(ident or "").strip()
+    cut = text.rfind("<")
+    if cut <= 0 or not text.endswith(">"):
+        return None
+    name, email = text[:cut].strip(), text[cut + 1:-1].strip()
+    if not name or not email:
+        return None
+    return Person(name=name, email=email)
+
+
+def listed(people: Iterable[Any], ident: str | None) -> Person | None:
+    """The person in ``people`` git's identity ``ident`` is, or None: the name
+    equal after stripping, the email equal ignoring case — both, as SPEC §0.3
+    asks. `claims.identity_matches` is not this: it matches a name alone, which
+    would let any address commit under a listed name."""
+    who = person_of(ident)
+    if who is None:
+        return None
+    for person in people or ():
+        name = str(getattr(person, "name", "") or "").strip()
+        email = str(getattr(person, "email", "") or "").strip()
+        if name == who.name and email.casefold() == who.email.casefold():
+            return person
+    return None
+
+
+def last_committed_round(raw: bytes | None) -> int | None:
+    """The round number HEAD's round record holds (its bytes, from `vcs.show`),
+    or None — absent, unreadable or without one. For the commit's "rounds a to b
+    were not committed" note only; never read for truth."""
+    if not raw:
+        return None
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    number = doc.get("round") if isinstance(doc, dict) else None
+    if isinstance(number, int) and not isinstance(number, bool) and number >= 1:
+        return number
+    return None
+
+
 __all__ = [
     "ROUND_REL", "ROUND_NAME", "SCHEMA", "HEADER", "MOVED", "RESOLUTION", "KEYS",
     "Previous", "RoundState", "Flip", "Changes", "Written",
     "path_of", "verdicts_digest", "computed_from", "body", "self_digest", "sealed", "render",
     "read",
     "state", "changes", "write",
+    # architecture phase 6: the round's commit
+    "ROUND_DIRS", "ROUND_NOPEKIT", "ROUND_ROOT_FILES", "ROUND_MAX_BYTES", "StagePlan",
+    "in_round_paths", "stage_plan", "person_of", "listed", "last_committed_round",
 ]

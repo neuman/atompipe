@@ -45,6 +45,28 @@ rendered: what is checked, what is not, and why.
 /plugin install nopekit
 ```
 
+### Your first session
+
+Set your git identity once, if you have not: `git config --global user.name "…"` and
+`git config --global user.email "…"`. Then start Claude Code in an empty directory and
+say what you want built.
+
+1. The agent interviews you in your own words — what it is for, where it lives, what it
+   must fit and survive — and asks for sketches, photos, links and measurements.
+2. It writes your requirements back to you (`requirements/R1.json`, …) and asks for a
+   yes; you can always say skip.
+3. It runs `nopekit init`, which starts a git repository when there is none and lists
+   you, from git's identity, as the person rounds commit as (`people` in
+   `.nopekit/project.json`).
+4. It reaches first light — a model and the first evaluators' verdicts on your numbers —
+   and gives you the live site's URL (`nopekit site serve --watch`).
+5. Each time its turn ends, the plugin's Stop hook runs `nopekit round --hook`: a quick
+   check, the site rebuilt, and a local commit `round N: <what changed>` of the
+   project's own files, as you. It never pushes, and it tells you in one short
+   paragraph what it did.
+
+Outside Claude Code, `nopekit round --commit` does the same by hand.
+
 **Anywhere else** — the spine is **standard library only**, so there is nothing to
 build and nothing to resolve:
 
@@ -272,7 +294,9 @@ nopekit ask                   what evidence to request from the human
 nopekit ingest <files>        sketches, photos, CAD, datasheets, measurements
 nopekit extract <artifact>    what was read out of it, and what that grounds
 nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
-nopekit round                 end a round: a tier-0 check, the site, the round record; never blocks
+nopekit round [--commit]      end a round: a tier-0 check, the site, the round record; --commit
+                              commits the project's own paths as a listed person; never blocks
+nopekit packs skills          the live packs' PACK.md and skill files, for the agent to read
 nopekit gap [--propose]       every claim whose mechanism has yet to run, and packs that might run it
 nopekit why <name>            one param's, claim's or requirement's full history
 nopekit gate selftest         every negative control; fails any gate that can't fail

@@ -1780,6 +1780,26 @@ class KeyCollision(Record):
 # the project
 # --------------------------------------------------------------------------- #
 @dataclass
+class Person(Record):
+    """One person a project lists (SPEC §0.3): a round commits only as one of
+    them. ``name`` and ``email`` as git knows them (``git config user.name`` and
+    ``user.email``); a git identity matches when the name is equal after
+    stripping and the email equal ignoring case (``rounds.listed``).
+
+    Agent-editable, like every key of ``.nopekit/project.json``: it decides
+    whose identity a round may commit under, and nothing else — never who
+    recorded a result, owns an assumption, judges a claim or prefers an
+    alternative. Invariant 11's channel stays the git identity at the moment of
+    the act, typed by the person in their own shell. What it guards against is
+    surprise (a commit under an identity the project never named: a CI runner,
+    a colleague's checkout, an unset or invented identity), not the agent
+    (SPINE_CONTRACT's limits)."""
+
+    name: str = ""
+    email: str = ""
+
+
+@dataclass
 class ProjectMeta(Record):
     name: str = ""
     summary: str = ""
@@ -1788,6 +1808,22 @@ class ProjectMeta(Record):
     model_entry: str = ""            # "model/boat.py" - the single source of truth
     packs: list[str] = field(default_factory=list)
     spine_version: str = ""
+    # Architecture phase 6 (SPEC §0.3, decision 24): the people a round may
+    # commit as. LAST, so a project.json an earlier phase wrote keeps its key
+    # order and reads as `[]`. Not hidden from a gate's read of `meta` (read
+    # whole, `verdicts._LEDGER_WHOLE`): no bundled or bracket gate reads `meta`.
+    people: list[Person] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProjectMeta":
+        """Lenient, like every ``Record.from_dict``, with each person as a
+        ``Person`` (a dict that stayed a dict would serialise, compare and
+        match differently from one read back)."""
+        names = {f.name for f in dataclasses.fields(cls)}
+        kw = {k: v for k, v in (data or {}).items() if k in names}
+        kw["people"] = [Person.from_dict(p) if isinstance(p, dict) else p
+                        for p in (kw.get("people") or [])]
+        return cls(**kw)
 
 
 @dataclass
@@ -2051,7 +2087,7 @@ __all__ = [
     "EntryStanding", "Standing", "Terminal", "TERMINALS_BY_KIND", "Claim",
     "Verdict", "NegativeControl", "GateSpec", "PrerequisiteKind", "CONTEXT_OUTSIDE",
     "ToolCandidate", "Need", "Extraction", "InputArtifact", "Decision",
-    "Locator", "View", "PackManifest", "KeyCollision", "ProjectMeta", "Ledger",
+    "Locator", "View", "PackManifest", "KeyCollision", "Person", "ProjectMeta", "Ledger",
     "RECORD_KINDS", "FORBIDDEN_KEYS", "ALWAYS_WRITTEN", "Milestone", "ExportRecord",
     "LATENCY_UNITS", "Requirement", "CLAIM_MECHANISM",
     "BASES", "BASIS_UNDECLARED", "REJECTION_TYPES", "REJECTION_UNTYPED",

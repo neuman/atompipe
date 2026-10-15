@@ -245,6 +245,10 @@ without moving the cache (the composition, the graph, a bracket record) ends wit
 goes red until it does. On a fresh clone `nopekit round` writes nothing and `git status`
 stays clean.
 
+The bracket lists no `people` in `.nopekit/project.json`, on purpose: `nopekit round
+--commit`, and the plugin's Stop hook that runs it, commits a round only as a person
+listed there, so a round run here, inside nopekit's own repository, never commits.
+
 The readiness report is not committed: `nopekit report --write` renders `REPORT.md`
 here, an output git ignores — it was `docs/readiness.md`, tracked, until it drifted
 from the records it was rendered from.

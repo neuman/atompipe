@@ -562,7 +562,7 @@ where the page's staleness lives.
 
 | Key | From | What it says |
 |---|---|---|
-| `name`, `summary`, `created`, `revision`, `model_entry`, `packs`, `spine_version` | `.nopekit/project.json`, verbatim (`ProjectMeta`) | the project, as its own record states it; a field `ProjectMeta` gains arrives here and in this table together |
+| `name`, `summary`, `created`, `revision`, `model_entry`, `packs`, `spine_version` | `.nopekit/project.json`, verbatim (`ProjectMeta`) | the project, as its own record states it; a field `ProjectMeta` gains arrives here and in this table together — except `people` (architecture phase 6), never baked (`site._UNPUBLISHED_META`): the page is published, and the names and addresses a round may commit as are not its to publish |
 | `stale` | the resolution: any row not current | whether the VERDICTS are current |
 | `stale_reason` | the resolution | the stale gates with their reasons (the first three, then `(+n more)`) |
 | `records_digest` | `store.records_digest(root)` at build time | which records the page was built from — whether the PAGE is current, half one |
@@ -1033,6 +1033,21 @@ a failed build writes `ok: false` with the error and the previous `id`. The page
 polls `build.json` every 2 s while it reads `live: true`, and reloads its data when
 `id` moves. **Published**: Pages serves `site/` as committed, or CI builds it; a 404
 or `live: false` stops the polling, so the page needs only static files.
+
+**Rounds** (architecture phase 6, SPEC 24). When the agent's turn ends, the plugin's
+Stop hook runs `nopekit round --hook`: it rebuilds the site when `site/index.html`
+exists (the same build as `site build`, over the round's resolution), and commits
+`site/` as its ignore files allow — `data/build.json`, the clock, never reaches git, so
+a round that judged nothing new commits no byte of the page. The hook's message, which
+the person sees, names each file in `site/content/` stamped before the latest results —
+each board's, and `intro` and `next`, which are stamped against every claim and the
+readiness, so any status that moves anywhere names them. The nopekit skill has the
+agent, before its turn ends, run `nopekit check` first (a stamp digests the tokens as
+they read when it runs, and after a model edit those are Stale until a check; the hook's
+check would then move them past the text it just stamped — review of phase 6), then read
+each of those files against the page, rewrite it, and run `nopekit site stamp <board>`
+for each (`--all` for every one).
+`state.json`'s `meta` never carries `people` (the page is published).
 
 ## Style
 

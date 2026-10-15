@@ -41,6 +41,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -v
 from __future__ import annotations
 
 import ast
+import functools
 import importlib
 import json
 import os
@@ -133,7 +134,15 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_round.OnlyRoundWritesTheRoundRecord",
         "test_round.NothingReadsTheRoundRecordForTruth",
         # Architecture phase 5: groups are records.
-        "test_records.GroupsAreRecords"],
+        "test_records.GroupsAreRecords",
+        # Architecture phase 6: the round's commit stages only the project's own
+        # paths, inside its directory, and writes no record.
+        "test_round.TheRoundCommitStagesOnlyTheProjectsPaths",
+        # Review of phase 6: the identity a round commits under, and the
+        # repository `init` starts, are invariant 8's own clauses; unmapped, a
+        # skip added to either went unseen.
+        "test_round.RoundsCommitOnlyAsAListedPerson",
+        "test_record_commands.InitStartsARepository"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -454,6 +463,15 @@ _SKIP_STRINGS = frozenset({
 })
 
 
+@functools.lru_cache(maxsize=None)
+def _parsed(source: str, filename: str) -> ast.Module:
+    """``ast.parse``, once per source text. The review of phase 6's pay-back:
+    `InvariantClassesNeverSkip` parsed a test file again for each class mapped
+    in it — test_records.py eleven times — and parsing was most of its 1.7 s.
+    Read-only below, so one tree serves every class."""
+    return ast.parse(source, filename)
+
+
 def _skip_findings(source: str, class_name: str, filename: str = "<planted>") -> list[str] | None:
     """Skip spellings in what runs when ``class_name`` runs; None if it is absent.
 
@@ -462,7 +480,7 @@ def _skip_findings(source: str, class_name: str, filename: str = "<planted>") ->
     module-level function, class or assignment any of those names: a helper that
     raises ``SkipTest`` skips the invariant just as surely as a decorator.
     """
-    tree = ast.parse(source, filename)
+    tree = _parsed(source, filename)
     defs: dict[str, ast.AST] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

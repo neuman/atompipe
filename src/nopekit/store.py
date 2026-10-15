@@ -2782,10 +2782,53 @@ def _parse_project(raw: bytes, label: str) -> ProjectMeta:
                             f"nopekit knows (it reads schema {PROJECT_SCHEMA})")
     body = {k: v for k, v in data.items() if k != "schema"}
     _check_keys(body, ProjectMeta, label)
+    found = people_problem(body.get("people"), label)
+    if found:
+        raise NopekitError(found)
     try:
         return ProjectMeta.from_dict(body)
     except (TypeError, ValueError) as exc:
         raise NopekitError(f"{label}: not a valid project file ({exc})") from None
+
+
+def people_problem(people: Any, label: str) -> str | None:
+    """What is wrong with project.json's ``people`` (architecture phase 6, SPEC
+    §0.3), as one sentence, or None. Absent or ``null`` reads as ``[]``. Each
+    entry is ``{"name", "email"}`` as git prints them: a name with ``<``, ``>``
+    or a line break, or an email with whitespace, ``<`` or ``>``, could never
+    equal what ``git var GIT_AUTHOR_IDENT`` says, so the person it means could
+    never commit a round — refused here, where the file is, rather than read as
+    a silent "not listed" on every turn. One entry per email, ignoring case
+    (`rounds.listed` compares it so). Pure: `_parse_project` raises it."""
+    if people is None:
+        return None
+    if not isinstance(people, list):
+        return (f'{label}: "people" must be a list of {{"name": ..., "email": ...}} objects '
+                f"— one per person a round may commit as")
+    seen: dict[str, int] = {}
+    for i, entry in enumerate(people):
+        if not isinstance(entry, Mapping):
+            return (f'{label}: "people" must be a list of {{"name": ..., "email": ...}} '
+                    f"objects — one per person a round may commit as")
+        for key in ("name", "email"):
+            if key not in entry:
+                return (f'{label}: people[{i}] has no "{key}" — each person is '
+                        f'{{"name": ..., "email": ...}}, as git knows them')
+        name, email = entry["name"], entry["email"]
+        if not isinstance(name, str) or not name.strip() \
+                or any(ch in name for ch in "<>\r\n"):
+            return (f"{label}: people[{i}].name must be the name as `git config user.name` "
+                    f'prints it — a non-empty string without "<", ">" or a line break')
+        if not isinstance(email, str) or not email.strip() \
+                or any(ch.isspace() or ch in "<>" for ch in email):
+            return (f"{label}: people[{i}].email must be the address as `git config "
+                    f'user.email` prints it — a non-empty string without spaces, "<" or ">"')
+        folded = email.casefold()
+        if folded in seen:
+            return (f"{label}: people[{i}] repeats {email} (people[{seen[folded]}]) — one "
+                    f"entry per person")
+        seen[folded] = i
+    return None
 
 
 def read_project(root: str) -> ProjectMeta:
@@ -3384,15 +3427,24 @@ runs/
 #: every user line kept). *Rejected:* unanchored `out/` (it would hide any
 #: directory of that name anywhere in the project); a block of its own (two
 #: marked blocks in one file, and the second one's markers to keep apart).
+#: Architecture phase 6's review adds `/.vscode/launch.json`: `init` writes it
+#: (`site.ensure_launch`) with this machine's absolute `src` path, so a round
+#: never stages it (`rounds.ROUND_DIRS`), and unignored it was named "not
+#: staged" at the end of every round and `git status` never came clean. A
+#: tracked one (the bracket's) is unaffected. *Rejected:* leaving it out of the
+#: round's not-staged list alone (`git status` still never clean); a
+#: self-ignoring `.vscode/.gitignore` (a second ignore file nobody looks for).
 _ROOT_IGNORE_BLOCK = f"""\
 {_BEGIN}
 # Written by nopekit: bytecode from importing model/, gates/ and selftest/,
-# the readiness report `nopekit report --write` renders, and the packages
-# `nopekit export` writes. Outputs, never sources.
+# the readiness report `nopekit report --write` renders, the packages
+# `nopekit export` writes, and the editor launch entry `nopekit init` writes
+# with this machine's paths. Outputs, never sources.
 __pycache__/
 *.py[cod]
 /REPORT.md
 /out/
+/.vscode/launch.json
 {_END}
 """
 
@@ -4170,6 +4222,8 @@ __all__ = [
     "nopekit_dir", "ledger_path", "out_dir", "inputs_dir",
     "docs_dir", "model_dir", "project_paths",
     "read_project", "write_project", "read_record", "write_record",
+    # architecture phase 6: the people a round may commit as
+    "people_problem",
     "load", "save", "is_legacy",
     "build_index", "write_index", "agree", "records_digest",
     # architecture phase 3a: the graph's record pointers

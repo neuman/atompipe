@@ -1083,6 +1083,144 @@ above stand where these do not change them):
   c392078 on a loaded machine (`tests/fast.py`); no idle run was had, so the 90 s line
   itself is not shown met.
 
+**Phase 6** (rounds and the plugin), decided while building it:
+
+- **`people` entries are `{"name", "email"}` objects** (`models.Person`), not
+  `Name <email>` strings: the reader names the half that is wrong, and git prints the
+  two separately. A git identity matches when the name is equal after stripping and the
+  email equal ignoring case; `claims.identity_matches` (a name alone) is not reused,
+  because §0.3 needs both. Duplicate emails are refused, compared ignoring case.
+- **`PROJECT_SCHEMA` stays 2.** `people` is optional on read (absent is `[]`) and always
+  written, last, so an earlier phase's file keeps its key order. An older nopekit
+  refuses the key, naming it; the plugin ships the spine and the skill together.
+- **`people` is not hidden from a gate's read of `meta`** (read whole), so
+  `verdicts.py` is untouched; no bundled or bracket gate reads `meta`. **It is never
+  baked into `state.json`** (`site._UNPUBLISHED_META`): the page is published, and the
+  design had `meta` copied whole, which would have put every listed email on Pages.
+- **The staging list is closed** (`rounds.ROUND_DIRS`, `ROUND_NOPEKIT`,
+  `ROUND_ROOT_FILES`): the record directories, `model/`, `gates/`, `selftest/`,
+  `generators/`, `site/`, `.nopekit/project.json`, the round record, `.nopekit/.gitignore`,
+  `.nopekit/verdicts/`, `.nopekit/trace/`, `.nopekit/packs/`, and the root's
+  `.gitignore`, `.gitattributes` and `README.md`. `docs/` and `.vscode/` are out
+  (`launch.json` holds a machine path), so a new project's paragraph names
+  `.vscode/launch.json` as not staged on each round that commits. A file over 50 MiB
+  (`ROUND_MAX_BYTES`) is named, not staged; an untracked nested repository (`name/`) is
+  never staged.
+- **`vcs.changed_paths` asks `git diff`, `diff --cached` and `ls-files --others`**, each
+  over `.`: the design's `ls-files --modified --deleted` names a file whose mtime alone
+  moved, and a copied project would have listed every such file as "not staged".
+- **The commit is `git commit --only` with the paths on stdin**, after `git add --all`
+  of the same list; what the person staged elsewhere stays staged. Every refusal (a
+  newer round record, no repository, an operation in progress, a detached HEAD, no
+  identity, no people, an identity not listed) is decided before the index is touched;
+  a commit git refuses leaves the round's files staged and says so. A failing round
+  commits; a round that is "not run" does not. `why` gained `unlisted` (git did not
+  list the changes), which the design folded into `refused`, whose sentence says the
+  files were left staged when none were.
+- **The commit number is the round record's.** A round whose record stood but whose
+  files changed reuses it, with a `<kinds> changed` subject; past 72 characters the
+  subject counts the flips and new verdicts, then is cut. The body is the paragraph,
+  the files by directory, the earlier rounds it holds (from HEAD's round record, or
+  all before it when HEAD has none) and what it left out; it is wrapped so no line
+  starts with one token and a colon, and `git interpret-trailers --parse` finds nothing.
+- **The writing half's timeout is 120 s**, SIGTERM then SIGKILL after 5 s, with
+  `GIT_EDITOR=:` and only `-c user.useConfigOnly=true`; `why` is git's first stderr
+  line, prefixed `refused:`.
+- **The Stop hook** finds the project from `-C`, the payload's `cwd`,
+  `$CLAUDE_PROJECT_DIR`, then the process's cwd; sends stdout nowhere at the Python
+  level **and at fd 1** (a solver or a commit hook writes to the inherited descriptor
+  below any `redirect_stdout`), rebuilds the index itself, and prints `{}` when the
+  record stood, nothing changed, no board's text is behind and no trace started. It
+  waits up to 60 s for the build lock (`ROUND_LOCK_WAIT_S`, hook only), ignores
+  `stop_hook_active`, and turns any exception but `KeyboardInterrupt` (`SystemExit`
+  included) into one line. Plain `round` is byte-identical to phase 3a; `--commit`
+  is explicit and `--hook` implies it.
+- **The board-text sentence is said with `--commit` only**, from `page.stamp_states`
+  over the round's tokens, naming every board, `intro` and `next` whose stamp is not
+  current. The hook's `systemMessage` reaches the person, not the model, so the skill
+  has the agent restamp before its turn ends.
+- **`init`** lists git's identity as the first person, starts a repository after
+  `store.init` (a refused init starts none) and only outside one, gains `--no-git`, and
+  prints decision 21's four steps; `--json` gains `git` and its steps carry their
+  commands in code spans, so the docs scan reads them.
+- **doctor's `people` row** is warn-only, with five states; it is not in
+  `test_doctor.ROWS`, because the bracket lists no one on purpose.
+- **`packs skills`** prints PACK.md, then each `skills/<name>/SKILL.md` in natural
+  order, for the live packs found here or the `--pack` names; `--json` adds `missing`;
+  a live pack not found is a FAIL line and exit 1. `pack validate` refuses a
+  `skills/<name>/` with no SKILL.md. "Site partials" are a pack's views and the
+  evidence its evaluators write; no new format.
+- **The skill** keeps its two anchor headings and the cause bullets verbatim
+  (`test_prerequisites.PrerequisiteWords`), puts the person's own commands in a fenced
+  block (a code span across a line break pairs the wrong backticks), and is held to
+  its section order, its command table (the parser's top-level subcommands, both ways)
+  and under 260 lines (`test_plugin`).
+- **The trace's seam** is `cli._round_start_trace(root, changes) -> str`, called after
+  the commit and outside the lock, returning `""` until phase 3b.
+- **Only the staging class maps to invariant 8**
+  (`test_round.TheRoundCommitStagesOnlyTheProjectsPaths`); the identity, history and
+  hook classes are ordinary, and no invariant number is new. The refactor moved
+  `cmd_round`'s body to `_round_run`, so `test_round`'s record-access allow list and
+  escape scan and `test_check_cache`'s one-helper set name it.
+- **The bracket lists no people**, so a round inside nopekit's own repository never
+  commits; its cache and round record were regenerated (round 3).
+- **The fast tier's pay-back:** the invariant 8 class added ~0.4 s in the tier (~1.5 s
+  alone); test_meta.NoGitOutsideVcs and five small non-invariant entries (~1.25 s)
+  went to the full suite. Two interleaved pairs measured 123.8 s and 123.1 s wall
+  (91.0 and 91.7 s user) against 120.0 s and 134.5 s (88.8 and 97.9 s user) for
+  e27e1a7, at load 0.8-1.5: flat within the noise, over the 90 s line as the base is.
+
+**Review of phase 6**, decided while fixing what it found:
+
+- **The hook runs a script, never `python3 -m`.** `hooks.json` runs
+  `hooks/stop.py`: `-m` put the session's cwd first on `sys.path`, so a `difflib.py`
+  (or `types.py`, `queue.py`, a `nopekit/`) in any repository ran at every turn's end
+  and could exit 2, which blocks the turn. The launcher drops every empty or relative
+  path entry, puts the plugin's `src` first and turns a failed import into the
+  one-line message. `PYTHONSAFEPATH`/`-P` were rejected (3.11+; nopekit supports
+  3.10), and `-I` too (it drops user site-packages, so a `pip --user` tool would read
+  skipped in the hook and present in the shell).
+- **A repository is started only on git's positive "no".** `vcs.in_repository`
+  answers True, False, or None with why: False only on git's own "not a git
+  repository" with no `.git` in the directory or above it. `init` and `init_repo`
+  used `is_repo`, which reads every failure as "no", and under "dubious ownership"
+  (WSL's `/mnt/c`, shared drives) or a slow git they nested a repository inside one.
+- **The committer is held to `people` too** (`vcs.committer_ident`, why
+  `committer-not-listed`), and doctor's `people` row reads it: `committer.*` config or
+  `GIT_COMMITTER_*` put an unlisted identity on round commits.
+- **`init` lists git's identity only when `store.people_problem` accepts it**: git
+  takes an email with a space, the strict reader does not, and the project init wrote
+  could not be read. `--json` gains `people_refused`.
+- **A directory is never staged**: `vcs.changed_paths` keeps the `/` with which git
+  lists an untracked nested repository, and `rounds.stage_plan` names any directory
+  as not staged; a clone under `generators/` had been committed as a gitlink.
+- **A repository that ignores the project says so**: `init` prints it, and a round
+  with nothing staged whose `.nopekit/project.json` git ignores reads why `ignored`,
+  not "nothing changed". Only the project file is asked, so a person's own ignore
+  rule over a big scan does not turn every quiet round into a message.
+- **`/.vscode/launch.json` joins the root ignore block**, so the launch entry `init`
+  writes is neither staged nor named on every round, and `git status` comes clean
+  after a round (superseding "names `.vscode/launch.json` as not staged" above; the
+  bracket's tracked one is unaffected, and its block was regenerated).
+- **`unlisted`'s sentence carries no detail** ("git did not answer when asked which
+  files changed"): it had printed empty parentheses.
+- **`packs skills` prints each pack's `lenses.md`** after its PACK.md (`--json`
+  `lenses`); the skill had sent the agent to `packs show`, which prints PACK.md alone.
+- **The skill's end of turn runs `nopekit check` before reading and stamping** the
+  boards, `intro` and `next`: a stamp digests the tokens as they read, Stale after a
+  model edit, and the hook's check moved them past the text. The loop gains
+  proposers and `why`.
+- **Invariant 8 maps `test_round.RoundsCommitOnlyAsAListedPerson` and
+  `test_record_commands.InitStartsARepository`** (superseding "only the staging class"
+  above): its text names both clauses. `packs skills`, `round --commit` and the hook
+  joined the records sweeps in tests of their own, the hook's index row with a model
+  that does not load (the check's own rebuild then never runs).
+- **The fast tier's pay-back:** the review added ~1.2 s in the tier (three identity
+  rows, two `init` rows, the nested repository) and paid ~1.2 s by parsing each test
+  file once in `test_meta.InvariantClassesNeverSkip` (1.8 s to 0.6 s with the modules
+  loaded, the same assertions). Two interleaved pairs on a loaded machine measured
+  127.2 s and 138.7 s wall against 161.2 s and 149.4 s for 63e9cef (`tests/fast.py`).
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

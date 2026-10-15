@@ -14,6 +14,28 @@ that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
 The budget is 90 s as ONE process on an otherwise idle machine. The review of
+architecture phase 6 added ~1.2 s in the tier (invariant 8's identity and `init`
+clauses: three in-process identity rows, two `init` rows, and the nested repository
+in the staging class) and paid ~1.2 s by parsing each test file once in
+test_meta.InvariantClassesNeverSkip (1.8 s to 0.6 s with the modules loaded, the same
+assertions). Measured on 2026-10-15 as two interleaved pairs against 63e9cef on a
+machine other sessions were loading (load average 2.3-3.9, not idle): 127.2 s and
+138.7 s wall (92.9 s and 101.7 s user) for its 662 tests, against 161.2 s and 149.4 s
+(109.8 s and 106.2 s user) for 63e9cef's 656 — not slower than its base, and over the
+line as its base is. Architecture phase
+6 (rounds and the plugin) added its invariant 8 class,
+test_round.TheRoundCommitStagesOnlyTheProjectsPaths (~0.4 s in the tier, warm; ~1.5 s
+alone: a bracket in a subtree committed in process twice, the checker's planted rows
+and the closed list), and doctor's `people` row in the records sweeps (a git question
+or two per `doctor`). It paid ~1.25 s, none an invariant class, each named where it
+was: test_meta.NoGitOutsideVcs (~0.9 s) and five small entries
+(test_prerequisites.PlanIsStable's three rows, test_goalposts.Margins and
+AClaimReadIsTheWholeRecord, test_context.MalformedContextsAreRefused and
+NoContextMovesNothing). Measured on 2026-10-15 as two interleaved pairs against
+e27e1a7 (load average 0.8-1.5, not idle): 123.8 s and 123.1 s wall (91.0 s and 91.7 s
+user) for its 656 tests, against 120.0 s and 134.5 s (88.8 s and 97.9 s user) for
+e27e1a7's 665 — flat within this machine's noise, and over the line here as its base
+is; the next change that adds pays first. The review of
 architecture phase 5 added ~0.3 s (its in-process rows: a Failing claim never worded
 inside its limit, the project's group, a claim named from another board, the checker
 over baked prose, the scan's units) and paid ~2.9 s: the two records-sweep rows
@@ -309,7 +331,10 @@ FAST: list[str] = [
     "test_meta.TheInvariantTableIsTheMap",
     "test_meta.InvariantClassesNeverSkip",
     "test_meta.NoWallClockBelowTheEdge",
-    "test_meta.NoGitOutsideVcs",
+    # (Architecture phase 6's pay-back: test_meta.NoGitOutsideVcs, an AST walk
+    # over every spine module for a git process outside `vcs`, ~0.9 s, to the
+    # full suite — a harness guard, no invariant class. An iteration that touches
+    # `vcs.py` or starts a git process runs test_meta and test_vcs whole.)
     # (House rule: the spine is standard library only. test_stdlib_only — CI's
     # own AST walk over the spine and a planted third-party import, 0.4 s — is
     # left to the full suite by architecture phase 2's pay-back: CI's first step
@@ -590,9 +615,8 @@ FAST: list[str] = [
     # (Architecture phase 5's pay-back: test_prerequisites.ApplyingTheRuleTwice-
     # MovesNothing, ~0.1-0.2 s, to the full suite — no invariant class; the rule
     # itself is PrerequisiteFailureIsNeverAPass's, above.)
-    "test_prerequisites.PlanIsStable.test_without_needs_run_order_is_registration_order",
-    "test_prerequisites.PlanIsStable.test_needs_order_is_dfs_postorder",
-    "test_prerequisites.PlanIsStable.test_a_plan_that_does_not_expand_is_caught",
+    # (Architecture phase 6's pay-back: test_prerequisites.PlanIsStable's three
+    # rows, ~0.05 s, to the full suite — the run order, no invariant class.)
 
     # -- P2.4: goalposts, the comparison, operating contexts (4, 7, 9) ----- #
     # In process, under a second together (measured 2026-10-03: 0.7 s): a pass
@@ -620,8 +644,9 @@ FAST: list[str] = [
     # `um` is left to the gate (below).
     "test_goalposts.AnEvaluatorStatesItsOwnUnits.test_no_shipped_or_taught_gate_echoes_the_claims_units",
     "test_goalposts.AnEvaluatorStatesItsOwnUnits.test_the_echo_is_what_the_scan_finds",
-    "test_goalposts.Margins",
-    "test_goalposts.AClaimReadIsTheWholeRecord",
+    # (Architecture phase 6's pay-back: test_goalposts.Margins and
+    # AClaimReadIsTheWholeRecord, ~0.2 s, to the full suite — no invariant
+    # class; a limit edit re-keying exactly its readers is TheGoalpostLivesInClaims'.)
     "test_context.OutsideTheContextAPassDoesNotCount.test_the_composition_reads_gap",
     "test_context.OutsideTheContextAPassDoesNotCount.test_the_breach_rule",
     "test_context.OutsideTheContextAPassDoesNotCount.test_the_mark_is_on_passes_alone_and_idempotent",
@@ -631,8 +656,8 @@ FAST: list[str] = [
     "test_context.KnownGoodOutsideIsUnqualified.test_the_judge_reads_known_good_outside",
     "test_context.AMutationPassingOutsideStillCounts",
     "test_context.AnOwnedFallbackReadsAssumed",
-    "test_context.MalformedContextsAreRefused",
-    "test_context.NoContextMovesNothing",
+    # (Architecture phase 6's pay-back: test_context.MalformedContextsAreRefused
+    # and NoContextMovesNothing, ~0.1 s, to the full suite — no invariant class.)
 
     # -- invariant 8: records are the source, the index an output --------- #
     # The class but its legacy row, the index-agrees test among it: a
@@ -882,6 +907,21 @@ FAST: list[str] = [
     "test_round.ABehindRoundRecordSaysSo.test_edited_unreadable_and_newer",
     "test_round.ABehindRoundRecordSaysSo.test_an_evaluator_edit_reads_behind",
     "test_round.TheRoundRecordIsByteStable.test_it_is_tracked_in_an_init_project",
+    # Architecture phase 6 (invariant 8): the round's commit stages only the
+    # project's own paths inside its directory — the bracket in a subtree beside
+    # the person's own work, committed in process twice (~1.5 s) — and the
+    # checker's planted rows and the closed list (instant).
+    "test_round.TheRoundCommitStagesOnlyTheProjectsPaths",
+    # The review of phase 6 (invariant 8's identity and init clauses, ~0.9 s): a
+    # round never commits as an identity `people` does not list — another
+    # name, a listed name at another address, a committer from
+    # `GIT_COMMITTER_*` — each in process over one bracket commit; and `init`
+    # nests no repository, inside one or where git does not answer.
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_another_identity",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_listed_name_at_another_address",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_committer_people_does_not_list",
+    "test_record_commands.InitStartsARepository.test_inside_a_repository_nothing_about_git_changes",
+    "test_record_commands.InitStartsARepository.test_git_that_does_not_answer_starts_none",
     "test_graph.AnEdgeChangesNoStatus",
     # (Architecture phase 5's pay-back: the graph's neighbours — its bytes under
     # a reversed listing and other words, the observed view agreeing with it,
@@ -935,6 +975,37 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # The review of phase 6: the rest of the identity rows (a listed person
+    # commits, an email in another case, no identity, no people, a detached
+    # HEAD, a merge, a newer record, no repository, and the CLI's words for git
+    # not listing, not staging and not finishing), `init`'s other rows, and the
+    # round's commit and the Stop hook in the records sweeps (~4.3 s, each a
+    # bracket or an `init` in a fresh process). The rule they share runs above:
+    # `rounds.listed` over another name, another address and the committer, and
+    # `vcs.in_repository` under git's refusal. An iteration touching
+    # `_round_commit`, `_round_hook`, `cmd_init`, `vcs.py` or `rounds.py` runs
+    # test_round, test_vcs, test_record_commands and test_records whole.
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_listed_person_commits_as_themselves",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_an_email_in_another_case_is_the_same_person",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_git_does_not_list_the_changes",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_git_does_not_stage",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_commit_that_does_not_finish",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_no_identity",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_no_people",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_detached_head",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_merge_in_progress",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_a_newer_round_record",
+    "test_round.RoundsCommitOnlyAsAListedPerson.test_no_repository",
+    "test_record_commands.InitStartsARepository.test_outside_a_repository_it_starts_one",
+    "test_record_commands.InitStartsARepository.test_no_git_starts_none",
+    "test_record_commands.InitStartsARepository.test_no_identity_lists_no_one_and_says_so",
+    "test_record_commands.InitStartsARepository.test_json_carries_git_and_people",
+    "test_record_commands.InitStartsARepository.test_a_refused_init_starts_no_repository",
+    "test_record_commands.InitStartsARepository.test_an_identity_the_reader_refuses_is_not_listed",
+    "test_records.IndexNeverDisagreesWithRecords.test_the_stop_hook_leaves_the_index_agreeing",
+    "test_records.IndexNeverDisagreesWithRecords.test_packs_skills_and_the_rounds_commit_leave_the_index_agreeing",
+    "test_records.NoCommandWritesARecord.test_packs_skills_writes_no_record",
+    "test_records.NoCommandWritesARecord.test_the_rounds_commit_writes_what_round_writes",
     # Architecture phase 5's subprocess halves: a hand-edited map read back
     # through `site status`, `status` and `doctor` (~2.8 s), the map against the
     # round record after `nopekit round` (~0.6 s), and `site stamp` run as a

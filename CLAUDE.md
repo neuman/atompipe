@@ -148,7 +148,18 @@ below names:
    path it writes (`out/<milestone>/`, its package) is ignored when written;
    `report --write` writes `REPORT.md`, an output git ignores; `round` writes
    what `check` writes, what `site build` writes when `site/index.html` exists, and
-   the round record; `site stamp` writes only the `as_of` line of the `site/content/`
+   the round record; `round --commit` (the Stop hook's `round --hook`) writes no
+   record: it writes what `round` writes, then commits only the project's own paths
+   inside the project's directory (`rounds.in_round_paths`), naming every other
+   changed path instead of staging it (a directory, an untracked nested repository
+   among them, never), only when `people` lists both its author and its committer,
+   and never pushes (designed against in phase 6: a hook that ran `git add -A` would
+   commit a person's unrelated work as "round N"; in its review, a committer from
+   `GIT_COMMITTER_*` that `people` never named reached a round's commit, and an
+   untracked clone under `generators/` was committed as a gitlink); `init` starts a
+   git repository only where git says positively that the project sits in none (in
+   review, a "dubious ownership" refusal read as "none" and nested one inside an
+   existing repository); `site stamp` writes only the `as_of` line of the `site/content/`
    files it names, which are not records; and `site badge` and `init` write only the
    README block. `.nopekit/round.json`, the round record, is a tracked output and not a
    record: only `round` writes it (and, from phase 4, `merge`), at most once a run,
@@ -391,7 +402,7 @@ named.)
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
 | 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository` |
 | 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
@@ -435,7 +446,8 @@ Each fact has one home; everything else that shows it is an output of that home.
   sealed and chained, appended only by `prefer`: never edit one by hand),
   `groups/<id>.json` (a board of claims, a zone of choices or a station of shared
   values: how the page groups the map, with no status and no position), and
-  `.nopekit/project.json` (meta, `model_entry`, the live `packs`).
+  `.nopekit/project.json` (meta, `model_entry`, the live `packs`, the `people` a round
+  may commit as).
   `results/<claim-id>.json` holds a claim's physical results and its owner's or
   authority's attributions, sealed and chained, appended only by `claim physical`
   (P2.5a): never edit one by hand — a broken seal refuses the file.
@@ -478,7 +490,7 @@ layout in full, with each writer.
 | `src/nopekit/store.py` | the records: one file per record, the strict reader, the writer, the generated index, the one-time legacy migration |
 | `src/nopekit/milestones.py` | the boundary that spends: a milestone's closure, the export's refusals and judgment, disagreements, the test card, the package |
 | `src/nopekit/verdicts.py` | the per-gate verdict cache: what a gate read (`ParamTrace`, `LedgerView`, the audit hook), portable digests and the spine digest, rho, cache and control entries, freshness, admission at the gate's current version, the one resolver every reader uses, the sweep `check` runs, and `last_check.json` |
-| `src/nopekit/vcs.py` | the only git edge: argv form, a clean environment, a timeout, never raises |
+| `src/nopekit/vcs.py` | the only git edge: a read half (argv form, a clean environment, a timeout, never raises) and a writing half (`init_repo`, `add`, `commit`) under its own contract |
 | `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map draws |
 | `src/nopekit/page.py` | the front page's baked data (SPEC 28-33): the map's layout from the graph and the groups, `map.json` and `page.json`, the floor, next steps, the evidence plan, the stamps, and invariant 14's checker |
 | `src/nopekit/prose.py` | the agent's text on the site: front matter and the stamp, the markdown subset, the number scan, and the style scans (SPEC 30, 34, 35) |
@@ -486,6 +498,7 @@ layout in full, with each writer.
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (the outline: the representation, the verdict, the map, a section per board, next steps) and `technical.html` (today's panels), both the project's own; `content/` the agent's prose, stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
+| `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |

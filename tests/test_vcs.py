@@ -333,5 +333,202 @@ class VcsIsTheOnlyGitEdge(_env.EnvCase):
             self.assertEqual(vcs.ident(repo), "Env Person <env@nopekit.invalid>")
 
 
+class TheWritingHalf(_env.EnvCase):
+    """Architecture phase 6: the writing half — `init_repo`, `add`, `commit` and
+    the reads that serve them. Explicit literal paths only, `--only` so what the
+    person staged stays theirs, never a push, a config write or a bypassed hook,
+    and never a raise: no git, a hung git and a refusal are each an answer."""
+
+    setUp = VcsIsTheOnlyGitEdge.setUp
+    _require_git = VcsIsTheOnlyGitEdge._require_git
+    _git = VcsIsTheOnlyGitEdge._git
+    _repo = VcsIsTheOnlyGitEdge._repo
+    _commit = VcsIsTheOnlyGitEdge._commit
+    _not_a_repo = VcsIsTheOnlyGitEdge._not_a_repo
+    _fake_git = VcsIsTheOnlyGitEdge._fake_git
+
+    def _identity(self):
+        os.environ.update(_env.IDENTITY)
+
+    def test_add_takes_a_literal_path(self):
+        repo = self._repo({"keep.txt": "k\n"})
+        _write(os.path.join(repo, "a.json"), "{}\n")
+        _write(os.path.join(repo, "*.json"), "{}\n")
+        self.assertEqual(vcs.add(repo, ["*.json"]), vcs.Wrote(True, None, ""))
+        self.assertEqual(vcs.staged_paths(repo), ["*.json"])
+
+    def test_commit_only_leaves_what_the_person_staged(self):
+        repo = self._repo({"x.txt": "x\n", "other.txt": "o\n"})
+        self._identity()
+        _write(os.path.join(repo, "other.txt"), "the person's staged edit\n")
+        self._git(["add", "other.txt"], repo)
+        _write(os.path.join(repo, "x.txt"), "x2\n")
+        _write(os.path.join(repo, "new.txt"), "n\n")
+        os.makedirs(os.path.join(repo, "gone"), exist_ok=True)
+        self.assertTrue(vcs.add(repo, ["x.txt", "new.txt"]).ok)
+        made = vcs.commit(repo, ["x.txt", "new.txt"], "round 1: x", "the body")
+        self.assertTrue(made.ok, made.why)
+        self.assertEqual(made.oid, vcs.git_head(repo))
+        shown = self._git(["show", "--name-only", "--format=%s%n%b", "HEAD"], repo)
+        self.assertIn("round 1: x", shown)
+        self.assertIn("the body", shown)
+        self.assertEqual(sorted(line for line in shown.splitlines()
+                                if line.endswith(".txt")), ["new.txt", "x.txt"])
+        self.assertEqual(vcs.staged_paths(repo), ["other.txt"])
+
+    def test_the_argv_never_pushes_bypasses_or_configures(self):
+        where = self.tmp()
+        log = os.path.join(where, "argv.jsonl")
+        bindir = self._fake_git(
+            "import json, sys\n"
+            f"open({log!r}, 'a').write(json.dumps({{'argv': sys.argv[1:], "
+            "'stdin': sys.stdin.read() if not sys.stdin.isatty() else ''}) + '\\n')\n"
+            # `init_repo` starts one only on git's own "no repository here".
+            "if 'rev-parse' in sys.argv:\n"
+            "    sys.stderr.write('fatal: not a git repository (or any of the parent "
+            "directories): .git\\n')\n"
+            "    sys.exit(128)\n")
+        with mock.patch.dict(os.environ, {"PATH": bindir}):
+            self.assertTrue(vcs.add(where, ["claims/C1.json", "a b/c.json"]).ok)
+            self.assertTrue(vcs.commit(where, ["claims/C1.json"], "round 1: s", "b").ok)
+            vcs.init_repo(where)
+        with open(log, encoding="utf-8") as fh:
+            calls = [json.loads(line) for line in fh]
+        writes = [c for c in calls if {"add", "commit", "init"} & set(c["argv"])]
+        self.assertEqual(len(writes), 3, calls)
+        for call in writes:
+            argv = call["argv"]
+            self.assertEqual(argv[:2], ["-C", where])
+            for banned in ("--no-verify", "-n", "push", "config", "-A", "core.hooksPath"):
+                self.assertNotIn(banned, argv)
+            if "--all" in argv:
+                self.assertIn("--pathspec-from-file=-", argv)
+            if "add" in argv or "commit" in argv:
+                self.assertIn("--literal-pathspecs", argv)
+                self.assertIn("--pathspec-file-nul", argv)
+        commit = next(c for c in writes if "commit" in c["argv"])
+        self.assertEqual(commit["argv"][2:4], ["-c", "user.useConfigOnly=true"])
+        self.assertIn("--only", commit["argv"])
+        self.assertEqual(commit["stdin"], "claims/C1.json\0")
+        add = next(c for c in writes if "add" in c["argv"])
+        self.assertEqual(add["stdin"], "claims/C1.json\0a b/c.json\0")
+
+    def test_a_hung_git_is_a_timeout(self):
+        project = self.tmp()
+        bindir = self._fake_git("import time\ntime.sleep(60)")
+        with mock.patch.dict(os.environ, {"PATH": bindir}), \
+                mock.patch.object(vcs, "VCS_WRITE_TIMEOUT_S", 0.5):
+            started = time.perf_counter()
+            found = vcs.commit(project, ["x"], "s", "b")
+            elapsed = time.perf_counter() - started
+        self.assertEqual(found, vcs.Wrote(False, None, "timeout"))
+        self.assertGreaterEqual(elapsed, 0.45)
+        self.assertLess(elapsed, 20)
+
+    def test_no_git_is_an_answer(self):
+        empty = self.tmp()
+        with mock.patch.dict(os.environ, {"PATH": empty}):
+            self.assertEqual(vcs.add(empty, ["x"]), vcs.Wrote(False, None, "no-git"))
+            self.assertEqual(vcs.commit(empty, ["x"], "s", "b").why, "no-git")
+            self.assertEqual(vcs.init_repo(empty).why, "no-git")
+            self.assertIsNone(vcs.changed_paths(empty))
+            self.assertIsNone(vcs.operation(empty))
+
+    def test_init_repo_inside_a_repository_is_refused(self):
+        repo = self._repo({"a.txt": "a\n"})
+        inner = os.path.join(repo, "sub")
+        os.makedirs(inner)
+        self.assertEqual(vcs.init_repo(inner), vcs.Wrote(False, None, "inside a repository"))
+        self.assertFalse(os.path.exists(os.path.join(inner, ".git")))
+        fresh = self._not_a_repo()
+        self.assertEqual(vcs.init_repo(fresh), vcs.Wrote(True, None, ""))
+        self.assertTrue(vcs.is_repo(fresh))
+        self.assertEqual(vcs.operation(fresh), "")
+
+    def test_a_repository_is_started_only_on_gits_no(self):
+        """Review of phase 6: `init_repo` and `init` asked `is_repo`, which reads
+        every failure as "no", so git's "dubious ownership" refusal (WSL's
+        /mnt/c, shared drives, container volumes) started a nested repository
+        inside an existing one. `in_repository` tells "no" from "no answer"."""
+        repo = self._repo({"a.txt": "a\n"})
+        inner = os.path.join(repo, "sub")
+        os.makedirs(inner)
+        self.assertEqual(vcs.in_repository(inner), (True, ""))
+        self.assertEqual(vcs.in_repository(self._not_a_repo()), (False, ""))
+        with mock.patch.dict(os.environ, {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"}):
+            self.assertFalse(vcs.is_repo(inner), "the refusal this guards against")
+            inside, why = vcs.in_repository(inner)
+            self.assertIsNone(inside)
+            self.assertIn("dubious ownership", why)
+            made = vcs.init_repo(inner)
+        self.assertFalse(made.ok)
+        self.assertTrue(made.why.startswith("git did not answer: "), made.why)
+        self.assertFalse(os.path.exists(os.path.join(inner, ".git")), "a nested repository")
+        # A `.git` git will not read stands above: that is no "no" either.
+        broken = self._not_a_repo()
+        _write(os.path.join(broken, ".git"), "gitdir: /nonexistent/nopekit-test\n")
+        below = os.path.join(broken, "proj")
+        os.makedirs(below)
+        inside, why = vcs.in_repository(below)
+        self.assertIsNone(inside, why)
+        self.assertFalse(vcs.init_repo(below).ok)
+        self.assertFalse(os.path.exists(os.path.join(below, ".git")))
+        # A hung git is no answer.
+        bindir = self._fake_git("import time\ntime.sleep(60)")
+        with mock.patch.dict(os.environ, {"PATH": bindir}), \
+                mock.patch.object(vcs, "VCS_TIMEOUT_S", 0.5):
+            self.assertIsNone(vcs.in_repository(self.tmp())[0])
+
+    def test_the_committer_is_read_on_its_own(self):
+        repo = self._repo({"a.txt": "a\n"})
+        os.environ.update(_env.IDENTITY)
+        self.assertEqual(vcs.committer_ident(repo), "nopekit tests <tests@nopekit.invalid>")
+        os.environ.update({"GIT_COMMITTER_NAME": "Mallory",
+                           "GIT_COMMITTER_EMAIL": "m@evil.example"})
+        self.assertEqual(vcs.committer_ident(repo), "Mallory <m@evil.example>")
+        self.assertEqual(vcs.ident(repo), "nopekit tests <tests@nopekit.invalid>")
+
+    def test_changed_paths_are_the_subtree_relative_to_it(self):
+        repo = self._repo({"top.txt": "t\n", "sub/kept.txt": "k\n", "sub/gone.txt": "g\n",
+                           "sub/mod.txt": "m\n"})
+        sub = os.path.join(repo, "sub")
+        _write(os.path.join(repo, "top.txt"), "t2\n")
+        _write(os.path.join(sub, "mod.txt"), "m2\n")
+        os.remove(os.path.join(sub, "gone.txt"))
+        _write(os.path.join(sub, "staged.txt"), "s\n")
+        self._git(["add", "sub/staged.txt"], repo)
+        _write(os.path.join(sub, "new.txt"), "n\n")
+        _write(os.path.join(repo, ".gitignore"), "*.log\n")
+        _write(os.path.join(sub, "noise.log"), "ignored\n")
+        # An mtime alone is not a change.
+        os.utime(os.path.join(sub, "kept.txt"), (1, 1))
+        self.assertEqual(vcs.changed_paths(sub),
+                         ["gone.txt", "mod.txt", "new.txt", "staged.txt"])
+        self.assertEqual(vcs.staged_paths(sub), ["staged.txt"])
+        self.assertIsNone(vcs.changed_paths(self._not_a_repo()))
+
+    def test_operation_names_each(self):
+        repo = self._repo({"a.txt": "a\n"})
+        self.assertEqual(vcs.operation(repo), "")
+        head = vcs.git_head(repo)
+        for name, word in (("MERGE_HEAD", "merge"), ("CHERRY_PICK_HEAD", "cherry-pick"),
+                           ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"),
+                           ("rebase-merge", "rebase"), ("rebase-apply", "rebase")):
+            with self.subTest(name=name):
+                where = os.path.join(repo, ".git", name)
+                if name.startswith("rebase"):
+                    os.makedirs(where)
+                else:
+                    _write(where, head + "\n")
+                self.assertEqual(vcs.operation(os.path.join(repo)), word)
+                if os.path.isdir(where):
+                    os.rmdir(where)
+                else:
+                    os.remove(where)
+        self._git(["checkout", "-q", "--detach"], repo)
+        self.assertEqual(vcs.operation(repo), "detached")
+        self.assertIsNone(vcs.operation(self._not_a_repo()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

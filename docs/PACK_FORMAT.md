@@ -18,6 +18,8 @@ packs/<name>/
   proposers/*.py     # tools that propose options or evidence; never evaluators (optional)
   generators/*.py    # model -> domain artifact (optional)
   views/*.py         # viewgens: model -> a view the site renders (optional)
+  skills/<name>/SKILL.md   # what an agent needs for one task in the domain; read, never
+                           #   installed: `nopekit packs skills` prints them (optional)
   lenses.md          # adversarial review dimensions for this domain
   sourcing.md        # real-world procurement and process constraints (optional)
   scaffold/          # starter model + claims for a new project in this domain (optional)
@@ -41,6 +43,14 @@ it.
 
 Tier 3 is where the depth goes. A CFD pack's `references/meshing.md` can be nine
 hundred lines; it costs nothing until an agent is actually meshing.
+
+**Skills** (architecture phase 6, SPEC 37) sit beside tier 2: `skills/<name>/SKILL.md`,
+one per task the domain needs — set up a solver case, read its log. They are read,
+never installed as Claude Code skills: an installed skill would be there in every
+project on the machine, live pack or not. `nopekit packs skills` prints each live pack's
+`PACK.md` and then its skill files (`--pack <name>` for one that is not live), and the
+nopekit skill tells the agent to read them before it works in that domain. `pack
+validate` refuses a `skills/<name>/` directory that holds no `SKILL.md`.
 
 ## `pack.json`
 
@@ -985,6 +995,11 @@ sweep, so a gate that returned `True` with a control on paper produced PROVEN ro
 
 ## Views and locators
 
+A pack's part of the project site is its views and the evidence its evaluators write:
+a file a verdict names as evidence is copied into the board posters
+(`site/assets/evidence/<gate>/…`). There is no other site partial format; the page's
+words, statuses and layout are the build's, never a pack's.
+
 A pack can also draw what its gates measure. `views/*.py` holds **viewgens**, which
 are to the project site what gates are to the report: same context shape, same
 `requires_*` declarations, same registry. A pack that emits a view in one of the
@@ -1086,7 +1101,8 @@ are silent.
 
 The adversarial review dimensions for this domain — the angles a reviewer should
 attack from before anything gets built. One heading each, a few pointed questions
-under it. Rule 8 of the method lives here.
+under it. Rule 8 of the method lives here. `nopekit packs skills` prints it, after
+PACK.md, for every live pack: it is how the agent reaches it.
 
 Good lenses are specific and uncomfortable: *"the part is loaded at its tip and its
 root is a cantilever — what is the free span, really, and did you measure it from
@@ -1109,7 +1125,7 @@ nopekit pack validate <name>
 ```
 
 checks that the manifest parses and matches its directory, `PACK.md` exists and is
-substantive, every declared gate actually registers, every gate has a negative
+substantive, every `skills/<name>/` holds a `SKILL.md`, every declared gate actually registers, every gate has a negative
 control, `max_tier` matches the gates, the description is one line, and every
 file-based fixture exists — and then **demonstrates** the pack at tiers 0–1, gate by
 gate, with the pack loaded alone: its known-good control passes (its own

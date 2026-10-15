@@ -150,13 +150,16 @@ def _rmtree(path: str) -> None:
 
 def run(argv: Sequence[Any], *, cwd: str, home: str | None = None, identity: bool = False,
         env: Mapping[str, Any] | None = None,
-        timeout: float = DEFAULT_TIMEOUT_S) -> subprocess.CompletedProcess:
+        timeout: float = DEFAULT_TIMEOUT_S,
+        input: str | None = None) -> subprocess.CompletedProcess:
     """Run ``argv`` in ``cwd`` under :func:`clean_env`; never raises on a non-zero exit.
 
     Output is captured as text (UTF-8, undecodable bytes replaced); stdin is
-    closed, so a child that asks a question fails instead of hanging. With no
-    ``home`` a fresh temp ``HOME`` is made for this call and removed after it.
-    A child that outlives ``timeout`` fails the test, naming the command.
+    closed, so a child that asks a question fails instead of hanging — unless
+    ``input`` is given, which is written to its stdin and then closed (the Stop
+    hook reads its JSON there, architecture phase 6). With no ``home`` a fresh
+    temp ``HOME`` is made for this call and removed after it. A child that
+    outlives ``timeout`` fails the test, naming the command.
     """
     own_home = None
     if home is None:
@@ -164,10 +167,11 @@ def run(argv: Sequence[Any], *, cwd: str, home: str | None = None, identity: boo
         home = own_home
     command = [os.fspath(a) for a in argv]
     try:
+        stdin = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
         return subprocess.run(
             command, cwd=cwd, env=clean_env(home=home, identity=identity, extra=env),
-            stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
-            errors="replace", timeout=timeout)
+            capture_output=True, encoding="utf-8",
+            errors="replace", timeout=timeout, **stdin)
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(
             f"{command!r} in {cwd} did not finish in {timeout}s") from exc

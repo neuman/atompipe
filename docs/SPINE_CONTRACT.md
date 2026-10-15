@@ -27,7 +27,7 @@ is `cli.py`'s.
 | Fact | Home | Git | Written by |
 |---|---|---|---|
 | a claim, a decision, an enriched need, an input's record, a param's provenance, a declared view | `claims/`, `decisions/`, `needs/`, `inputs/<id>.json`, `params/`, `views/*.json` — one file per record | tracked | a human or the agent, editing the file; the shims `ingest`, `extract`, `decide` |
-| project meta, the model entry, the live packs | `.nopekit/project.json` | tracked | the same; `init`; `packs add` |
+| project meta, the model entry, the live packs, the people a round may commit as (phase 6) | `.nopekit/project.json` | tracked | the same; `init` (`people` from git's identity, when the strict reader reads it back); `packs add` |
 | a physical result, and an owner's or an authority's attribution (P2.5a) | `results/<claim-id>.json`, append-only, every entry sealed and chained | tracked | `claim physical`, typed in a person's own shell — never by hand |
 | a parameter's value, units, rationale and what lost to it | the model (`model/*.py`: `Config`, its docstrings, `PARAMS`) | tracked | the model's author |
 | a gate's verdict, and its control's | `.nopekit/verdicts/<gate id>/`, one file per rho, never rewritten | tracked | `check`, `gate selftest` |
@@ -271,9 +271,14 @@ class KeyCollision(Record):     # one projection key two installed packs read di
     key: str; packs: list[str]; meanings: dict[str, str]; scoped: dict[str, str]
     primary: dict[str, str]; live: bool = False
     def fix(self) -> str                                 # the one sentence that resolves it
+class Person(Record):           # phase 6 (SPEC §0.3): one person a round may commit as
+    name: str = ""; email: str = ""   # as `git config user.name` / `user.email` print them
 class ProjectMeta(Record):
     name: str = ""; summary: str = ""; created: str = ""; revision: str = "v0.1"
     model_entry: str = ""; packs: list[str]; spine_version: str = ""
+    people: list[Person]         # phase 6: LAST; absent reads []; never baked into the
+                                 #   page (site._UNPUBLISHED_META); read whole by a gate with
+                                 #   `meta`, which no bundled or bracket gate reads
 class Ledger(Record):           # the whole project, in memory (store.load assembles it)
     meta: ProjectMeta; claims: list[Claim]; params: list[Param]
     inputs: list[InputArtifact]; needs: list[Need]; decisions: list[Decision]
@@ -460,10 +465,29 @@ def git_head(root) -> str | None                     # HEAD's sha; None outside 
 def ls_files(root, relpaths, *, others=True) -> list[str] | None   # -z; relative to root
 def ignored(root, relpaths) -> list[str] | None      # phase 5: untracked files git ignores
 def ident(root) -> str | None                        # author identity, timestamp dropped
+def committer_ident(root) -> str | None              # phase 6 review: the committer's
+def in_repository(path) -> tuple[bool | None, str]   # phase 6 review: True; False only on
+                                                     #   git's "not a git repository" with no
+                                                     #   .git above; None, why: no answer
 def show(root, relpath, rev="HEAD") -> bytes | None  # P2.5a: the bytes a commit holds at relpath
 def history(root, relpath, limit) -> list[str]      # P2.5a review: commits that changed it, newest first
 def model_dirty(root, relpaths) -> bool | None       # P2.5a: any of them differs from HEAD
 def commit_times(root, relpaths) -> dict[str, str]   # path -> its last commit's time
+# the writing half (architecture phase 6): round --commit, init's repository
+VCS_WRITE_TIMEOUT_S = 120
+class Wrote(NamedTuple): ok; oid; why    # why: "" | "no-git" | "timeout" |
+                                         #   "inside a repository" | "git did not answer:
+                                         #   <why>" | "refused: <git's line>"
+def init_repo(root) -> Wrote                     # git init -q; only on in_repository's False
+def changed_paths(root) -> list[str] | None      # read: diff, diff --cached, ls-files --others
+                                                 #   --exclude-standard, each over "." only;
+                                                 #   an untracked nested repository keeps "/"
+def staged_paths(root) -> list[str] | None       # read: diff --cached --relative -- .
+def operation(root) -> str | None                # read: "" | merge | rebase | cherry-pick |
+                                                 #   revert | bisect | detached; None outside git
+def add(root, relpaths) -> Wrote                 # --literal-pathspecs add --all, paths on stdin
+def commit(root, relpaths, subject, body) -> Wrote   # -c user.useConfigOnly=true commit --only,
+                                                 #   paths on stdin; oid = HEAD after
 ```
 Argv form with `-C root`, never a shell string. The environment strips `GIT_DIR`,
 `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
@@ -476,12 +500,39 @@ list, and a test holds it against the installed git's. It does not strip every `
 the user's `GIT_CONFIG_GLOBAL` and `GIT_AUTHOR_NAME` must still reach git. It sets
 `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0` and `LC_ALL=C`. `ls_files` with
 `others` is `--cached --others --exclude-standard`: tracked plus untracked-not-ignored.
-`ident` is `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT`. **Every function
+`ident` is `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT`, `committer_ident` the
+same for `GIT_COMMITTER_IDENT`. `in_repository` is the one read that tells "no" from "no
+answer": `is_repo` reads every failure as `False`, and `init` that trusted it started a
+nested repository inside one git refused to read ("dubious ownership") or did not
+answer in time (review of phase 6). **Every function
 returns `None` (or `{}`) on any failure and never raises**: a project outside git, a
 missing `git`, a timeout. `VCS_TIMEOUT_S` is 10 because `git ls-files` on a cold, large
 repository takes seconds; *rejected:* unbounded (a hung credential helper hangs
 `check`) and 1–2 s (network filesystems). A `--dir` copy with no `.git` is the
 common case (verify.sh), so every caller has a non-git path.
+
+**The writing half** (architecture phase 6) keeps the read half's rules — argv form,
+`-C root`, the same environment — and adds its own contract. Every `add` and `commit`
+takes explicit literal paths relative to `root`, on stdin
+(`--pathspec-from-file=- --pathspec-file-nul`, under `--literal-pathspecs`): never
+`-A` over the repository, never a directory pathspec. `commit` is `--only`, so what the
+person staged outside the list stays staged and uncommitted. It never pushes (push,
+merge and tag come with phase 4, under this same section), never writes config (the
+only `-c` is `user.useConfigOnly=true` on the commit, so git never invents an identity),
+and never bypasses a hook (no `--no-verify`, no `core.hooksPath`: a refusing hook is an
+answer, quoted in `why`). `GIT_EDITOR=:` so no hook opens an editor. A call that
+outlives `VCS_WRITE_TIMEOUT_S` is sent SIGTERM, then SIGKILL after 5 s: git removes its
+`index.lock` on SIGTERM. It never raises; `why` is the one place git's prose comes
+back — its first stderr line, shown to a person, never parsed. `VCS_WRITE_TIMEOUT_S` is
+120 because the Stop hook's budget is 300 s and an ordinary commit hook takes tens of
+seconds; *rejected:* 10 s (the read timeout: an ordinary pre-commit hook exceeds it)
+and 290 s (a hung gpg pinentry would spend the hook's budget, and Claude Code would kill
+it mid-commit, leaving `index.lock`). `changed_paths` asks `diff` rather than
+`ls-files --modified`, which names a file whose mtime alone moved, and never
+`status --porcelain`, which prints paths relative to the repository's top level.
+It keeps the trailing `/` with which `ls-files --others` names an untracked nested
+repository, so `rounds.in_round_paths` refuses it: stripped, `generators/cadlib` read
+as a file and a round committed a gitlink (review of phase 6).
 
 ### `store.py`  (deps: models, util)
 Persistence: where a project lives on disk. **Never imports `modelio` or `verdicts`**
@@ -514,6 +565,9 @@ def project_paths(root) -> dict[str, str]              # every well-known path, 
 
 def read_project(root) -> ProjectMeta                   # .nopekit/project.json, strict
 def write_project(root, meta) -> str | None             # the path, or None when unchanged
+def people_problem(people, label) -> str | None         # phase 6: project.json's `people`,
+                                                        #   each {name, email} as git prints them,
+                                                        #   one per email ignoring case
 def read_record(path, kind, *, model_entry="") -> Record | ResultsFile           # STRICT
 RESULTS_LISTS = ("results", "attributions")   # P2.5a: a results file's two sealed lists
 SEAL_SCHEMA = 1; ROLES = ("owner", "authority")
@@ -601,9 +655,11 @@ hand, so moving the layout is one edit here instead of a grep across the spine.
 **The layout** (checkpoint 1.3; relative to the project root):
 ```
 .nopekit/project.json     TRACKED  {"schema": 2, name, summary, created, revision,
-                                     model_entry, packs, spine_version} — written LAST
+                                     model_entry, packs, spine_version, people}
+                                     — written LAST; people: [{"name", "email"}]
 .nopekit/.gitignore       TRACKED  the marked deny-list block (below)
-.gitignore, .gitattributes TRACKED  marked blocks: bytecode; LF, binary kinds -text
+.gitignore, .gitattributes TRACKED  marked blocks: bytecode, REPORT.md, out/, the
+                                   editor's .vscode/launch.json; LF, binary kinds -text
 .nopekit/ledger.json      IGNORED  the generated index — an output, never read for truth
 .nopekit/verdicts/**      TRACKED  cache and control entries (verdicts.py)
 claims/<id>.json           TRACKED  one Claim; the stem IS the id; no "gates"
@@ -622,7 +678,10 @@ out/<name>/                IGNORED  a milestone's package (`export`)
 `init` writes the empty record directories, the input buckets and `inputs/README.md`
 (only when missing), `docs/`, `model/`, the three blocks, and `project.json` **last** —
 **never a `ledger.json`**: a new project born in the legacy layout would need a migration
-on its first command. The record reader and the index read only `views/*.json`; the
+on its first command. Then (architecture phase 6) it starts a git repository
+(`vcs.init_repo`) only on git's positive answer that none holds the project
+(`vcs.in_repository`; `--no-git` starts none), and says when an enclosing repository
+ignores the project. The record reader and the index read only `views/*.json`; the
 viewgen loader only `views/*.py`. Every top-level `inputs/*.json` IS a record; evidence
 bytes live in the bucket subdirectories.
 
@@ -2789,6 +2848,8 @@ def load_all_gates(names, registry, root=None) -> list[GateSpec]
 def pack_doc(name, root=None) -> str                       # PACK.md  (tier 2)
 def reference_doc(name, ref, root=None) -> str             # references/<ref>.md (tier 3)
 def references(name, root=None) -> list[str]               # tier-3 names, none loaded
+SKILLS_DIR = "skills"; SKILL_NAME = "SKILL.md"             # phase 6 (SPEC 37): read, never installed
+def skill_files(pack_dir) -> list[tuple[str, str]]         # (name, path) of skills/<name>/SKILL.md
 def validate(pack_dir, *, tier=Tier.BUILD, notes=None) -> list[str]   # problems; empty = ok
 def baseline_context(pack_dir, *, out_dir) -> GateContext  # the ONE sealed baseline context
 def demonstrate(pack_dir, *, tier=Tier.BUILD, out_dir=None) -> Demonstration
@@ -3014,6 +3075,17 @@ def round_paragraph(shape, number, changes, *, view, composed, check, site, wrot
                                              #   the count line, ready as last evaluated, the
                                              #   check, the site; HUMAN["round"]'s words
 def round_moved(moved) -> str                # "the records, the verdict cache and the design"
+COMMIT_SUBJECT_MAX = 72                      # phase 6: a round commit's subject, git's convention
+def round_commit_sentence(commit) -> str     # phase 6: what `round --commit` did, then the
+                                             #   changed paths it named instead of staging
+def round_prose_sentence(prose) -> str       # phase 6: board text stamped before the latest
+                                             #   results, named; "" when none is behind
+def round_commit_message(number, shape, changes, staged, outside, too_large, earlier,
+                         paragraph, *, round_rel="") -> tuple[str, str]
+                                             # phase 6: "round N: <what changed>" (compacted,
+                                             #   then cut, past 72) and its body; no trailer
+def round_hook_message(outcome) -> str       # phase 6: the Stop hook's systemMessage
+def round_hook_crash(exc) -> str             # phase 6: its message for a crash
 def requirement_statuses(ledger, composed, cover) -> dict[str, RequirementStatus]
                                              # claims.requirement_statuses, each row's disagree
                                              #   filled: serving claims _disagreement names (D18)
@@ -3300,7 +3372,9 @@ claim's and a requirement's token says `errored` — one vocabulary per kind of 
 ### `rounds.py`  (deps: models, util, store)
 The round record, `.nopekit/round.json` (SPEC decision 18, architecture phase 3a): an
 output, tracked, never read for truth. Imported only by `cli`
-(`test_round.NothingReadsTheRoundRecordForTruth`). No clock, no git.
+(`test_round.NothingReadsTheRoundRecordForTruth`). No clock, no git: from phase 6 it
+also decides which paths a round commits and whose identity may commit them, and `cli`
+asks git (`vcs`) and hands the answers in.
 ```python
 ROUND_REL = ".nopekit/round.json"; ROUND_NAME = "round.json"; SCHEMA = 1
 HEADER: str                                           # the one sentence it holds
@@ -3330,6 +3404,18 @@ def state(root, computed_now, content=None) -> RoundState   # content: what roun
                                                       #   write now; differing -> behind (RESOLUTION)
 def changes(previous, body, computed_now) -> Changes
 def write(root, body) -> Written                      # only when what it holds moved
+# architecture phase 6: the round's commit — which paths, and whose identity (pure)
+ROUND_DIRS = (*store.RECORD_DIRS, "model", "gates", "selftest", "generators", "site")
+ROUND_NOPEKIT = (".nopekit/project.json", ROUND_REL, ".nopekit/.gitignore",
+                 ".nopekit/verdicts/", ".nopekit/trace/", ".nopekit/packs/")
+ROUND_ROOT_FILES = (".gitignore", ".gitattributes", "README.md")
+ROUND_MAX_BYTES = 50 * 1024 * 1024                    # a larger file is named, not staged
+class StagePlan(NamedTuple): staged; outside; too_large   # too_large: ((path, bytes), ...)
+def in_round_paths(rel) -> bool                       # one of the project's own paths
+def stage_plan(root, changed) -> StagePlan            # os.lstat for size; a deletion is staged
+def person_of(ident) -> Person | None                 # "Name <email>" split at its last "<"
+def listed(people, ident) -> Person | None            # name equal stripped, email ignoring case
+def last_committed_round(raw) -> int | None           # HEAD's round.json bytes -> its round
 ```
 **The seal comes first.** A record whose self-digest does not hold reads `edited`
 whatever its `schema` says — the seal rule is the format's at every schema — so a hand
@@ -3694,7 +3780,55 @@ def _round_inputs(root, ledger, registry, model, projection, view, resolution, *
                   model_error="", shown=None) -> tuple[dict, dict]   # (rounds.body, computed_from)
 def _round_state(root, ledger, model, projection, resolution, registry, view, *,
                  model_error="", shown=None) -> rounds.RoundState
+# architecture phase 6: the round's commit and the Stop hook
+ROUND_LOCK_WAIT_S = 60.0                    # --hook only: how long it waits for the build lock
+class CommitOutcome(NamedTuple): made; oid; who; why; detail; staged; outside; too_large;
+                                 earlier; subject
+class RoundOutcome(NamedTuple): not_run; done; content; check; site; view; composed; prose;
+                                commit; trace; summary
+def _round_run(root, *, commit, wait_s, now) -> RoundOutcome   # cmd_round's body; never raises
+                                            #   a NopekitError (not_run instead)
+def _round_commit(root, ledger, done, paragraph) -> CommitOutcome   # under the build lock
+def _round_start_trace(root, changes) -> str   # the trace's seam: "" until phase 3b fills it
+def _round_hook(args) -> int                # Claude Code's Stop hook; always 0
 ```
+**`round --commit`** (architecture phase 6, SPEC 24 with §0.3) runs the round, then,
+still under the build lock, `_round_commit`: refusals first, each leaving the index as
+it was — a round record a newer nopekit wrote, no repository, a merge, rebase,
+cherry-pick, revert or bisect in progress, a detached HEAD, no git identity, no
+`people`, an author `people` does not list (`rounds.listed`: name and email), a
+committer it does not list (`vcs.committer_ident`, review of phase 6) — then
+`vcs.changed_paths` split by `rounds.stage_plan` (a directory, such as an untracked
+nested repository, is named, never staged), `vcs.add` of the project's own paths,
+their intersection with `vcs.staged_paths` (an mtime-only change drops out), and
+`vcs.commit` with `report.round_commit_message`. Nothing changed makes no commit, and
+nothing staged under a repository that ignores the project's file says so
+(`_round_ignored`, why `ignored`) instead of "nothing changed"; a
+commit git refuses leaves the files staged and says so; it never pushes. Its paragraph
+appends `report.round_commit_sentence` and `report.round_prose_sentence`; `--json` adds
+a `commit` object. A round whose check could not run, or whose claims fail, still
+commits: the commit is history, not a quality gate. **`round --hook`** reads the hook's
+JSON on stdin, finds the project from `-C`, its `cwd`, `$CLAUDE_PROJECT_DIR` or the
+process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
+Python stream and fd 1) and stderr sent nowhere, rebuilds the index itself
+(`args._index_done`, so `_after` writes nothing after it), and prints one JSON object:
+`{"systemMessage": report.round_hook_message(...)}`, or `{}` outside a project or when
+the record stood, nothing changed, no board's text is behind and no trace started. It
+always exits 0 and never prints `"decision": "block"`; a crash is a one-line message.
+The plugin runs it through `hooks/stop.py`, a script, never `python3 -m`: `-m` puts the
+session's cwd first on `sys.path`, and a `difflib.py` there ran as code at every turn's
+end and could exit 2 (review of phase 6); the launcher keeps every empty or relative
+entry off the path, puts the plugin's `src` first, and turns a failed import into the
+one-line message. **`init`** lists git's identity as the first person
+(`rounds.person_of(vcs.ident)`) when `store.people_problem` accepts it (git takes an
+email with a space; the strict reader does not, so listing it bricked the project),
+and starts a repository after `store.init` only on `vcs.in_repository`'s positive "no
+repository" (`vcs.init_repo`; `--no-git` starts none; git that does not answer —
+"dubious ownership", a timeout — starts none and says why); inside a repository that
+ignores the project it says so. Its next steps follow decision 21.
+**`packs skills`** (`cmd_packs_skills`) prints each live, found pack's PACK.md, its
+`lenses.md` and its `skills/<name>/SKILL.md` files (or `--pack` names'); a live pack not found is a FAIL
+line and exit 1. **`doctor`** gains a warn-only `people` row (`_doctor_people_row`).
 `propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
 non-zero exit, a timeout or any project file outside its directory that moved
 (`_project_files`, a stat of the project but its ignored scratch, each path named),
@@ -4609,7 +4743,50 @@ status, a qualification, a rho or `check`'s exit code.
   `readme`; `why` resolves a group and names a claim's board; a site is present only
   with `site/index.html` (`site.scaffolded`).
 
+## What phase 6 of the architecture moved
+
+Rounds and the plugin (SPEC decision 24 with §0.3, decision 37, the interview half of
+decision 21). `.nopekit/project.json` gains `people` (`models.Person`, read by
+`store.people_problem`); `vcs.py` gains its writing half (`init_repo`, `add`, `commit`,
+and the reads `changed_paths`, `staged_paths`, `operation`) under a contract of its
+own; `rounds.py` decides which paths a round stages and whose identity may commit them
+(`ROUND_DIRS`, `ROUND_NOPEKIT`, `ROUND_ROOT_FILES`, `ROUND_MAX_BYTES`, `stage_plan`,
+`listed`); `round` gains `--commit` and `--hook` (`_round_run`, `_round_commit`,
+`_round_hook`, and the trace's seam `_round_start_trace`); `init` lists the person and
+starts a repository; `doctor` gains a `people` row; `packs skills` prints the live
+packs' PACK.md and skill files (`packs.skill_files`; `pack validate` refuses a
+`skills/<name>/` with no SKILL.md). The plugin ships `hooks/hooks.json`, a Stop hook
+running `round --hook` through `hooks/stop.py` (the session's cwd kept off the import
+path). `state.json`'s `meta` never carries `people` (`site._UNPUBLISHED_META`): the
+page is published. Invariant 8 gained the round's commit
+(`test_round.TheRoundCommitStagesOnlyTheProjectsPaths`), the identity it commits under
+(`test_round.RoundsCommitOnlyAsAListedPerson`) and the repository `init` starts
+(`test_record_commands.InitStartsARepository`). Its review added
+`vcs.committer_ident` and `vcs.in_repository`, `cli._round_ignored`, and the root
+ignore block's `/.vscode/launch.json`.
+
 ## Limits: what the spine cannot see, named
+
+- **`people` guards against surprise, not against the agent (architecture phase 6).**
+  It is a key of `.nopekit/project.json`, which the agent edits like every record: it
+  stops a round committing under an identity the project never named (a CI runner, a
+  colleague's checkout, an unset or invented identity), and the skill tells the agent
+  to change it only when the person asks, with the name and email they give.
+- **A round's commit carries the person's identity though the agent made the change.**
+  Nothing reads commit authorship as a person's act: results, owners, judgments and
+  preferences take `vcs.ident` at the moment of the act, typed in the person's own
+  shell (invariant 11), never a commit's author.
+- **A commit hook that runs a nopekit command in the project meets the build lock the
+  round holds**, and fails; git's refusal is quoted and the round's files are left
+  staged. Releasing the lock before the commit was rejected: a writer could land
+  between the staging and the commit.
+- **gpg signing that waits for a pinentry runs into `vcs.VCS_WRITE_TIMEOUT_S`**, and
+  the round reads "did not finish"; the Stop hook has no terminal to ask from.
+- **A project directory its outer repository ignores reads "nothing to commit"**: git
+  lists no change there, and a round cannot tell that from a round that moved nothing.
+- **`changed_paths` sees what git sees.** A file git ignores is never staged and never
+  named; a project that does not ignore its outputs names them as "not staged" on
+  every round that commits.
 
 - **The site's number scan is a floor, not a proof (architecture phase 5).** It is
   sign-insensitive (prose says "40% past the limit" over a margin of −0.3994); blind to
