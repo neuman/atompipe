@@ -1028,6 +1028,15 @@ Rules:
   Only what the context recorded is known to be live, so a file written behind its
   back either survives forever or gets swept the first time the cleaner is made
   stricter. `write_asset` returns the site-relative path that goes in `View.src`.
+- **Write byte-stable assets** (architecture phase 5, SPEC 32). The site is
+  committed, and `write_asset` writes only when the bytes differ, so a rebuild that
+  judged nothing new changes no tracked byte. A viewgen that stamps a clock, a random
+  id or an unordered dict into its GLB or SVG rewrites the asset on every build and
+  dirties `git status` every time.
+- **The representation is the first `model3d` view by order**, else the first image
+  or diagram view (`page.representation`): it heads the front page, beside the
+  verdict sentence. Give the view that best shows the whole design the lowest
+  `order`.
 - **Node names are an interface the pack must publish.** Whatever a `model3d`
   viewgen calls its nodes is what every gate in that domain must use in its
   locators, and `PACK.md` is where that scheme belongs. It is an interface between

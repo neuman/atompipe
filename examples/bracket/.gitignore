@@ -7,3 +7,7 @@ __pycache__/
 /REPORT.md
 /out/
 # nopekit:end
+
+# The page is built on demand: nopekit site init, then nopekit site build. Only its text is tracked.
+/site/*
+!/site/content/

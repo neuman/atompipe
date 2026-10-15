@@ -171,6 +171,10 @@ docs/decisions.md             tracked   the decision log, generated from decisio
                                         `nopekit report --write`; never edit it
 milestones/print-v1.json      tracked   a spend — the print — and the claims it
                                         requires (C1-C4), with its generator
+groups/*.json                 tracked   the page's boards (claims), zones (choices)
+                                        and the one named station (`allowable`)
+site/content/*.md             tracked   the page's text, one file per board plus
+                                        intro.md and next.md, each stamped `as_of`
 generators/profile.py         tracked   writes the print's package: the plate's
                                         outline and the print settings
 exports/print-v1.json         tracked   written by `nopekit export print-v1` only:
@@ -188,6 +192,8 @@ exports/print-v1.json         tracked   written by `nopekit export print-v1` onl
 .nopekit/ledger.json         ignored   the generated index of the records — the whole
                                         project in one read; edit the records, never it
 REPORT.md                     ignored   the readiness report, `nopekit report --write`
+site/ (but site/content/)     ignored   the page, built on demand: `nopekit site init`,
+                                        then `nopekit site build`
 out/print-v1/                 ignored   the package `nopekit export print-v1` wrote
 .nopekit/cache/, obs/, out/  ignored   this checkout's memory, costs and gate scratch
 ```
@@ -228,6 +234,7 @@ rm -rf .nopekit/verdicts .nopekit/cache .nopekit/obs .nopekit/out
 nopekit check              # exits 1: bracket.deflection fails on purpose
 nopekit gate selftest      # writes nothing new: the controls were just recorded
 nopekit round              # the round record of the regenerated cache
+nopekit site stamp --all   # only when a status moved: read the text again first
 git add -A .
 ```
 
@@ -241,6 +248,26 @@ stays clean.
 The readiness report is not committed: `nopekit report --write` renders `REPORT.md`
 here, an output git ignores — it was `docs/readiness.md`, tracked, until it drifted
 from the records it was rendered from.
+
+## The page
+
+`nopekit site init` scaffolds `site/`, and `nopekit site build` bakes the page from the
+records, the verdict cache and the text in `site/content/`; `nopekit site serve
+--watch` serves it and builds it again when any of those change. The page reads like
+a poster: the verdict sentence, the grounding map, then one section per board, then
+the next steps. The map draws the four requirements on the left, the four zones of
+choices (`groups/arm.json` and its neighbours), the shared values the evaluators read
+— `allowable` is named in `groups/allowable.json`, and `slenderness`, which two
+claims' evaluators read, becomes a station on its own — and the four boards on the
+right, one line per claim in its status's colour, glyph and word.
+
+The text beside each board is the only part of the page an agent writes, so it is the
+part held most closely. Each file carries an `as_of` stamp, the digest of its claims'
+statuses when it was written (`nopekit site stamp <board>`, or `--all`); when a status
+moves, the page marks the text as written before the latest results. Every number in
+the text must be a number the build bakes: a number nothing holds is marked on the
+page and named by the build. The built page is not committed here (`.gitignore`
+keeps only `site/content/`), so a clone builds its own.
 
 ## Spend: `nopekit export print-v1`
 
@@ -272,3 +299,7 @@ fail), and a fail there is a contradiction on `bracket.deflection`'s track recor
 - Set `thickness=2.0` — now `bracket.min_wall` and `bracket.deflection` both trip, and
   `bracket.model_validity` warns that the remaining numbers are not trustworthy.
 - Delete a gate's `negative_control` — the registry refuses to load it at all.
+
+<!-- nopekit:begin badge -->
+<a href="https://github.com/neuman/nopekit"><img src="https://raw.githubusercontent.com/neuman/nopekit/main/docs/img/made-with-nopekit.png" width="160" alt="Made with nopekit"></a>
+<!-- nopekit:end badge -->

@@ -250,6 +250,15 @@ class Requirement(Record):      # phase 1: requirements/<id>.json — the person
     id: str                         # its stem, store.REQUIREMENT_ID (R1, R2, …)
     statement: str = ""             # the words, verbatim; required, non-blank
     source: str = ""                # "interview", or an input id
+GROUP_KINDS = ("board", "zone", "station")   # phase 5 (SPEC 17)
+class Group(Record):            # phase 5: groups/<id>.json — a board, a zone or a station
+    id: str                         # its stem, store.GROUP_ID; names site/content/<id>.md
+    kind: str = ""                  # GROUP_KINDS; required
+    title: str = ""                 # the words the page shows; required
+    line: str = ""                  # one short sentence under the title
+    members: list[str]              # claim ids (board), choices (zone), derived values
+                                    #   (station), in the order the page draws them
+    order: int = 0                  # groups of one kind sort by (order, id)
 class PackManifest(Record):     # pack.json, tier 1 (docs/PACK_FORMAT.md)
     name: str; version: str = "0.1.0"; description: str = ""; settles: list[str]
     claim_classes: list[str]; provides_gates: list[str]; provides_views: list[str]
@@ -275,8 +284,10 @@ class Ledger(Record):           # the whole project, in memory (store.load assem
     milestones: list[Milestone]  # P2.5b
     exports: list[ExportRecord]  # P2.5b: every milestone's, file by file, oldest first
     requirements: list[Requirement]  # phase 1: natural id order; read whole by a gate, traced
+    groups: list[Group]          # phase 5: natural id order; hidden from every gate
+                                 #   (verdicts._LEDGER_HIDDEN): a regroup re-keys nothing
     def claim(cid) | param(name) | artifact(aid) | need(nid) | verdict(gate_id)
-        | milestone(name) | requirement(rid) -> record | None
+        | milestone(name) | requirement(rid) | group(gid) -> record | None
     def verdicts_for(cid) -> list[Verdict];  def upsert_verdict(verdict) -> None
 ```
 **Records as files** (checkpoint 1.3). Three constants tell `store` how a record
@@ -394,6 +405,8 @@ def utcnow_iso() -> str                      # "2026-09-11T14:46:00Z"
 def ensure_dir(path) -> str                  # mkdir -p; returns the path as a str
 def atomic_write_text(path, text) -> None    # write temp + os.replace; never truncate on crash
 def atomic_write_json(path, obj) -> None     # sorted keys, indent=2, trailing newline; NaN refused
+def write_json_if_changed(path, obj) -> bool # phase 5: atomic_write_json's bytes, only when
+                                             #   they differ (a tracked baked file)
 def read_json(path, default=None) -> Any
 def sha256_text(text: str) -> str
 def canonical_json(value) -> str             # P2.5a: THE canonical form: sorted, compact, no NaN
@@ -445,6 +458,7 @@ VCS_TIMEOUT_S = 10
 def is_repo(path) -> bool
 def git_head(root) -> str | None                     # HEAD's sha; None outside git
 def ls_files(root, relpaths, *, others=True) -> list[str] | None   # -z; relative to root
+def ignored(root, relpaths) -> list[str] | None      # phase 5: untracked files git ignores
 def ident(root) -> str | None                        # author identity, timestamp dropped
 def show(root, relpath, rev="HEAD") -> bytes | None  # P2.5a: the bytes a commit holds at relpath
 def history(root, relpath, limit) -> list[str]      # P2.5a review: commits that changed it, newest first
@@ -542,6 +556,19 @@ def pointer_problems(ledger) -> list[str]   # phase 3a: the graph's record point
 def grounded_by_problem(where, name, aid, input_ids, claim_kinds) -> str | None
                                         # one grounded_by id: an input, or an assumption the
                                         # value IS; else why not (doctor reads PARAMS' through it)
+GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")   # phase 5: a group's stem
+RESERVED_GROUP_IDS: dict[str, str]      # intro, next, other: the page's own names
+def groups_in_order(groups, kind) -> list   # (order, natural id): the one order of a kind
+def group_problems(ledger) -> list[str] # phase 5: a board member no claim holds, a claim on
+                                        # two boards, a name in two zones or two stations, or
+                                        # in a zone and on a station; the index's and doctor's
+README_BADGE_BEGIN = "<!-- nopekit:begin badge -->"; README_BADGE_END = "<!-- nopekit:end badge -->"
+README_BADGE_BLOCK: str                 # SPEC 36: the Made-with-nopekit block
+def ensure_readme_badge(root, name="", summary="") -> bool   # the block at the bottom of
+                                        # README.md (created when absent); idempotent; a
+                                        # block is whole marker lines, the last one; the
+                                        # file's line ending is kept
+def readme_has_badge(text) -> bool      # the same matcher, for doctor's `readme` row
 class MigrationPlan(NamedTuple):
     ledger: Ledger; files: dict[str, bytes]; notice: str
 def migrate_legacy(root, *, apply: bool, when: str,
@@ -2499,6 +2526,8 @@ class RequirementStatus(NamedTuple): id; status; errored; claims; worst; disagre
                                               #   report.requirement_statuses' to fill
 def requirement_statuses(ledger, composed) -> dict[str, RequirementStatus]   # THE producer:
                                               #   the worst serving claim by severity; Gap with none
+def worst_of(ids, composed) -> tuple[ClaimStatus, bool, tuple]   # phase 5: the fold a
+                                              #   requirement and a board both ask; Gap with none
 # Architecture phase 2 (SPEC 14, §0.2): what lost, and what would bring it back
 RETURN_STATES = ("holds", "does-not-hold", "cannot-evaluate", "not-machine-checkable", "none")
 class ReturnState(NamedTuple): state; why = ""; claim = ""; status = ""; observed = None
@@ -3235,6 +3264,8 @@ def build(view, resolution, registry, *, projection, design, views=(), bases=Non
 def tokens(view, resolution, registry, *, composed=None) -> Tokens
 def of(root, view, resolution, registry, *, projection, model, views=(), bases=None,
        trace=None) -> Graph                           # build, design = verdicts.design_of
+def upward(graph, value) -> list[str]                 # phase 5: a value node id and every
+                                                      #   value it derives from (the map's lines)
 ```
 **Nodes.** A requirement, a milestone and a decision carry no attrs; a claim
 `{claim_kind, by, critical, removed}` (every `view.claims`, a `Ledger.removed`
@@ -3314,14 +3345,24 @@ digest** is `util.seal(verdicts.design_of(...))` — the current article's `buil
 so a model or data-file edit that files no verdict still reads behind; there is no spine
 or version digest, so an upgrade is not "behind the records".
 
-### `site.py`  (deps: models, util, store, claims, decisions, report, modelio, gates, verdicts)
-The project site's spine half: viewgens, and the one JSON document the page reads.
-The page's half is plain HTML, CSS and ES modules in `site_template/`, copied by
-`scaffold`; the data contract between the two is `docs/SITE_CONTRACT.md`.
+### `site.py`  (deps: models, util, store, claims, decisions, graph, page, prose, report, modelio, gates, verdicts)
+The project site's spine half: viewgens, the technical record's document
+(`state.json`), and the orchestration of a build — the front page's two documents are
+`page`'s, the prose `prose`'s. The page's half is plain HTML, CSS and ES modules in
+`site_template/`, copied by `scaffold`; the data contract between the two is
+`docs/SITE_CONTRACT.md`.
 ```python
 SITE_DIR = "site"; DATA_DIR = "data"; ASSETS_DIR = "assets"; VENDOR_DIR = "vendor"
 VIEWS_DIR = "data/views"                     # per-view payloads too big to inline
-STATE_NAME = "state.json"                    # site/data/state.json: everything the page shows
+STATE_NAME = "state.json"                    # site/data/state.json: the technical record
+PAGE_NAME = "page.json"; MAP_NAME = "map.json"   # the front page's documents (phase 5)
+BUILD_NAME = "build.json"                    # the clock: ignored, never tracked (SPEC 32)
+CONTENT_DIR = "content"                      # site/content/: the agent's prose and figures
+EVIDENCE_DIR = "assets/evidence"             # evidence copied from .nopekit/out/
+SHELLS = ("index.html", "technical.html")    # the project's own: never refreshed
+OUTLINE_MARKER = '<meta name="nopekit-outline" content="1">'; OUTLINE_MARKER_RE: str
+AGED_SECONDS = 86400                         # a result this old is aged (build.json)
+WATCH_DIRS: tuple[str, ...]                  # what `site serve --watch` polls
 @dataclass
 class ViewContext:                           # a viewgen's one argument, mirroring GateContext
     root; ledger; model; params; assets_dir; log; extra; written   # written: assets recorded
@@ -3342,13 +3383,25 @@ def run_viewgen(spec, fn, ctx) -> tuple[View | None, str]  # never raises; None 
 def run_all_viewgens(registry, ctx, *, only=None) -> tuple[list, list]   # (views, notes)
 def derive_explode(bounds, *, overrides=None) -> dict      # a FIRST DRAFT explode manifest
 def locator_problems(views, verdicts) -> list[dict]         # every locator that cannot be drawn
-def scaffold(root, *, force=False) -> list                  # copy the template; index.html only with force
+def scaffold(root, *, force=False) -> list                  # copy the template; the shells only
+                                                            #   when absent, or with force
+def refresh_renderer(root) -> list                          # every template file but SHELLS
+def scaffolded(root) -> bool                                # site/index.html is a file
+def outline_of(root) -> int | None                          # index.html's OUTLINE_MARKER
+def ensure_site_ignore(root) -> bool                        # data/build.json in site/.gitignore,
+                                                            #   created with it alone when absent
+def prose_pool(docs, assets=()) -> Pool                      # what prose numbers are matched to
+def baked_pool(root, map_doc, page_doc) -> Pool              # the same, over a built site on disk
 def build(root, ledger, registry, view_registry, *, model=None, projection=None, now="",
-          resolution=None, params=None) -> dict
+          resolution=None, params=None, graph=None, live=False) -> dict
 def state(root, ledger, registry, *, now="", stale=None, resolution=None,
-          params=None) -> dict   # state.json
-def judgement_digest(payload) -> str                        # sha256 of what a state document judged
-def judgement_moved(shown, now) -> list[str]                # "C1 pass -> fail": what a rebuild would change
+          params=None, judged=None) -> dict   # state.json: clock-free (now is ignored)
+def resolution_digest(payload) -> str                       # sha256 of what a state document judged
+def resolution_moved(shown, now) -> list[str]               # "C1 pass -> fail": what a rebuild would change
+def ages(resolution, now) -> dict                           # {gate: {when, age_s, aged}}
+def write_build_json(root, *, now, id, ok=True, error="", live=False, verdicts=None,
+                     mixed_age=None) -> str                 # site/data/build.json, ignored
+def watch_snapshot(root) -> dict                            # {relpath: (size, mtime_ns)} over WATCH_DIRS
 def clean_assets(root, keep) -> list                        # delete unreferenced site/assets/ files
 def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`
 ```
@@ -3360,7 +3413,15 @@ to pass a resolution would serve every cached PASS as current and skip admission
 (invariant 7 by omission). `stale=True` stays an all-stale override. It stamps each
 verdict with its own age — obs `when`, else the entry's commit time, else `null`; a
 build that re-ran the cheap gates on the way past would publish ten-second-old tier-0
-numbers beside week-old tier-2 numbers under one "built at" stamp. `state` borrows every judgement —
+numbers beside week-old tier-2 numbers under one "built at" stamp. From architecture
+phase 5 that age is in `data/build.json` (`ages`), ignored by git, and `state.json`
+holds no clock, so a rebuild that judged nothing new changes no tracked byte; every
+tracked file is written only when its bytes differ (`util.write_json_if_changed`,
+`ViewContext.write_asset`, the evidence copies). `build` bakes `map.json` and `page.json`
+(`page`), refuses — writing nothing under `site/data/` — when `page.status_problems`
+finds a token the resolution does not say, copies the evidence `page.evidence_plan`
+plans, fills the prose (`page.bake_prose`) against a pool of every baked number, seals
+both documents and writes `build.json` last. `state` borrows every judgement —
 statuses from `claims`, the readiness sentence and the PARTIAL logic from `report` —
 because a second implementation would give the page and the readiness document two
 opinions about one ledger (the site renders the ledger; it never computes truth).
@@ -3369,17 +3430,17 @@ From architecture phase 1 the document gains `requirements` — each row
 each claim row a `mechanism` and its `requirements` (through `report.claim_json`);
 `judgement_digest` covers them, so a moved requirement status marks the page behind.
 The page draws no requirement until the map (phase 5).
-`now` is the caller's timestamp: without it every `age_s` is `null`, never 0, since
-an age of zero renders as "just now". `meta.records_digest` is `store.records_digest(root)`
+`meta.records_digest` is `store.records_digest(root)`
 at build time — which records the page was built from; the CLI's site staleness compares
-it with the records now (see `cli.py`), never an mtime. `meta.judgement_digest` is
-`judgement_digest` of the finished document, set last by `state` itself: a sha256 over
-everything but the clock (`built`, each row's `when` and `age_s`), the two digests,
-`views` and `locator_problems` — a deny-list, so a key a later `state` adds is judged by
-default. It is the other half of what the page was built from: the resolver's judgement
+it with the records now (see `cli.py`), never an mtime. `meta.resolution_digest` is
+`resolution_digest` of the finished document, set last by `state` itself: a sha256 over
+everything but the two digests, each row's `evidence_assets`, `views` and
+`locator_problems` — a deny-list, so a key a later `state` adds is judged by default
+(phase 3a's `judgement_digest`, renamed in phase 5: "judgement" names nothing on the
+page, and the glossary's *judgment* is an expert's). It is the other half of what the page was built from: the resolver's judgement
 of the verdict cache against the live model, which no record holds (review,
 `repro_site`: a `check` that FAILed C1 moved no record, and the page's C1 PASS read
-current). `judgement_moved(shown, now)` names what a rebuild would change — claims whose
+current). `resolution_moved(shown, now)` names what a rebuild would change — claims whose
 status moved, else verdict rows whose outcome or measurement did, else parameters whose
 value (`thickness 7 mm -> 8 mm`) or, the value standing, another field (`thickness
 rationale`) did — for the reason line; it reads both documents and judges neither.
@@ -3393,6 +3454,109 @@ A locator is never dropped for being undrawable: it stays on its verdict, and
 `locator_problems` publishes the problem beside it in `state.json`, because a gate
 that believes it is drawing and is not looks exactly like a gate that found nothing. `clean_assets` deletes only what
 it can prove is unreferenced, which is why every asset arrives through `write_asset`.
+
+### `page.py`  (deps: models, util, store, claims, report, graph, prose)
+The front page's baked data (architecture phase 5, SPEC 28-33): `map.json` and
+`page.json`. Not a spine module (an edit here keys no verdict); clock-free; it reads
+`site/content/` and the presence and size of evidence files, and never imports `site`.
+Every status, word, count, margin and *ready* it bakes is from its one producer:
+`graph.tokens`, `claims.worst_of`, `claims.unresolved`, `claims.margin`.
+```python
+OUTLINE = 1; SCHEMA = 1
+LANES = ("requirements", "zones", "stations", "boards")
+MAP_EDGE_TYPES: tuple[str, ...]              # graph.EDGE_TYPES less requires, decides
+OTHER = "other"                              # the generated board and zone
+IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
+EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
+EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next")
+WORD_KEYS: frozenset; RECORD_KEYS: frozenset # every string key of page.json and map.json:
+                                             #   scanned for the register, or exempt
+class Board(NamedTuple): id; title; line; generated; members
+class Zone(NamedTuple): id; title; line; generated; members
+class Station(NamedTuple): id; title; line; generated; members   # id "@<name>" when generated
+class Layout(NamedTuple): boards; zones; stations; board_of; zone_of; station_of; lines;
+                          unread; warnings
+class Evidence(NamedTuple): gate; entry; path; name; source; dest; href; missing; action;
+                            reason   # why it is not on the page: the build's warning, never baked
+def token_of(composed) -> str                # STATUS_KEY, or errored
+def boards_of(view) -> tuple                 # board records, then the generated `other`
+def layout(view, built, *, projection, params=(), registry=None, resolution=None) -> Layout
+def value_text(measured, units, limit_text, margin) -> str   # "0.6997 mm against a limit of
+                                             #   0.5 mm, 40% past the limit"
+def words_block() -> dict                    # page.json's words
+def evidence_plan(root, view, resolution, registry=None, *, ignored=None) -> list
+                                             # [Evidence]; plans only; `ignored(relpath)`
+                                             #   is git's ignore rule (site build's)
+def evidence_assets(plan) -> dict            # {gate: [href or "", ...]} for state.json
+def settle(claim, composed, *, milestone=None, cover=(), tiers=None) -> dict  # {text, commands}
+def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of prose is
+                                             #   stamped against: a board's claims, and
+                                             #   "@<id>" for each named claim off the board
+def named_in(blocks) -> list                 # the claim ids a piece of prose names
+def prose_named(body, claim_ids) -> list     # named_in over a file's body
+def prose_files(root) -> list                # [(subject, path)] under site/content/
+def subjects(boards) -> list                 # board ids, then intro, next
+def stamp_state(as_of, current) -> str       # current | stale | unstamped
+def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, current_as_of}]
+def content_digest(root) -> str              # a seal over site/content/
+def seal(doc) -> str                         # map.json's and page.json's `self`
+def representation(views) -> dict            # the first model3d, else image or diagram
+def bake_map(view, lay, built, toks, composed, *, projection, params=(), registry=None,
+             payload=None, name="", records_digest="", resolution_digest="") -> dict
+def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
+              plan=(), records_digest="", resolution_digest="") -> dict
+def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
+def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
+                    pool=None) -> list[str]   # invariant 14: tokens, words, marks, ready,
+                                             #   a compared value's words, prose stamps;
+                                             #   with prose_as_of and pool, each as_of
+                                             #   and each number's match
+```
+**Order is baked, geometry is rendered**: nodes carry a lane, an `order`, a `row` and a
+`column` (greedy interval packing over the rows their lines span), never a position, and
+a status flip moves none of them. `status_problems` is invariant 14's one checker: the
+build refuses a page it names, and `cli._site_state` reads an on-disk page with it — a
+token the resolution does not say, while both documents' `resolution_digest` equal
+now's, reads *edited by hand* (a resealed forgery). A line's values are its settling
+evaluators' named reads (`graph.served_reads`), closed upward over `derives`
+(`graph.upward`): the trace adds edges and no code.
+
+### `prose.py`  (deps: none)
+The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure
+functions over strings and JSON values, importable by `site stamp` and the style tests
+without the page machinery. No clock, no file reads.
+```python
+SENTENCE_MAX_WORDS = 25                      # ASD-STE100 rule 4.1
+UNIT_WORDS: frozenset; BANNED_WORDS = ("delve", "robust", "seamless", "crucial", "honest")
+IDENTIFIER_SUFFIXES: frozenset               # 3D, 1st: letters that make a number an id
+POOL_EXCLUDED_KEYS: frozenset                # numbers that are structure, never a result
+POOL_COUNT_KEYS: frozenset; POOL_FRACTION_KEYS: frozenset   # counts and fractions
+COUNT = "#count"; FRACTION = "#fraction"; UNSTATED = ""     # the pool's tags beside units
+class FrontMatter(NamedTuple): as_of; keys; body; problems
+class Pool(NamedTuple): values; tagged       # every baked number's absolute value, sorted,
+                                             #   and by tag (a unit, COUNT, FRACTION, UNSTATED)
+    def near(self, x, tolerance, tag=None) -> bool
+def parse_front_matter(text) -> FrontMatter
+def stamp_text(text, as_of) -> str           # writes only the as_of line
+def stamp_digest(subject, tokens) -> str     # 16 hex: sha256 over nopekit-stamp-v1
+def parse_markdown(body, *, exists=..., claims=()) -> tuple[list[dict], list[str]]
+def number_pool(docs) -> Pool
+def scan_numbers(blocks, pool) -> tuple[list[dict], list[str]]   # number runs, unmatched
+def matches(text, decimals, percent, pool, unit="") -> bool   # a unit must agree
+def unit_key(unit) -> str                    # a unit as the pool compares it
+def all_runs(blocks) -> list[dict]; def number_runs(blocks) -> list[dict]
+def run_matches(run, pool) -> bool           # a baked number run, by the scan's rule
+def runs_text(runs, *, code=False) -> str; def blocks_text(blocks) -> list[str]
+def register_problems(text) -> list[str]     # em-dash, not X but Y, question, banned word,
+                                             #   contraction
+def long_sentences(text, limit=SENTENCE_MAX_WORDS) -> list[str]
+```
+The markdown subset is parsed here into typed blocks and runs; the browser receives no
+HTML from prose. A number matches a pooled value within half a unit of its last written
+decimal, sign-insensitive; a unit must agree with the value's (or the value states
+none), a count matches only a bare number, and `%` a fraction times 100; letters
+joined to a number are its unit unless they are an `IDENTIFIER_SUFFIXES` suffix. A
+stamp guards age, never correctness.
 
 ### `milestones.py`  (deps: models, util, store, claims, report, verdicts)
 The boundary that spends (P2.5b): what `export <milestone>` judges, and the package
@@ -4420,7 +4584,49 @@ rho or `check`'s exit code, and `check` writes no new path.
 - **`cli._grounding`** moved to `artifacts.value_grounding` (the graph cannot import
   the CLI); `claims.outcome_key` and `report.status_token_word` are new public names.
 
+## What phase 5 of the architecture moved
+
+The site (`docs/SPEC.md` §7 step 5: decisions 17 and 28 to 36). The spine digest moved
+(models: `Group`, `GROUP_KINDS`, `Ledger.groups`, `FORBIDDEN_KEYS["Group"]`; verdicts:
+`_LEDGER_HIDDEN` gains `groups`); every entry re-keys once, and the bracket's committed
+cache was regenerated with it (its round record reads round 2). Nothing here moves a
+status, a qualification, a rho or `check`'s exit code.
+
+- **`groups/<id>.json`** (`store.GROUP_ID`, `_check_group`, `group_problems`,
+  `groups_in_order`): boards, zones and stations, hidden from every gate.
+- **`page.py`** bakes `map.json` and `page.json`; **`prose.py`** reads the agent's text
+  and scans it. Neither is a spine module.
+- **`site.py`**: `state.json` is clock-free (`ages` and `write_build_json` hold the
+  clock in the ignored `build.json`); `judgement_digest`/`judgement_moved` are
+  `resolution_digest`/`resolution_moved`; `build` refuses a page `page.status_problems`
+  names, copies evidence, writes tracked files only when their bytes differ;
+  `technical.html` is a shell.
+- **`claims.worst_of`** (a requirement's fold, now a board's too), **`graph.upward`**,
+  **`util.write_json_if_changed`**, and `report._verdict_sentence`/`limits_line`'s
+  `register="site"` with `HUMAN["site"]`.
+- **Commands**: `site stamp`, `site badge`, `site serve --watch`, `site build --live`;
+  `init` writes the README's badge block; `doctor` gains `groups`, `site text` and
+  `readme`; `why` resolves a group and names a claim's board; a site is present only
+  with `site/index.html` (`site.scaffolded`).
+
 ## Limits: what the spine cannot see, named
+
+- **The site's number scan is a floor, not a proof (architecture phase 5).** It is
+  sign-insensitive (prose says "40% past the limit" over a margin of −0.3994); blind to
+  number words, unit conversions and code spans; and small integers match counts. A
+  stamp guards age, never correctness, and qualitative prose ("the arm is stiff") is
+  never scanned: the floor sits under the prose so a reader sees the data beside it.
+- **Evidence over 2 MiB is not copied to the page**, and a viewgen that writes a clock
+  into its asset breaks the page's byte stability: every build then rewrites it.
+- **The watcher polls size and mtime over a fixed set of directories**
+  (`site.WATCH_DIRS`): an edit outside them, or one that keeps both, is not seen until
+  the next build.
+- **Zone and station members are judged by doctor and the build, never by the index**:
+  whether a name is a choice or a derived value needs the model.
+- **A forger who reseals a page and keeps its tokens can still change its words.**
+  `page.status_problems` compares tokens, *ready*, steps and marks with the
+  resolution; a word, a hint or a value text edited by hand and resealed reads
+  current until the next build writes it again.
 
 - **A resealed round record reads as no hand edit (architecture phase 3a).** Its
   self-digest is tamper evidence against a hand edit, not a lock: anyone who can write

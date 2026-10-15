@@ -1,0 +1,12 @@
+{
+  "kind": "board",
+  "title": "Holds the pump",
+  "line": "The arm carries the pump with no crack and no sag that a person can see.",
+  "members": [
+    "C1",
+    "C2",
+    "C3",
+    "C6"
+  ],
+  "order": 1
+}

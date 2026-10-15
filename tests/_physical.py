@@ -205,7 +205,7 @@ def channels(root: str, cid: str, *, site: bool = True) -> dict[str, Any]:
     out["status.text"] = text
     out["report.text"] = run(root, "report", code=0).stdout
     if site:
-        if not os.path.isdir(os.path.join(root, "site")):
+        if not os.path.isfile(os.path.join(root, "site", "index.html")):
             run(root, "site", "init", code=0)
         run(root, "site", "build", code=0)
         state = read_json(os.path.join(root, "site", "data", "state.json"))

@@ -62,7 +62,8 @@ BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearin
 REGENERATE = ("the committed bracket cache was written by another spine or model: in "
               "examples/bracket run `rm -rf .nopekit/verdicts && nopekit check; "
               "nopekit gate selftest; nopekit round` and commit the result "
-              "(examples/bracket/README.md, \"The committed cache\")")
+              "(examples/bracket/README.md, \"The committed cache\"); a status change "
+              "also needs `nopekit site stamp --all` after reading the text again")
 
 #: What a stale committed round record says (architecture phase 3a): a change
 #: that moves what it holds — the cache, the composition (`claims.py`,

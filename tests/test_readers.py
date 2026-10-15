@@ -258,7 +258,9 @@ class ReadersTakeStaleGates(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class SiteAgesAreNeverZero(_Project):
     """An age of zero renders as "just now": the exact lie a staleness display
-    exists to prevent. Unknown is `null`."""
+    exists to prevent. Unknown is `null`. From architecture phase 5 (SPEC 32)
+    the ages are in the ignored `data/build.json` (`site.ages`), and
+    `state.json` holds none."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -269,7 +271,13 @@ class SiteAgesAreNeverZero(_Project):
     def _row(self, payload: dict) -> dict:
         rows = [v for v in payload["verdicts"] if v["gate"] == "r.stiff"]
         self.assertEqual(len(rows), 1, payload["verdicts"])
+        self.assertNotIn("when", rows[0], "state.json is clock-free (SPEC 32)")
+        self.assertNotIn("age_s", rows[0], "state.json is clock-free (SPEC 32)")
         return rows[0]
+
+    def _age(self, now: str) -> dict:
+        resolution = site_mod._resolve(self.root, self.ledger, self.registry, now=now)
+        return site_mod.ages(resolution, now)["r.stiff"]
 
     def test_no_obs_no_git_gives_null(self):
         payload = site_mod.state(self.root, self.ledger, self.registry,
@@ -277,17 +285,20 @@ class SiteAgesAreNeverZero(_Project):
         row = self._row(payload)
         self.assertTrue(row["fresh"], "the fixture must be a current row, or the age "
                                       "assertion tests nothing")
-        self.assertFalse(row["when"], "no obs run and no commit: nothing dates this row")
-        self.assertIsNone(row["age_s"],
+        found = self._age("2026-01-01T00:10:00Z")
+        self.assertFalse(found["when"], "no obs run and no commit: nothing dates this row")
+        self.assertIsNone(found["age_s"],
                           "an unknown age is null — a 0 here renders as 'just now'")
 
     def test_an_obs_run_dates_the_row(self):
         verdicts_mod.record_obs(self.root, "r.stiff", entry=self.written.name,
                                 when="2026-01-01T00:00:00Z", duration_s=0.01, cpu_s=0.01)
-        row = self._row(site_mod.state(self.root, self.ledger, self.registry,
-                                       now="2026-01-01T00:10:00Z"))
-        self.assertEqual(row["when"], "2026-01-01T00:00:00Z")
-        self.assertEqual(row["age_s"], 600.0)
+        self._row(site_mod.state(self.root, self.ledger, self.registry,
+                                 now="2026-01-01T00:10:00Z"))
+        found = self._age("2026-01-01T00:10:00Z")
+        self.assertEqual(found["when"], "2026-01-01T00:00:00Z")
+        self.assertEqual(found["age_s"], 600.0)
+        self.assertFalse(found["aged"])
 
     def test_a_commit_dates_a_row_no_obs_run_names(self):
         if shutil.which("git") is None:
@@ -297,17 +308,16 @@ class SiteAgesAreNeverZero(_Project):
             proc = _env.git(args, cwd=self.root, identity=True)
             self.assertEqual(proc.returncode, 0, proc.stderr)
         committed = _env.git(["log", "-1", "--format=%cI"], cwd=self.root).stdout.strip()
-        row = self._row(site_mod.state(self.root, self.ledger, self.registry,
-                                       now="2099-01-01T00:00:00Z"))
-        self.assertTrue(row["when"], "a committed entry is dated by its commit")
-        self.assertEqual(site_mod._parse_iso(row["when"]), site_mod._parse_iso(committed))
-        self.assertGreater(row["age_s"], 0.0)
+        found = self._age("2099-01-01T00:00:00Z")
+        self.assertTrue(found["when"], "a committed entry is dated by its commit")
+        self.assertEqual(site_mod._parse_iso(found["when"]), site_mod._parse_iso(committed))
+        self.assertGreater(found["age_s"], 0.0)
+        self.assertTrue(found["aged"], "a result from decades ago is aged")
 
     def test_an_unknown_now_is_null_too(self):
         verdicts_mod.record_obs(self.root, "r.stiff", entry=self.written.name,
                                 when="2026-01-01T00:00:00Z", duration_s=0.01, cpu_s=0.01)
-        self.assertIsNone(self._row(site_mod.state(self.root, self.ledger,
-                                                   self.registry))["age_s"])
+        self.assertIsNone(self._age("")["age_s"])
 
 
 # --------------------------------------------------------------------------- #

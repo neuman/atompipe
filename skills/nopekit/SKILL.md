@@ -300,10 +300,39 @@ It must stay fast — if tier 0 is not seconds, something is miscategorised.
 ## The project site: how the human sees what you are doing
 
 ```sh
-nopekit site init      # once, early
-nopekit site build     # after every check sweep
-nopekit site serve     # python3 -m http.server; no build step, no npm
+nopekit site init               # once, early
+nopekit site build              # after every check sweep
+nopekit site serve --watch      # serve it, and rebuild when the records or the cache move
+nopekit site stamp <board>      # after you read a board's text against the results now
+nopekit site badge              # the Made-with-nopekit block, for a project made before init wrote it
 ```
+
+**The front page is a poster around a map.** It reads top to bottom: the design's
+name and its representation, the readiness sentence, the grounding map, one section
+per board, next steps. The map and every status on it are baked from the resolution;
+your part is the grouping and the text:
+
+1. **Write the groups.** `groups/<id>.json`, one per file: `{"kind": "board", "title":
+   "Holds the pump", "line": "...", "members": ["C1", "C2"], "order": 1}`. A board holds
+   claims of any kind (a claim on one board at most), a zone holds choices, a station a
+   derived value several claims read. Claims on no board go to a board called Other.
+2. **Write the text in `site/content/`**: `intro.md` (what the design is),
+   `<board>.md` for each board, `next.md`. Use only numbers the build bakes: every other
+   number is marked on the page. Say nothing the statuses do not say.
+3. **`nopekit site build`**, and read every warning it prints about the text.
+4. **Read each board** on the page against its floor (the data under the text).
+5. **`nopekit site stamp <board>`** (or `--all`) when the text says what the results
+   say. When a status moves, the page marks the text as written before the latest
+   results until you read it again and stamp it.
+
+**Write the site's text in ASD-STE100.** Short sentences, 25 words at most. One word
+for one thing, present tense, the imperative for an instruction, no contractions. No
+em-dash asides, no "not X but Y", no rhetorical questions, and none of "delve",
+"robust", "seamless", "crucial" or "honest". `tests/test_style.py` scans what nopekit
+writes; your text is scanned by `site build`. An example:
+
+> At 7 mm thick, the tip sags 0.70 mm under 15 N. The limit is 0.5 mm, so C1 fails by
+> 40%. A thicker arm is the cheap fix.
 
 **Build it early, not as a finishing touch.** You are working in a text channel on a
 physical object, and a page with the claims, the verdicts and the geometry on it is
@@ -329,8 +358,9 @@ A gate that thinks it is highlighting something and is not looks exactly like a 
 that found nothing, from both ends.
 
 The site never computes truth; it renders the records and the verdict cache.
-Everything on the page is in `site/data/state.json`, so read that rather than the
-HTML when you want the state back. A project with no geometry still gets a useful
+Everything on the page is in `site/data/` — `map.json` and `page.json` for the front
+page, `state.json` for the technical record — so read those rather than the HTML when
+you want the state back. A project with no geometry still gets a useful
 site — claims, verdicts, evidence, provenance, readiness. Contract:
 `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md`.
 

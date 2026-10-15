@@ -524,7 +524,8 @@ class RenderersReadTheParamView(_Bracket):
         return proc
 
     def page(self, root: str) -> dict:
-        if not os.path.isdir(os.path.join(root, "site")):
+        # A site is `site/index.html` (phase 5): the bracket tracks site/content/.
+        if not os.path.isfile(os.path.join(root, "site", "index.html")):
             self.run_ok(root, "site", "init")
         self.run_ok(root, "site", "build")
         with open(os.path.join(root, "site", "data", "state.json"), encoding="utf-8") as fh:
@@ -640,24 +641,24 @@ class RenderersReadTheParamView(_Bracket):
         self.assertFalse(info["stale"], info)
 
     def test_what_moved_names_a_parameter_after_claims_and_verdicts(self):
-        """`judgement_moved`'s parameter tier: a value, then the first other field
+        """`resolution_moved`'s parameter tier: a value, then the first other field
         in the row's order; claims and verdict rows still come first."""
         row = {"name": "thickness", "value": 7.0, "units": "mm", "rationale": "why 7",
                "defended": True}
         shown = {"claims": [{"id": "C1", "status": "fail"}], "verdicts": [],
                  "params": [dict(row), {"name": "width", "value": 30.0, "units": "mm"}]}
         now = json.loads(json.dumps(shown))
-        self.assertEqual(site_mod.judgement_moved(shown, now), [])
+        self.assertEqual(site_mod.resolution_moved(shown, now), [])
         now["params"][0].update(rationale="", defended=False)
-        self.assertEqual(site_mod.judgement_moved(shown, now), ["thickness rationale"])
+        self.assertEqual(site_mod.resolution_moved(shown, now), ["thickness rationale"])
         now["params"][0].update(value=8.0)
         del now["params"][1]
         now["params"].append({"name": "fillet_r", "value": None, "model_error": "boom"})
-        self.assertEqual(site_mod.judgement_moved(shown, now),
+        self.assertEqual(site_mod.resolution_moved(shown, now),
                          ["thickness 7 mm -> 8 mm", "fillet_r (none) -> (no value)",
                           "width 30 mm -> (none)"])
         now["claims"][0].update(status="pass")
-        self.assertEqual(site_mod.judgement_moved(shown, now), ["C1 fail -> pass"])
+        self.assertEqual(site_mod.resolution_moved(shown, now), ["C1 fail -> pass"])
 
     def test_a_model_that_does_not_load_is_called_neither(self):
         """V: with the model broken there is no number and no rationale to judge:

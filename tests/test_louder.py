@@ -836,9 +836,18 @@ def js_table(source: str, name: str) -> dict[str, dict[str, str]]:
     return out
 
 
-def js_order(source: str) -> dict[str, int]:
-    body = re.search(r"const VERDICT_ORDER = \{([^}]*)\}", source)
-    return {k: int(v) for k, v in re.findall(r"(\w+):\s*(\d+)", body.group(1) if body else "")}
+def row_order(state: dict) -> dict[str, int]:
+    """The worst reading position each verdict status takes on the page: the
+    baked `order` of `state.json`'s verdict rows (architecture phase 5, SPEC
+    32), which `panels.js` and `stage.js` read in place of the `VERDICT_ORDER`
+    table the page once kept. A status's position is its LAST row's, so a
+    crash sorted below any skip reads as such."""
+    out: dict[str, int] = {}
+    for row in state.get("verdicts") or ():
+        status, order = str(row.get("status")), row.get("order")
+        if isinstance(order, int):
+            out[status] = max(out.get(status, -1), order)
+    return out
 
 
 #: The statements in `panels.js` and `format.js` the claim-row tone mirror
@@ -891,9 +900,15 @@ def state_problems(state: dict, format_js: str, panels_js: str) -> list[Problem]
         tone = verdict_table.get(str(row.get("status")), {}).get("tone")
         if (tone == fail_tone) != (gate in ERRORED_GATES):
             out.append(Problem("site.verdicts", "tone", gate, f"tone {tone} (fail: {fail_tone})"))
-    order = js_order(panels_js)
-    if not order.get("errored", 9) < order.get("skipped", -1):
-        out.append(Problem("site.verdicts", "order", "*", f"VERDICT_ORDER {order}"))
+    # The reading order is the bake's (`order`): every crash above every skip.
+    order = row_order(state)
+    firsts = {str(r.get("status")): r.get("order") for r in sorted(
+        state.get("verdicts") or (), key=lambda r: -(r.get("order") or 0))}
+    if not order.get("errored", 9) < firsts.get("skipped", -1):
+        out.append(Problem("site.verdicts", "order", "*", f"baked order {order}"))
+    if "VERDICT_ORDER" in panels_js:
+        out.append(Problem("site.verdicts", "order", "*",
+                           "panels.js keeps its own VERDICT_ORDER beside the baked order"))
 
     claims = state.get("claims") or []
     by_id = {row.get("id"): row for row in claims}
@@ -1134,6 +1149,11 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
                        "`site init` and `site build` above",
     ("site", "vendor"): "downloads the page's libraries",
     ("site", "status"): "prints whether the site is built and current, and counts",
+    # Architecture phase 5: the stamp prints the as_of it wrote (a digest of
+    # tokens, never a word for one), and the badge a README block.
+    ("site", "stamp"): "writes the as_of digest into site/content prose; prints the digest, "
+                       "never a status word",
+    ("site", "badge"): "writes the README's Made-with-nopekit block; reads no verdict",
 }
 
 

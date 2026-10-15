@@ -62,6 +62,7 @@ __all__ = [
     "ensure_dir",
     "atomic_write_text",
     "atomic_write_json",
+    "write_json_if_changed",
     "read_json",
     "sha256_text",
     "short_hash",
@@ -246,6 +247,29 @@ def atomic_write_json(path: str | os.PathLike[str], obj: Any) -> None:
     place — a value that silently becomes "no value" is the NaN problem in a
     quieter shape, and the gate layer already refuses the number upstream.
     """
+    atomic_write_text(path, _json_payload(path, obj))
+
+
+def write_json_if_changed(path: str | os.PathLike[str], obj: Any) -> bool:
+    """``atomic_write_json``'s exact bytes, written only when the file does not
+    already hold them; True when it wrote. What a tracked output needs
+    (architecture phase 5, SPEC 32): a site rebuild that judged nothing new must
+    change no tracked byte and no mtime, or every build dirties `git status`
+    and a watcher rebuilding on mtimes wakes itself."""
+    payload = _json_payload(path, obj)
+    data = (payload if payload.endswith("\n") else payload + "\n").encode("utf-8")
+    try:
+        with open(path, "rb") as fh:
+            if fh.read() == data:
+                return False
+    except OSError:
+        pass
+    atomic_write_text(path, payload)
+    return True
+
+
+def _json_payload(path: str | os.PathLike[str], obj: Any) -> str:
+    """The text `atomic_write_json` writes, or the refusal that names ``path``."""
     try:
         payload = json.dumps(obj, sort_keys=True, indent=2, ensure_ascii=False,
                              allow_nan=False)
@@ -273,7 +297,7 @@ def atomic_write_json(path: str | os.PathLike[str], obj: Any) -> None:
             f"cannot write {os.fspath(path)}: value is not JSON-serialisable ({exc}); "
             f"encode records with .to_dict() before saving"
         ) from exc
-    atomic_write_text(path, payload)
+    return payload
 
 
 def read_json(path: str | os.PathLike[str], default: Any = None) -> Any:

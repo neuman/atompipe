@@ -165,6 +165,9 @@ class InitIsBornMigrated(_env.EnvCase):
         for rel in (".gitignore", ".gitattributes", ".nopekit/.gitignore"):
             with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as fh:
                 self.assertIn("# nopekit:begin", fh.read(), rel)
+        # SPEC 36: the README, with the Made-with-nopekit block at its bottom.
+        with open(os.path.join(root, "README.md"), encoding="utf-8") as fh:
+            self.assertTrue(fh.read().endswith(store.README_BADGE_BLOCK))
 
         with open(os.path.join(dot, "project.json"), "rb") as fh:
             project = fh.read()

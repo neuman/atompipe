@@ -54,6 +54,7 @@ __all__ = [
     "is_repo",
     "git_head",
     "ls_files",
+    "ignored",
     "ident",
     "show",
     "history",
@@ -206,6 +207,24 @@ def ls_files(root: str | os.PathLike[str], relpaths: Iterable[str], *,
         args += ["--cached", "--others", "--exclude-standard"]
     args += ["--", *paths]
     out = _git(root, args, literal_pathspecs=True)
+    if out is None:
+        return None
+    return sorted({os.fsdecode(name) for name in out.split(b"\0") if name})
+
+
+def ignored(root: str | os.PathLike[str], relpaths: Iterable[str]) -> list[str] | None:
+    """The files under ``relpaths`` that git ignores and does not track, as
+    POSIX paths relative to ``root``, sorted; ``None`` on failure or outside a
+    repository. A tracked file is never in it, whatever an ignore rule says
+    (it is already public), and a path with no file is never in it either.
+    `site build` asks it before it publishes evidence a verdict names by a
+    path in the project (architecture phase 5: a git-ignored ``.env`` named as
+    evidence was published)."""
+    paths = _paths(relpaths)
+    if not paths:
+        return None if paths is None else []
+    out = _git(root, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--",
+                      *paths], literal_pathspecs=True)
     if out is None:
         return None
     return sorted({os.fsdecode(name) for name in out.split(b"\0") if name})

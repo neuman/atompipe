@@ -156,6 +156,9 @@ my-project/
   milestones/  exports/     a spend and the claims it requires; that spend's sealed exports
   preferences/              a person's recorded preference against a rejected alternative,
                             sealed, written only by `nopekit prefer` in their own shell
+  groups/strength.json      a board of claims, a zone of choices or a station of shared
+                            values: how the page groups the map (no status, no position)
+  site/content/<board>.md   the agent's text beside each board, stamped `as_of`
   .nopekit/project.json    the project: its name, its model entry, its live packs
   .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
   .nopekit/round.json      the round record: every status as a token and the typed graph,
@@ -227,10 +230,25 @@ parts up in the viewer, at the pose where it happens, and you are looking at the
 problem instead of reading about it.
 
 ```sh
-nopekit site init      # scaffold site/ — index.html is yours, never regenerated
-nopekit site build     # run the viewgens, write site/data/ and site/assets/
-nopekit site serve     # python3 -m http.server. No build step, no npm, ever.
+nopekit site init            # scaffold site/ — index.html is yours, never regenerated
+nopekit site build           # run the viewgens, write site/data/ and site/assets/
+nopekit site serve [--watch] # python3 -m http.server. No build step, no npm, ever.
+nopekit site stamp <board>   # stamp the text beside a board with the results it read
 ```
+
+The front page reads like a poster: the design's name and its representation, the
+readiness sentence right under it, then the **grounding map** — the requirements on
+the left, zones of choices, the values several claims share, and boards of claims on
+the right, one line per claim in its status's colour, glyph and word. Then one section
+per board, with the agent's text and the data under it, then the next steps. Boards,
+zones and stations are records (`groups/<id>.json`); the text is
+`site/content/<board>.md`, stamped by `nopekit site stamp`, and the page marks text
+written before the latest results and every number in it that no result holds. The
+browser computes no status: every word, number and order is baked by `site build`.
+`site serve --watch` rebuilds when the records, the model or the verdict cache
+change, and the page reloads its data. Today's panels are `technical.html`. `init`
+writes the Made-with-nopekit badge at the bottom of a new project's README (`nopekit
+site badge` adds it to an older one).
 
 `site build` never runs gates. It renders the verdicts already in the verdict
 cache and stamps each with its own age, because a page that re-ran the cheap gates
@@ -238,8 +256,9 @@ and not the expensive ones would show a mixed-age picture under one timestamp. I
 every locator naming a view or a part that does not exist — a gate that thinks it is
 highlighting something and is not looks exactly like a gate that found nothing.
 
-Everything the page shows is in `site/data/state.json`, so `curl` answers "what is
-the status of this project?" with no browser. And 3D is one view kind of six: a
+Everything the technical record shows is in `site/data/state.json`, and the front
+page is `map.json` and `page.json`, so `curl` answers "what is the status of this
+project?" with no browser. And 3D is one view kind of six: a
 project with no geometry still gets claims, verdicts, evidence, provenance and the
 readiness sentence. `nopekit site vendor` pulls three.js local for offline use.
 
@@ -260,6 +279,7 @@ nopekit gate selftest         every negative control; fails any gate that can't 
 nopekit report [--write]      the readiness report (--write: REPORT.md, an ignored output)
 nopekit export <milestone>    the spend: re-runs what it requires, then builds out/<milestone>/
 nopekit site build|serve      the project site: the ledger, rendered and clickable
+nopekit site stamp <board>    stamp the text beside a board with the results it was written against
 nopekit doctor                run this first when something is confusing
 ```
 

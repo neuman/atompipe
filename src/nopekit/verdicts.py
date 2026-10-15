@@ -1108,7 +1108,10 @@ _LEDGER_WHOLE = frozenset({"claims", "params", "inputs", "needs", "decisions",
 #: its own spend, and every export after a check would invalidate any gate
 #: that read the ledger whole. *Rejected:* hiding `milestones` too (a gate that
 #: reads what a spend requires is honest, and traced like `decisions`).
-_LEDGER_HIDDEN = frozenset({"verdicts", "exports"}) & _LEDGER_FIELD_SET
+#: Architecture phase 5 (SPEC 17) hides the groups: a gate that read board
+#: membership would re-key on a regroup, so presentation would move evidence;
+#: a gate that reads ``ctx.ledger.groups`` gets ``[]``.
+_LEDGER_HIDDEN = frozenset({"verdicts", "exports", "groups"}) & _LEDGER_FIELD_SET
 
 #: Filled in memory from somewhere other than the record: `Claim.gates` from
 #: registry coverage, `physical_result`, `results` and `attributions` from

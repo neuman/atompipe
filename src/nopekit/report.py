@@ -213,6 +213,205 @@ _SKIPPED_ERRORED = _SKIPPED._replace(
     hint="an evaluator errored: it crashed, so nothing was evaluated, and the evaluator "
          "itself is broken")
 
+#: The site's words (architecture phase 5, SPEC 34 and 35): every string the
+#: front page (`page.json`, `map.json`) bakes that is not record text, in
+#: ASD-STE100 — short sentences, one word for one thing, present tense, the
+#: imperative for an instruction, no contraction, no em-dash aside, no "not X
+#: but Y", no question. CLI output and REPORT.md keep the glossary's register
+#: (`HUMAN`'s other keys); the readiness sentence has one builder with two
+#: registers (`_verdict_sentence(..., register="site")`), so the page and the
+#: terminal never give two answers to "is it ready". `test_style` scans every
+#: string here, formatted with sample values. *Rejected:* rewriting the CLI's
+#: strings to STE (its transcript and shapes are pinned byte for byte, and the
+#: glossary is that channel's rule); a second sentence builder for the page.
+_SITE_WORDS: Mapping[str, Any] = MappingProxyType({
+    "generated": "nopekit site build wrote this file from the records, the verdict cache "
+                 "and site/content/. It is not a source. Change those, then build again.",
+    "other_board": "Other",
+    "all_board": "Claims",
+    "other_zone": "Other choices",
+    "all_zone": "Choices",
+    "no_representation": "Add a model3d view to show the design here. An image view or a "
+                         "diagram view also works.",
+    "value": "{measured} {units} against a limit of {limit}",
+    "value_bare": "{measured} {units}",
+    "margin_inside": ", {pct} inside the limit",
+    "margin_past": ", {pct} past the limit",
+    "margin_at": ", at the limit",
+    "chart_margin": MappingProxyType({"inside": "{delta} inside the limit",
+                                      "past": "{delta} past the limit"}),
+    "rebuild": "Rebuild article {article} for {claims}. These values moved: {moves}.",
+    "ready_word": "ready",
+    "not_ready_word": "not ready",
+    # The readiness sentence in the site's register: one key per branch of
+    # `_verdict_sentence`, mirrored one for one.
+    "readiness": MappingProxyType({
+        "no_claims": "{rev} has no claims, so nothing is evaluated. A project with no claims "
+                     "is not ready. Write claims/C1.json with a statement and an acceptance "
+                     "condition to start.",
+        "never": "{rev} is NOT ready. No evaluator ran on its {n} {claims}. Run nopekit "
+                 "check --tier 0 to start.",
+        "never_ready": "{rev} is ready, as last evaluated. No evaluator ran on its {n} "
+                       "{claims}.",
+        "none_required": "{rev} is NOT ready. None of its {n} {claims} is required.",
+        "not_ready": "{rev} is NOT ready. {k} of {req} required {claims} {is_} unresolved: "
+                     "{groups}.",
+        "tally": "{k} of {n} {claims} {is_} {checked} against the current inputs.",
+        "ready_last": "{rev} is ready, as last evaluated. Every required claim is {checked} "
+                      "against the current inputs.",
+        "other": "{n} {claims} that {is_} not required {is_} unresolved: {groups}.",
+        "unrun": "{n} registered {evaluators} did not run.",
+        "ready_for": "{rev} is ready for {m}. Every claim that {m} requires is {checked} "
+                     "against the current inputs.",
+        "not_ready_for": "{rev} is NOT ready for {m}. {k} of {n} required {claims} {is_} "
+                         "unresolved: {groups}.",
+        "ready_for_last": "{rev} is ready for {m}, as last evaluated. Every claim that {m} "
+                          "requires is {checked} against the current inputs.",
+        "not_ready_for_last": "{rev} is NOT ready for {m}, as last evaluated. {k} of {n} "
+                              "required {claims} {is_} unresolved: {groups}.",
+        "requires_nothing": "{rev} is NOT ready for {m}. {m} requires no claim. Add the "
+                            "claims that it needs to milestones/{m}.json.",
+        "limits": "{Checked} does not mean true. Its evaluators have shown that they can "
+                  "fail. They have not shown that they are correct or sufficient. Nothing "
+                  "outside these {n} {claims} is evaluated.",
+    }),
+    # Each status token's hint on the page. The checked hint does not say
+    # "does not mean true": the page says that once, in `verdict.limits`.
+    "hint": MappingProxyType({
+        "checked": "Every evaluator is qualified and passed on the current inputs.",
+        "failing": "An evaluator or a test on a built article failed the current design.",
+        "errored": "An evaluator stopped with an error. A crash settles nothing.",
+        "skipped": "An evaluator did not run. A tool that it needs is missing.",
+        "gap": "Nothing can settle this claim yet.",
+        "open": "An evaluator can settle this claim. It did not run on the current design.",
+        "stale": "The design changed after the result.",
+        "pending_build": "Only a test on a built article can settle this claim.",
+        "assumed": "A person accepts this claim for now.",
+    }),
+    # One sentence per ClaimCause: why a claim reads what it reads.
+    "cause": MappingProxyType({
+        "failed": "An evaluator failed the current design.",
+        "physical-fail": "A test on a built article failed.",
+        "errored": "An evaluator stopped with an error. A crash settles nothing.",
+        "prerequisite-errored": "An evaluator that this claim needs first stopped with an "
+                                "error.",
+        "skipped": "An evaluator did not run because a tool that it needs is missing.",
+        "prerequisite": "An evaluator that this claim needs first did not pass, so the next "
+                        "evaluator did not run.",
+        "unqualified": "An evaluator did not show that it can fail, so its result does not "
+                       "count.",
+        "no-evaluator": "No evaluator checks this claim yet.",
+        "no-owner": "This assumption has no owner.",
+        "owner-unattributed": "The owner of this assumption did not record it in their own "
+                              "shell.",
+        "no-reason": "This assumption has no reason.",
+        "unrun": "An evaluator did not run on the current design.",
+        "invalidated": "The design changed after the result.",
+        "no-article": "No test on a built article is recorded.",
+        "owned": "Its owner accepts this assumption for now.",
+        "physical-pass": "A pass is recorded. No built article of the current design holds "
+                         "it.",
+        "checked": "Every evaluator is qualified and passed on the current inputs.",
+        "acceptance": "An evaluator passed. Its value does not meet the acceptance "
+                      "condition.",
+        "outside-context": "The design is outside the range that the evaluator was tested "
+                           "on.",
+        "fallback": "The design is outside the range of the evaluator. A person accepts the "
+                    "claim for now.",
+        "contradiction": "A test on a built article failed a claim that an evaluator passed.",
+        "judged-fail": "An expert judged that the claim fails.",
+        "no-authority": "The claim names no expert to judge it.",
+        "authority-unattributed": "The expert did not record the judgment in their own "
+                                  "shell.",
+        "article-moved": "The design changed after the test on the built article.",
+        "claim-moved": "The claim changed after its test or its judgment.",
+        "judgment-moved": "The design changed after the expert judgment.",
+        "article-unjudged": "The model does not load, so the test cannot be compared with "
+                            "the design.",
+        "awaiting-judgment": "The claim waits for the judgment of its expert.",
+        "on-article": "A test on a built article of the current design passed.",
+        "judged": "The expert judged that the claim holds.",
+    }),
+    # What settles each cause: STE text and the commands (`page.settle`).
+    "settle": MappingProxyType({
+        "fix": "Change the design until {id} passes. Then run the check again.",
+        "built_fail": "A test on a built article failed {id}. Change the design, build a new "
+                      "article and test it again.",
+        "crash": "An evaluator stopped with an error. Repair it, then run the check again.",
+        "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
+                "again.",
+        "run": "Run the check. It runs the evaluators and their controls.",
+        "outside": "The design is outside the range that the evaluator was tested on.",
+        "find": "No evaluator checks {id} yet. Find one or write one.",
+        "owner": "{id} is an assumption. Its owner records it in their own shell.",
+        "reason": "{id} is an assumption with no reason. Write the reason in the claim file.",
+        "owned": "Its owner accepts {id} for now. A test can replace the assumption.",
+        "article": "{id} needs a test on a built article. Build the article, test it and "
+                   "record the result in your own shell.",
+        "article_free": "{id} needs a test on a built article. Build the part from the "
+                        "current design, test it and record the result in your own shell. "
+                        "To build it with nopekit export, name {id} in a milestone file.",
+        "no_authority": "{id} needs an expert judgment, and the claim names no expert.",
+        "judgment": "{id} needs a judgment from {authority}. That person records it in their "
+                    "own shell.",
+        "missing": "{milestone} requires {id}, and no claim file holds it.",
+    }),
+    "lanes": MappingProxyType({"requirements": "What was asked", "zones": "Choices",
+                               "stations": "Shared values", "boards": "Claims"}),
+    "kinds": MappingProxyType({"measurable": "Automated", "physical": "Test on a built article",
+                               "assumption": "Assumption"}),
+    "by": MappingProxyType({
+        "automated": "An evaluator settles it.",
+        "closed_form": "A formula settles it.",
+        "solver": "A solver settles it.",
+        "datasheet": "A datasheet settles it.",
+        "measurement": "A measurement on a built article settles it.",
+        "human": "A person settles it.",
+        "none": "Nothing settles it. It is accepted for now.",
+    }),
+    "basis": MappingProxyType({
+        "established": "An existing tool gives the answer.",
+        "sourced": "The logic follows a cited outside source.",
+        "model-only": "A model wrote the logic. It has no outside source.",
+        "undeclared": "The evaluator does not say where its answers come from.",
+    }),
+    "outcome": MappingProxyType({
+        "pass": "pass", "fail": "fail", "skipped": "skipped", "errored": "errored",
+        "unqualified": "not qualified", "outside-context": "outside its range",
+        "unrun": "did not run",
+    }),
+    "headings": MappingProxyType({"map": "Grounding map", "next": "Next steps",
+                                  "floor": "Show the data", "technical": "Technical record",
+                                  "project": "This revision", "open": "Other open claims",
+                                  "rebuild": "Articles to rebuild",
+                                  "made_with": "Made with nopekit"}),
+    "notices": MappingProxyType({
+        "prose_stale": "This text was written before the latest results. The data below "
+                       "shows the results now.",
+        "prose_unstamped": "This text has no stamp. It can be older than the results. The "
+                           "data below shows the results now.",
+        "unmatched": "No result on this page has this number.",
+        "unmatched_note": "A number with this mark is not in a result on this page.",
+        "build_failed": "The last build failed. This page shows the build before it.",
+        "no_intro": "Add site/content/intro.md to describe the design.",
+        "invalidated": "Some results are older than the design. Run nopekit check, then "
+                       "build the site again.",
+        "reads_all": "This evaluator reads every value of the design.",
+        "disagree": "The status and the evidence of this claim disagree. This is a defect "
+                    "in nopekit. Report it.",
+    }),
+    # The words beside evidence that is not on the page. They depend only on
+    # the path: why a file inside the project was not copied (its size, a
+    # directory, gone) reads one machine's disk, so the build warns with it
+    # and never bakes it (review of phase 5: a fresh clone baked "not on this
+    # computer" where the author's machine baked the file's size).
+    "evidence": MappingProxyType({
+        "outside": "Not on the page. The file is outside the project.",
+        "not_copied": "Not on the page. The site build gives the reason.",
+    }),
+})
+
+
 HUMAN: Mapping[str, Any] = MappingProxyType({
     # ClaimStatus -> its row. Ten members, eight rows: a physical pass is
     # Checked and a physical fail Failing — the terminal is the claim's, not
@@ -1352,6 +1551,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "args_help": "what the script is handed; a flag of the script's goes after --, as in "
                      "nopekit propose <id> -- --limit 5",
     }),
+    # Architecture phase 5: the front page's words, in ASD-STE100 (`_SITE_WORDS`).
+    "site": _SITE_WORDS,
 })
 
 
@@ -3203,14 +3404,17 @@ def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
     return parts
 
 
-def limits_line(ledger: Ledger) -> str:
+def limits_line(ledger: Ledger, register: str = "cli") -> str:
     """The limits line (M18.1; METHOD rule 9: "Say so, in the report, every
     time"): what a checked claim does not mean, and that nothing outside the
     claims was evaluated — REPORT.md's paragraph and `export`'s line, verbatim
-    on both (critique 10 of the P2.5b design: `/ready` must carry it too)."""
+    on both (critique 10 of the P2.5b design: `/ready` must carry it too).
+    ``register="site"``: the same facts in the site's words (SPEC 34), the
+    page's only "Checked does not mean true"."""
     n = len(ledger.claims)
-    return HUMAN["readiness"]["limits"].format(Checked=words(ClaimStatus.PASS).term, n=n,
-                                               claims=_plural(n, "claim"))
+    table = HUMAN["site"]["readiness"] if register == "site" else HUMAN["readiness"]
+    return table["limits"].format(Checked=words(ClaimStatus.PASS).term, n=n,
+                                  claims=_plural(n, "claim"))
 
 
 def latency_words(claim: Claim, exports: Iterable[Any]) -> str:
@@ -3276,7 +3480,7 @@ def not_ready_line(ledger: Ledger, composed: Mapping[str, Any]) -> str:
 
 def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any,
                       *, stale: bool, markdown: bool, milestone: Any = None,
-                      boundary: bool = False) -> str:
+                      boundary: bool = False, register: str = "cli") -> str:
     """The readiness sentence, then what stays true whatever it says. Bad news
     first, always.
 
@@ -3327,7 +3531,17 @@ def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any
     … Nothing below is checked … 1 claim is checked on an article" — no NOT
     ready, and a contradiction in one sentence; and a crash on a claim not
     required was "unresolved", its errored said only on the count line.
+
+    ``register="site"`` (architecture phase 5, SPEC 34): the same branches,
+    the same predicate and the same groups, each branch's words from
+    ``HUMAN["site"]["readiness"]`` in ASD-STE100, never markdown. The CLI
+    branch's bytes are untouched (its transcript and shapes are pinned).
+    *Rejected:* a second sentence builder for the page (two answers to "is it
+    ready").
     """
+    if register == "site":
+        return _site_sentence(ledger, composed, registry, milestone=milestone,
+                              boundary=boundary)
     rev = ledger.meta.revision or "this revision"
     bold = (lambda s: f"**{s}**") if markdown else (lambda s: s)
     total = len(ledger.claims)
@@ -3400,19 +3614,73 @@ def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any
     return " ".join(parts)
 
 
+def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
+                   milestone: Any = None, boundary: bool = False) -> str:
+    """`_verdict_sentence`'s site register: branch for branch the CLI's, from
+    the same `readiness`, `_groups`, `_unrun_specs` and `_hardware_clause`,
+    worded by ``HUMAN["site"]["readiness"]``."""
+    said = HUMAN["site"]["readiness"]
+    rev = ledger.meta.revision or "this revision"
+    total = len(ledger.claims)
+    checked = word(ClaimStatus.PASS)
+    if total == 0:
+        return " ".join([said["no_claims"].format(rev=rev), *_hardware_clause(ledger, composed)])
+    if milestone is not None:
+        return " ".join([_milestone_sentence(ledger, composed, milestone, rev, lambda t: t,
+                                             boundary=boundary, register="site"),
+                         *_hardware_clause(ledger, composed)])
+    found = readiness(ledger, composed)
+    status_of = {cid: c.status for cid, c in composed.items()}
+    n_checked = sum(1 for st in status_of.values()
+                    if st in (ClaimStatus.PASS, ClaimStatus.VERIFIED))
+    tally = said["tally"].format(k=n_checked, n=total, claims=_plural(total, "claim"),
+                                 is_=_plural(n_checked, "is", "are"), checked=checked)
+    parts: list[str] = []
+    if not [v for v in ledger.verdicts if not verdict_logic.never_run(v)]:
+        parts.append(said["never_ready" if found["ready"] else "never"].format(
+            rev=rev, n=total, claims=_plural(total, "claim")))
+    elif not found["required"]:
+        parts.append(said["none_required"].format(rev=rev, n=total,
+                                                  claims=_plural(total, "claim")))
+        parts.append(tally)
+    elif found["unresolved"]:
+        n, req = len(found["unresolved"]), len(found["required"])
+        parts.append(said["not_ready"].format(
+            rev=rev, k=n, req=req, claims=_plural(req, "claim"), is_=_plural(n, "is", "are"),
+            groups=_groups(ledger, composed, found["unresolved"])))
+        parts.append(tally)
+    else:
+        parts.append(said["ready_last"].format(rev=rev, checked=checked))
+    other = [c for c in ledger.claims if not c.critical
+             and status_of.get(c.id) not in (ClaimStatus.PASS, ClaimStatus.VERIFIED)]
+    if other:
+        parts.append(said["other"].format(n=len(other), claims=_plural(len(other), "claim"),
+                                          is_=_plural(len(other), "is", "are"),
+                                          groups=_groups(ledger, composed, other)))
+    unrun = _unrun_specs(ledger, registry)
+    if unrun and ledger.verdicts:
+        parts.append(said["unrun"].format(n=len(unrun),
+                                          evaluators=_plural(len(unrun), "evaluator")))
+    parts += _hardware_clause(ledger, composed)
+    return " ".join(parts)
+
+
 def _milestone_sentence(ledger: Ledger, composed: Mapping[str, Any], milestone: Any,
                         rev: str, bold: Callable[[str], str], *,
-                        boundary: bool = False) -> str:
+                        boundary: bool = False, register: str = "cli") -> str:
     """The milestone variant's head (P2.5b §2.4), from `claims.unresolved` —
-    the boundary's words plainly, a cache reader's as last evaluated."""
-    said = HUMAN["readiness"]
+    the boundary's words plainly, a cache reader's as last evaluated.
+    ``register="site"``: the site's words for the same branches."""
+    said = HUMAN["site"]["readiness"] if register == "site" else HUMAN["readiness"]
+
     name = str(getattr(milestone, "id", "") or "")
     if not list(getattr(milestone, "requires", None) or ()):
         return bold(said["requires_nothing"].format(rev=rev, m=name))
     found = claim_logic.unresolved(ledger, composed, milestone)
     tail = "" if boundary else "_last"
     if found.ready:
-        return bold(said["ready_for" + tail].format(rev=rev, m=name))
+        return bold(said["ready_for" + tail].format(rev=rev, m=name,
+                                                    checked=word(ClaimStatus.PASS)))
     n = len(found.required) + len(found.missing)
     k = len(found.unresolved) + len(found.missing)
     groups = "; ".join(part for part in (

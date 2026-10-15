@@ -729,7 +729,7 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         self.assertEqual(list(index), [
             "generated", "schema", "records_digest", "meta", "claims", "params", "decisions",
             "needs", "inputs", "results", "attributions", "views", "milestones", "exports",
-            "requirements", "preferences", "unregistered_inputs", "problems"])
+            "requirements", "preferences", "groups", "unregistered_inputs", "problems"])
         # P2.5b: a milestone's export entries are records as stored — their
         # `counted` is what the export saw, sealed, not a status now.
         self.assertEqual(index["generated"], store.INDEX_BANNER)
@@ -781,10 +781,18 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         and the dry runs repair nothing by design — a doctor that rebuilt the index
         would hide the disagreement it is there to name — so they run on an index
         that agrees, and must leave it agreeing and unwritten."""
-        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
-        index = os.path.join(project, ".nopekit", "ledger.json")
         commands = ([argv for argv, _output in _NON_SHIM] + [("check",), ("check", "--force")]
                     + [argv for argv, _named in _shims(self.tmp())])
+        self._leaves_the_index_agreeing(commands)
+
+    def test_the_site_text_commands_leave_the_index_agreeing(self):
+        """The same, over `site stamp --all` and `site badge` (architecture
+        phase 5's rows, `_NON_SHIM_SITE_TEXT`)."""
+        self._leaves_the_index_agreeing([argv for argv, _output in _NON_SHIM_SITE_TEXT])
+
+    def _leaves_the_index_agreeing(self, commands: list) -> None:
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        index = os.path.join(project, ".nopekit", "ledger.json")
         for n, argv in enumerate(commands):
             with self.subTest(argv=argv):
                 repairs = argv[0] not in ("doctor", "init") and "--no-record" not in argv
@@ -1467,6 +1475,11 @@ def _migrated_bracket(dest: str) -> str:
     # here, which is the point: nothing but `round` may bring it current).
     _write(os.path.join(project, *rounds.ROUND_REL.split("/")),
            _read_bytes(os.path.join(_projects.BRACKET, *rounds.ROUND_REL.split("/"))))
+    # Architecture phase 5 (SPEC 17): a board, written by hand with its keys in
+    # another order, so a command that rewrote a group is caught.
+    _write(os.path.join(project, "groups", "strength.json"),
+           json.dumps({"members": ["C1", "C2"], "title": "Holds the pump", "order": 1,
+                       "kind": "board"}, indent=3) + "\n")
     return project
 
 
@@ -1611,6 +1624,16 @@ _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("export",), False), (("export", "--json"), False),
     (("export", "print-v1", "--dry-run"), False),
     (("report", "--milestone", "print-v1"), False),
+)
+
+#: Architecture phase 5's rows of the same sweeps: `site stamp` writes only the
+#: `as_of` line of the prose it names (none here), `site badge` only the
+#: README's block. Swept by their own tests in each class
+#: (`test_the_site_text_commands_*`), which the fast tier leaves to the gate
+#: (the review of phase 5's pay-back, ~1.8 s): what each writes is held, one
+#: line and one block, by test_site_truth's and test_groups' rows of their own.
+_NON_SHIM_SITE_TEXT: tuple[tuple[tuple[str, ...], bool], ...] = (
+    (("site", "stamp", "--all"), True), (("site", "badge"), True),
 )
 
 #: The exit codes each command may end with while doing its work: 1 is a
@@ -1983,8 +2006,9 @@ class NoCommandWritesARecord(_env.EnvCase):
                       f"nothing about what it writes:\n{proc.stdout}\n{proc.stderr}")
         self.assertNotIn("Traceback", proc.stderr)
 
-    def _no_record_written(self, project: str, *, legacy: bool, watched: bool) -> None:
-        for argv, output in _NON_SHIM:
+    def _no_record_written(self, project: str, *, legacy: bool, watched: bool,
+                           rows: tuple = _NON_SHIM) -> None:
+        for argv, output in rows:
             with self.subTest(argv=argv):
                 before = _records(project)
                 round_before = _round_stamp(project)
@@ -2013,6 +2037,12 @@ class NoCommandWritesARecord(_env.EnvCase):
                         f"the fixture lacks a record kind, so a command that rewrites one "
                         f"could not be seen: {sorted(set(store.RECORD_DIRS) - kinds)}")
         self._no_record_written(project, legacy=False, watched=True)
+
+    def test_the_site_text_commands_write_no_record(self):
+        """`site stamp --all` and `site badge` on a migrated project, watched as
+        every other command is (architecture phase 5's rows)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self._no_record_written(project, legacy=False, watched=True, rows=_NON_SHIM_SITE_TEXT)
 
     def test_the_phase_2_writers_write_their_one_record(self):
         """(architecture phase 2) `prefer` from a pipe writes nothing; `decide`
@@ -2050,7 +2080,8 @@ class NoCommandWritesARecord(_env.EnvCase):
         shims reads it — migrated in memory — and leaves it, and everything around
         it, as it was."""
         project = _legacy_bracket(os.path.join(self.tmp(), "legacy"))
-        self._no_record_written(project, legacy=True, watched=False)
+        self._no_record_written(project, legacy=True, watched=False,
+                                rows=_NON_SHIM + _NON_SHIM_SITE_TEXT)
 
     # -- check -------------------------------------------------------------- #
     def test_check_writes_only_ignored_paths_and_new_entries(self):
@@ -3230,6 +3261,114 @@ class RequirementsAreRecords(_env.EnvCase):
                                    "requirements/R2.json")])
 
 
+class GroupsAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 5: SPEC 17) `groups/<id>.json` is a
+    record — a board, a zone or a station — read strictly; a member that names
+    no record is read and named by the index, never refused; `agree` sees a hand
+    edit; a legacy project keeps its groups through the migration; a gate never
+    reads them."""
+
+    def write(self, stem: str, record: Any) -> str:
+        root = self.tmp()
+        path = os.path.join(root, "groups", stem)
+        _write(path, json.dumps(record, indent=2) if not isinstance(record, str) else record)
+        return path
+
+    def test_its_place(self):
+        from nopekit import models
+        self.assertEqual(store.RECORD_DIRS[-1], "groups")
+        self.assertEqual(list(models.RECORD_KINDS)[-1], "groups")
+        self.assertIn("groups", store._BEYOND_LEGACY)
+        self.assertIn("groups/", store.INDEX_BANNER)
+
+    def test_the_strict_reader(self):
+        found = store.read_record(self.write("strength.json", {
+            "kind": "board", "title": "Holds the pump", "line": "It holds.",
+            "members": ["C1", "C2"], "order": 2}), "groups")
+        self.assertEqual((found.id, found.kind, found.title, found.members, found.order),
+                         ("strength", "board", "Holds the pump", ["C1", "C2"], 2))
+        board = {"kind": "board", "title": "t", "members": ["C1"]}
+        refused = {
+            "an upper-case stem": ("Strength.json", board, "lower-case letters"),
+            "a reserved stem": ("other.json", board, '"other" is reserved'),
+            "an intro stem": ("intro.json", board, "site/content/intro.md"),
+            "no kind": ("a.json", {"title": "t"}, '"kind" must be "board", "zone" or'),
+            "a wrong kind": ("a.json", {**board, "kind": "lane"}, '"kind" must be'),
+            "no title": ("a.json", {"kind": "board"}, '"title" must be text'),
+            "a line that is not text": ("a.json", {**board, "line": 3}, '"line" must be text'),
+            "members not a list": ("a.json", {**board, "members": "C1"}, '"members" must be'),
+            "a member with a space": ("a.json", {"kind": "zone", "title": "t",
+                                                 "members": ["arm length"]},
+                                      '"members" must be'),
+            "a board member that is no id": ("a.json", {**board, "members": ["C 1"]},
+                                             '"members" must be'),
+            "a repeated member": ("a.json", {**board, "members": ["C1", "C1"]},
+                                  "names 'C1' twice"),
+            "an order that is not whole": ("a.json", {**board, "order": 1.5},
+                                           '"order" must be a whole number'),
+            "a bool order": ("a.json", {**board, "order": True}, '"order" must be'),
+            "a stored status": ("a.json", {**board, "status": "pass"}, "derived on every build"),
+            "a position": ("a.json", {**board, "x": 10}, "never a position"),
+            "an unknown key, with its suggestion": ("a.json", {**board, "titel": "t"},
+                                                    'did you mean "title"'),
+        }
+        for name, (stem, record, needle) in refused.items():
+            with self.subTest(name):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write(stem, record), "groups")
+                self.assertIn(needle, str(caught.exception))
+                self.assertIn("groups/", str(caught.exception))
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        index = store.build_index(root)
+        self.assertEqual([row["id"] for row in index["groups"]],
+                         ["allowable", "arm", "bolts", "load", "outdoors", "printer", "prints",
+                          "pump", "strength"])
+        self.assertEqual(index["problems"], [])
+        _write(os.path.join(root, "groups", "second.json"),
+               json.dumps({"kind": "board", "title": "t", "members": ["C1", "C9"]}))
+        _write(os.path.join(root, "groups", "twice.json"),
+               json.dumps({"kind": "zone", "title": "t", "members": ["load_n"]}))
+        _write(os.path.join(root, "groups", "both.json"),
+               json.dumps({"kind": "station", "title": "t", "members": ["width"]}))
+        problems = store.build_index(root)["problems"]
+        self.assertIn("groups/second.json: members names 'C9', which has no claims/C9.json",
+                      problems)
+        self.assertIn("claims/C1.json: C1 sits on 2 boards (groups/second.json, "
+                      "groups/strength.json): a claim sits on at most one board; the map puts "
+                      "it on second", problems)
+        self.assertIn("groups/twice.json: 'load_n' is also in groups/load.json: a value sits in "
+                      "at most one zone", problems)
+        self.assertIn("groups/arm.json and groups/both.json: 'width' is in a zone and on a "
+                      "station: a zone holds choices, a station derived values", problems)
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        _write(os.path.join(root, "groups", "pump.json"),
+               json.dumps({"kind": "board", "title": "Quiet", "members": ["C7"], "order": 3}))
+        self.assertTrue(any(p.startswith("groups") for p in store.agree(root)),
+                        store.agree(root))
+
+    def test_a_legacy_project_keeps_its_groups(self):
+        project = _bracket(self)
+        path = _write(os.path.join(project, "groups", "strength.json"),
+                      '{"kind": "board", "title": "Holds", "members": ["C1"]}\n')
+        before = _read_bytes(path)
+        plan = store.migrate_legacy(project, apply=False, when="")
+        self.assertNotIn("groups/strength.json", plan.files)
+        store.migrate_legacy(project, apply=True, when="2026-09-28T00:00:00Z")
+        self.assertEqual(_read_bytes(path), before)
+        self.assertEqual([g.id for g in store.load(project).groups], ["strength"])
+
+    def test_a_gate_never_reads_them(self):
+        from nopekit import verdicts
+        ledger = store.load(_projects.bracket_copy(os.path.join(self.tmp(), "b"),
+                                                   migrated=True))
+        self.assertTrue(ledger.groups)
+        self.assertIn("groups", verdicts._LEDGER_HIDDEN)
+        self.assertEqual(verdicts.LedgerView(ledger).groups, [])
+
+
 class PreferencesAreRecords(_env.EnvCase):
     """(invariant 8, architecture phase 2: SPEC 14) `preferences/<decision>.json`
     is a record kind — last, beyond the legacy ledger — the index lists each
@@ -3238,9 +3377,10 @@ class PreferencesAreRecords(_env.EnvCase):
     sees a new entry; a whole-ledger `save` never writes the kind."""
 
     def test_its_place(self):
+        """Last when phase 2 added it; phase 5's `groups/` comes after it."""
         from nopekit import models
-        self.assertEqual(store.RECORD_DIRS[-1], "preferences")
-        self.assertEqual(list(models.RECORD_KINDS)[-1], "preferences")
+        self.assertEqual(store.RECORD_DIRS[-2:], ("preferences", "groups"))
+        self.assertEqual(list(models.RECORD_KINDS)[-2:], ["preferences", "groups"])
         self.assertIn("preferences", store._BEYOND_LEGACY)
         self.assertIn("preferences/", store.INDEX_BANNER)
 

@@ -102,21 +102,20 @@ let OUTCOME_WORDS = {};
 const CLAIM_KIND = {
   measurable: {
     title: "Automated",
-    blurb: "An automated evaluator settles these from the model — the only kind an " +
-           "automated evaluator settles.",
+    blurb: "An automated evaluator settles these claims from the model.",
   },
   physical: {
     title: "Physical",
-    blurb: "Only an article settles these. No evaluator here settles them; they are " +
-           "carried, visibly, until a physical result is recorded.",
+    blurb: "Only a test on a built article settles these claims. They stay on this " +
+           "list until a person records a result.",
   },
   // No status word in a blurb: each row's chip and reason say what it reads
   // (review of P2.1: "An assumption nobody owns is a gap." — a status word the
   // page owned, and a scan of `label:`/`text:` values could not see a blurb).
   assumption: {
     title: "Assumptions",
-    blurb: "Accepted provisionally, with a reason and an owner, and written down so they " +
-           "stay visible. Each row says whether its owner has recorded it.",
+    blurb: "A person accepts each of these for now, with a reason. " +
+           "Each row says whether its owner has recorded it.",
   },
 };
 
@@ -152,6 +151,14 @@ export function verdictStatus(key) {
            hint: String((PHRASES.outcome_hint || {})[key] || "") };
 }
 
+/** A baked outcome's look (`pass`, `fail`, `errored`, `skipped`,
+ *  `unqualified`, `outside-context`, and `unrun` for an evaluator with no
+ *  result): the verdict table's glyph and tone. The word is always the baked
+ *  `outcome_word`. */
+export function outcomeLook(key) {
+  return VERDICT_STATUS[key] || { glyph: "◌", tone: "dim" };
+}
+
 export function claimKind(key) {
   return CLAIM_KIND[key] || { title: String(key || "other"), blurb: "" };
 }
@@ -161,6 +168,76 @@ export function chip(status, { small = false, title = "" } = {}) {
   return el("span", { class: `chip tone-${status.tone}${small ? " chip-sm" : ""}`, title: title || status.hint },
     el("span", { class: "chip-glyph", "aria-hidden": "true", text: status.glyph }),
     el("span", { class: "chip-label", text: status.label }));
+}
+
+// --------------------------------------------------------------------------- //
+// the front page's tokens (architecture phase 5)
+// --------------------------------------------------------------------------- //
+
+/** How each claim status TOKEN looks on the front page and the map: its glyph,
+ *  its tone and the stroke of its line. One table for the chip, the legend, the
+ *  board header and the line, so a token cannot read one way on the map and
+ *  another in its section. The tokens are `claims.STATUS_KEY`'s (and `errored`),
+ *  exactly as `map.json` and `page.json` bake them; the WORD beside each glyph is
+ *  always the baked `word`, never a string from this file (D-16).
+ *
+ *  Strokes, after the author's map (SPEC 29): a pass is a solid line, a fail a
+ *  heavier solid red one, a crash a heavy dashed red one (louder than a missing
+ *  tool, invariant 2), a result older than the design a dashed one, and every
+ *  status that nothing has settled yet a dotted one. Amber is a MARK beside the
+ *  token (`marks`), drawn as a casing under the line; it is never a token here.
+ *
+ *  An unknown token, from a newer spine, gets a neutral dot and prints the raw
+ *  token as its word. It never borrows a pass's look. What slipped through in
+ *  the reference map: its own vocabulary (GO, NO-GO, WAITING) beside the
+ *  paper's, and no look at all for a crash or a skipped evaluator. */
+export const TOKEN_LOOK = {
+  checked:       { glyph: "✓", tone: "ok",    stroke: "solid" },
+  failing:       { glyph: "✕", tone: "bad",   stroke: "heavy" },
+  errored:       { glyph: "!", tone: "bad",   stroke: "crash" },
+  stale:         { glyph: "≈", tone: "dim",   stroke: "dashed" },
+  skipped:       { glyph: "⊘", tone: "warn",  stroke: "dotted" },
+  gap:           { glyph: "?", tone: "warn",  stroke: "dotted" },
+  open:          { glyph: "◌", tone: "warn",  stroke: "dotted" },
+  pending_build: { glyph: "◻", tone: "phys",  stroke: "dotted" },
+  assumed:       { glyph: "≡", tone: "assum", stroke: "dotted" },
+};
+
+/** The readiness tokens (`verdict.token`, a step group's `token`): ready reads
+ *  as a pass, every other value as not ready. */
+const READY_LOOK = {
+  "ready":     { glyph: "✓", tone: "ok" },
+  "not-ready": { glyph: "✕", tone: "bad" },
+};
+
+const UNKNOWN_LOOK = { glyph: "·", tone: "muted", stroke: "dotted", unknown: true };
+
+/** The look of a baked token. `errored` wins: a crash takes its own look
+ *  whatever word the status carries. */
+export function lookOf(token, { errored = false } = {}) {
+  if (errored) return TOKEN_LOOK.errored;
+  return TOKEN_LOOK[token] || READY_LOOK[token] || UNKNOWN_LOOK;
+}
+
+/** A baked token's chip: glyph, then the baked word, then the colour. The word
+ *  is the raw token when the bake gave none, so a newer token never blanks.
+ *  ``marks`` are the bake's marks beside the token (`disagree`): each shows as
+ *  a "!" in the chip, with ``notices.disagree`` as its label, so a claim whose
+ *  status and evidence disagree never reads as a plain chip. Every caller that
+ *  draws a token passes its marks (`test_site_truth` reads the calls). What
+ *  slipped through (review of phase 5): the phone list and a board's heading
+ *  drew a disagreeing claim as a plain green chip. */
+export function tokenChip(token, word, { errored = false, small = false, title = "", marks = [], notices = {} } = {}) {
+  const look = lookOf(token, { errored });
+  const disagree = (marks || []).includes("disagree");
+  const label = (notices && notices.disagree) || "";
+  return el("span", {
+    class: `nk-chip tone-${look.tone}${small ? " nk-chip-sm" : ""}${disagree ? " has-mark" : ""}`,
+    title: title || (disagree ? label : "") || null,
+  },
+    el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }),
+    el("span", { class: "nk-word", text: String(word || token || "") }),
+    disagree ? el("span", { class: "nk-mark", role: "img", "aria-label": label || null, text: "!" }) : null);
 }
 
 /** A plain labelled tag with no status semantics (tier, pack, kind, count). */
@@ -209,18 +286,6 @@ export function age(seconds) {
   const w = d / 7;
   if (w < 9) return `${Math.round(w)}w ago`;
   return `${Math.round(d / 30)} months ago`;
-}
-
-/** Anything older than this reads as aged on the page. It is a DISPLAY
- *  threshold: it marks a row so a reader looks, and it never changes a status.
- *  Whether a result is actually invalidated is the resolver's judgement, per
- *  gate (each row's stale_reason, and meta.stale), not a clock's: an old result
- *  whose inputs have not moved is current, and a fresh one whose inputs moved
- *  a second later is not. */
-export const AGED_SECONDS = 24 * 3600;
-
-export function isAged(seconds) {
-  return seconds !== null && seconds !== undefined && Number(seconds) >= AGED_SECONDS;
 }
 
 /** ISO timestamp -> a local, readable stamp with the raw value on hover.

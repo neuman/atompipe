@@ -449,6 +449,63 @@ def site_problems(state_keys, data_files, site_contract: str) -> list[str]:
     return problems
 
 
+#: Objects whose keys are names (ids, gate ids, word tables), not schema keys:
+#: their keys are never looked up in SITE_CONTRACT; what lies under them is.
+_BAKED_ID_MAPS = frozenset({"values", "evaluators", "edges", "via", "claims", "tokens",
+                            "lanes", "kinds", "by", "basis", "outcome", "headings", "notices",
+                            "ready", "columns", "ground", "verdicts"})
+
+#: Each baked file and the SITE_CONTRACT sections that document its keys (a
+#: prose piece's blocks and runs are in "Prose and the stamp").
+BAKED_SECTIONS = {
+    "map.json": (r"^##\s+`map\.json`",),
+    "page.json": (r"^##\s+`page\.json`", r"^##\s+Prose and the stamp"),
+    "build.json": (r"^##\s+`build\.json`",),
+}
+
+
+def baked_keys(doc) -> set[str]:
+    """Every schema key of a baked document, the keys of `_BAKED_ID_MAPS`
+    objects left out (an `edges` object is two levels of ids)."""
+    found: set[str] = set()
+
+    def walk(node, ids: int) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if not ids:
+                    found.add(key)
+                if ids:
+                    walk(value, ids - 1)
+                elif key in _BAKED_ID_MAPS and isinstance(value, dict):
+                    walk(value, 2 if key == "edges" else 1)
+                else:
+                    walk(value, 0)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, 0)
+
+    walk(doc, 0)
+    return found
+
+
+def baked_key_problems(docs: dict, site_contract: str) -> list[str]:
+    """Each key of `map.json`, `page.json` and `build.json` that the code of
+    its SITE_CONTRACT sections never names. What slipped through (review of
+    phase 5): only `state.json`'s top-level keys were held, so a key added to
+    `page.bake_page` reached the template undocumented."""
+    problems: list[str] = []
+    for name, doc in sorted(docs.items()):
+        sections = [md_section(site_contract, h) for h in BAKED_SECTIONS[name]]
+        if any(s is None for s in sections):
+            problems.append(f"SITE_CONTRACT has no section for {name}")
+            continue
+        code = "\n".join(code_text(s) for s in sections)
+        for key in sorted(baked_keys(doc)):
+            if not mentions(code, key):
+                problems.append(f"{name} key `{key}` is not in SITE_CONTRACT's {name} section")
+    return problems
+
+
 # -- the reverse direction: what the contracts name exists (Phase 1 commit) -- #
 #: A call form inside an inline code span — `name(`, `store.load(`,
 #: `ctx.param(`. A word followed by `(s)` is English ("control(s)"), not a call.
@@ -1112,7 +1169,13 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
         # build.lock rode a copytree, P2.3's gate) — and without a `site/` an
         # earlier `site init` left untracked there, which `site init` here would meet.
         self.root = _projects.bracket_copy(os.path.join(tmp, "bracket"), migrated=True)
-        shutil.rmtree(os.path.join(self.root, "site"), ignore_errors=True)
+        # The bracket tracks its page's text (architecture phase 5): everything
+        # under site/ goes but site/content/, which the build reads.
+        site_dir = os.path.join(self.root, "site")
+        for name in os.listdir(site_dir) if os.path.isdir(site_dir) else ():
+            if name != "content":
+                path = os.path.join(site_dir, name)
+                (shutil.rmtree if os.path.isdir(path) else os.remove)(path)
         saved = gates_mod.REGISTRY
         gates_mod.REGISTRY = gates_mod.Registry()
         self.addCleanup(setattr, gates_mod, "REGISTRY", saved)
@@ -1150,6 +1213,29 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
                                  _read(SITE_CONTRACT))
         self.assertEqual(problems, ["site/data/planted_u01.json is written by "
                                     "`site build` and not named in SITE_CONTRACT"])
+
+    def test_every_baked_key_is_documented(self):
+        """Every key of `map.json`, `page.json` and `build.json` is in its own
+        SITE_CONTRACT section, and a planted key in each is named."""
+        docs = {}
+        for name in BAKED_SECTIONS:
+            with open(os.path.join(self.root, "site", "data", name), encoding="utf-8") as fh:
+                docs[name] = json.load(fh)
+        self.assertIn("nodes", baked_keys(docs["map.json"]))
+        self.assertIn("value_text", baked_keys(docs["page.json"]))
+        self.assertNotIn("C1", baked_keys(docs["page.json"]))
+        problems = baked_key_problems(docs, _read(SITE_CONTRACT))
+        self.assertEqual(problems, [], "\n".join(problems))
+        for name in BAKED_SECTIONS:
+            with self.subTest(name):
+                planted = json.loads(json.dumps(docs))
+                target = planted[name]
+                if name == "page.json":
+                    target = target["claims"]["C1"]["values"][0]
+                target["planted_key_u01"] = 1
+                self.assertEqual(baked_key_problems(planted, _read(SITE_CONTRACT)),
+                                 [f"{name} key `planted_key_u01` is not in SITE_CONTRACT's "
+                                  f"{name} section"])
 
     def test_a_split_view_payload_is_covered_by_the_template(self):
         self.assertEqual(site_problems([], ["views/assembly.json"],

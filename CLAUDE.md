@@ -131,7 +131,7 @@ below names:
 8. **The index never disagrees with the records, and no command writes a record
    it was not asked to write.** The records are files — `claims/`, `params/`,
    `decisions/`, `needs/`, `inputs/`, `results/`, `views/`, `milestones/`,
-   `exports/`, `requirements/`, `preferences/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
+   `exports/`, `requirements/`, `preferences/`, `groups/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
    from them, rebuilt after every command (`doctor`, `init` and `--no-record` runs
    write none of it), so a hand edit made since the last command reaches it;
    nothing reads it for truth. `check` writes no record: every path it writes is
@@ -146,9 +146,11 @@ below names:
    (`exports/<milestone>.json`), the new verdict and control entries its re-run
    files, as `check --force` files them, and the marked ignore blocks — every other
    path it writes (`out/<milestone>/`, its package) is ignored when written;
-   `report --write` writes `REPORT.md`, an output git ignores; and `round` writes
-   what `check` writes, what `site build` writes when `site/` exists, and the round
-   record. `.nopekit/round.json`, the round record, is a tracked output and not a
+   `report --write` writes `REPORT.md`, an output git ignores; `round` writes
+   what `check` writes, what `site build` writes when `site/index.html` exists, and
+   the round record; `site stamp` writes only the `as_of` line of the `site/content/`
+   files it names, which are not records; and `site badge` and `init` write only the
+   README block. `.nopekit/round.json`, the round record, is a tracked output and not a
    record: only `round` writes it (and, from phase 4, `merge`), at most once a run,
    only when what it holds moved, and as the round record of the state after the
    run; `check` and every other command never write it, and nothing reads it for
@@ -326,9 +328,39 @@ person's. Enforced in `tests/test_preferences.py`:
     file. What the seal does not stop is `results/`'s limit, in
     `docs/SPINE_CONTRACT.md`.)
 
-One more came with checkpoint P2.3, numbered 15 (14 is reserved for the site, which
-lands in architecture phase 5: `docs/SPEC.md` §8, "Invariant numbers"). Enforced in
-`tests/test_mutation.py`, over every mutation entry point in `src/`:
+One more came with architecture phase 5, when the site gained a map and the agent's
+prose: the one place the site persuades. Enforced in `tests/test_site_truth.py`:
+
+14. **The site never says more than the resolution, and stamped prose is flagged when
+    behind.** Every status, word, count, order, margin and *ready* that `site build` bakes
+    into `site/data/` comes from `claims.compose` through `graph.tokens`,
+    `claims.unresolved` and `claims.margin`, on the resolution every reader uses: a
+    claim's token on the map, on its board and in next steps is its composition's, a
+    board's is the worst of its claims', a milestone's steps are `claims.unresolved`'s.
+    The build refuses to write a page whose token, word or mark for a claim, a
+    requirement, a board, a milestone or the project differs, or whose words put a value
+    inside a limit its claim's condition rejects (`page.status_problems`), and the browser
+    computes no status, margin, readiness, reading order, age or sensitivity: no page
+    script reads a verdict's flags, does arithmetic on a limit, takes a worst-of or sorts
+    by a status. A baked file edited by hand reads *edited by hand* in `site status`,
+    `status` and `doctor`, a resealed page that shows behind text as current included. The
+    agent's text in `site/content/` reads current only while its `as_of` stamp equals the
+    digest of the tokens of its board's claims and of every claim it names now; otherwise
+    the page says it was written before the latest results, unstamped text included; and
+    every number in it that no number the page keeps matches at its precision, in its
+    unit, is marked. (What slipped through: the reference page decided its go/no-go in the
+    browser from a hand-kept claim list, so a claim added to a board never reached it; the
+    template ranked anchored verdicts by their `passed` flag beside the resolver's word,
+    sorted verdict rows by a status table of its own and subtracted a chart's limit from
+    its value; and nothing kept prose from saying a claim passes after it failed; and, in
+    review of phase 5, a Failing claim read "99% inside the limit" (the evaluator's margin
+    beside the claim's limit), a stamp missed a claim its text named from another board,
+    "3 mm" matched a count of claims, and an evidence copy the same build deleted vouched
+    for a number.)
+
+One more came with checkpoint P2.3, numbered 15 before 14 landed (14 was reserved for
+the site, which landed in architecture phase 5). Enforced in `tests/test_mutation.py`,
+over every mutation entry point in `src/`:
 
 15. **A mutation pass writes nothing, changes nothing it was handed, and never says more
     than it ran.** It runs in process on a copy of the known-good control: nothing is
@@ -359,12 +391,13 @@ named.)
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
 | 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords` |
 | 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate` |
 | 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
+| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth` |
 | 15 | `test_mutation.MutationIsSealed` |
 
 ## House rules
@@ -378,9 +411,10 @@ named.)
   fresh context window re-litigates every settled number.
 - **The site renders the records and the verdict cache; it never computes truth.**
   Nothing under `site/` re-derives a measurement or decides whether a claim passes —
-  if a number on the page is wrong, a record or the cache is wrong. And no build
-  step: plain HTML, CSS and ES modules, for the same reason the spine has no
-  dependencies.
+  if a number on the page is wrong, a record or the cache is wrong. The browser
+  computes no status, margin, readiness or sensitivity: every number, status, word
+  and order is in a baked file. And no build step: plain HTML, CSS and ES modules,
+  for the same reason the spine has no dependencies.
 - **Comments say what slipped through.** Where a rule exists because something got
   past a check, name it. The modules are dense with this on purpose.
 - **No reference to the parent project.** nopekit carries its method and none of its
@@ -398,11 +432,16 @@ Each fact has one home; everything else that shows it is an output of that home.
   `views/*.json`, `milestones/<name>.json` (a spend and the claims it requires),
   `exports/<name>.json` (that spend's exports, sealed and chained, appended only by
   `export`), `preferences/<decision-id>.json` (a decision's recorded preferences,
-  sealed and chained, appended only by `prefer`: never edit one by hand), and
+  sealed and chained, appended only by `prefer`: never edit one by hand),
+  `groups/<id>.json` (a board of claims, a zone of choices or a station of shared
+  values: how the page groups the map, with no status and no position), and
   `.nopekit/project.json` (meta, `model_entry`, the live `packs`).
   `results/<claim-id>.json` holds a claim's physical results and its owner's or
   authority's attributions, sealed and chained, appended only by `claim physical`
   (P2.5a): never edit one by hand — a broken seal refuses the file.
+- **The site's text** — `site/content/` is the agent's prose and figures: tracked,
+  stamped by `site stamp`, and not a record. The page flags a piece whose stamp its
+  claims' statuses have moved past.
 - **The model** — `model/*.py` owns every parameter's value, units and rationale, and
   in `PARAMS` what lost to it; a param record holds only the provenance the model
   cannot (`source`, `grounded_by`, `tags`). An assumption claim's id in
@@ -414,7 +453,8 @@ Each fact has one home; everything else that shows it is an output of that home.
   after each command), `.nopekit/cache/last_check.json` (statuses, counts and the
   parameter view as the last full `check` saw them), `.nopekit/obs/` (what each run
   cost), `.nopekit/out/` (scratch and evidence), `REPORT.md` (the readiness report,
-  `report --write`) and `out/<milestone>/` (the package `export` wrote). The index
+  `report --write`), `out/<milestone>/` (the package `export` wrote) and
+  `site/data/build.json` (the page's build time and each result's age). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
 - **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at
@@ -423,7 +463,9 @@ Each fact has one home; everything else that shows it is an output of that home.
   of the records, the verdict cache and the design it was computed from, a round
   number and its own digest. Written only by `nopekit round` (and, from phase 4,
   `merge`), never by `check`; nothing reads it for truth — `status` and `doctor`
-  say only whether it is current, behind or edited by hand.
+  say only whether it is current, behind or edited by hand. And `site/data/` and
+  `site/assets/`, baked by `site build` (clock-free, written only when their bytes
+  differ), where a project publishes its page.
 
 `docs/SPINE_CONTRACT.md` ("Where facts live", then `store.py`'s section) has the
 layout in full, with each writer.
@@ -437,9 +479,11 @@ layout in full, with each writer.
 | `src/nopekit/milestones.py` | the boundary that spends: a milestone's closure, the export's refusals and judgment, disagreements, the test card, the package |
 | `src/nopekit/verdicts.py` | the per-gate verdict cache: what a gate read (`ParamTrace`, `LedgerView`, the audit hook), portable digests and the spine digest, rho, cache and control entries, freshness, admission at the gate's current version, the one resolver every reader uses, the sweep `check` runs, and `last_check.json` |
 | `src/nopekit/vcs.py` | the only git edge: argv form, a clean environment, a timeout, never raises |
-| `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map will draw |
+| `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map draws |
+| `src/nopekit/page.py` | the front page's baked data (SPEC 28-33): the map's layout from the graph and the groups, `map.json` and `page.json`, the floor, next steps, the evidence plan, the stamps, and invariant 14's checker |
+| `src/nopekit/prose.py` | the agent's text on the site: front matter and the stamp, the markdown subset, the number scan, and the style scans (SPEC 30, 34, 35) |
 | `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
-| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`. Plain HTML/CSS/ES modules, no build step |
+| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (the outline: the representation, the verdict, the map, a section per board, next steps) and `technical.html` (today's panels), both the project's own; `content/` the agent's prose, stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |

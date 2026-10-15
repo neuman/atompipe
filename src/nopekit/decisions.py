@@ -576,6 +576,9 @@ class _Evidence:
     """The caller's compositions, for the status word beside an assumption."""
     entry: str = ""
     """The model's entry file, named where a derived value comes from."""
+    prose: Mapping[str, str] | None = None
+    """``{subject: stamp state}`` of ``site/content/`` (architecture phase 5),
+    for a board's ``text:`` line."""
 
     def word(self, ledger: Ledger, cid: str) -> str:
         """`cid`'s status word, from the caller's compositions."""
@@ -1067,6 +1070,66 @@ def _why_value_node(ledger: Ledger, node: Any, evidence: _Evidence) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def _board_line(ledger: Ledger, claim: Claim) -> list[str]:
+    """`board: strength (Holds the pump)` — the board a claim sits on, from the
+    records (architecture phase 5, SPEC 17), or the page's own board when no
+    record holds it; said only where the project has board records."""
+    boards = [g for g in getattr(ledger, "groups", None) or () if g.kind == "board"]
+    if not boards:
+        return []
+    from . import store                              # the one order of the groups
+    for board in store.groups_in_order(boards, "board"):
+        if claim.id in board.members:
+            return _wrap(f"board: {board.id} ({board.title})", indent="  ")
+    from . import report                             # a reader's module: not at import
+    return _wrap(f"board: other ({report.HUMAN['site']['other_board']})", indent="  ")
+
+
+_PROSE_WORDS = {"current": "current", "stale": "written before the latest results",
+                "unstamped": "not stamped"}
+
+
+def _why_group(ledger: Ledger, group: Any, views: list[Any] | None,
+               evidence: _Evidence) -> str:
+    """A board, a zone or a station (architecture phase 5, SPEC 17): its title
+    and line, then a board's claims with their status words, a zone's choices
+    with their values and what sources each, a station's values with what reads
+    each — and, for a board, the stamp state of its text."""
+    out = [f"{group.kind} {group.id}: {group.title}   (groups/{group.id}.json)"]
+    if group.line:
+        out += _wrap(group.line, indent="  ")
+    by_view = {v.name: v for v in views or ()}
+    built = evidence.graph
+    if group.kind == "board":
+        out += _wrap("claims: " + (" · ".join(
+            f"{cid} {evidence.word(ledger, cid)}" for cid in group.members) or "(none)"),
+            indent="")
+        state = (evidence.prose or {}).get(group.id)
+        shown = _PROSE_WORDS.get(state, "") if state else ""
+        out += _wrap(f"text: site/content/{group.id}.md ({shown})" if shown else
+                     "text: (none)", indent="")
+        return "\n".join(out).rstrip() + "\n"
+    head = "choices:" if group.kind == "zone" else "values:"
+    out.append(head)
+    for name in group.members:
+        found = by_view.get(name)
+        node = built.node(f"value:{name}") if built is not None else None
+        value = (f" = {_view_value(found.value, getattr(found, 'units', '') or '')}"
+                 if found is not None and found.value is not None else
+                 f" = {_view_value(node.attrs['value'], '')}"
+                 if node is not None and "value" in node.attrs else "")
+        line = f"{name}{value}"
+        if built is not None:
+            if group.kind == "zone":
+                sources = [s.partition(":")[2] for s in built.sourced_from(name)]
+                line += f"   sourced by: {', '.join(sources) if sources else 'none'}"
+            else:
+                readers = list(built.read_by(name))
+                line += f"   read by: {', '.join(readers) if readers else 'none'}"
+        out += _wrap(line, indent="  ")
+    return "\n".join(out).rstrip() + "\n"
+
+
 def _why_claim(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
     from . import report                             # a reader's module: not at import
     names = {claim.id}
@@ -1106,6 +1169,7 @@ def _why_claim(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
         out += _wrap(said_req["serves"].format(ids=", ".join(
             rid if rid in held else said_req["serves_missing"].format(id=rid)
             for rid in serves)), indent="  ")
+    out += _board_line(ledger, claim)
     out += _claim_graph_lines(ledger, claim, evidence)
     if str(getattr(claim, "authority", "") or "").strip():
         out += _wrap(f"authority: {claim.authority}", indent="  ")
@@ -1365,7 +1429,8 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
         composed: Mapping[str, Any] | None = None,
         rows: Iterable[Any] | None = None,
         bases: Mapping[str, str] | None = None,
-        graph: Any = None, entry: str = "") -> str:
+        graph: Any = None, entry: str = "",
+        prose: Mapping[str, str] | None = None) -> str:
     """Everything known about one parameter, claim, requirement or decision, as
     one dense plain-text block.
 
@@ -1434,7 +1499,8 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
                          verdicts=_first_by_gate(verdicts),
                          rows=None if rows is None else {(r.decision, r.index): r
                                                          for r in rows},
-                         bases=bases, graph=graph, composed=composed, entry=entry)
+                         bases=bases, graph=graph, composed=composed, entry=entry,
+                         prose=prose)
     views = _as_views(view)
 
     def param_named(match) -> str | None:
@@ -1457,6 +1523,12 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     decision = next((d for d in ledger.decisions if d.id == wanted), None)
     if decision is not None:
         return _why_decision(ledger, decision, evidence)
+    # Architecture phase 5 (SPEC 17): a board, a zone or a station, after the
+    # decisions — a group id is lower case, so it never equals a claim's.
+    groups = list(getattr(ledger, "groups", None) or ())
+    group = next((g for g in groups if g.id == wanted), None)
+    if group is not None:
+        return _why_group(ledger, group, views, evidence)
     # Architecture phase 3a: a value the graph holds that no parameter view does
     # — a derived value an evaluator read — by its exact name only.
     node = graph.node(f"value:{wanted}") if graph is not None else None
@@ -1476,11 +1548,14 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     for decision in ledger.decisions:
         if decision.id.casefold() == folded:
             return _why_decision(ledger, decision, evidence)
+    for group in groups:
+        if group.id.casefold() == folded:
+            return _why_group(ledger, group, views, evidence)
 
     param_names = ([v.name for v in views] if views is not None
                    else [p.name for p in ledger.params])
     known = (param_names + [c.id for c in ledger.claims] + [r.id for r in requirements]
-             + [d.id for d in ledger.decisions])
+             + [d.id for d in ledger.decisions] + [g.id for g in groups])
     close = difflib.get_close_matches(wanted, known, n=_SUGGESTIONS, cutoff=0.6)
 
     in_decisions = any(

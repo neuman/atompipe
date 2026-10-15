@@ -70,8 +70,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 from . import __version__
-from . import (artifacts, claims, decisions, gates, graph, milestones, modelio, packs, report,
-               rounds, site, store, vcs, verdicts)
+from . import (artifacts, claims, decisions, gates, graph, milestones, modelio, packs, page,
+               prose, report, rounds, site, store, vcs, verdicts)
 from .models import (
     ArtifactKind,
     Claim,
@@ -942,12 +942,18 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
                                    stale_gates=resolution.stale_gates)
     # SPEC 14, 38: each rejection's condition and preference from the same
     # view and compositions, and each input's basis from its proposer.
+    # Architecture phase 5: each prose file's stamp state, for a board's line.
+    prose_states: dict[str, str] = {}
+    if os.path.isdir(page.content_dir(root)):
+        found = graph.tokens(view, resolution, registry, composed=composed)
+        prose_states = {row["subject"]: row["stamp"]
+                        for row in page.stamp_states(root, view, found) if row["subject"]}
     return decisions.why(shown, name, view=views,
                          coverage=claims.effective_gates(ledger, registry),
                          read_sets=read_sets, verdicts=resolution.verdicts,
                          composed=composed, rows=claims.rejection_rows(view, composed),
                          bases=bases, graph=built,
-                         entry=ledger.meta.model_entry or "")
+                         entry=ledger.meta.model_entry or "", prose=prose_states)
 
 
 def _input_bases(root: str, ledger: Ledger) -> dict[str, str]:
@@ -969,6 +975,14 @@ def _input_bases(root: str, ledger: Ledger) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 # init
 # --------------------------------------------------------------------------- #
+def _readme_bytes(root: str) -> bytes | None:
+    try:
+        with open(os.path.join(root, "README.md"), "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Create the records layout, and print the next three steps.
 
@@ -1002,7 +1016,11 @@ def cmd_init(args: argparse.Namespace) -> int:
         packs=_collect(args.pack),
         spine_version=__version__,
     )
+    readme_before = _readme_bytes(root)
     ledger = store.init(root, meta)
+    # SPEC 36: `store.init` writes the Made-with-nopekit block at the bottom of
+    # README.md; said here only when it wrote.
+    readme = "README.md" if _readme_bytes(root) != readme_before else None
     project = rel(store.project_paths(root)["project"], root)
     # Every groundspace opens its own site from the editor (site.ensure_launch). Written
     # only when absent, so `init` in an existing repo leaves the person's own untouched.
@@ -1020,6 +1038,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             "project": project,
             "meta": ledger.meta.to_dict(),
             "launch": launch,
+            "readme": readme,
             "next": [
                 "nopekit ask",
                 "write claims/C1.json: {\"statement\": ..., \"acceptance\": "
@@ -1038,6 +1057,8 @@ def cmd_init(args: argparse.Namespace) -> int:
     _say(f"  {'docs/':<24} generated readiness report and decision log")
     if launch:
         _say(f"  {launch:<24} Run and Debug: builds and opens this project's site")
+    if readme:
+        _say(f"  {readme:<24} Made-with-nopekit badge, at the bottom")
     _say("")
     _say("next, in this order:")
     _say("  1. nopekit ask                 — what evidence to ask for, then")
@@ -1960,7 +1981,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 def _round_inputs(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
                   projection: Any, view: Ledger, resolution: verdicts.Resolution, *,
                   model_error: str = "",
-                  shown: list | None = None) -> tuple[dict, dict]:
+                  shown: list | None = None, built: Any = None) -> tuple[dict, dict]:
     """``(body, computed_now)``: the round record's content for ``view`` under
     ``resolution`` — `graph.build` over the design an article reads
     (`verdicts.design_of`) and `graph.tokens` from the compositions `status`
@@ -1973,8 +1994,9 @@ def _round_inputs(root: str, ledger: Ledger, registry: gates.Registry, model: An
     if shown is None:
         shown = _shown_params(root, ledger, model, model_error, resolution, registry,
                               projection=projection)
-    built = graph.build(view, resolution, registry, projection=projection, design=design,
-                        views=shown, bases=_input_bases(root, ledger))
+    if built is None:
+        built = graph.build(view, resolution, registry, projection=projection, design=design,
+                            views=shown, bases=_input_bases(root, ledger))
     found = graph.tokens(view, resolution, registry)
     computed_now = rounds.computed_from(root, design)
     return rounds.body(computed_now, found, built), computed_now
@@ -2052,7 +2074,7 @@ def cmd_round(args: argparse.Namespace) -> int:
         return 0
     now = utcnow_iso()
     check = {"ran": False, "why": "", "executed": 0, "cached": 0}
-    site_info = {"present": os.path.isdir(os.path.join(root, site.SITE_DIR)),
+    site_info = {"present": site.scaffolded(root),
                  "built": False, "warnings": 0, "why": ""}
     try:
         with _lock(root):
@@ -2081,16 +2103,28 @@ def cmd_round(args: argparse.Namespace) -> int:
             # model's resolution, its parameter views silent on the failure.
             if site_info["present"] and model_error:
                 site_info["why"] = (model_error.strip().splitlines() or [""])[0]
-            elif site_info["present"]:
+            # One graph for the map and the round record (architecture phase 5),
+            # over the one resolution they share.
+            shown = _shown_params(root, ledger, model, model_error, resolution, registry,
+                                  projection=projection)
+            built = graph.build(view, resolution, registry, projection=projection,
+                                design=verdicts.design_of(
+                                    root, projection, model,
+                                    anchors=resolution.anchors or verdicts.Anchors(
+                                        root=os.path.abspath(root)),
+                                    resolution=resolution),
+                                views=shown, bases=_input_bases(root, ledger))
+            if site_info["present"] and not model_error:
                 try:
                     summary = _site_build(root, ledger, registry, model, projection, view,
-                                          resolution, now=now)
+                                          resolution, now=now, built=built)
                 except NopekitError as exc:
                     site_info["why"] = _first_line(exc)
                 else:
                     site_info.update(built=True, warnings=len(summary.get("warnings") or ()))
             content, _computed = _round_inputs(root, ledger, registry, model, projection,
-                                               view, resolution, model_error=model_error)
+                                               view, resolution, model_error=model_error,
+                                               shown=shown, built=built)
             done = rounds.write(root, content)
     except NopekitError as exc:
         return _round_not_run(args, _first_line(exc))
@@ -5972,37 +6006,36 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
     else?), which is a different question from the verdicts' staleness (did a
     gate's inputs move since its verdict?). Both are reported, separately,
     because the fixes are different commands: `nopekit site build` for the
-    first and `nopekit check` for the second. Collapsing them into one "stale"
-    flag sends half the readers to the wrong one.
+    first and `nopekit check` for the second.
 
-    The page records what it was built from in two digests, and this compares
-    each with the same computation now. `meta.records_digest` against
-    `store.records_digest` (cli:H16): what it replaced compared the mtimes of
-    `ledger.json` and `state.json`, and from checkpoint 1.3 `ledger.json` is a
-    generated index every command rewrites, so a page built from unchanged
-    records read stale after any `status`, and a record edited by hand — before
-    a command had rebuilt the index — read current. Then `meta.judgement_digest`
-    against `site.state` over `_resolved`'s view now (`_site_judgement`): what
-    slipped through with the records alone (review, `repro_site`) — a check
-    that FAILed C1 moved no record, so all three readers called a page showing
-    C1 PASS and ready "current with the records". A page with either digest
-    missing was built by an older spine and cannot say what it was built from:
-    stale.
+    A site is present only when `site/index.html` exists (`site.scaffolded`,
+    architecture phase 5): a project that tracks only `site/content/` has text
+    for a page and no page. The checks, in order, the first that fires deciding
+    the stale reason: the records (`meta.records_digest`, cli:H16) and what the
+    page judged (`meta.resolution_digest`, against `site.state` over
+    `_resolved`'s view now — review, `repro_site`: a check that FAILed C1 moved
+    no record, so all three readers called a page showing C1 PASS current); the
+    front page's two files missing (an older build); a seal that fails on either
+    (*edited by hand*); a token the resolution does not say while both digests
+    hold (*edited by hand*: a resealed forgery, `page.status_problems`); the
+    text in `site/content/` against what the page was built from. A page with a
+    digest missing was built by an older spine and cannot say what it was built
+    from: stale.
 
     `resolved` — the caller's `(view, registry, resolution, params)`, from
     `_resolved` with the registry it loaded and `_shown_params` over the model
     it loaded, so `status` and `doctor` judge the page by the resolution and the
     parameters they print. Without it this resolves for itself exactly as they
-    do (strict=False, `_projection_safe`): it loads the model and the gates, as
-    `status` does, because only the resolver can say what a rebuild would show.
+    do (strict=False, `_projection_safe`).
     """
     site_dir = os.path.join(root, site.SITE_DIR)
-    state_path = os.path.join(site_dir, site.DATA_DIR, site.STATE_NAME)
+    data_dir = os.path.join(site_dir, site.DATA_DIR)
+    state_path = os.path.join(data_dir, site.STATE_NAME)
     vendor_dir = os.path.join(site_dir, site.VENDOR_DIR)
     assets_dir = os.path.join(site_dir, site.ASSETS_DIR)
 
     info: dict[str, Any] = {
-        "present": os.path.isdir(site_dir),
+        "present": site.scaffolded(root),
         "dir": site.SITE_DIR,
         "built": False,
         "state": rel(state_path, root),
@@ -6020,10 +6053,16 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         "vendored": False,
         "vendor_files": 0,
         "three_version": site.THREE_VERSION,
+        "edited": [],
+        "outline": None,
+        "prose": [],
+        "prose_behind": [],
+        "map": {},
     }
     if not info["present"]:
-        info["stale_reason"] = "no site/ directory — `nopekit site init`"
+        info["stale_reason"] = "no site/index.html — `nopekit site init`"
         return info
+    info["outline"] = site.outline_of(root)
 
     total = size = 0
     for walk_dir, _dirnames, filenames in os.walk(assets_dir):
@@ -6039,10 +6078,8 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         vendored = [p for p in site.vendor_urls()
                     if os.path.isfile(os.path.join(site_dir, p.replace("/", os.sep)))]
         info["vendor_files"] = len(vendored)
-        # Partially vendored is NOT vendored. A vendor/ holding three of four
-        # files shadows the CDN import map and 404s on the fourth, offline and
-        # online alike, which reads as "three.js is broken" rather than as "the
-        # download was interrupted".
+        # Partially vendored is NOT vendored: a vendor/ holding three of four
+        # files shadows the CDN import map and 404s on the fourth.
         info["vendored"] = len(vendored) == len(site.vendor_urls())
 
     if not os.path.isfile(state_path):
@@ -6060,7 +6097,13 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
 
     meta = payload.get("meta") or {}
     info["built"] = True
-    info["built_at"] = str(meta.get("built") or "")
+    # The build time is in the ignored `build.json` from phase 5 (SPEC 32); an
+    # older page's `state.json` still says it.
+    try:
+        clock = read_json(os.path.join(data_dir, site.BUILD_NAME), None)
+    except NopekitError:
+        clock = None
+    info["built_at"] = str((clock or {}).get("built") or meta.get("built") or "")
     info["age"] = _age(info["built_at"])
     info["views"] = [{"id": v.get("id", ""), "kind": v.get("kind", ""),
                       "src": v.get("src", ""), "pack": v.get("pack", "")}
@@ -6071,60 +6114,106 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
     info["claims"] = len(payload.get("claims") or [])
     info["verdicts"] = len(payload.get("verdicts") or [])
 
+    def stale(reason: str) -> dict:
+        info["stale"] = True
+        info["stale_reason"] = reason
+        return info
+
     built_from = str(meta.get("records_digest") or "")
-    judged_from = str(meta.get("judgement_digest") or "")
+    judged_from = str(meta.get("resolution_digest") or "")
     try:
         records_now = store.records_digest(root)
     except (NopekitError, OSError) as exc:
-        info["stale"] = True
-        info["stale_reason"] = (f"the records cannot be read ({exc}) — fix them, then "
-                                f"`nopekit site build`")
-        return info
-    if not built_from:
-        info["stale"] = True
-        info["stale_reason"] = ("the page does not say which records it was built from "
-                                "(an older build) — `nopekit site build`")
-        return info
-    if built_from != records_now:
-        info["stale"] = True
-        info["stale_reason"] = ("the records have changed since the site was built "
-                                "— `nopekit site build`")
-        return info
-    if not judged_from:
-        info["stale"] = True
-        info["stale_reason"] = ("the page does not say which verdicts it was built from "
-                                "(an older build) — `nopekit site build`")
-        return info
+        return stale(f"the records cannot be read ({exc}) — fix them, then "
+                     f"`nopekit site build`")
     try:
-        now = _site_judgement(root, resolved)
+        now, view, registry, resolution = _site_judgement(root, resolved)
     except (NopekitError, OSError) as exc:
-        info["stale"] = True
-        info["stale_reason"] = (f"what the page would show now cannot be worked out "
-                                f"({exc}) — fix that, then `nopekit site build`")
-        return info
-    if now["meta"]["judgement_digest"] != judged_from:
-        moved = site.judgement_moved(payload, now)
+        return stale(f"what the page would show now cannot be worked out "
+                     f"({exc}) — fix that, then `nopekit site build`")
+    composed = claims.compositions(view, registry=registry,
+                                   stale_gates=frozenset(resolution.stale_gates))
+    tokens = graph.tokens(view, resolution, registry, composed=composed)
+    try:
+        info["prose"] = [{"file": row["file"], "subject": row["subject"], "stamp": row["stamp"]}
+                         for row in page.stamp_states(root, view, tokens)]
+    except OSError:
+        info["prose"] = []
+    info["prose_behind"] = [row["file"] for row in info["prose"]
+                            if row["subject"] is not None and row["stamp"] != "current"]
+
+    docs: dict[str, Any] = {}
+    for name in (site.MAP_NAME, site.PAGE_NAME):
+        try:
+            docs[name] = read_json(os.path.join(data_dir, name), None)
+        except NopekitError as exc:
+            info["edited"].append(f"data/{name} is unreadable ({exc}): a build writes it again")
+            docs[name] = None
+    for name, doc in docs.items():
+        if isinstance(doc, dict) and doc.get("self") != page.seal(doc):
+            info["edited"].append(f"data/{name} was edited by hand: a build writes it again")
+    map_doc, page_doc = docs.get(site.MAP_NAME), docs.get(site.PAGE_NAME)
+    if isinstance(map_doc, dict):
+        info["map"] = {"lines": len(map_doc.get("lines") or ()),
+                       "boards": sum(1 for n in map_doc.get("nodes") or ()
+                                     if n.get("kind") == "board"),
+                       "zones": sum(1 for n in map_doc.get("nodes") or ()
+                                    if n.get("kind") == "zone"),
+                       "stations": sum(1 for n in map_doc.get("nodes") or ()
+                                       if n.get("kind") == "station")}
+
+    if not built_from:
+        return stale("the page does not say which records it was built from "
+                     "(an older build) — `nopekit site build`")
+    if built_from != records_now:
+        return stale("the records have changed since the site was built "
+                     "— `nopekit site build`")
+    if not judged_from:
+        return stale("the page does not say which verdicts it was built from "
+                     "(an older build) — `nopekit site build`")
+    if now["meta"]["resolution_digest"] != judged_from:
+        moved = site.resolution_moved(payload, now)
         shown = moved[:verdicts.MAX_STALE_REASONS]
         more = len(moved) - len(shown)
         named = (f" ({'; '.join(shown)}{f' (+{more} more)' if more > 0 else ''})"
                  if shown else "")
-        info["stale"] = True
-        info["stale_reason"] = (f"what the page shows has changed since the site was built"
-                                f"{named} — `nopekit site build`")
-        return info
+        return stale(f"what the page shows has changed since the site was built"
+                     f"{named} — `nopekit site build`")
+    if not isinstance(map_doc, dict) or not isinstance(page_doc, dict):
+        return stale("the page has no front-page data (an older build): `nopekit site build`")
+    if not info["edited"] and all(
+            (d.get("meta") or {}).get("resolution_digest") == judged_from
+            for d in (map_doc, page_doc)):
+        as_of: dict[str, Any] = {}
+        for subject, path in page.prose_files(root):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
+                    as_of[subject] = prose.parse_front_matter(fh.read()).as_of
+            except OSError:
+                continue
+        found = page.status_problems(map_doc, page_doc, view, composed, tokens,
+                                     prose_as_of=as_of,
+                                     pool=site.baked_pool(root, map_doc, page_doc))
+        if found:
+            info["edited"].append(f"the page data (data/{site.PAGE_NAME}, "
+                                  f"data/{site.MAP_NAME}) was edited by hand: {found[0]}")
+    if info["edited"]:
+        return stale(f"{info['edited'][0]} — `nopekit site build`")
+    if (page_doc.get("meta") or {}).get("content_digest") != page.content_digest(root):
+        return stale("the text in site/content/ changed since the site was built: "
+                     "`nopekit site build`")
     info["stale_reason"] = "current with the records and the verdicts"
     return info
 
 
-def _site_judgement(root: str, resolved: tuple | None) -> dict:
-    """The `state.json` a `site build` would write now, less its views: the one
-    producer (`site.state`) over the one resolution (`_resolved`, R-5), handed
-    in by the caller or resolved here the way `status` resolves — the gates
-    loaded with strict=False and the model through `_projection_safe`, because
-    the question is asked by the commands that must survive a broken pack or a
-    model mid-edit. Where `site build` would refuse (it loads both strictly),
-    this judges what the project resolves to now, which is not what the page
-    shows: stale, correctly. No viewgen runs: the views are not judged
+def _site_judgement(root: str, resolved: tuple | None) -> tuple:
+    """``(state, view, registry, resolution)``: the `state.json` a `site build`
+    would write now, less its views — the one producer (`site.state`) over the
+    one resolution (`_resolved`, R-5), handed in by the caller or resolved here
+    the way `status` resolves (the gates loaded with strict=False and the model
+    through `_projection_safe`, because the question is asked by the commands
+    that must survive a broken pack or a model mid-edit) — and what it was
+    judged over. No viewgen runs: the views are not judged
     (`site._UNJUDGED_KEYS`)."""
     if resolved is None:
         ledger = _load(root)
@@ -6136,7 +6225,9 @@ def _site_judgement(root: str, resolved: tuple | None) -> dict:
                                projection=projection)
     else:
         view, registry, resolution, params = resolved
-    return site.state(root, view, registry, resolution=resolution, params=params)
+    judged = verdicts.view(view, resolution)
+    return (site.state(root, judged, registry, resolution=resolution, params=params),
+            judged, registry, resolution)
 
 
 def _site_brief(info: dict) -> dict:
@@ -6152,6 +6243,8 @@ def _site_brief(info: dict) -> dict:
         "built_at": info["built_at"], "stale": info["stale"],
         "views": len(info["views"]), "dangling_locators": len(info["locator_problems"]),
         "vendored": info["vendored"], "error": info["error"],
+        "outline": info.get("outline"), "edited": list(info.get("edited") or ()),
+        "prose_behind": list(info.get("prose_behind") or ()),
     }
 
 
@@ -6163,16 +6256,21 @@ def _site_line(info: dict) -> str:
         return "site: scaffolded, never built — `nopekit site build`"
     dangling = len(info["locator_problems"])
     bits = [f"{len(info['views'])} view(s)"]
+    if info.get("edited"):
+        bits.insert(0, "edited by hand")
     if dangling:
         bits.append(f"{dangling} dangling locator(s)")
+    if info.get("prose_behind"):
+        n = len(info["prose_behind"])
+        bits.append(f"{n} text(s) written before the latest results")
     if info["stale"]:
-        # The reason `_site_state` found, never a fixed sentence: this line said
-        # "the records have moved" for every stale page, and from the verdicts'
-        # digest on (review, `repro_site`) a page goes stale with every record
-        # where it was — sending the reader to diff claim files that never moved.
+        # The reason `_site_state` found, never a fixed sentence (review,
+        # `repro_site`).
         bits.append(f"STALE: {info['stale_reason']}")
     elif info["age"]:
         bits.append(f"built {info['age']}")
+    elif not info["built_at"]:
+        bits.append("built (time unknown)")
     return f"site: {', '.join(bits)}"
 
 
@@ -6220,16 +6318,20 @@ def cmd_site_init(args: argparse.Namespace) -> int:
 
 def _site_build(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
                 projection: Any, view: Ledger, resolution: verdicts.Resolution, *,
-                now: str) -> dict:
+                now: str, built: Any = None, live: bool = False) -> dict:
     """`site build`'s work under the caller's lock, over the caller's resolution:
     the viewgens, `site.build`, and the launch entry. `round` calls it with the
     resolution its round record is computed from (architecture phase 3a), so
-    the page and the record cannot disagree about a claim."""
+    the page and the record cannot disagree about a claim — and, from phase 5,
+    with its graph (``built``), so the map and the round record share one."""
     view_registry, _ = _view_registry(root, ledger)
+    params = _shown_params(root, ledger, model, "", resolution, registry, projection=projection)
+    if built is None:
+        built = graph.of(root, view, resolution, registry, projection=projection, model=model,
+                         views=params, bases=_input_bases(root, ledger))
     summary = site.build(root, view, registry, view_registry, model=model,
                          projection=projection, now=now, resolution=resolution,
-                         params=_shown_params(root, ledger, model, "", resolution, registry,
-                                              projection=projection))
+                         params=params, graph=built, live=live)
     # A groundspace made before `init` wrote one gains its launch entry here, the
     # first time its site is built; an existing file is never touched.
     summary["launch"] = site.ensure_launch(root, _project_name(root, ledger))
@@ -6282,7 +6384,7 @@ def cmd_site_build(args: argparse.Namespace) -> int:
         view, resolution = _resolved(root, ledger, registry, projection, "", now=now,
                                      model=model)
         summary = _site_build(root, ledger, registry, model, projection, view, resolution,
-                              now=now)
+                              now=now, live=bool(getattr(args, "live", False)))
 
     problems = summary.get("locator_problems") or []
     counts = summary.get("counts") or {}
@@ -6318,6 +6420,23 @@ def cmd_site_build(args: argparse.Namespace) -> int:
     _say(f"{counts.get('claims', 0)} claim(s), {counts.get('verdicts', 0)} verdict(s), "
          f"{counts.get('views', 0)} view(s), {counts.get('assets', 0)} asset(s) from "
          f"viewgens")
+    # Architecture phase 5: the front page's map, its text and its evidence.
+    shape = summary.get("map") or {}
+    _say(f"map: {shape.get('lines', 0)} lines, {shape.get('boards', 0)} boards, "
+         f"{shape.get('zones', 0)} zones, {shape.get('stations', 0)} stations"
+         + ("" if shape.get("traced") else
+            "; derivation not traced yet: lines start at the values each evaluator read"))
+    prose_counts = summary.get("prose_counts") or {}
+    if any(row.get("subject") for row in summary.get("prose") or ()):
+        n = sum(1 for row in summary["prose"] if row.get("subject"))
+        _say(f"prose: {n} piece(s): {prose_counts.get('current', 0)} current, "
+             f"{prose_counts.get('stale', 0)} stale, {prose_counts.get('unstamped', 0)} "
+             f"unstamped; {prose_counts.get('unmatched', 0)} unmatched number(s)")
+    else:
+        _say("prose: none (write site/content/intro.md and one file per board)")
+    found = summary.get("evidence") or {}
+    _say(f"evidence: {found.get('copied', 0)} file(s) copied, {found.get('kept', 0)} kept from "
+         f"an earlier build, {found.get('missing', 0)} not on the page")
     if summary.get("refreshed"):
         _say(f"refreshed the renderer to this nopekit's template: "
              f"{', '.join(summary['refreshed'])}")
@@ -6363,11 +6482,13 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
 
     root = _root(args)
     site_dir = os.path.join(root, site.SITE_DIR)
-    if not os.path.isdir(site_dir):
+    if not site.scaffolded(root):
         raise NopekitError(
-            f"no {site.SITE_DIR}/ directory at {root} — `nopekit site init` first")
+            f"no {site.SITE_DIR}/index.html at {root} — `nopekit site init` first")
     state_path = os.path.join(site_dir, site.DATA_DIR, site.STATE_NAME)
     built = os.path.isfile(state_path)
+    watch = bool(getattr(args, "watch", False))
+    interval = max(0.2, float(getattr(args, "interval", 1.0) or 1.0))
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         # A class attribute, not an instance one: SimpleHTTPRequestHandler reads
@@ -6422,10 +6543,25 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
                "serving": rel(site_dir, root), "built": built})
     else:
         _say(site.SERVE_READY_LINE.format(served=rel(site_dir, root), url=url))
-        if not built:
+        if watch:
+            _say(f"watching {len(site.watch_snapshot(root))} path(s); a change rebuilds site/ "
+                 f"(no evaluator runs: `nopekit check` does that)")
+        elif not built:
             _say(f"{_tag('warn')} {rel(state_path, root)} does not exist yet — the page "
                  f"will load with no data. Run `nopekit site build`.")
         _say("Ctrl-C to stop")
+    stop = None
+    if watch:
+        # SPEC 33: one build before serving, then a daemon thread that rebuilds
+        # on a change. The page polls data/build.json while it reads live.
+        import threading
+        before = site.watch_snapshot(root)
+        ok, error, _moved = _watch_rebuild(root, quiet=True)
+        if not ok:
+            _warn(f"{_tag('warn')} rebuild failed: {error}; the page keeps the last build")
+        stop = threading.Event()
+        threading.Thread(target=_watch_loop, args=(root, interval, stop, before), daemon=True,
+                         name="nopekit-site-watch").start()
 
     if not args.no_browser:
         # Safe to open now: the socket is bound and listening from the
@@ -6445,8 +6581,223 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
             _say("")
             _say("stopped")
     finally:
+        if stop is not None:
+            stop.set()
         server.server_close()
     return 0
+
+
+def cmd_site_stamp(args: argparse.Namespace) -> int:
+    """Write the ``as_of`` stamp into ``site/content/`` prose (SPEC 30): the
+    digest of the status tokens of the claims the text is about, now — a
+    board's claims for ``<board>.md``, every claim, the readiness and each
+    milestone for ``intro.md`` and ``next.md``. It writes only the ``as_of``
+    line (`prose.stamp_text`), never a record (invariant 8), and needs no
+    ``site/index.html``: the bracket tracks its text without a built page.
+
+    The stamp says "I read the results as they are now and the text says
+    nothing they contradict". It guards age, never correctness: the page flags
+    a stamp the resolution has moved past, and the number scan guards the
+    numbers. What slipped through before it: nothing kept prose from saying a
+    claim passes after it failed."""
+    root = _root(args)
+    if not getattr(args, "all", False) and not getattr(args, "subject", None):
+        raise NopekitError("site stamp needs a board name, intro, next or --all")
+    with _lock(root):
+        folder = page.content_dir(root)
+        if not os.path.isdir(folder) and getattr(args, "all", False):
+            if args.json:
+                _dump({"stamped": [], "unchanged": [], "skipped": []})
+            else:
+                _say("no text in site/content/ to stamp")
+            return 0
+        if not os.path.isdir(folder):
+            raise NopekitError(f"no site/content/ at {root}: write site/content/<board>.md "
+                               f"first; the stamp records the results the text was written "
+                               f"against")
+        ledger = _load(root)
+        registry, _ = _registry(root, ledger)
+        try:
+            model, projection = _projection(root, ledger)
+        except NopekitError as exc:
+            raise NopekitError(f"the model does not load, so there are no results to stamp "
+                               f"against: {_first_line(exc)}") from None
+        view, resolution = _resolved(root, ledger, registry, projection, "", now=utcnow_iso(),
+                                     model=model)
+        composed = claims.compositions(view, registry=registry,
+                                       stale_gates=resolution.stale_gates)
+        tokens = graph.tokens(view, resolution, registry, composed=composed)
+        boards = page.boards_of(view)
+        known = page.subjects(boards)
+        files = page.prose_files(root)
+        skipped: list[dict] = []
+        if getattr(args, "all", False):
+            targets = [(subject, path) for subject, path in files if subject in known]
+            skipped = [{"file": f"site/content/{subject}.md", "why": "names no board"}
+                       for subject, _path in files if subject not in known]
+        else:
+            subject = str(args.subject)
+            if subject not in known:
+                raise NopekitError(
+                    f"no board named {subject!r}: boards are "
+                    f"{', '.join(b.id for b in boards) or 'none'} (and intro, next)")
+            path = os.path.join(folder, f"{subject}.md")
+            if not os.path.isfile(path):
+                raise NopekitError(f"site/content/{subject}.md does not exist: write the text "
+                                   f"first, then stamp it")
+            targets = [(subject, path)]
+        stamped: list[dict] = []
+        unchanged: list[str] = []
+        current_of: dict[str, str] = {}
+        for subject, path in targets:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+            found_front = prose.parse_front_matter(text)
+            before = found_front.as_of
+            current = prose.stamp_digest(subject, page.subject_tokens(
+                subject, boards, tokens, named=page.prose_named(found_front.body,
+                                                                tokens.claims)))
+            rel_path = f"site/content/{subject}.md"
+            if before == current:
+                unchanged.append(rel_path)
+                current_of[rel_path] = current
+                continue
+            stamped_text = prose.stamp_text(text, current)
+            site._atomic_write_bytes(path, stamped_text.encode("utf-8"))
+            stamped.append({"file": rel_path, "subject": subject, "as_of": current,
+                            "before": before,
+                            "state_before": "unstamped" if not before else "stale"})
+    if args.json:
+        _dump({"stamped": stamped, "unchanged": unchanged, "skipped": skipped})
+        return 0
+    if not targets:
+        _say("no text in site/content/ to stamp")
+    for row in stamped:
+        was = (f"was {row['before']}, stale" if row["before"] else "was unstamped")
+        _say(f"{row['file']}: as_of {row['as_of']} ({was})")
+    for rel_path in unchanged:
+        _say(f"{rel_path}: already current ({current_of[rel_path]})")
+    for row in skipped:
+        _say(f"{_tag('warn')} {row['file']}: {row['why']}; not stamped")
+    return 0
+
+
+def cmd_site_badge(args: argparse.Namespace) -> int:
+    """Write the Made-with-nopekit block at the bottom of ``README.md`` (SPEC
+    36), creating the file when absent — the block `init` writes, for a project
+    made before it did. Writes no record and builds no page."""
+    root = _root(args)
+    with _lock(root):
+        try:
+            meta = store.read_project(root)
+            name, summary = meta.name, meta.summary
+        except NopekitError:
+            name, summary = "", ""
+        wrote = store.ensure_readme_badge(root, name, summary)
+    if args.json:
+        _dump({"readme": "README.md", "wrote": wrote})
+        return 0
+    _say("wrote the Made-with-nopekit block at the bottom of README.md" if wrote
+         else "README.md already carries the Made-with-nopekit block")
+    return 0
+
+
+def _watch_rebuild(root: str, *, quiet: bool) -> tuple[bool, str, list[str]]:
+    """One `nopekit site build --live --json` in a fresh process (SPEC 33):
+    ``(ok, error, moved)``. A fresh process reloads the model and the gates
+    cleanly. *Rejected:* an in-process loop (module and gate caches would carry
+    state from one build to the next)."""
+    package_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = package_parent + (os.pathsep + env["PYTHONPATH"]
+                                          if env.get("PYTHONPATH") else "")
+    before = None
+    state_path = os.path.join(root, site.SITE_DIR, site.DATA_DIR, site.STATE_NAME)
+    try:
+        before = read_json(state_path, None)
+    except NopekitError:
+        before = None
+    proc = subprocess.run([sys.executable, "-m", "nopekit", "site", "build", "-C", root,
+                           "--live", "--json"], capture_output=True, text=True, env=env,
+                          check=False)
+    if proc.returncode != 0:
+        lines = [line for line in (proc.stderr or proc.stdout or "").splitlines()
+                 if line.strip()]
+        return False, (lines[-1].strip() if lines else f"exit {proc.returncode}"), []
+    moved: list[str] = []
+    try:
+        after = read_json(state_path, None)
+        if isinstance(before, dict) and isinstance(after, dict):
+            moved = site.resolution_moved(before, after)
+    except NopekitError:
+        pass
+    return True, "", moved
+
+
+def _lock_taken(root: str) -> bool:
+    """Whether another command holds the project's lock: its file exists
+    (`FileLock.age`; `FileLock.held` says only whether THIS object holds it)."""
+    return _lock(root).age() is not None
+
+
+def _lock_words(root: str) -> str:
+    holder = _lock(root).holder()
+    what = str(holder.get("command") or holder.get("argv") or "another nopekit command")
+    pid = holder.get("pid")
+    return f"{what} (pid {pid})" if pid else what
+
+
+def _watch_loop(root: str, interval: float, stop: Any, built_from: dict | None = None) -> None:
+    """Poll `site.watch_snapshot` every ``interval`` seconds; rebuild when the
+    snapshot differs from the last one built and was equal on two polls in a
+    row; wait while the lock is held; never run `check`. ``built_from`` is the
+    snapshot the page was last built from — taken by the caller before its own
+    first build, so an edit that lands before this thread starts is still seen."""
+    if built_from is None:
+        built_from = site.watch_snapshot(root)
+    last = built_from
+    said_waiting = False
+    while not stop.wait(interval):
+        try:
+            now = site.watch_snapshot(root)
+        except OSError:
+            continue
+        if now != last:
+            last = now
+            continue
+        if now == built_from:
+            continue
+        if _lock_taken(root):
+            if not said_waiting:
+                _warn(f"waiting: {_lock_words(root)}")
+                said_waiting = True
+            continue
+        said_waiting = False
+        # The snapshot the build starts from, never one taken after it: an edit
+        # that lands while the build runs is a change the next poll still sees.
+        # What slipped through the first cut: under load the snapshot was taken
+        # after the build, so a model broken during it read as built.
+        built_from = now
+        ok, error, moved = _watch_rebuild(root, quiet=True)
+        if ok:
+            shown = moved[:4]
+            _warn("rebuilt: " + ("; ".join(shown) + (f" (+{len(moved) - 4} more)"
+                                                     if len(moved) > 4 else "")
+                                 if shown else "nothing the page shows moved"))
+            continue
+        if _lock_taken(root):
+            built_from = {}                 # another command raced the build: try again
+            continue
+        try:
+            previous = read_json(os.path.join(root, site.SITE_DIR, site.DATA_DIR,
+                                              site.BUILD_NAME), None) or {}
+        except NopekitError:
+            previous = {}
+        site.write_build_json(root, now=utcnow_iso(), id=str(previous.get("id") or ""),
+                              ok=False, error=error, live=True,
+                              verdicts=previous.get("verdicts") or {},
+                              mixed_age=previous.get("mixed_age"))
+        _warn(f"{_tag('warn')} rebuild failed: {error}; the page keeps the last build")
 
 
 def cmd_site_vendor(args: argparse.Namespace) -> int:
@@ -6583,7 +6934,7 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         return 0
 
     if not info["present"]:
-        _say(f"no {site.SITE_DIR}/ directory — `nopekit site init`")
+        _say(f"no {site.SITE_DIR}/index.html — `nopekit site init`")
         return 0
     if info["error"]:
         _say(f"{_tag('FAIL')} {info['state']}: {info['error']}")
@@ -6608,7 +6959,23 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         why = row["reason"] or "registered, but produced nothing in the last build"
         _say(f"{_tag('warn')} viewgen {row['id']}: {why}")
 
+    for edited in info.get("edited") or ():
+        _say(f"{_tag('FAIL')} {edited}")
     _say(f"{'STALE' if info['stale'] else 'current'}: {info['stale_reason']}")
+    shape = info.get("map") or {}
+    if shape:
+        _say(f"map: {shape.get('lines', 0)} lines, {shape.get('boards', 0)} boards, "
+             f"{shape.get('zones', 0)} zones, {shape.get('stations', 0)} stations")
+    pieces = [row for row in info.get("prose") or () if row.get("subject")]
+    if pieces:
+        _say(f"prose: {len(pieces)} piece(s): "
+             + ", ".join(f"{row['file']} {row['stamp']}" for row in pieces))
+    for row in info.get("prose") or ():
+        if not row.get("subject"):
+            _say(f"{_tag('warn')} {row['file']} names no board: it is not on the page")
+    if info.get("outline") is None or info["outline"] < page.OUTLINE:
+        _say(f"{_tag('warn')} {site.SITE_DIR}/index.html predates the page outline (no "
+             f"nopekit-outline marker): `nopekit site init --force` after keeping a copy")
     if info["verdicts_stale"]:
         _say(f"{_tag('warn')} the verdicts on the page are stale: "
              f"{info['verdicts_stale_reason']} — `nopekit check`, then rebuild")
@@ -7561,7 +7928,7 @@ def _doctor_requirement_rows(results: list[dict], ledger: Ledger) -> None:
 
 def _doctor_graph_rows(results: list[dict], root: str, ledger: Ledger, view: Ledger,
                        registry: Any, resolution: verdicts.Resolution, model: Any,
-                       projection: Any, model_error: str) -> None:
+                       projection: Any, model_error: str) -> Any:
     """`doctor`'s `graph` row (architecture phase 3a, SPEC 19), always present,
     writing nothing: one FAIL per record pointer the graph cannot follow
     (`store.pointer_problems`, which the index names too) and per `PARAMS`
@@ -7585,7 +7952,7 @@ def _doctor_graph_rows(results: list[dict], root: str, ledger: Ledger, view: Led
     for problem in problems:
         _check(results, "graph", "FAIL", problem)
     if problems:
-        return
+        return None
     built = graph.of(root, view, resolution, registry, projection=projection, model=model,
                      views=views, bases=_input_bases(root, ledger))
     said = report.HUMAN["round"]
@@ -7596,6 +7963,108 @@ def _doctor_graph_rows(results: list[dict], root: str, ledger: Ledger, view: Led
     if built.trace is None:
         detail += said["graph_untraced"]
     _check(results, "graph", "ok", detail)
+    return built
+
+
+def _doctor_groups_row(results: list[dict], root: str, ledger: Ledger, view: Ledger,
+                       registry: Any, resolution: verdicts.Resolution, model: Any,
+                       projection: Any, model_error: str, built: Any = None) -> None:
+    """`doctor`'s `groups` row (architecture phase 5, SPEC 17), always present:
+    FAIL on what the index names (`store.group_problems`: a board member no
+    claim holds, a claim on two boards, a value in two zones or stations) and,
+    when the model loads, a zone member that is not a choice or a station
+    member that is not a derived value — the judgement the index cannot make;
+    else a warning for an empty group, for claims on no board beside board
+    records, for more generated stations than the map reads well, and for a
+    group id that is also a decision's or a milestone's (`why` shows the other
+    first); else the groups' shape."""
+    problems = list(store.group_problems(ledger))
+    groups = list(ledger.groups or ())
+    if isinstance(projection, Mapping) and not model_error:
+        config = dict(projection.get("config") or {})
+        derived = set(graph.derived_names(projection))
+        for group in store.groups_in_order(groups, "zone"):
+            for name in group.members:
+                if name not in config:
+                    close = difflib.get_close_matches(name, list(config), n=1, cutoff=0.6)
+                    problems.append(f"zone {group.id} names {name}, which is not a choice of "
+                                    f"the model"
+                                    + (f" (did you mean {close[0]}?)" if close else ""))
+        for group in store.groups_in_order(groups, "station"):
+            for name in group.members:
+                if name not in derived:
+                    close = difflib.get_close_matches(name, sorted(derived), n=1, cutoff=0.6)
+                    problems.append(f"station {group.id} names {name}, which is not a derived "
+                                    f"value of the model"
+                                    + (f" (did you mean {close[0]}?)" if close else ""))
+    if problems:
+        shown = "; ".join(problems[:3]) + (f"; +{len(problems) - 3} more"
+                                          if len(problems) > 3 else "")
+        _check(results, "groups", "FAIL", shown)
+        return
+    warns: list[str] = []
+    for group in groups:
+        if not group.members:
+            warns.append(f"groups/{group.id}.json holds no members")
+    boards = store.groups_in_order(groups, "board")
+    if boards:
+        on_board = {cid for board in boards for cid in board.members}
+        loose = [c.id for c in ledger.claims if c.id not in on_board]
+        if loose:
+            warns.append(f"{len(loose)} claim(s) on no board ({', '.join(loose[:6])}"
+                         f"{', ...' if len(loose) > 6 else ''}): the page shows them on the "
+                         f"board Other")
+    try:
+        if built is None:                   # the graph row's, when it drew one
+            built = graph.of(root, view, resolution, registry, projection=projection,
+                             model=model, views=_shown_params(
+                                 root, ledger, model, model_error, resolution, registry,
+                                 projection=projection), bases=_input_bases(root, ledger))
+        lay = page.layout(view, built, projection=projection, registry=registry,
+                          resolution=resolution) if groups or ledger.claims else None
+    except Exception:                       # noqa: BLE001 - a row, never a crash of doctor
+        lay = None
+    if lay is not None:
+        generated = sum(1 for s in lay.stations if s.generated)
+        if generated > page.IMPLICIT_STATIONS_WARN:
+            warns.append(f"{generated} shared values became stations on the map: name the ones "
+                         f"that matter in groups/<id>.json (\"kind\": \"station\")")
+    clash = {d.id for d in ledger.decisions} | {m.id for m in ledger.milestones}
+    for group in groups:
+        if group.id in clash:
+            warns.append(f"group {group.id} has the id of a decision or a milestone: `why "
+                         f"{group.id}` shows the other first")
+    if warns:
+        _check(results, "groups", "warn", "; ".join(warns[:3])
+               + (f"; +{len(warns) - 3} more" if len(warns) > 3 else ""))
+        return
+    if not groups:
+        _check(results, "groups", "ok", "no groups: every claim shows on one board")
+        return
+    counts = {kind: len(store.groups_in_order(groups, kind))
+              for kind in ("board", "zone", "station")}
+    _check(results, "groups", "ok",
+           f"{counts['board']} board(s), {counts['zone']} zone(s), {counts['station']} "
+           f"station(s); every claim sits on one board" if boards else
+           f"{counts['zone']} zone(s), {counts['station']} station(s); no board records: "
+           f"every claim shows on one board")
+
+
+def _doctor_readme_row(results: list[dict], root: str) -> None:
+    """`doctor`'s `readme` row (SPEC 36): a warning, never a FAIL, when
+    `README.md` lacks the Made-with-nopekit block — a project made before
+    `init` wrote it; `nopekit site badge` adds it."""
+    try:
+        with open(os.path.join(root, "README.md"), "r", encoding="utf-8",
+                  errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        text = None
+    if text is None or not store.readme_has_badge(text):
+        _check(results, "readme", "warn", "README.md has no Made-with-nopekit block: "
+                                          "`nopekit site badge` adds it at the bottom")
+    else:
+        _check(results, "readme", "ok", "README.md carries the Made-with-nopekit block")
 
 
 def _doctor_round_row(results: list[dict], root: str, ledger: Ledger, model: Any,
@@ -8041,8 +8510,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _check(results, "mechanisms", "ok", said["doctor_none"])
     _doctor_decision_rows(results, root, view)
     _doctor_basis_rows(results, root, view, registry)
-    _doctor_graph_rows(results, root, ledger, view, registry, resolution, model, projection,
-                       model_error)
+    built = _doctor_graph_rows(results, root, ledger, view, registry, resolution, model,
+                               projection, model_error)
+    _doctor_groups_row(results, root, ledger, view, registry, resolution, model, projection,
+                       model_error, built=built)
     _doctor_round_row(results, root, ledger, model, projection, resolution, registry, view,
                       model_error)
     _doctor_seal_row(results, registry,
@@ -8063,20 +8534,48 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         elif not site_info["built"]:
             _check(results, "site", "warn",
                    "scaffolded but never built — `nopekit site build`")
+        elif site_info.get("edited"):
+            # Invariant 14: a baked file edited by hand is a FAIL — the page
+            # would say what no producer said.
+            _check(results, "site", "FAIL", f"{site_info['edited'][0]} — `nopekit site build`")
         else:
             dangling = len(site_info["locator_problems"])
             # Dangling locators are a WARNING, not a failure: the verdicts and
             # claims on the page are still true, and the overlay is the part
             # that is wrong. But never silent — a gate that believes it is
             # drawing and is not looks exactly like a gate that found nothing.
-            status = "warn" if (site_info["stale"] or dangling) else "ok"
-            detail = (f"{len(site_info['views'])} view(s), built {site_info['built_at']}"
+            outline = site_info.get("outline")
+            old_shell = outline is None or outline < page.OUTLINE
+            # The text written before the latest results is the `site text` row's,
+            # so a stale piece of prose is one warning, never two.
+            status = "warn" if (site_info["stale"] or dangling or old_shell) else "ok"
+            detail = (f"{len(site_info['views'])} view(s), built "
+                      f"{site_info['built_at'] or '(time unknown)'}"
                       f"{' (' + site_info['age'] + ')' if site_info['age'] else ''}, "
                       f"{site_info['stale_reason']}")
             if dangling:
                 detail += (f" — {dangling} locator(s) point at a view or node that does "
                            f"not exist (`nopekit site status`)")
+            if old_shell:
+                detail += (" — site/index.html predates the page outline: `nopekit site init "
+                           "--force` after keeping a copy")
             _check(results, "site", status, detail)
+        prose_rows = [row for row in site_info.get("prose") or ()]
+        if prose_rows:
+            behind = [row for row in prose_rows
+                      if row.get("subject") and row.get("stamp") != "current"]
+            loose = [row for row in prose_rows if not row.get("subject")]
+            if behind or loose:
+                bits = [f"{row['file']} is {'not stamped' if row['stamp'] == 'unstamped' else 'written before the latest results'}: read it again, then `nopekit site stamp {row['subject']}`"
+                        for row in behind]
+                bits += [f"{row['file']} names no board: it is not on the page" for row in loose]
+                _check(results, "site text", "warn", "; ".join(bits[:3])
+                       + (f"; +{len(bits) - 3} more" if len(bits) > 3 else ""))
+            else:
+                _check(results, "site text", "ok",
+                       f"{len(prose_rows)} text(s), each stamped against the current results")
+
+    _doctor_readme_row(results, root)
 
     lock = _lock(root)
     age = lock.age()
@@ -8464,6 +8963,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = site_sub.add_parser("build", parents=[common],
                             help="run the viewgens and write data/ and assets/; runs no gates")
+    p.add_argument("--live", action="store_true",
+                   help="mark data/build.json live, so a page served by `site serve --watch` "
+                        "polls it")
     p.set_defaults(func=cmd_site_build)
 
     p = site_sub.add_parser("serve", parents=[common],
@@ -8474,7 +8976,27 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"bind address (default {SERVE_HOST} — loopback on purpose)")
     p.add_argument("--no-browser", action="store_true",
                    help="do not open a browser window")
+    p.add_argument("--watch", action="store_true",
+                   help="rebuild the site when the records, the model, the verdict cache, the "
+                        "trace, the groups or site/content change; the page reloads its data")
+    p.add_argument("--interval", type=float, default=1.0,
+                   help="seconds between polls with --watch (default 1.0, at least 0.2)")
     p.set_defaults(func=cmd_site_serve)
+
+    p = site_sub.add_parser("stamp", parents=[common],
+                            help="write the as_of stamp into site/content prose: the results "
+                                 "its board's claims had when you wrote it")
+    which = p.add_mutually_exclusive_group()
+    which.add_argument("subject", nargs="?", default=None,
+                       help="a board's id, intro or next (site/content/<subject>.md)")
+    which.add_argument("--all", action="store_true",
+                       help="stamp every file in site/content/ that names a board, intro or next")
+    p.set_defaults(func=cmd_site_stamp)
+
+    p = site_sub.add_parser("badge", parents=[common],
+                            help="add the Made-with-nopekit block at the bottom of README.md "
+                                 "(creating README.md when absent)")
+    p.set_defaults(func=cmd_site_badge)
 
     p = site_sub.add_parser("vendor", parents=[common],
                             help="pull three.js into site/vendor/ so the site works offline")

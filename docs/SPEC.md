@@ -104,7 +104,7 @@ part of it.
 
 ## 3. What stays
 
-1. **The invariants** in `CLAUDE.md` (numbered 1 to 13 and 15; 14 is reserved, see
+1. **The invariants** in `CLAUDE.md` (numbered 1 to 15; 14 landed in phase 5, see
    section 8) and the tests that hold them. Nothing below weakens one.
 2. **Git is the groundspace.** A checkout is one state; commits are the history. No
    second history store, no snapshot per check. Reason: git already has parent
@@ -509,9 +509,10 @@ decisions above. Overturn any of them here.
 - **The README badge** (36) is a marked block `init` appends at the bottom of
   `README.md`, with an absolute image URL, so it works before `site init`.
 - **Invariant numbers**: 13 is "a preference counts only through the person's
-  channel" (landed in phase 2) and 14 is reserved for "the site never says more than the
-  resolution, and stamped prose is flagged when behind" (phase 5). Each lands with
-  its tests, its `INVARIANT_CLASSES` row and its `CLAUDE.md` row.
+  channel" (landed in phase 2) and 14 is "the site never says more than the
+  resolution, and stamped prose is flagged when behind" (landed in phase 5, held by
+  `tests/test_site_truth.py`). Each lands with its tests, its `INVARIANT_CLASSES` row
+  and its `CLAUDE.md` row.
 - **The fast tier** keeps its 90-second rule: a phase that adds time pays it back.
 
 **Phase 1** (claims say how they settle), decided while building it:
@@ -807,6 +808,280 @@ decisions above. Overturn any of them here.
 - **The fast tier's pay-back:** the review added ~1.3 s of invariant rows and moved
   `doctor`'s round row to the gate and the graph's and the round record's bytes on
   another path to the full suite; measured flat on wall against 6440bad, +0.6 s user.
+
+**Phase 5** (the site), decided while building it (the data side):
+
+- **Groups gain an optional integer `order`** (default 0, written only when non-zero;
+  groups of one kind sort by `(order, natural id)`). Decision 17 lists kind, title,
+  line and members only, but board order derived from member claim ids would put
+  PETGasus's `measured` (A1) board first and `fits` (C5) before `prints` (C6); file-name
+  order would force renaming prose files. Rows within a board follow `members` order,
+  as the reference's do.
+- **Group ids follow the milestone pattern** (lower case, `.`, `_`, `-`, at most 64),
+  because an id is also a prose file name, an anchor and the `site stamp` argument;
+  `intro`, `next` and `other` are reserved and refused by the strict reader for every
+  kind. `title` is required, `line` optional, an empty `members` list is read (doctor
+  warns); `status`, `x` and `y` are forbidden keys naming where each is derived.
+- **Groups are hidden from every gate** (`verdicts._LEDGER_HIDDEN`), so a regroup
+  re-keys no verdict; with the `models.py` edit this moved the spine digest, so the
+  bracket's cache and round record were regenerated in the phase commit (round 2).
+- **What the index judges, and what it cannot.** A board member with no claim file, a
+  claim on two boards, a value in two zones or on two stations, and a name in both a
+  zone and a station are index problems (doctor FAIL); whether a zone member is a
+  choice or a station member a derived value needs the model, so doctor (FAIL when the
+  model loads) and `site build` (a warning) judge it, never the index. A claim on two
+  boards is drawn on the first by `(order, id)`; a choice in two zones likewise.
+- **The generated board** for claims on no board has id `other`, titled "Other" beside
+  board records and "Claims" with none; the generated zone likewise "Other choices" or
+  "Choices", holding only the remaining choices a line touches or an assumption
+  sources. `map.json`'s `unread` lists every choice no line touches (in a zone record
+  or not); only those in no zone are left undrawn.
+- **Generated stations**: a derived value no station record holds, read by a named path
+  (never `[]` or `["config"]`) by the settling evaluators of two or more distinct
+  claims; id `station:@<name>`, so it never collides with a record; the build and
+  doctor warn past 8 (`page.IMPLICIT_STATIONS_WARN`).
+- **A line's stops** are its requirements, the zones and stations holding the values
+  its settling evaluators read (named reads closed upward over `derives` with
+  `graph.upward`), then the claim; a whole read draws no stop and is baked as
+  `reads_all`.
+- **Requirement, zone and station nodes carry a baked `column`** from greedy interval
+  packing over the rows their lines span, and each lane its `columns`; claim nodes a
+  global `order`, a `row` within their board and `severity` (for the optional "failing
+  first" toggle). No coordinate is baked anywhere.
+- **A board's token is `claims.worst_of`** over its members (factored out of
+  `claims.requirement_statuses`, which now calls it), Gap when empty; boards get no
+  ready flag. **Marks** are a list of tokens beside the status (`disagree` today, `amber`
+  from phase 3b) and never change a token; a requirement or board carries `disagree`
+  when any member does.
+- **Two front-page documents**: `page.json` (outline, verdict, prose, floor rows, next
+  steps, words) and `map.json` (nodes, lines, values, evaluators, typed edges); claim
+  detail lives once, in `page.json` `claims`, for the floor and the drawer. Both carry a
+  `self` seal (`page.seal`) and the resolution and records digests.
+- **Two new non-spine modules**, both clock-free: `page.py` (the layout, the bake, the
+  evidence plan, the settle table, `status_problems`) and `prose.py` (front matter, the
+  markdown subset, the number scan, the style scans, the stamp digest); `site.py` stays
+  the orchestrator. `prose.py` imports nothing from nopekit, so `site stamp` and the
+  style tests need no page machinery.
+- **Prose markdown is parsed at build time** into typed blocks and runs; the browser
+  receives no HTML from prose. A `num` run carries `t`, the number as written (`40%`,
+  `12mm`), beside `num` and `unit` — a key the design did not list, so the template
+  shows the author's own spelling.
+- **The number pool** is every finite numeric leaf (never numbers inside strings) of
+  `state.json`, the view files, `map.json`, `page.json` without its prose and
+  `site/assets/**/*.json`, less `schema`, `outline`, `order`, `column`, `columns`,
+  `severity` and `rank`; matching is sign-insensitive, within half a unit of the last
+  written decimal, `%` also tries ×100, thousands separators are removed. A number
+  joined to letters counts only with a unit from `prose.UNIT_WORDS`; **a number
+  followed by a space and another word stands alone and is scanned** (`2 bolts`) — the
+  design read any letters after a space as the number's unit or an identifier, which
+  would have left every count in prose unscanned.
+- **Stamp scope**: a board's file hashes `{claim id: token[:marks]}` for its claims;
+  `intro.md` and `next.md` hash every claim's token plus `_readiness` and
+  `_m:<milestone>`. The digest is the first 16 hex of sha256 with a `nopekit-stamp-v1`
+  prefix. `unstamped` is baked apart from `stale`; both show the "written before the
+  latest results" notice (in their own words).
+- **`site stamp`** takes the lock, refuses when the model entry fails to load, never
+  needs `site/index.html`, and writes only front matter; `site stamp --all` skips files
+  that name no subject, and with no `site/content/` at all says there is nothing to
+  stamp and exits 0 (a named subject there is refused) — so `--all` is safe to run in
+  every project, as invariant 8's command list runs it.
+- **Evidence** is copied to `site/assets/evidence/<gate>/<entry name>/<basename>`, only
+  from `<out>/` or inside the root, at most 2 MiB a file; when the source is gone but
+  the entry-keyed copy exists (a fresh clone) the copy is kept, so no manifest file is
+  needed. A clashing basename in one entry gains `-2`, `-3`.
+- **`state.json` is clock-free**: it loses `meta.built` and each verdict row's `when`
+  and `age_s` (now in `build.json`), and gains verdict `order` (rank, then id),
+  `evidence_assets`, claim `board`, and chart `margin_text`; its CLI-register words stay
+  and are exempt from the STE scan as the technical record's. `evidence_assets` is left
+  out of `resolution_digest` (where a copy is on the page moves with the disk, never
+  with the judgement) — the design had `_UNJUDGED_ROW` empty.
+- **`site.judgement_digest`/`judgement_moved` and `meta.judgement_digest`** are renamed
+  `resolution_digest`/`resolution_moved`/`meta.resolution_digest` with no aliases; a
+  page without the new key reads stale once.
+- **`build.json`** carries the build time, `live`, an `id` over the tracked baked bytes,
+  ok/error, per-verdict ages with the `aged` flag (a day, `site.AGED_SECONDS`, moved
+  from format.js), and the mixed-age banner decision (moved from app.js); it is ignored
+  through `site/.gitignore`, which `site build` amends (`site.ensure_site_ignore`).
+- **Tracked baked files are written only when their bytes differ**
+  (`util.write_json_if_changed`, `ViewContext.write_asset`, the evidence copies), so a
+  rebuild that judged nothing new changes no tracked byte or mtime.
+- **`site build` refuses**, writing nothing under `site/data/`, when
+  `page.status_problems` finds a baked token that differs from `graph.tokens`,
+  `claims.worst_of` or `claims.unresolved`; the same function judges on-disk pages in
+  `status` and `doctor` (*edited by hand*, a doctor FAIL) and is the checker the tests
+  hold to their own answers.
+- **Page currency** in `status` and `doctor`, in order: the records and the
+  `state.json` resolution digest, then missing `page.json`/`map.json`, a broken seal
+  (edited), token disagreement with the live resolution while both documents' digests
+  match now's (edited: a resealed forgery), and `page.json`'s `content_digest` against
+  `site/content/` now. The seals are read whatever the order decides, so an edited
+  page says so beside any stale reason.
+- **A site is present** (round builds it, status shows it, site build and site serve
+  accept it) only when `site/index.html` exists (`site.scaffolded`), so the bracket
+  tracks `site/content/` without a built site.
+- **`technical.html` is a shell like `index.html`**: written by `site init` and by
+  `site build` when absent, never refreshed (PETGasus ships its own customised
+  `technical.html`). The data side writes it only when the template carries one.
+- **The outline marker** is `<meta name="nopekit-outline" content="1">`; `site build`
+  warns when `index.html` lacks it or carries an older one, and still writes the front
+  page's two documents.
+- **The readiness sentence gains `register="site"`** inside `report._verdict_sentence`
+  (and `_milestone_sentence`, `limits_line`), with STE templates in
+  `HUMAN["site"]["readiness"]` mirroring every CLI branch; the CLI branch's bytes are
+  untouched. The hardware clause and `HUMAN["physical"]["unbound"]` pass the style scan
+  as they are, so they gained no site key.
+- **`HUMAN["site"]`** holds STE hints per token, one STE sentence per `ClaimCause`, a
+  settle text per cause (an exhaustive table; every command parses), lane, kind, `by`
+  (with `automated` for a measurable claim that declares none), basis and outcome
+  words, headings and notices; the checked hint omits "does not mean true" so that
+  sentence appears once per page (`verdict.limits`).
+- **Next steps**: per milestone, `claims.unresolved`'s unresolved claims in severity
+  order with their mechanism's `how`, an STE text and the settling commands; a required
+  id with no claim file is listed under `missing`; with no milestone the required claims
+  form one `project` group; unresolved claims no milestone requires go under `open`;
+  `next: true` marks the first not-ready milestone in natural order.
+- **The STE scan** covers `HUMAN["site"]`, the word keys of `page.json`/`map.json`
+  (`page.WORD_KEYS`, every string key classified against `page.RECORD_KEYS`), the README
+  block and the bracket's content (template strings are the template side's); record
+  text, `reason`/`stale_reason`/`limit_text` and `state.json`'s words are exempt.
+  Sentence limit 25 words (STE rule 4.1), not counting ids, parentheses, code or URLs;
+  lists of three and restating closers are review-only.
+- **`site serve --watch`** rebuilds through a `nopekit site build --live` subprocess,
+  debounced over two equal polls of `site.WATCH_DIRS`, waits while another command
+  holds the lock (the lock file exists: `FileLock.held` says only whether the same
+  object holds it, so the design's `held()` would never have waited), never runs
+  `check`, and on failure writes `build.json` `ok: false` with the previous `id`.
+- **`nopekit site badge`** writes or refreshes the README block; `init` calls the same
+  `store.ensure_readme_badge`; doctor's `readme` row (warn only) suggests the command.
+  Markers are `<!-- nopekit:begin badge -->`/`<!-- nopekit:end badge -->`; a missing
+  `README.md` is created as `# name` plus the summary.
+- **Doctor** gains `groups` (FAIL on index problems and unknown zone/station members),
+  `site text` (warn on stale or unstamped prose) and `readme` rows; `why` resolves group
+  ids after decisions and shows a claim's board — only in a project with board records,
+  so a project without groups prints the `why` it printed before.
+- **The bracket** gains four boards (strength, prints, pump, outdoors, in requirement
+  order R1, R4, R2, R3, with C6 on strength), four zones, one recorded station
+  (`allowable`: `design_stress`) with `slenderness` left generated, six stamped STE
+  prose files, a root `.gitignore` that tracks only `site/content/`, and the badge
+  block; its regenerated cache ends at round 2.
+- **Invariant 14's classes** live in `tests/test_site_truth.py` (three on the data side;
+  `TheBrowserComputesNoTruth` is the template side's); `NextStepsAreThePredicate` joins
+  row 12 and `test_records.GroupsAreRecords` row 8. The watcher's and the badge's tests
+  sit in `tests/test_groups.py` beside the groups' readers, where the design placed them
+  in `test_launch` and `test_record_commands`.
+- **The fast tier is over the line after this phase**, said in `tests/fast.py`: two
+  interleaved pairs measured 96.5 s and 97.7 s wall against 89.4 s and 93.8 s for
+  fe9f6e3 (~3.8 s of test time added: the in-process invariant rows ~0.9 s, the two
+  records-sweep rows ~1.8 s, the site register in the hardware-clause rows and the
+  meta scans ~0.7 s); ~1.2 s was paid (seven non-invariant entries to the full suite,
+  the number scan's build row to the gate), and the next change that touches the tier
+  pays the rest first. The phase's design asked the fast tier to stay flat; the
+  non-invariant entries left in it were too small to pay for the sweep rows it also
+  asked for.
+- **The watcher takes its snapshot before it builds** (and `site serve --watch` before
+  its first build), so an edit that lands while a build runs is still seen; the first
+  cut snapshotted after the build and, under load, read a model broken during it as
+  built.
+- **doctor's `site` row warns on a stale page, a dangling locator or a shell older than
+  the outline**; text written before the latest results is the `site text` row's, so
+  one stale piece of prose is one warning (the design put it on both rows).
+
+**Phase 5** (the site), decided while building it (the template side):
+
+- **The map's geometry is straight tracks at the board rows** (the design's baseline):
+  each line runs level from its first stop to its row, capsules sit in their baked
+  column over the rows their lines span, and a line that only crosses a capsule's span
+  is drawn over it on a bridge, so it never reads as a stop. *Rejected:* the
+  reference's bundled trunk with risers and fallers (it needs per-project routing, the
+  hand-placed layout decision 29 rejects); a capsule per member line (a station shared
+  by six lines would draw six). A node no line stops at (most of PETGasus's zones until
+  the trace links choices to derived values) is listed under the map in its lane, not
+  drawn on a track.
+- **The viewer control is labelled "Worst first"**, where decision 29 says "failing
+  first": the label is a template string, and `failing` is a status word the page may
+  only print from the bake (`test_vocabulary`'s page scan). It sorts by the baked
+  `severity`, then `row`, inside each board; columns stay the baked ones.
+- **A capsule's title may take two columns of room**, moves up a line (twice at most)
+  to clear an earlier title, and only then is shortened, with its full text as the
+  tooltip. The first cut gave it one column, and the bracket's "Load and material"
+  read "Load and mat…".
+- **The drawer and the floor share one function** (`drawer.claimBlocks`), so the two
+  places a claim is explained cannot drift. The drawer also opens from the URL
+  (`#claim=C1`, `#zone=arm`), which is how a link from elsewhere, and the headless
+  check of this phase, reach it.
+- **A recorded result's word comes from a new key**, `physical_result.outcome`
+  (`"pass"` | `"fail"`, baked by `site.state` beside `passed`): the template scan
+  refuses any `.passed` read, a verdict row's flag and a result's field alike, and
+  `counts` alone cannot tell a counted fail from a counted pass. The design's table
+  mapped `result.passed` to `counts`, which loses the fail.
+- **`TheBrowserComputesNoTruth` reads code with every string's text and every comment
+  blanked** (`tests/_template.py`, one lexer for it and the style scan); `.error` is a
+  flag only where it decides (`?`, `&&`, `!`), because `v.error || v.detail` prints the
+  crash's message. Its rules: a verdict flag, arithmetic on a limit, `every`/`some`
+  over a status, a sort over a status or a status table, an age compared.
+- **The style scan reads a JavaScript literal as words when it holds two plain words
+  side by side** outside a class, selector, attribute, storage-key or comparison slot;
+  HTML text nodes and `alt`, `title` and `aria-label` are read whole. Comments are
+  exempt. The heuristic's planted cases are in `test_style.TemplateWordsFollowTheStyle`.
+- **The technical record's page lost its own judgements** with the rest: it defaults
+  to showing every evaluator (the "problems only" default read the statuses), shows no
+  failing count on a view tab, and gives the anchored list no tone of its own.
+- **The drawer's open class is `is-open`**, and the front page names no status word in
+  a literal: `open` is Open's word, and the page scan read `classList.add("open")` as
+  the page saying it.
+
+**Phase 5** (the site), decided in its review (each a confirmed finding; the bullets
+above stand where these do not change them):
+
+- **A compared value's words use the claim's margin.** `value_text` beside the claim's
+  limit carries the margin against that limit (`claims._margin_of` over the
+  acceptance condition, `cross_check` deciding the side); the baked `margin` stays
+  `claims.margin`'s beside the verdict's own `limit`. C3 tightened to 0.1 MPa had read
+  "99% inside the limit" under Failing. `status_problems` names a compared value
+  whose words disagree with `cross_check`.
+- **The checker holds words, groups, marks and prose.** Every baked status `word` is
+  its token's; a milestone's and the project's `ready`, `token` and `word` are
+  `claims.unresolved`'s; a step carries its claim's `marks`; each prose piece's
+  `stamp` and `notice` are its digest's now. `site status`, `status` and `doctor` also
+  hand it each file's `as_of` and the number pool (`site.baked_pool`), so a resealed
+  page cannot show behind text as current.
+- **A board's stamp holds the claims its text names** from other boards, keyed
+  `@<id>` (`page.named_in`), in `site stamp` and in the build alike; a regroup still
+  moves the stamp. *Rejected:* refusing a link to another board's claim (prose that
+  explains a dependency names it).
+- **The number scan reads units.** Letters joined to a number are its unit unless an
+  identifier suffix (`3D`, `1st`); `.9` and `1e3` are read; `row`, `index` and `tier`
+  are structure; counts (`n`, tallies, ground and readiness counts) match a bare
+  number only, a margin a percentage, a value its own unit or none stated. The pool
+  reads only the assets the build keeps. *Rejected:* leaving counts out (a true "3 of
+  7 claims" would be marked).
+- **Evidence stays where it was written.** `<out>/` paths must resolve inside
+  `.nopekit/out/` (no `..`, no link out); a bare path inside the root with no hidden
+  part and not git-ignored (`vcs.ignored`); clashing names are free ignoring case.
+  The words baked beside evidence not on the page depend on the path alone ("outside
+  the project" or "not on the page"); the disk's reason is a build warning, so a
+  fresh clone bakes the same bytes.
+- **`site build` writes `site/.gitignore` with the clock's lines when there is none**,
+  and the scaffolded comment says to delete only the `vendor/` line.
+- **The README block is whole marker lines** (`store.readme_has_badge`, which doctor
+  reads too); anything else gets a block appended, never a splice across a person's
+  text, and the file's CRLF or LF is kept.
+- **A shown pass is the pass `claim physical` takes**: `--evidence <file>`, and a
+  judgment's `--authority`. A built article with no milestone gets the
+  `article_free` text, which says to name the claim in a milestone file.
+- **The template**: every chip passes the bake's `marks` (a "!" and the notice); the
+  map's rows and headers grow with the text below 1400 px (`metricsFor`, redrawn on
+  `onRescale`); with the drawer open the map scales into its column; a rested-on line
+  keeps its status colour; the phone caption speaks of cards; an unmatched number
+  wears a dagger, stays on one line and is explained under the text; the technical
+  record fits a 390 px phone.
+- **The fast tier**: the two records-sweep rows phase 5 added (`site stamp --all`,
+  `site badge`) moved to tests of their own in each sweep, left to the gate, and
+  `test_meta.NoSubprocessOutsideRun` (a harness guard) to the full suite: ~2.9 s paid
+  against ~0.3 s added, which covers the ~2.5 s phase 5 left standing. Two
+  interleaved pairs measured 110.3 s and 113.9 s wall against 113.0 s and 114.1 s for
+  c392078 on a loaded machine (`tests/fast.py`); no idle run was had, so the 90 s line
+  itself is not shown met.
 
 ## 9. Retired
 

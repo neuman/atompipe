@@ -1,0 +1,9 @@
+{
+  "kind": "zone",
+  "title": "Printer",
+  "members": [
+    "nozzle_d",
+    "bed_xy",
+    "brim_mm"
+  ]
+}

@@ -21,7 +21,7 @@
 import { el, mount, field } from "./dom.js";
 import {
   chip, tag, claimStatus, verdictStatus, claimKind,
-  num, quantity, age, isAged, stamp, plural, code, phrase, needWord, outcomeWord,
+  num, quantity, age, stamp, plural, code, phrase, needWord, outcomeWord,
 } from "./format.js";
 
 /** `invalidated` -> `Invalidated`, for a field label. */
@@ -103,11 +103,11 @@ export function staleBanner(state) {
   return el("aside", { class: "banner banner-stale", role: "status" },
     el("span", { class: "banner-glyph", "aria-hidden": "true", text: "≈" }),
     el("div", {},
-      el("b", { text: "Some verdicts are invalidated." }),
+      el("b", { text: "Some results are older than the design." }),
       " ",
-      el("span", { text: meta.stale_reason || "a verdict's inputs have moved since it was measured" }),
-      el("p", { class: "banner-fix" }, "Re-run ", code("nopekit check"),
-        " and then ", code("nopekit site build"), " to settle them against what the model says now.")));
+      el("span", { text: meta.stale_reason || "The inputs of a verdict changed after it ran." }),
+      el("p", { class: "banner-fix" }, "Run ", code("nopekit check"),
+        ", then ", code("nopekit site build"), ". The check runs those evaluators on the design as it is now.")));
 }
 
 /** Locator problems: a gate that believes it is drawing and is not.
@@ -122,9 +122,9 @@ export function locatorProblems(state) {
   if (!problems.length) return null;
   return el("section", { class: "panel", id: "locator-problems" },
     panelHead("Locators that cannot be drawn", `${problems.length}`,
-      "A gate attached a highlight to something this site cannot find. The verdict is " +
-      "still true; it just has no anchor, and a gate that thinks it is drawing and is " +
-      "not looks exactly like a gate that found nothing."),
+      "An evaluator attached a highlight to something that this site cannot find. The " +
+      "verdict stays as it is. Without this list, an evaluator that cannot draw looks " +
+      "the same as an evaluator that found nothing."),
     el("ul", { class: "problem-list" },
       ...problems.map((p) => el("li", {},
         code(p.gate), " → ", code(`${p.view || "(no view)"}${p.target ? "/" + p.target : ""}`),
@@ -183,9 +183,9 @@ export function claimsPanel(state, app) {
   return el("section", { class: "panel", id: "claims" },
     panelHead("Claims", plural(claims.length, "claim"),
       "What has to be true for this design to work, and what settled it."),
-    ...(sections.length ? sections : [emptyNote("This project has recorded no claims yet. " +
-      "A claim is a file, `claims/<id>.json`, and it is where a project starts: a design with " +
-      "no claims has nothing to prove.")]));
+    ...(sections.length ? sections : [emptyNote("This project has no claims yet. " +
+      "A claim is a file, `claims/<id>.json`. A project starts with its claims, because a " +
+      "design with no claims has nothing to prove.")]));
 }
 
 function claimRow(claim, state, app) {
@@ -214,7 +214,7 @@ function claimRow(claim, state, app) {
     claim.physical_result ? physicalResult(claim.physical_result) : null,
     verdicts.length
       ? el("div", { class: "claim-verdicts" },
-          el("h4", { text: "Gates" }),
+          el("h4", { text: "Evaluators" }),
           el("ul", { class: "mini-verdicts" },
             ...verdicts.map((v) => miniVerdict(v, app))))
       : null,
@@ -228,10 +228,10 @@ function claimRow(claim, state, app) {
       ? el("p", { class: "claim-reason", text: claim.reason }) : null,
     (claim.unproven || []).length
       ? el("div", { class: claim.disagree ? "partial-note tone-bad" : "partial-note" },
-          claim.disagree ? el("b", { text: "Status and evidence disagree — " }) : null,
-          "a gate covering this claim produced no verdict that counts:",
+          claim.disagree ? el("b", { text: "Status and evidence disagree. " }) : null,
+          "An evaluator of this claim gave no result that counts:",
           el("ul", {}, ...claim.unproven.map((u) =>
-            el("li", {}, code(u.gate), " — ", u.why))))
+            el("li", {}, code(u.gate), ": ", u.why))))
       : null,
     (claim.evidence || []).length
       ? el("div", { class: "evidence-row" },
@@ -267,20 +267,21 @@ function claimRow(claim, state, app) {
     el("details", { class: "disclosure" }, summary, body));
 }
 
-/** One recorded physical result. Its tone is keyed on `result.counts` — the
- *  judge's word (state.json, `report.result_facts`) — and on `passed` only to
- *  tell a fail from a pass: a pass that does not count (from an agent session,
- *  on a moved article, with changed evidence) is never the ok tone, and says
- *  why. What slipped through (critique 3 of the P2.5a design): this painted any
- *  `passed` in the ok tone, so an agent's pass on a Pending build claim read
- *  green on the page alone. */
+/** One recorded physical result. Its tone is keyed on `result.counts`, the
+ *  judge's word (state.json, `report.result_facts`), and its word on
+ *  `result.outcome` ("pass" or "fail", baked beside it): a pass that does not
+ *  count (from an agent session, on a moved article, with changed evidence) is
+ *  never the ok tone, and says why. What slipped through (critique 3 of the
+ *  P2.5a design): this painted any `passed` in the ok tone, so an agent's pass
+ *  on a Pending build claim read green on the page alone. The page reads no
+ *  `passed` flag at all since phase 5 (SPEC 32). */
 function physicalResult(result) {
-  const pass = result.passed === true;
+  const failed = result.outcome !== "pass";
   const counts = result.counts === true;
-  const tone = !pass ? "tone-bad" : counts ? "tone-ok" : "tone-muted";
+  const tone = failed ? "tone-bad" : counts ? "tone-ok" : "tone-muted";
   return el("div", { class: `physical-result ${tone}` },
     el("b", { text: `${result.heading || phrase("result_recorded")} ` +
-                    `${outcomeWord(pass ? "pass" : "fail")} — ` +
+                    `${outcomeWord(failed ? "fail" : "pass")}; ` +
                     `${phrase(counts ? "result_counts" : "result_not_counted")}. ` }),
     el("span", { text: result.detail || "" }),
     !counts && result.why ? el("p", { class: "claim-reason", text: result.why }) : null,
@@ -295,34 +296,29 @@ function physicalResult(result) {
 // verdicts
 // --------------------------------------------------------------------------- //
 
-/** The gate results, newest judgement first in reading order: what failed, what
- *  never ran, then what passed.
+/** The evaluator results in reading order: a crash, a fail, an evaluator that
+ *  is not qualified, a pass outside its range, a skip, then a pass.
  *
- *  Sorted that way deliberately. A list in alphabetical order buries the one
- *  failing gate among fourteen passing ones, and the reason anybody opens this
- *  page in DEBUG mode is the failing one. */
-const VERDICT_ORDER = { errored: 0, fail: 1, skipped: 2, pass: 3 };
-
+ *  The order is the bake's (`order` on each row, `site.state`: SPEC 32), never
+ *  a sort here. What slipped through before phase 5: this file ranked the
+ *  statuses itself, a second copy of the order beside the one the spine keeps. */
 export function verdictsPanel(state, app) {
-  const all = state.verdicts || [];
+  const all = (state.verdicts || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const host = el("ul", { class: "verdict-list" });
-  const filters = ["problems", "all"];
-  let mode = all.some((v) => v.status !== "pass") ? "problems" : "all";
+  const filters = ["all", "problems"];
+  let mode = "all";
 
   const paint = () => {
-    const rows = (mode === "all" ? all : all.filter((v) => v.status !== "pass"))
-      .slice()
-      .sort((a, b) => (VERDICT_ORDER[a.status] ?? 9) - (VERDICT_ORDER[b.status] ?? 9)
-        || String(a.gate).localeCompare(String(b.gate)));
+    const rows = mode === "all" ? all : all.filter((v) => v.status !== "pass");
     mount(host, rows.length
       ? rows.map((v) => verdictRow(v, app))
-      : el("li", { class: "muted", text: "Every gate that ran, passed." }));
+      : el("li", { class: "muted", text: "No row matches this filter." }));
   };
 
   const switcher = el("div", { class: "seg", role: "group", "aria-label": "filter verdicts" },
     ...filters.map((f) => el("button", {
       class: "seg-btn", type: "button", "aria-pressed": String(f === mode),
-      text: f === "problems" ? "Problems only" : "All gates",
+      text: f === "problems" ? "Problems only" : "All evaluators",
       onclick: (ev) => {
         mode = f;
         ev.currentTarget.parentElement.querySelectorAll(".seg-btn")
@@ -333,14 +329,15 @@ export function verdictsPanel(state, app) {
 
   paint();
   return el("section", { class: "panel", id: "verdicts" },
-    panelHead("Gate results", plural(all.length, "verdict"),
-      "One line per gate. A skip is not a pass and a crash is not a pass; both are " +
-      "listed as what they are.", switcher),
+    panelHead("Evaluator results", plural(all.length, "verdict"),
+      "One row for each evaluator. A skip is not a pass, and a crash is not a pass. " +
+      "Each row shows what it is.", switcher),
     host);
 }
 
 function verdictRow(v, app) {
   const status = verdictStatus(v.status);
+  const ages = (app.ages || {})[v.gate] || {};
   const locators = v.locators || [];
   const anchored = locators.filter((loc) => app.index.viewById.has(loc.view));
 
@@ -357,15 +354,16 @@ function verdictRow(v, app) {
     : null;
 
   const body = el("div", { class: "verdict-detail" },
-    detail ? el("p", { class: `verdict-text${v.error && !unqualified ? " mono" : ""}`,
+    detail ? el("p", { class: `verdict-text${v.status === "errored" && !unqualified ? " mono" : ""}`,
                        text: detail }) : null,
     el("dl", { class: "kv" },
       ...(v.pack ? field("Pack", code(v.pack)) : []),
-      ...field("Tier", `${v.tier} — ${["instant", "build", "solve", "external"][v.tier] || "?"}`),
+      ...field("Tier", `${v.tier}: ${["instant", "build", "solve", "external"][v.tier] || "unknown"}`),
       ...(v.duration_s ? field("Ran in", `${num(v.duration_s)} s`) : []),
-      // `when` is the site's, from the resolver: the run that last wrote or hit
-      // this result, else the commit that brought it. Neither known: said so.
-      ...field("Recorded", v.when ? `${stamp(v.when)} · ${age(v.age_s)}` : "no date recorded for this result"),
+      // `when` is build.json's, from the resolver: the run that last wrote or
+      // hit this result, else the commit that brought it. Neither known: said so.
+      ...field("Recorded", ages.when ? `${stamp(ages.when)} · ${age(ages.age_s)}`
+        : "No date is recorded for this result."),
       ...(v.stale_reason ? field(capital(phrase("invalidated")), v.stale_reason) : []),
       ...(v.claims || []).length
         ? field("Settles", ...v.claims.map((c) => el("button", {
@@ -374,15 +372,15 @@ function verdictRow(v, app) {
           })))
         : [],
       ...(v.evidence || []).length ? field("Evidence", el("ul", { class: "file-list" },
-        ...v.evidence.map((e) => fileRef(e)))) : []),
+        ...v.evidence.map((e, i) => fileRef(e, (v.evidence_assets || [])[i])))) : []),
     // An unlocatable failure is a NORMAL outcome, said out loud. A gate attaches
     // a locator only when it genuinely knows the position, because a confident
     // highlight on the wrong part sends someone to inspect a part that is fine
     // and they stop trusting the overlay afterwards.
     v.unanchored
       ? el("p", { class: "muted small", text:
-          "This verdict carries no locator, so there is nothing to highlight. The gate " +
-          "knows that something is wrong, not where." })
+          "This verdict has no locator, so nothing is highlighted. The evaluator knows " +
+          "that something is wrong. It does not know where." })
       : null,
     anchored.length
       ? el("div", { class: "locator-row" },
@@ -411,14 +409,14 @@ function verdictRow(v, app) {
               text: `≈ ${phrase("invalidated")}` })
           : null,
         anchored.length
-          ? el("span", { class: "pin-count", title: "highlights the geometry this is about" },
+          ? el("span", { class: "pin-count", title: "Highlights the part that this verdict is about" },
               `⌖ ${anchored.length}`)
           : null,
-        el("span", { class: `verdict-age${isAged(v.age_s) ? " aged" : ""}`, text: age(v.age_s) })),
+        el("span", { class: `verdict-age${ages.aged ? " aged" : ""}`, text: age(ages.age_s) })),
       body),
     anchored.length
       ? el("button", {
-          class: "show-me", type: "button", title: "isolate and frame this in the viewer",
+          class: "show-me", type: "button", title: "Isolate this part and frame it in the viewer",
           text: "Show me",
           onclick: () => app.focusLocator(anchored[0], v),
         })
@@ -430,14 +428,14 @@ function verdictRow(v, app) {
  *  format.js. `severity` defaults to the verdict's own outcome, exactly as the
  *  Locator docstring says. */
 export function shapeFor(loc, verdict) {
-  const sev = (loc.severity || (verdict && verdict.ok ? "info" : "fail")).toLowerCase();
+  const sev = (loc.severity || (verdict && verdict.status === "pass" ? "info" : "fail")).toLowerCase();
   if (sev === "fail" || sev === "error" || sev === "critical") return "✕";
   if (sev === "warn" || sev === "warning") return "▲";
   return "●";
 }
 
 export function severityOf(loc, verdict) {
-  const sev = (loc.severity || (verdict && verdict.ok ? "info" : "fail")).toLowerCase();
+  const sev = (loc.severity || (verdict && verdict.status === "pass" ? "info" : "fail")).toLowerCase();
   if (sev === "fail" || sev === "error" || sev === "critical") return "fail";
   if (sev === "warn" || sev === "warning") return "warn";
   return "info";
@@ -455,7 +453,7 @@ function miniVerdict(v, app) {
     v.limit !== null && v.limit !== undefined
       ? el("span", { class: "muted mono", text: ` / ${quantity(v.limit, v.units)}` })
       : null,
-    el("span", { class: "muted", text: ` ${age(v.age_s)}` }));
+    el("span", { class: "muted", text: ` ${age(((app.ages || {})[v.gate] || {}).age_s)}` }));
 }
 
 // --------------------------------------------------------------------------- //
@@ -482,7 +480,7 @@ export function paramsPanel(state, app) {
     panelHead("Parameters", plural(params.length, "parameter"),
       "Click one for why it has this value and what was tried instead.",
       undefended ? tag(`${undefended} undefended`, { tone: "warn",
-        title: "no rationale recorded — the next agent will change it" }) : null),
+        title: "No rationale is recorded. The next agent will change it." }) : null),
     params.length
       ? el("ul", { class: "param-list" }, ...params.map((p) => paramRow(p, app)))
       : emptyNote("No parameters in the ledger yet."));
@@ -497,7 +495,7 @@ function paramRow(p, app) {
         el("span", { class: "param-value mono", text: formatValue(p.value) }),
         p.units ? el("span", { class: "param-units", text: p.units }) : null,
         p.derived ? tag("derived", { tone: "ok", title: `from ${(p.derived_from || []).join(", ")}` }) : null,
-        p.defended === false ? tag("undefended", { tone: "warn", title: "no rationale recorded" }) : null,
+        p.defended === false ? tag("undefended", { tone: "warn", title: "No rationale is recorded." }) : null,
         p.model_error ? tag("no value", { tone: "warn", title: `model does not load: ${p.model_error}` })
           : !p.home ? tag("not in the model", { tone: "muted", title: `only ${p.record || "a record"} holds it` })
           : null,
@@ -539,7 +537,7 @@ function paramRow(p, app) {
  *  expensive thing in the ledger. */
 export function rejectedList(rejected) {
   return el("div", { class: "rejected" },
-    el("h4", {}, "Rejected ", el("span", { class: "muted", text: "— tried, and why it lost" })),
+    el("h4", {}, "Rejected ", el("span", { class: "muted", text: "(tried, and why it lost)" })),
     el("ul", {}, ...rejected.map((r) => el("li", {},
       el("span", { class: "rejected-value mono", text: r.value }),
       el("span", { class: "rejected-why", text: r.why }),
@@ -573,8 +571,8 @@ export function evidencePanel(state, app) {
       unread ? tag(`${unread} never read`, { tone: "warn" }) : null),
     inputs.length
       ? el("ul", { class: "input-list" }, ...inputs.map((a) => inputRow(a)))
-      : emptyNote("Nothing has been ingested. A design conversation is the thinnest input a " +
-          "project has — sketches, teardown photos, calipers and datasheets are the real ones."));
+      : emptyNote("Nothing is ingested yet. A conversation is the weakest input to a design. " +
+          "Sketches, photos, measurements and datasheets are stronger inputs."));
 }
 
 function inputRow(a) {
@@ -587,7 +585,7 @@ function inputRow(a) {
         el("span", { class: "input-desc", text: a.description || a.path || a.url || "" }),
         extractions.length
           ? tag(plural(extractions.length, "extraction"), { tone: "ok" })
-          : tag("never read", { tone: "warn", title: "an artifact nobody extracted from is decoration" })),
+          : tag("never read", { tone: "warn", title: "Nobody read a value from this artifact." })),
       el("div", { class: "input-detail" },
         el("dl", { class: "kv" },
           ...(a.path ? field("Path", code(a.path)) : []),
@@ -645,7 +643,7 @@ export function gapsPanel(state, app) {
                 c.why ? el("p", { text: c.why }) : null,
                 c.cost ? el("p", { class: "small muted", text: `cost: ${c.cost}` }) : null,
                 c.install ? el("pre", { class: "install" }, code(c.install)) : null)))
-            : el("p", { class: "muted small", text: "No tool options proposed yet — `nopekit gap --propose`." })))))));
+            : el("p", { class: "muted small", text: "No tool is proposed yet. Run `nopekit gap --propose`." })))))));
 }
 
 /** The decision log, newest first, each entry naming what lost. */
@@ -683,14 +681,14 @@ export function decisionsPanel(state, app) {
 }
 
 /** Project identity and the provenance of the page itself. */
-export function aboutPanel(state) {
+export function aboutPanel(state, app) {
   const meta = state.meta || {};
   return el("section", { class: "panel", id: "about" },
     panelHead("This page", "", "An output of the ledger, not a source."),
     el("dl", { class: "kv" },
       ...(meta.model_entry ? field("Model", code(meta.model_entry)) : []),
       ...(meta.created ? field("Project created", stamp(meta.created)) : []),
-      ...(meta.built ? field("Site built", `${stamp(meta.built)}`) : field("Site built", "unstamped")),
+      ...field("Site built", app && app.build && app.build.built ? stamp(app.build.built) : "No build time"),
       // No "last gate sweep" and no model hash: there is no sweep record any
       // more, and one hash for the whole project said THAT something moved,
       // never which result. Each verdict carries its own date and, when it is
@@ -698,7 +696,7 @@ export function aboutPanel(state) {
       ...((meta.packs || []).length ? field("Packs", ...meta.packs.map((p) => tag(p))) : []),
       ...(meta.spine_version ? field("nopekit", meta.spine_version) : [])),
     el("p", { class: "small muted", text: meta.generated ||
-      "Generated by `nopekit site build` from the ledger. If a number here is wrong, the ledger is wrong." }));
+      "The command `nopekit site build` wrote this page from the records. If a number here is wrong, a record is wrong." }));
 }
 
 // --------------------------------------------------------------------------- //
@@ -745,12 +743,15 @@ export function emptyNote(text) {
   return el("p", { class: "empty-note", text });
 }
 
-/** An evidence path. Linked only when it is under `assets/`, which is the one
- *  directory the site actually serves — everything else is a repo path, and a
- *  dead link to `runs/2026-09/deflection.json` is worse than the plain string,
- *  because it looks like the page is offering the file and it is not. */
-export function fileRef(path) {
+/** An evidence path. Linked only when the site serves it: a path under
+ *  `assets/`, or the copy `site build` published (`evidence_assets`, phase 5:
+ *  the evaluator wrote it under the ignored `.nopekit/out/`, and the build
+ *  copied it beside the page). Anything else is a repo path, and a dead link to
+ *  `runs/2026-09/deflection.json` is worse than the plain string, because it
+ *  looks like the page is offering the file and it is not. */
+export function fileRef(path, href = "") {
   const text = String(path);
+  if (href) return el("li", {}, el("a", { class: "mono", href, text }));
   if (text.startsWith("assets/") || text.startsWith("./assets/")) {
     return el("li", {}, el("a", { class: "mono", href: text, text }));
   }

@@ -1634,6 +1634,44 @@ class Requirement(Record):
     source: str = ""
 
 
+#: A group's kinds (SPEC 17): a board groups claims of any kind, a zone
+#: choices, a station derived values that several claim lines share.
+GROUP_KINDS: tuple[str, ...] = ("board", "zone", "station")
+
+
+@dataclass
+class Group(Record):
+    """A board, a zone or a station (SPEC decision 17): one file,
+    ``groups/<id>.json``, whose stem is its id (`store.GROUP_ID`) — and the name
+    of the board's prose, ``site/content/<id>.md``, and the argument of
+    ``nopekit site stamp``. ``kind`` is one of `GROUP_KINDS`; ``title`` the
+    words the page shows; ``line`` one short sentence under it; ``members`` the
+    claim ids on a board, the choice names in a zone, the derived-value names on
+    a station, in the order the page draws them; ``order`` where it sorts among
+    the groups of its kind (then by id).
+
+    What slipped through before it: the reference map grouped claims through
+    hand-kept JavaScript lists that no record held, so a claim added to a board
+    never reached the board, and the page decided each board's go/no-go from the
+    list it had. Membership is a record now, and the status of a board is
+    derived on every build (`page.layout`, `claims.worst_of`).
+
+    *Rejected:* a ``status`` key (a second producer: R-5); positions (SPEC 29:
+    the page lays out the map, the data holds an order); one ``groups.json``
+    (two branches that each add a board conflict on one file, as the milestones
+    would have); a ``board`` field on each claim (a board is the agent's
+    presentation, a claim is a person's statement, and a regroup would then
+    edit every claim file). Hidden from every gate (``verdicts._LEDGER_HIDDEN``):
+    presentation never moves evidence."""
+
+    id: str
+    kind: str = ""
+    title: str = ""
+    line: str = ""
+    members: list[str] = field(default_factory=list)
+    order: int = 0
+
+
 # --------------------------------------------------------------------------- #
 # packs
 # --------------------------------------------------------------------------- #
@@ -1808,6 +1846,10 @@ class Ledger(Record):
     requirements: list = field(default_factory=list)
     """``requirements/*.json`` (SPEC decision 12), natural id order; read whole by
     a gate, traced (``verdicts._LEDGER_WHOLE``), like ``milestones``."""
+    groups: list = field(default_factory=list)
+    """``groups/*.json`` (SPEC 17), natural id order; hidden from every gate
+    (``verdicts._LEDGER_HIDDEN``): a gate that read board membership would re-key
+    on a regroup, and presentation would move evidence."""
 
     def to_dict(self) -> dict[str, Any]:
         out = super().to_dict()
@@ -1819,6 +1861,9 @@ class Ledger(Record):
 
     def requirement(self, rid: str) -> "Requirement | None":
         return next((r for r in self.requirements if r.id == rid), None)
+
+    def group(self, gid: str) -> "Group | None":
+        return next((g for g in self.groups if g.id == gid), None)
 
     # -- lookups ---------------------------------------------------------- #
     def claim(self, cid: str) -> Claim | None:
@@ -1861,6 +1906,7 @@ class Ledger(Record):
             milestones=[Milestone.from_dict(m) for m in data.get("milestones") or []],
             exports=[ExportRecord.from_dict(e) for e in data.get("exports") or []],
             requirements=[Requirement.from_dict(r) for r in data.get("requirements") or []],
+            groups=[Group.from_dict(g) for g in data.get("groups") or []],
         )
 
 
@@ -1880,7 +1926,8 @@ class Ledger(Record):
 #: `milestones/<name>.json` (a declared spend) and `exports/<name>.json` (that
 #: spend's export records, sealed and chained like a results file), last, so
 #: every kind before them keeps its place. SPEC decision 12 adds `requirements/`
-#: last, for the same reason.
+#: last, for the same reason; architecture phase 5 (SPEC 17) adds `groups/`
+#: after `preferences/`, for the same reason again.
 #: The order is `store.RECORD_DIRS`' and a test holds the two equal. Rejected: a
 #: `ledger.json` sharded by kind (`claims.json`, …) — the same conflict per kind.
 RECORD_KINDS: dict[str, type] = {
@@ -1895,6 +1942,7 @@ RECORD_KINDS: dict[str, type] = {
     "exports": ExportRecord,
     "requirements": Requirement,
     "preferences": PreferenceRecord,
+    "groups": Group,
 }
 
 #: Keys a record FILE may never carry, per kind (the class name), each with the
@@ -1958,6 +2006,14 @@ FORBIDDEN_KEYS: dict[str, dict[str, str]] = {
         "claims": "a claim names the requirements it serves (\"requirements\" in "
                   "claims/<id>.json); a requirement never lists its claims",
     },
+    # Architecture phase 5 (SPEC 17, 29): a group holds membership and an
+    # order; what is derived from it, or drawn, has another home.
+    "Group": {
+        "status": "a group's status is derived on every build: the worst of its claims "
+                  "(`nopekit site build`)",
+        "x": "the page lays out the map; a group holds an order, never a position",
+        "y": "the page lays out the map; a group holds an order, never a position",
+    },
     "*": {
         "independence": "derived from origin (pack, human, agent session, external "
                         "solver), never a field the proposer fills in",
@@ -2000,5 +2056,5 @@ __all__ = [
     "LATENCY_UNITS", "Requirement", "CLAIM_MECHANISM",
     "BASES", "BASIS_UNDECLARED", "REJECTION_TYPES", "REJECTION_UNTYPED",
     "RETURN_QUANTITIES", "RETURN_COMPARATORS", "ReturnCondition", "Rejection",
-    "PreferenceRecord",
+    "PreferenceRecord", "Group", "GROUP_KINDS",
 ]

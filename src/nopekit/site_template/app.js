@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// app.js — the renderer. It reads site/data/state.json and nothing else.
+// app.js: the technical record (technical.html). It reads site/data/state.json,
+// and site/data/build.json when it is there (the build time and each result's
+// age, which the tracked files never hold: SPEC 32).
 //
 // The page has two jobs and the second is the reason it is worth building:
 //
@@ -21,7 +23,7 @@
 // `view-source` and audited by whoever has to trust it.
 
 import { el, mount, $ } from "./lib/dom.js";
-import { code, stamp, age, isAged, useWords, phrase } from "./lib/format.js";
+import { code, stamp, age, useWords, phrase } from "./lib/format.js";
 import {
   headline, staleBanner, locatorProblems, claimsPanel, verdictsPanel,
   paramsPanel, evidencePanel, gapsPanel, decisionsPanel, aboutPanel, cssId,
@@ -32,6 +34,8 @@ const STATE_URL = "data/state.json";
 
 const app = {
   state: null,
+  build: null,                 // data/build.json, or null: ages and the build time
+  ages: {},                    // gate -> { when, age_s, aged }, from build.json
   index: { verdictByGate: new Map(), viewById: new Map(), claimById: new Map() },
   hash: parseHash(),
   stage: null,
@@ -44,7 +48,7 @@ boot();
 
 async function boot() {
   const root = $("#app") || document.body;
-  mount(root, el("p", { class: "booting", text: "Reading the ledger…" }));
+  mount(root, el("p", { class: "booting", text: "Reading the data." }));
 
   let state;
   try {
@@ -55,6 +59,16 @@ async function boot() {
     mount(root, noState(err));
     return;
   }
+
+  // BUILD.JSON holds the clock: when the site was built and how old each result
+  // is. It is ignored by git and optional: a page without it shows no ages.
+  try {
+    const res = await fetch("data/build.json", { cache: "no-store" });
+    if (res.ok) app.build = await res.json();
+  } catch (err) {
+    app.build = null;
+  }
+  app.ages = (app.build && app.build.verdicts) || {};
 
   // ANNOTATIONS are authored, not generated: site/annotations.json is written by
   // whoever designed the thing, and it is the explaining half of the page — the
@@ -80,7 +94,7 @@ async function boot() {
 
   document.documentElement.toggleAttribute("data-stale", !!(state.meta || {}).stale);
   const name = (state.meta || {}).name || "nopekit project";
-  document.title = `${name} — ${(state.readiness || {}).all_required_checked ? "ready" : "not ready"}`;
+  document.title = `Technical record: ${name}`;
 
   render(root, state);
 }
@@ -92,7 +106,7 @@ function render(root, state) {
     topbar(state),
     headline(state, app),
     staleBanner(state),
-    mixedAgeBanner(state),
+    mixedAgeBanner(),
     sectionNav(state),
     el("main", { class: "sheet" },
       app.stage.element,
@@ -103,7 +117,7 @@ function render(root, state) {
       evidencePanel(state, app),
       gapsPanel(state, app),
       decisionsPanel(state, app),
-      aboutPanel(state)),
+      aboutPanel(state, app)),
     keyDialog());
 
   wireKeys();
@@ -126,7 +140,9 @@ function topbar(state) {
       // ledger's word for the verdict, never the status (review of P2.1).
       meta.stale ? el("span", { class: "stale-flag", title: meta.stale_reason || "",
         text: `≈ ${phrase("invalidated")}` }) : null,
-      el("span", { class: "muted", text: meta.built ? `built ${stamp(meta.built)}` : "built (unstamped)" }),
+      el("span", { class: "muted", text: app.build && app.build.built
+        ? `Built ${stamp(app.build.built)}` : "No build time" }),
+      el("a", { class: "btn btn-ghost", href: "index.html", text: "Front page" }),
       el("button", { class: "btn btn-ghost", type: "button", text: "Keys",
         onclick: () => document.getElementById("key-dialog").showModal() })));
 }
@@ -135,44 +151,41 @@ function sectionNav(state) {
   const items = [
     ["views", "Views", (state.views || []).length],
     ["claims", "Claims", (state.claims || []).length],
-    ["verdicts", "Gates", (state.verdicts || []).length],
+    ["verdicts", "Evaluators", (state.verdicts || []).length],
     ["params", "Parameters", (state.params || []).length],
     ["evidence", "Evidence", (state.inputs || []).length],
     ["gaps", "Gaps", (state.gaps || []).length],
     ["decisions", "Decisions", (state.decisions || []).length],
-    // Claims and gates are always listed, even at zero. An empty claims section
-    // is a statement about the project ("nothing has been claimed") and quietly
-    // dropping the link would read as the page not having that section at all.
+    // Claims and evaluators are always listed, even at zero. An empty claims
+    // section is a statement about the project ("nothing has been claimed"), and
+    // a missing link would read as the page not having that section at all.
   ].filter(([id, , n]) => n > 0 || id === "claims" || id === "verdicts");
   return el("nav", { class: "section-nav" }, ...items.map(([id, label, n]) =>
     el("a", { href: `#${id}`, class: "section-link" }, label,
       el("span", { class: "section-count", text: String(n) }))));
 }
 
-/** Verdicts of visibly different ages under one "built" timestamp.
+/** Verdicts of visibly different ages under one build time.
  *
- *  `site build` deliberately does not re-run gates, and a `--only` sweep leaves
- *  the gates it skipped at their previous results — so a page can legitimately
- *  show a tier-0 number from a minute ago beside a tier-2 number from last week.
- *  That is honest, but only if it is SAID: a single build stamp at the top of the
- *  page otherwise reads as one timestamp over everything below it. */
-function mixedAgeBanner(state) {
-  const ages = (state.verdicts || []).map((v) => v.age_s).filter((a) => a !== null && a !== undefined);
-  if (ages.length < 2) return null;
-  const newest = Math.min(...ages), oldest = Math.max(...ages);
-  if (!(isAged(oldest) && oldest > newest * 4)) return null;
-  const stale = (state.verdicts || []).filter((v) => isAged(v.age_s));
+ *  `site build` does not re-run evaluators, and a `--only` sweep leaves the
+ *  ones it skipped at their previous results, so a page can show a tier-0
+ *  number from a minute ago beside a tier-2 number from last week. That is
+ *  true, and only if it is SAID. Whether to say it is `build.json`'s
+ *  `mixed_age`, decided by `site build` (SPEC 32): the page compares no ages. */
+function mixedAgeBanner() {
+  const mixed = (app.build && app.build.mixed_age) || {};
+  if (!mixed.shown) return null;
   return el("aside", { class: "banner banner-age", role: "status" },
     el("span", { class: "banner-glyph", "aria-hidden": "true", text: "≈" }),
     el("div", {},
-      el("b", { text: "These results are not all the same age. " }),
-      `The oldest is ${age(oldest)}, the newest ${age(newest)}. `,
+      el("b", { text: "These results do not all have the same age. " }),
+      `The oldest is ${age(mixed.oldest_s)}. The newest is ${age(mixed.newest_s)}. `,
       el("span", { class: "muted", text:
-        "Building the site does not re-run gates — a check run that left the expensive ones " +
-        "out leaves them at their previous answer, and one timestamp over all of it would hide that." }),
-      el("p", { class: "small" }, "Aged: ",
-        ...stale.map((v) => el("button", { class: "linkish mono", type: "button", text: v.gate,
-          onclick: () => reveal(`gate-${cssId(v.gate)}`) })))));
+        "A site build runs no evaluator. A check that leaves out the slow " +
+        "evaluators keeps their earlier results." }),
+      el("p", { class: "small" }, "Older than a day: ",
+        ...(mixed.gates || []).map((gate) => el("button", { class: "linkish mono", type: "button", text: gate,
+          onclick: () => reveal(`gate-${cssId(gate)}`) })))));
 }
 
 /** The page with no data, which is a page someone WILL hit — `site init` writes
@@ -181,24 +194,25 @@ function mixedAgeBanner(state) {
 function noState(err) {
   const isFile = location.protocol === "file:";
   return el("div", { class: "no-state" },
-    el("h1", { text: "No ledger data on this page yet." }),
-    el("p", { class: "mono small", text: `${STATE_URL} — ${err && err.message ? err.message : err}` }),
+    el("h1", { text: "This page has no data yet." }),
+    el("p", { class: "mono small", text: `${STATE_URL}: ${err && err.message ? err.message : err}` }),
     isFile
       ? el("div", {},
-          el("p", {}, el("b", { text: "This page was opened from the filesystem." }),
-            " A browser will not let a module fetch a neighbouring file over ", code("file://"), "."),
+          el("p", {}, el("b", { text: "This page was opened from the disk." }),
+            " A browser does not let a module read a file beside it over ", code("file://"), "."),
           el("pre", { class: "cmd" }, code("nopekit site serve")),
-          el("p", { class: "small muted" }, "which is ", code("python3 -m http.server"), " and nothing else."))
+          el("p", { class: "small muted" }, "That command serves the site. It is ",
+            code("python3 -m http.server"), " with the correct types."))
       : el("div", {},
           el("p", { text: "Build it from the project root:" }),
           el("pre", { class: "cmd" }, code("nopekit site build")),
           el("p", { class: "small muted" },
             "That runs the viewgens and writes ", code("site/data/state.json"),
-            " from the ledger. It runs no evaluator — if a verdict is invalidated, ",
+            " from the records. It runs no evaluator. If a verdict is out of date, run ",
             code("nopekit check"), " first.")),
     el("p", { class: "small muted", text:
-      "The site is an output. Nothing under site/data/ is hand-edited, and nothing here is a " +
-      "source of truth about the project." }));
+      "The site is an output. Nobody edits site/data/ by hand. Nothing here is a source " +
+      "of truth about the project." }));
 }
 
 function keyDialog() {

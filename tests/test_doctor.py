@@ -93,7 +93,13 @@ ROWS = ("instruments", "opaque-inputs", "cache-entries", "two-outcomes", "sealed
         # Architecture phase 3a (SPEC 18, 19): the graph's pointers, and the
         # round record's state (`test_round.ABehindRoundRecordSaysSo` plants
         # each warning).
-        "graph", "round")
+        "graph", "round",
+        # Architecture phase 5 (SPEC 17, 36): the groups, and the README's badge
+        # (test_groups plants each FAIL and warning; `site text` shows only
+        # where a site and its text exist, and
+        # test_site_truth.TheReadersSayTheTextIsBehind holds its ok and its
+        # warning).
+        "groups", "readme")
 
 #: A fixture every planted project gate can borrow: the bracket's own, which
 #: sags the known-good design 30 mm — past any limit the planted gates use.

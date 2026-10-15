@@ -140,7 +140,7 @@ __all__ = [
     "Latency",
     "latency",
     "RequirementStatus",
-    "requirement_statuses",
+    "requirement_statuses", "worst_of",
     "MechanismProblem",
     "mechanism_problems",
     "MECHANISM_YET_TO_RUN",
@@ -2039,14 +2039,29 @@ def requirement_statuses(ledger: Ledger, composed: Mapping[str, Composed]
         rid = requirement.id
         serving = [c.id for c in ledger.claims
                    if rid in (getattr(c, "requirements", None) or ()) and c.id in composed]
-        if not serving:
-            out[rid] = RequirementStatus(rid, ClaimStatus.UNCLAIMED, False, (), ())
-            continue
-        rank = min(severity(composed[cid]) for cid in serving)
-        worst = tuple(cid for cid in serving if severity(composed[cid]) == rank)
-        first = composed[worst[0]]
-        out[rid] = RequirementStatus(rid, first.status, first.errored, tuple(serving), worst)
+        status, errored, worst = worst_of(serving, composed)
+        out[rid] = RequirementStatus(rid, status, errored, tuple(serving),
+                                     tuple(worst) if serving else ())
     return out
+
+
+def worst_of(ids: Any, composed: Mapping[str, Composed]
+             ) -> tuple[ClaimStatus, bool, tuple]:
+    """The worst composition among ``ids`` (those ``composed`` holds), in
+    `SEVERITY_ORDER`: ``(status, errored, worst ids)`` — a crash's Skipped above
+    a plain one (invariant 2 carries up), ties in the order given. With none,
+    Gap (UNCLAIMED), not errored, ``()``: nothing to stand on is never a pass.
+    The one fold a requirement (`requirement_statuses`) and a board on the site
+    (`page`, SPEC 17) both ask, so the two cannot disagree (invariant 14).
+    *Rejected:* a board fold of its own in the page module (a second producer,
+    R-5)."""
+    held = [cid for cid in ids or () if cid in composed]
+    if not held:
+        return ClaimStatus.UNCLAIMED, False, ()
+    rank = min(severity(composed[cid]) for cid in held)
+    worst = tuple(cid for cid in held if severity(composed[cid]) == rank)
+    first = composed[worst[0]]
+    return first.status, bool(first.errored), worst
 
 
 # --------------------------------------------------------------------------- #

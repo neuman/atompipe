@@ -1,0 +1,9 @@
+{
+  "kind": "zone",
+  "title": "Load and material",
+  "members": [
+    "load_n",
+    "safety_factor",
+    "material"
+  ]
+}

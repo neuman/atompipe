@@ -53,7 +53,7 @@ export function createStage(state, app) {
 
   const element = el("section", { class: "panel panel-stage", id: "views" },
     panelHead("Views", views.length ? plural(views.length, "view") : "",
-      "Gate results, anchored to the thing they are about."),
+      "Evaluator results, attached to the part that each one is about."),
     views.length ? tabs : null,
     el("div", { class: "stage-grid" },
       el("div", { class: "stage-main" }, host, note, controls),
@@ -63,10 +63,9 @@ export function createStage(state, app) {
     mount(host, el("div", { class: "stage-empty" },
       el("p", { text: "This project has no views." }),
       el("p", { class: "small muted", text:
-        "That is a normal state, not a missing feature: a project with no geometry — a " +
-        "process, a supply chain, a design that has not been exported yet — still has " +
-        "claims, verdicts, evidence and a readiness sentence, and they are all below. " +
-        "A pack that emits a view gets a picture here for free." })));
+        "That is a normal state. A project with no geometry (a process, a supply chain, " +
+        "a design that nobody exported yet) still has claims, verdicts, evidence and a " +
+        "readiness sentence. They are all below. A pack that emits a view shows a picture here." })));
     mount(side, unanchoredList(state, app));
   }
 
@@ -75,16 +74,13 @@ export function createStage(state, app) {
   // ------------------------------------------------------------------- //
   function paintTabs() {
     mount(tabs, ...views.map((v) => {
-      const anchored = anchoredVerdicts(v.id);
-      const failing = anchored.filter((x) => !x.verdict.ok).length;
       return el("button", {
         class: `view-tab${active && active.id === v.id ? " is-active" : ""}`,
         type: "button", role: "tab", "aria-selected": String(!!active && active.id === v.id),
         onclick: () => showView(v.id),
       },
         el("span", { class: "view-tab-kind", text: v.kind }),
-        el("span", { class: "view-tab-title", text: v.title || v.id }),
-        failing ? el("span", { class: "view-tab-bad", title: `${failing} failing here`, text: `✕${failing}` }) : null);
+        el("span", { class: "view-tab-title", text: v.title || v.id }));
     }));
   }
 
@@ -110,7 +106,7 @@ export function createStage(state, app) {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         next.data = await res.json();
       } catch (err) {
-        mount(note, problem(`${next.data_url} did not load (${err.message}). Re-run \`nopekit site build\`.`));
+        mount(note, problem(`${next.data_url} did not load (${err.message}). Run \`nopekit site build\` again.`));
       }
     }
     if (active !== next) return;                 // a faster click won
@@ -131,11 +127,11 @@ export function createStage(state, app) {
     // lives in the data. A seventh kind is a pack talking to a newer site than
     // this one, and saying so beats rendering a blank panel.
     return mount(host, el("div", { class: "stage-empty" },
-      el("p", {}, "This view is of kind ", code(kind), ", which this renderer does not know."),
+      el("p", {}, "This view is of kind ", code(kind), ". This renderer does not know that kind."),
       el("p", { class: "small muted", text:
-        "The site renders model3d, image, chart, table, field and diagram. A pack emitting " +
-        "anything else is ahead of the page: upgrade the site template, or re-emit the view " +
-        "in a kind the renderer implements." })));
+        "The site renders model3d, image, chart, table, field and diagram views. A pack that " +
+        "emits another kind is newer than this page. Upgrade the site template, or emit the " +
+        "view in a kind that the renderer knows." })));
   }
 
   // ------------------------------------------------------------------- //
@@ -145,7 +141,7 @@ export function createStage(state, app) {
     const frame = el("div", { class: "viewer" });
     mount(host, frame);
     if (!active.src) {
-      mount(host, problem("This 3D view carries no asset. The viewgen produced a record but no GLB."));
+      mount(host, problem("This 3D view has no asset. The viewgen wrote a record and no GLB file."));
       return;
     }
     viewer = createViewer({
@@ -161,8 +157,8 @@ export function createStage(state, app) {
         mount(host, el("div", { class: "viewer-fallback" },
           el("p", { class: "tone-bad" }, el("b", { text: "No 3D viewer. " }), err.message),
           el("p", { class: "small muted", text:
-            "Everything the viewer would have shown is still addressable: the parts this " +
-            "view declares are listed here, and the verdicts anchored to them are beside it." }),
+            "This list shows the parts that this view declares. The verdicts attached to " +
+            "them are beside it." }),
           nodeList(active, app)));
         paintControls();
         paintSide();
@@ -212,9 +208,9 @@ export function createStage(state, app) {
     // and the actual export disagree, which nothing upstream can see.
     if (missing.length) {
       mount(note, problem(
-        `${plural(missing.length, "locator")} could not be placed: this model has no node named ` +
-        `${missing.map((m) => `'${m}'`).join(", ")}. The node names a viewgen exports are the ` +
-        `interface its pack's gates address — one side of it has moved.`));
+        `${plural(missing.length, "locator")} could not be placed. This model has no node named ` +
+        `${missing.map((m) => `'${m}'`).join(", ")}. The evaluators of a pack find parts by ` +
+        `the node names that its viewgen exports. One side of that interface changed.`));
     }
   }
 
@@ -271,16 +267,15 @@ export function createStage(state, app) {
     if (!active) return;
     const annotations = annotationsFor(active.id);
     const anchored = anchoredVerdicts(active.id);
-    const failing = anchored.filter((a) => !a.verdict.ok);
     mount(side,
       el("h3", { class: "side-head" }, "Anchored here",
-        tag(String(anchored.length), { tone: failing.length ? "bad" : "muted" })),
+        tag(String(anchored.length), { tone: "muted" })),
       anchored.length
         ? el("ul", { class: "anchor-list" }, ...anchored.map((a, i) => anchorRow(a, i)))
         : el("p", { class: "small muted", text:
-            "No verdict points at this view. Either nothing here is in question, or the gates " +
-            "that cover it could not say where the problem was — an unlocatable failure carries " +
-            "no anchor rather than guessing at one." }),
+            "No verdict points at this view. Nothing here is in question, or its evaluators " +
+            "do not know where the problem is. An evaluator that does not know the place " +
+            "attaches no anchor." }),
       active.description ? el("p", { class: "view-desc", text: active.description }) : null,
       annotations.length
         ? el("div", { class: "annots" },
@@ -379,8 +374,11 @@ export function createStage(state, app) {
   // ------------------------------------------------------------------- //
   // helpers over the ledger
   // ------------------------------------------------------------------- //
-  /** Locators addressing one view, worst first. Failing verdicts lead because
-   *  they are the reason anyone opened the page in debug mode. */
+  /** Locators addressing one view, worst first, in the verdicts' baked
+   *  reading order (`order`, SPEC 32). What slipped through before phase 5:
+   *  this ranked verdicts by their `error`, `passed` and `skipped` flags, a
+   *  second opinion beside the resolver's status, and a row with both
+   *  `passed` and `skipped` set ranked as a pass. */
   function anchoredVerdicts(viewId) {
     const out = [];
     for (const verdict of state.verdicts || []) {
@@ -388,8 +386,7 @@ export function createStage(state, app) {
         if (locator.view === viewId) out.push({ locator, verdict });
       }
     }
-    const rank = (a) => (a.verdict.error ? 0 : !a.verdict.passed ? 1 : a.verdict.skipped ? 2 : 3);
-    return out.sort((a, b) => rank(a) - rank(b) || String(a.verdict.gate).localeCompare(String(b.verdict.gate)));
+    return out.sort((a, b) => (a.verdict.order ?? 0) - (b.verdict.order ?? 0));
   }
 
   const locatorsFor = (viewId) => anchoredVerdicts(viewId).map((a) => a.locator);
@@ -578,9 +575,9 @@ export async function renderDiagram(view, host, note) {
       el("figcaption", { text: "mermaid source" }),
       el("pre", {}, code(String(data.mermaid)))));
     mount(note, el("p", { class: "small muted", text:
-      "Rendered as source: the site ships no mermaid renderer, because the one artifact " +
-      "whose job is to be trusted should not pull a second library to draw a box. A viewgen " +
-      "that emits SVG gets a drawn diagram and addressable element ids." }));
+      "This shows the source. The site has no mermaid renderer, because a page that people " +
+      "must trust loads no extra library to draw a box. A viewgen that emits SVG gets a " +
+      "drawn diagram, and a locator can address its element ids." }));
     return;
   }
   const markup = data.svg || "";
@@ -606,7 +603,7 @@ export async function renderDiagram(view, host, note) {
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   const svgRoot = doc.documentElement;
   if (!svgRoot || svgRoot.nodeName === "parsererror") {
-    mount(host, problem("that SVG did not parse."));
+    mount(host, problem("This SVG did not parse."));
     return;
   }
   svgRoot.querySelectorAll("script, foreignObject").forEach((n) => n.remove());

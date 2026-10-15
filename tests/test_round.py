@@ -35,6 +35,12 @@ from nopekit import cli, graph, report as report_mod, rounds, util
 from nopekit.models import ClaimStatus
 
 NOW = "2026-10-15T00:00:00Z"
+
+#: The round the bracket's committed record holds: it moves each time the
+#: bracket's cache is regenerated (architecture phase 5 wrote round 2), so the
+#: tests read it rather than repeat it.
+with open(os.path.join(_projects.BRACKET, ".nopekit", "round.json"), encoding="utf-8") as _fh:
+    R = json.load(_fh)["round"]
 SRC = os.path.join(_env.REPO, "src", "nopekit")
 
 
@@ -123,7 +129,7 @@ class OnlyRoundWritesTheRoundRecord(_env.EnvCase):
         self.assertEqual(untouched_problems(root, _NOT_ROUND), [])
         code, out, err = main(root, "round")
         self.assertEqual(code, 0, err)
-        self.assertTrue(out.startswith("round 1 stands: nothing it records moved."), out)
+        self.assertTrue(out.startswith(f"round {R} stands: nothing it records moved."), out)
 
     def test_round_writes_the_next_round_and_names_the_flip(self):
         root = bracket(os.path.join(self.tmp(), "b"))
@@ -134,11 +140,11 @@ class OnlyRoundWritesTheRoundRecord(_env.EnvCase):
         code, out, err = main(root, "round")
         self.assertEqual(code, 0, err)
         self.assertNotEqual(stamp(root), before)
-        self.assertTrue(out.startswith("round 2: C1 failing -> checked"), out)
+        self.assertTrue(out.startswith(f"round {R + 1}: C1 failing -> checked"), out)
         self.assertIn("Wrote .nopekit/round.json.", out)
         with open(record_path(root), encoding="utf-8") as fh:
             doc = json.load(fh)
-        self.assertEqual((doc["round"], doc["claims"]["C1"]), (2, "checked"))
+        self.assertEqual((doc["round"], doc["claims"]["C1"]), (R + 1, "checked"))
 
     def test_a_check_that_writes_it_is_caught(self):
         root = bracket(os.path.join(self.tmp(), "b"))
@@ -517,14 +523,14 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
     def test_status_says_current_then_what_moved(self):
         root = bracket(os.path.join(self.tmp(), "b"))
         code, out, err = main(root, "status")
-        self.assertIn("round record: round 1, current with the records, the verdict cache "
+        self.assertIn(f"round record: round {R}, current with the records, the verdict cache "
                       "and the design", out)
         _edit_record(root)
         code, out, err = main(root, "status")
-        self.assertIn("round record: round 1, behind the records — the records moved since "
+        self.assertIn(f"round record: round {R}, behind the records — the records moved since "
                       "it was written; `nopekit round` writes the next", out)
         doc = json.loads(main(root, "status", "--json")[1])["round"]
-        self.assertEqual(doc, {"state": "behind", "round": 1, "moved": ["records"], "why": ""})
+        self.assertEqual(doc, {"state": "behind", "round": R, "moved": ["records"], "why": ""})
 
     def test_each_input_is_seen(self):
         self.assertEqual(behind_problems(lambda: bracket(os.path.join(self.tmp(), "b"))), [])
@@ -549,7 +555,7 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(text.replace('"C1": "failing"', '"C1": "checked"'))
         self.assertEqual(round_state(root).state, "edited")
-        self.assertIn("round record: round 1, edited by hand — its digest does not match "
+        self.assertIn(f"round record: round {R}, edited by hand — its digest does not match "
                       "what it holds", main(root, "status")[1])
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("<<<<<<< HEAD\n" + text + "=======\n" + text + ">>>>>>> theirs\n")
@@ -567,10 +573,10 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
         with open(path, "wb") as fh:
             fh.write(rounds.render(doc))
         self.assertEqual(round_state(root).state, "edited")
-        self.assertIn("round record: round 1, edited by hand", main(root, "status")[1])
+        self.assertIn(f"round record: round {R}, edited by hand", main(root, "status")[1])
         code, out, err = main(root, "round")
         self.assertEqual(code, 0, err)
-        self.assertTrue(out.startswith("round 2: the last round record was edited by hand"),
+        self.assertTrue(out.startswith(f"round {R + 1}: the last round record was edited by hand"),
                         out)
         with open(path, encoding="utf-8") as fh:
             rewritten = json.load(fh)
@@ -601,7 +607,7 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
         found = round_state(root)
         self.assertEqual((found.state, found.moved), ("behind", ("resolution",)))
         out = main(root, "status")[1]
-        self.assertIn("round record: round 1, behind the records — the resolution (an "
+        self.assertIn(f"round record: round {R}, behind the records — the resolution (an "
                       "evaluator's code, its controls, a pack or a tool) moved since it was "
                       "written", out)
         row = doctor_round_row(root)
@@ -614,12 +620,12 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
         root = bracket(os.path.join(self.tmp(), "b"))
         row = doctor_round_row(root)
         self.assertEqual(row["status"], "ok", row)
-        self.assertEqual(row["detail"], "round 1, current with the records, the verdict "
+        self.assertEqual(row["detail"], f"round {R}, current with the records, the verdict "
                                         "cache and the design")
         _edit_record(root)
         row = doctor_round_row(root)
         self.assertEqual(row["status"], "warn", row)
-        self.assertIn("round 1, behind the records — the records moved", row["detail"])
+        self.assertIn(f"round {R}, behind the records — the records moved", row["detail"])
         path = record_path(root)
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
@@ -627,7 +633,7 @@ class ABehindRoundRecordSaysSo(_env.EnvCase):
             fh.write(text.replace('"C1": "failing"', '"C1": "checked"'))
         row = doctor_round_row(root)
         self.assertEqual(row["status"], "warn", row)
-        self.assertIn("round 1, edited by hand", row["detail"])
+        self.assertIn(f"round {R}, edited by hand", row["detail"])
 
 
 # --------------------------------------------------------------------------- #
@@ -833,12 +839,12 @@ class RoundSummary(_env.EnvCase):
         self.assertEqual(set(doc), {"round", "written", "path", "previous", "changes",
                                     "counts", "readiness", "check", "site", "summary"})
         self.assertEqual((doc["round"], doc["written"], doc["path"]),
-                         (1, False, rounds.ROUND_REL))
+                         (R, False, rounds.ROUND_REL))
         self.assertEqual(set(doc["changes"]), {"compared", "replaced", "claims", "requirements",
                                                "verdicts", "instructions",
                                                "instructions_unrecorded", "readiness",
                                                "moved"})
-        self.assertTrue(doc["summary"].startswith("round 1 stands"), doc["summary"])
+        self.assertTrue(doc["summary"].startswith(f"round {R} stands"), doc["summary"])
 
     def test_what_changed_end_to_end(self):
         """`changes()` over a real run: a claim's flip and its requirement's, the

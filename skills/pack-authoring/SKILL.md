@@ -282,6 +282,12 @@ Three things to get right:
   naming a view or a node that does not exist. That is the check that catches the
   rename you did on one side of the interface and not the other.
 
+Viewgens run in `order`, and the first `model3d` view by order is the front page's
+representation (else the first image or diagram view): give the view that shows the
+whole design the lowest `order`. Write byte-stable assets — no clock, no random id, no
+unordered dict in a GLB or an SVG — because the site is committed and a rebuild that
+judged nothing new must change no tracked byte.
+
 A pack with no view still works; the site degrades all the way down to claims,
 verdicts and provenance. But if your domain has geometry and you skip this, every
 failure it finds stays a sentence about coordinates. Contract:

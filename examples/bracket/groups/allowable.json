@@ -1,0 +1,8 @@
+{
+  "kind": "station",
+  "title": "Allowed stress",
+  "line": "Yield divided by the safety factor",
+  "members": [
+    "design_stress"
+  ]
+}

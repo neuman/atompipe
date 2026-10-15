@@ -213,10 +213,11 @@ class Graph:
                 "nodes": {n.id: dict(n.attrs) for n in self.nodes}, "edges": edges}
 
 
-def _upward(graph: Graph, value: str) -> list[str]:
-    """``value`` and every value it derives from over ``derives`` edges,
-    transitively (a choice a derived value moves with) — the closure
-    ``rests_on`` reads. Just ``[value]`` until a trace adds derives edges."""
+def upward(graph: Graph, value: str) -> list[str]:
+    """``value`` (a node id) and every value it derives from over ``derives``
+    edges, transitively (a choice a derived value moves with) — the closure
+    ``rests_on`` reads, and the site's map closes a line's reads over
+    (architecture phase 5). Just ``[value]`` until a trace adds derives edges."""
     seen = [value]
     stack = [value]
     while stack:
@@ -226,6 +227,10 @@ def _upward(graph: Graph, value: str) -> list[str]:
                 seen.append(up)
                 stack.append(up)
     return seen
+
+
+#: The private name phase 3a's callers use.
+_upward = upward
 
 
 # --------------------------------------------------------------------------- #
@@ -625,5 +630,5 @@ __all__ = [
     "SCHEMA", "NODE_KINDS", "EDGE_TYPES", "VALUE_ROLES",
     "Node", "Edge", "Trace", "Graph", "Tokens",
     "node_id", "value_names", "derived_names", "served_reads", "value_sources", "observe",
-    "build", "tokens", "of",
+    "build", "tokens", "of", "upward",
 ]

@@ -131,7 +131,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # Architecture phase 3a: only `round` writes the round record, and
         # nothing reads it for truth.
         "test_round.OnlyRoundWritesTheRoundRecord",
-        "test_round.NothingReadsTheRoundRecordForTruth"],
+        "test_round.NothingReadsTheRoundRecordForTruth",
+        # Architecture phase 5: groups are records.
+        "test_records.GroupsAreRecords"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -198,7 +200,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # says, a forged one moves nothing, and no graph edge moves a status.
          "test_round.TheRoundRecordSaysWhatTheCompositionSays",
          "test_round.NothingReadsTheRoundRecordForTruth",
-         "test_graph.AnEdgeChangesNoStatus"],
+         "test_graph.AnEdgeChangesNoStatus",
+         # Architecture phase 5: next steps on the page are the predicate's.
+         "test_site_truth.NextStepsAreThePredicate"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and
@@ -207,6 +211,16 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_preferences.ANomineeAloneNeverCounts",
          "test_preferences.ThePreferenceFileIsSealedAndChained",
          "test_preferences.APreferenceIsBoundToWhatThePersonRead"],
+    # 14 (architecture phase 5, reserved in SPEC §8): the site never says more
+    # than the resolution, and stamped prose is flagged when behind — a baked
+    # token against the composition, a stale or missing stamp, a number no
+    # baked file holds.
+    14: ["test_site_truth.TheSiteNeverSaysMoreThanTheResolution",
+         "test_site_truth.StampedProseIsFlaggedWhenBehind",
+         "test_site_truth.ANumberNoBakedFileHoldsIsFlagged",
+         # The template side: no page script computes a status, a margin, a
+         # reading order or an age.
+         "test_site_truth.TheBrowserComputesNoTruth"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: "test_mutation.MutationIsSealed",
@@ -794,7 +808,11 @@ CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs",
                      # Architecture phase 3a: the graph and the round record are
                      # clock-free by construction — their bytes must not move
                      # with the time a command ran.
-                     "graph", "rounds")
+                     "graph", "rounds",
+                     # Architecture phase 5: the front page's bake and the prose
+                     # scans — a clock in either would move a tracked baked byte
+                     # on every build.
+                     "page", "prose")
 
 
 def _clock_findings(source: str, filename: str = "<planted>") -> list[str]:

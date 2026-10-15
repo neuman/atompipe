@@ -1,0 +1,9 @@
+{
+  "kind": "board",
+  "title": "Stays quiet beside the pump",
+  "line": "The shelf does not shake when the pump runs.",
+  "members": [
+    "C7"
+  ],
+  "order": 3
+}

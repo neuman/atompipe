@@ -14,6 +14,42 @@ that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
 The budget is 90 s as ONE process on an otherwise idle machine. The review of
+architecture phase 5 added ~0.3 s (its in-process rows: a Failing claim never worded
+inside its limit, the project's group, a claim named from another board, the checker
+over baked prose, the scan's units) and paid ~2.9 s: the two records-sweep rows
+phase 5 added (`site stamp --all`, `site badge`, ~1.8 s) to tests of their own left
+to the gate, and test_meta.NoSubprocessOutsideRun (~1.1 s, a harness guard) to the
+full suite, so the ~2.5 s phase 5 left standing is paid. Measured on 2026-10-15 as
+two interleaved pairs against c392078 (load average 0.9-2.2, not idle: the base
+itself ran 113-114 s on that machine, where the data side had measured 96.5 s): 110.3
+s and 113.9 s wall (83.2 s and 85.3 s user) for its 665 tests, against 113.0 s and
+114.1 s (85.4 s and 86.4 s user) for c392078's 661. Under its base, not shown under
+the line: no idle run was had, so the next change that adds pays first. Architecture
+phase 5's template side added ~0.25 s (`TheBrowserComputesNoTruth` and the template's style
+scan, both source scans) and paid ~1.5 s: test_meta.EnvIsFaithful and
+test_meta.NoTestShadowsTheFramework to the full suite (harness guards, no invariant;
+named where `test_meta` was). Measured on 2026-10-15 as interleaved pairs against the
+data side's ea175d5 on a machine other sessions were loading (load average 1.0-10.6,
+not idle): 103.7 s and 99.9 s wall (76.2 s and 74.3 s user) for its 661 tests against
+115.1 s and 108.4 s (85.0 s and 80.1 s user) for ea175d5's 660 (a third pair, 197 s
+against 116 s, ran beside another session's suite and is not counted). Not slower than
+its base, and still over the line on that machine: the rest the data side left (below)
+stands, and the next change that touches the tier pays first. Architecture phase 5
+(the site) is OVER the line, said here rather than hidden: two interleaved pairs on
+2026-10-15 (load average 0.6-1.6) measured 96.5 s and 97.7 s wall (71.5-72.2 s user)
+for its 661 tests, against 89.4 s and 93.8 s (68.6-69.5 s user) for fe9f6e3's 647.
+What it added, by `--durations` against the same base (~3.8 s of test time): its
+invariant 14 and 12 rows and the groups record in process (~0.9 s, after sharing one
+bracket copy and its resolution across the in-process rows: first written, they cost
+~2.5 s), the two rows the design added to both records sweeps, `site stamp --all` and
+`site badge` (~1.8 s, kept: a command that writes is what those sweeps exist to
+catch), the site register's sentences in the hardware-clause rows (~0.3 s) and the
+meta scans over four more test modules (~0.4 s). What it paid (~1.2 s): to the full
+suite, test_cache.PairedEntries, test_packs.NoLeakedProvenance,
+test_prerequisites.ApplyingTheRuleTwiceMovesNothing and the graph's four neighbours
+(none an invariant class, each named where it was); to the gate, the number scan's
+build row. The rest (~2.5 s) stands: the next change that touches the fast tier pays
+it back first. The review of
 phase 3a added ~1.3 s (the evaluator edit that reads behind, the hand-bumped schema,
 the forgery read back through five more readers, the doctor row) and paid ~1.3 s:
 the doctor row to the gate, and the graph's and the round record's bytes on another
@@ -218,6 +254,9 @@ out below are the channels that code carries:
   `cmd_status`, `cmd_doctor`, `claim list`/`show`, `decisions.why`,
   `site.state` or the site template — -> `test_louder` is in this tier; also
   run `test_renderers`, `test_junit`, `test_shapes` and `test_site` whole;
+* the site — its template, `site.py`, `page.py`, `prose.py` or `graph.py`
+  (architecture phase 5) -> `test_map`, `test_site_truth` and `test_style`
+  whole, and `test_site`;
 * a goalpost or an operating context (P2.4) — `GateContext.acceptance`,
   `gates._held_to_acceptances`/`_held_to_context`/`context_breach`/
   `goalpost_runs`, `verdicts._contexted` and the `acceptance:` ledger keys,
@@ -256,8 +295,21 @@ FAST: list[str] = [
     # The tests about the tests: each numbered invariant maps to a class that
     # exists and never skips; no subprocess outside `_env.run`, no clock below
     # the edge, no git outside `vcs`. Weakening an invariant test is the cheapest
-    # way to green, so this runs every iteration. 2.8 s.
-    "test_meta",
+    # way to green, so this runs every iteration. ~2 s. (Architecture phase 5's
+    # template side paid with two of its classes, ~1.5 s, left to the full suite:
+    # test_meta.EnvIsFaithful (the test environment `_env.run` builds, 0.9 s) and
+    # test_meta.NoTestShadowsTheFramework (an AST walk over every test module,
+    # 0.6 s). Neither holds an invariant; each guards the harness, which an
+    # iteration on the spine or the site does not touch. The review of phase 5
+    # paid with a third of the same kind, ~1.1 s: test_meta.NoSubprocessOutsideRun
+    # (an AST walk over every test module for a process started outside
+    # `_env.run`); an iteration that adds a test which starts a process runs
+    # test_meta whole.)
+    "test_meta.EveryInvariantHasItsTest",
+    "test_meta.TheInvariantTableIsTheMap",
+    "test_meta.InvariantClassesNeverSkip",
+    "test_meta.NoWallClockBelowTheEdge",
+    "test_meta.NoGitOutsideVcs",
     # (House rule: the spine is standard library only. test_stdlib_only — CI's
     # own AST walk over the spine and a planted third-party import, 0.4 s — is
     # left to the full suite by architecture phase 2's pay-back: CI's first step
@@ -468,8 +520,9 @@ FAST: list[str] = [
     "test_admission.QualificationIsPaired.test_a_known_bad_pass_beside_a_crashed_known_good_half_is_remembered",
     "test_admission.QualificationIsPaired.test_each_unusable_or_crashed_control_is_named_in_its_own_words",
     "test_admission.TheCheckRunTakesTheQualifiedPath",
-    # The control entry's paired shape and its strict reader (V8). 0.1 s.
-    "test_cache.PairedEntries",
+    # (Architecture phase 5's pay-back: test_cache.PairedEntries, the control
+    # entry's paired shape and its strict reader, ~0.3 s, to the full suite —
+    # no invariant class; QualificationIsPaired above reads the same entries.)
 
     # -- invariant 7: stale is not current (test_staleness is ~95 s whole) - #
     # Every in-process channel: same-size edits with mtime restored, the racy
@@ -534,9 +587,9 @@ FAST: list[str] = [
     # (UnselectedDependentFollowsTheSweep, 0.3 s, left to the full suite by
     # architecture phase 2's pay-back: no invariant class, and the merged view
     # it reads is PrerequisiteFailureIsNeverAPass's above.)
-    # The review of P2.2: applying the rule twice moves nothing (`cli._swept`
-    # applies it over a view `resolve` already ruled on). In process, 0.2 s.
-    "test_prerequisites.ApplyingTheRuleTwiceMovesNothing",
+    # (Architecture phase 5's pay-back: test_prerequisites.ApplyingTheRuleTwice-
+    # MovesNothing, ~0.1-0.2 s, to the full suite — no invariant class; the rule
+    # itself is PrerequisiteFailureIsNeverAPass's, above.)
     "test_prerequisites.PlanIsStable.test_without_needs_run_order_is_registration_order",
     "test_prerequisites.PlanIsStable.test_needs_order_is_dfs_postorder",
     "test_prerequisites.PlanIsStable.test_a_plan_that_does_not_expand_is_caught",
@@ -642,9 +695,9 @@ FAST: list[str] = [
     "test_packs.TestsTheBundledCopy",
 
     # -- house rule: no reference to the parent project ------------------- #
-    # The whole walk and its planted violators. Note: it reads the working
-    # tree, untracked files included, here as in the full suite. 0.1 s.
-    "test_packs.NoLeakedProvenance",
+    # (Architecture phase 5's pay-back: test_packs.NoLeakedProvenance, the
+    # whole walk and its planted violators, ~0.15 s, to the full suite — a house
+    # rule, no invariant class; CI runs the full suite before every merge.)
     # -- invariant 11 (P2.5a): the channel, the sealed results file, an owner
     # and an authority only as recorded, what a physical result can do — and 4,
     # 7 and planned 12 over a physical claim. Their in-process rows (~1.5 s): the
@@ -830,17 +883,51 @@ FAST: list[str] = [
     "test_round.ABehindRoundRecordSaysSo.test_an_evaluator_edit_reads_behind",
     "test_round.TheRoundRecordIsByteStable.test_it_is_tracked_in_an_init_project",
     "test_graph.AnEdgeChangesNoStatus",
-    # The graph's neighbours, in process (<0.3 s together): its bytes under a
-    # reversed listing and other words; the observed view agreeing with it; and
-    # the pointers it refuses to follow. The review of phase 3a's pay-back
-    # (~0.8 s, neither an invariant class): its bytes on another path, and the
-    # round record's on two paths and under other words, to the full suite —
-    # the committed record's currency (test_bracket_cache) and the two hash
-    # seeds' row hold byte stability there.
-    "test_graph.TheGraphIsDeterministic.test_listing_order_moves_nothing",
-    "test_graph.TheGraphIsDeterministic.test_words_move_nothing_and_no_statement_is_written",
-    "test_graph.ObservedViewAgreesWithTheGraph",
-    "test_graph.PointersAreChecked",
+    # (Architecture phase 5's pay-back: the graph's neighbours — its bytes under
+    # a reversed listing and other words, the observed view agreeing with it,
+    # and the pointers it refuses to follow, ~0.4 s together, none an invariant
+    # class — to the full suite, as the design for this phase named first. The
+    # map's own determinism row below bakes the same graph under a reversed
+    # listing, and an iteration touching `graph.py` runs test_graph whole.)
+    # Architecture phase 5 (invariants 8, 12 and 14), in process: every baked
+    # token, *ready*, margin and mark against the composition over the bracket,
+    # its variants and every eighth seeded ledger, the checker naming each planted
+    # lie, and a planted producer refused whole by `site build` (~0.4 s); the
+    # stamp states, a moved claim, a regroup, unstamped text and a planted stamp
+    # state (~0.2 s); the number scan, its planted matcher and one build (~0.4 s);
+    # next steps over the seeds and the settle table (~0.1 s); the groups record
+    # (~0.2 s); the style scans over the site's words, the baked keys and the
+    # bracket's text (~0.3 s); and the map's order and determinism (~0.2 s).
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_the_bracket_and_its_variants",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_forced_disagreement_is_marked",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_every_eighth_seeded_ledger",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_the_checker_names_each_planted_lie",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_planted_producer_is_refused_whole",
+    # The review of phase 5, in process over the shared bracket (~0.3 s): a
+    # Failing claim never worded inside its limit, the project's group held, a
+    # claim named from another board in the stamp, the checker over the baked
+    # prose, and the number scan's units, joined letters and structure keys.
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_failing_claim_never_reads_inside_its_limit",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_the_project_group_is_held_too",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_claim_named_from_another_board_moves_the_stamp",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_the_checker_reads_the_baked_prose",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_joined_units_and_bare_fractions_are_read",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_a_unit_must_agree_and_structure_never_matches",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_the_brackets_text_is_current",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_moved_claim_flags_its_board_and_no_other",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_regroup_flags_the_board",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_unstamped_text_is_flagged",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_planted_stamp_state_is_named",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_the_precision_rule",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_what_is_scanned_and_what_is_not",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_the_prose_never_matches_itself",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_a_planted_matcher_is_caught",
+    # The template side of invariant 14: source scans, ~0.2 s.
+    "test_site_truth.TheBrowserComputesNoTruth",
+    "test_site_truth.NextStepsAreThePredicate",
+    "test_records.GroupsAreRecords",
+    "test_style",
+    "test_map.TheMapIsBaked",
 ]
 
 
@@ -848,6 +935,25 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Architecture phase 5's subprocess halves: a hand-edited map read back
+    # through `site status`, `status` and `doctor` (~2.8 s), the map against the
+    # round record after `nopekit round` (~0.6 s), and `site stamp` run as a
+    # person runs it (~2 s). Their rules run in process above: the checker over
+    # every planted lie, the stamp states, the stamp's one-line write. An
+    # iteration touching the site template, `site.py`, `page.py`, `prose.py` or
+    # `graph.py` runs test_map, test_site_truth and test_style whole.
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_hand_edit_reads_edited_by_hand",
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_the_map_and_the_round_record_agree",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_site_stamp_writes_only_the_as_of_line",
+    # And the number scan through a whole build (~0.4 s, a bracket copy of its
+    # own): the scan, its precision and its planted matcher run in process above.
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_through_a_build",
+    # The review of phase 5's builds and commands (~2.5 s): two builds over an
+    # evidence copy the first one removes, and `site stamp` over text that names
+    # a claim of another board. Their rules run in process above: the pool's
+    # keys and units, and the stamp over a named claim.
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_an_asset_the_build_removes_vouches_for_nothing",
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_site_stamp_stamps_a_named_claim_too",
     # Architecture phase 3a's subprocess halves: `round` with a site (what `site
     # build` writes is held by the records sweep's site rows), the index after a
     # round (every writer's index row is the full suite's), the louder project's
@@ -1097,6 +1203,15 @@ LEFT_FOR_THE_GATE: list[str] = [
     # `check` and each shim on a legacy copy — the same carve-out, the same
     # escalation.
     "test_records.IndexNeverDisagreesWithRecords.test_a_migration_leaves_the_index_agreeing",
+    # The review of phase 5's pay-back (~1.8 s): architecture phase 5's two rows of
+    # both sweeps, `site stamp --all` and `site badge`, in tests of their own. What
+    # each writes is held row by row beside its rule: the stamp's one `as_of` line
+    # (test_site_truth's `site stamp` row, gate) and the badge block alone, with a
+    # quoted marker and a CRLF file (test_groups.TheBadgeIsWritten); an iteration
+    # touching `cmd_site_stamp`, `cmd_site_badge` or `store.ensure_readme_badge`
+    # runs test_records, test_groups and test_site_truth whole.
+    "test_records.NoCommandWritesARecord.test_the_site_text_commands_write_no_record",
+    "test_records.IndexNeverDisagreesWithRecords.test_the_site_text_commands_leave_the_index_agreeing",
     # P2.4's channels on bracket copies and planted projects, through the
     # commands (~1-3 s each): a goalpost moved and tightened (and its coupled
     # and whole-record violators), the control entry unmoved, every channel

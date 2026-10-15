@@ -915,8 +915,13 @@ class StatusWordsComeFromOneTable(unittest.TestCase):
 
 
 def _page_sources() -> dict[str, str]:
+    """The page scripts that print words: the technical record's (`app.js`,
+    `format.js`, `panels.js`) and, from architecture phase 5, the front
+    page's (`page.js` and the map, drawer, sections and live modules), keyed by
+    base name."""
     out = {}
-    for name in ("app.js", "lib/format.js", "lib/panels.js"):
+    for name in ("app.js", "lib/format.js", "lib/panels.js", "page.js", "lib/map.js",
+                 "lib/drawer.js", "lib/sections.js", "lib/live.js"):
         with open(os.path.join(site_mod.TEMPLATE_DIR, *name.split("/")),
                   encoding="utf-8") as fh:
             out[os.path.basename(name)] = fh.read()
@@ -1812,6 +1817,9 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
             for markdown in (False, True):
                 renderings[f"sentence{'.md' if markdown else ''}"] = report_mod._verdict_sentence(
                     ledger, composed, None, stale=False, markdown=markdown)
+            # Architecture phase 5: the page's register, the same branches.
+            renderings["sentence.site"] = report_mod._verdict_sentence(
+                ledger, composed, None, stale=False, markdown=False, register="site")
             md = report_mod.render_markdown(ledger, None, stale_gates=stale)
             renderings["REPORT.md"] = _sentence_of(md)
             if md.count(_LIMITS) != 1:
@@ -1819,6 +1827,9 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
             for milestone in getattr(ledger, "milestones", None) or ():
                 renderings[f"sentence[{milestone.id}]"] = report_mod._verdict_sentence(
                     ledger, composed, None, stale=False, markdown=False, milestone=milestone)
+                renderings[f"sentence.site[{milestone.id}]"] = report_mod._verdict_sentence(
+                    ledger, composed, None, stale=False, markdown=False, milestone=milestone,
+                    register="site")
                 mmd = report_mod.render_markdown(ledger, None, stale_gates=stale,
                                                  milestone=milestone)
                 renderings[f"REPORT.md[{milestone.id}]"] = _sentence_of(mmd)
