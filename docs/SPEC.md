@@ -451,27 +451,32 @@ Each phase runs on branch `architecture`: understand, design (a judge panel),
 implement in a worktree, review (three refuters per finding), fix, all four CI checks
 green, commit. Smallest and safest first.
 
-1. **Claims say how they settle.** The plugin paths (37, part), the mechanism (13),
-   requirements (12), `gap` over every unsettled claim, the vocabulary
-   (§0.9, glossary rows for proposer, requirement, mechanism, basis), METHOD.md's
-   three edits (§0.8).
-2. **Decisions keep their losers.** Typed rejections and return conditions (14),
-   `nopekit prefer` (a sealed preference), basis on evaluators, proposers and inputs
-   (38), proposers in packs (22, 25).
-3. **The graph and the round record.** The typed graph (19), the round record (18),
-   `nopekit round` without its hook, the trace (39) with derivation edges and amber.
-4. **Candidates and merge.** Candidate records (15, 16), return-condition evaluation
-   in `check`, the writing half of `vcs.py`, `nopekit merge` (23).
-5. **The site.** Boards, zones, stations (17); the map data and the transit renderer
-   (29); the outline and `technical.html` (28); the poster and `site stamp` (30);
-   `build.json` and `serve --watch` (32, 33); the STE and register scans (34, 35);
-   the README badge (36).
-6. **Rounds and the plugin.** The Stop hook (24), the people allow list (§0.3), the
-   skill rewrite and pack skills (37).
-7. **Packs in the world.** `extends`, the registry file (26), the track export (27).
-8. **The design/ move** (section 5), if budget remains.
-9. **A replay.** A sandboxed agent with no shared priors runs the PETGasus requests
-   through the new nopekit, as a check on the whole.
+1. **Claims say how they settle** (done: e138fc8). The plugin paths (37, part), the
+   mechanism (13), requirements (12), `gap` over every unsettled claim, the vocabulary
+   (§0.9), METHOD.md's three edits (§0.8).
+2. **Decisions keep their losers** (done: 7a1338c). Typed rejections and return
+   conditions (14), `nopekit prefer` (a sealed preference, invariant 13), basis on
+   evaluators, proposers and inputs (38), proposers in packs (22, 25).
+3. **The graph and the round record** (3a). The typed graph (19), the round record
+   (18), `nopekit round` without its hook and commit.
+4. **The site** (5). Boards, zones, stations (17); the map data and the transit
+   renderer (29); the outline and `technical.html` (28); the poster and `site stamp`
+   (30); `build.json` and `serve --watch` (32, 33); the STE and register scans (34,
+   35); the README badge (36).
+5. **Rounds and the plugin** (6). The Stop hook and the round's commit (24), the
+   people allow list (§0.3), the skill rewrite and pack skills (37).
+6. **The trace** (3b). Derivation by perturbation, derives edges, amber (39).
+7. **Candidates and merge** (4). Candidate records (15, 16), return conditions in
+   `check`, the writing half of `vcs.py`, `nopekit merge` (23).
+8. **Packs in the world** (7). `extends`, the registry file (26), the track export (27).
+9. **The design/ move** (section 5) and **a replay** (a sandboxed agent with no shared
+   priors runs the PETGasus requests through the new nopekit), if budget remains.
+
+The order changed after phase 2 (2026-10-15): the author capped this refactor at 40%
+of a week's usage, and two phases cost about ten points, so the work that shows (the
+graph, the site, the live round) comes before the work that refines it (the trace,
+candidates, packs in the world). Phase labels in parentheses are the ones commits
+and section 8 use.
 
 `examples/bracket` stays the reference project at every phase, its committed cache
 regenerated whenever the spine moves.
