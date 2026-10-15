@@ -644,7 +644,7 @@ class RequirementWords(_env.EnvCase):
     def test_an_unknown_name_names_requirements(self):
         proc = _env.nopekit(["why", "R9"], cwd=self.root)
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("no parameter, claim or requirement named 'R9'", proc.stderr)
+        self.assertIn("no parameter, claim, requirement or decision named 'R9'", proc.stderr)
 
 
 if __name__ == "__main__":

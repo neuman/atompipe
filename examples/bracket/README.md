@@ -89,19 +89,46 @@ REJECTED (1)
   4.0 mm — 3.75 mm deflection, 7.5x the limit   (model/bracket.py PARAMS)
 ```
 
+**Decisions keep their losers.** `decisions/print-in-petg.json`, written by `nopekit
+decide`, gives each material that lost its type and what would bring it back: PLA is
+*infeasible* (it creeps under a sustained load), ABS *unevaluated* (the model holds no
+ABS properties), and a machined aluminium bracket *preferred against* — Robin, who
+prints their own parts (R4), is the person named. Run `nopekit why print-in-petg`:
+
+```
+REJECTED (3)
+  PLA — creeps under sustained load at room temperature — …
+      infeasible · not machine-checkable: when the load is no longer sustained: …
+  ABS — the model holds no ABS properties (MATERIALS has petg, pla and alu6061), …
+      unevaluated · not machine-checkable: when ABS is added to MATERIALS …
+  a machined 6061 aluminium bracket — Robin prints their own parts, in PETG (R4); …
+      preferred against, not recorded by Robin Okafor · does not hold: C3 margin < 0.1, now 0.987 (bracket.bearing)
+```
+
+The aluminium bracket's return condition is structured: `check` evaluates it against
+C3's margin and would print `may return:` if the bearing stress came within 10% of its
+limit (it never changes `check`'s exit code for it). The preference is Robin's to
+record, typed in Robin's own shell: `nopekit prefer print-in-petg`. No agent records it
+for them, so it reads *not recorded by Robin Okafor*, and `nopekit doctor` warns about
+it — as it should.
+
 **Rule 5 — falsification controls.** Six gates, six fixtures in
 `selftest/bad_configs.py`, each changing exactly one physically meaningful thing in
 the direction that gate cares about, starting from the known-good design in
 `selftest/known_good.py` — never from whatever the model says today:
 
-| Gate | Known-bad fixture |
-|---|---|
-| `bracket.deflection` | same bracket at 1/4 thickness (~64x worse) |
-| `bracket.bending_stress` | same bracket at 20x load |
-| `bracket.bearing` | one bolt in a thin plate, bearing area collapsed |
-| `bracket.model_validity` | short deep arm where shear deflection stops being negligible |
-| `bracket.bed_fit` | a 400 mm arm — nothing wrong but the footprint |
-| `bracket.min_wall` | a 1.2 mm nozzle that cannot resolve the section |
+| Gate | Basis | Known-bad fixture |
+|---|---|---|
+| `bracket.deflection` | sourced | same bracket at 1/4 thickness (~64x worse) |
+| `bracket.bending_stress` | sourced | same bracket at 20x load |
+| `bracket.bearing` | sourced | one bolt in a thin plate, bearing area collapsed |
+| `bracket.model_validity` | sourced | short deep arm where shear deflection stops being negligible |
+| `bracket.bed_fit` | model-only | a 400 mm arm — nothing wrong but the footprint |
+| `bracket.min_wall` | model-only | a 1.2 mm nozzle that cannot resolve the section |
+
+The basis says where each gate's verdict logic comes from: the four structural gates
+follow textbook beam formulae (sourced); the bed-fit and wall rules are the model's
+own (model-only). It is shown in `nopekit gate list`, and it changes no status.
 
 ```bash
 nopekit gate selftest
@@ -136,6 +163,10 @@ selftest/bad_configs.py       tracked   one known-bad fixture per gate
 requirements/R1.json … R4.json tracked  what the person asked for, in their words
 claims/C1.json … C7.json      tracked   what must be true: one record per claim, the
                                         filename is its id. Edit these by hand.
+decisions/print-in-petg.json  tracked   a decision and what lost, typed, with return
+                                        conditions (written by `nopekit decide`)
+docs/decisions.md             tracked   the decision log, generated from decisions/ by
+                                        `nopekit report --write`; never edit it
 milestones/print-v1.json      tracked   a spend — the print — and the claims it
                                         requires (C1-C4), with its generator
 generators/profile.py         tracked   writes the print's package: the plate's

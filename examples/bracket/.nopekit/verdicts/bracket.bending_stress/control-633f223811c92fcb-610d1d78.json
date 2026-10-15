@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.bending_stress",
-  "rho": "0bb656295ea64f212eff49dba648bf74581b6500361c227ac3f906885c7bbc67",
-  "static": "af6bee6c4dac0393697030455ee19dbb419513ab145ebabc7baf1f263505fd67",
+  "rho": "633f223811c92fcb7f4c975136057b1e67ee7792281d0564f7427a9fb43258f0",
+  "static": "9472440aa6af93d734c4b42141b6f072da6bd913b48557abdf0fe6c3bb15779f",
   "static_parts": {
-    "spine": "7d5aa8d7e879f51e43ce49fa1732d6ac66e2e4d43e9384b0e9c90270c56b10c8",
+    "spine": "bbb0d218546a4947749cd3151d636523a587bb269c1c8ac14eedbb045b52cb06",
     "code": {
-      "digest": "9d44aca4ef6356d0c2fa1c7c1d0f4b0ecc678f8ff5f83afd6a748d6c119386f3",
+      "digest": "d331da46a69cea9f2332749e77cb340e7268fb7e438030c67231c3a34fa60d1e",
       "files": [
         "gates/structural.py"
       ]
@@ -163,5 +163,5 @@
   "measured": 3.75,
   "limit": 1.0,
   "units": "utilisation",
-  "digest": "92c961d86afccdea8bbf6820f27e9342367809164ab235036c391cc706d7ab72"
+  "digest": "b50f91ff16ae5a7ec27a5f536c4df1b7c80650008fb61cfd8803a8f73601d72c"
 }

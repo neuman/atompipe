@@ -14,7 +14,8 @@ packs/<name>/
   pack.json          # tier 1 — the manifest. ~20 words. Always affordable to read.
   PACK.md            # tier 2 — ~150 lines. Loaded when the domain is relevant.
   references/*.md    # tier 3 — loaded only for the specific task at hand.
-  gates/*.py         # validators. Each declares a negative control.
+  gates/*.py         # evaluators. Each declares a negative control.
+  proposers/*.py     # tools that propose options or evidence; never evaluators (optional)
   generators/*.py    # model -> domain artifact (optional)
   views/*.py         # viewgens: model -> a view the site renders (optional)
   lenses.md          # adversarial review dimensions for this domain
@@ -62,7 +63,13 @@ hundred lines; it costs nothing until an agent is actually meshing.
   "max_tier": 1,
   "lenses": ["printability", "part orientation", "assembly order", "material"],
   "licence": "Apache-2.0",
-  "origin": "extracted from a production FDM project"
+  "origin": "extracted from a production FDM project",
+  "basis": "model-only",
+  "provides_proposers": [
+    {"id": "fdm.slicer_estimate", "basis": "established",
+     "description": "runs the installed slicer on the part and keeps its time estimate",
+     "run": "proposers/slicer_estimate.py"}
+  ]
 }
 ```
 
@@ -80,6 +87,61 @@ address — declared here, the pair can be checked without importing anything.
 `origin` matters. Say where the pack came from — extracted from a real project,
 built by the extension protocol, ported from a paper. It tells the next reader how
 much to trust it.
+
+`basis` is the default basis of the pack's evaluators (see "Basis" below);
+`provides_proposers` declares its proposers (see "Proposers").
+
+## Basis
+
+Every evaluator says where its verdict's logic comes from (SPEC 38), in a fixed
+order of preference:
+
+| Basis | When |
+|---|---|
+| `established` | the verdict is an existing non-AI tool's own answer: trimesh's `is_volume`, omc's `checkModel` |
+| `sourced` | the logic follows a cited outside source: a textbook formula, a standard, a datasheet |
+| `model-only` | the model wrote the logic with no outside source — even when it calls a tool's primitives |
+
+Declare the pack's default in `pack.json` (`"basis": "sourced"`) and override one
+evaluator with `@gate(..., basis="model-only")`. The bundled packs are the examples:
+beam-analytic is `sourced` (closed-form formulae in `references/formulae.md`) with
+`beam.input_sanity` `model-only` (the pack's own sign and unit bands); cad-solid is
+`model-only` with `cad.is_volume` `established` — and `cad.watertight` stays
+`model-only` on purpose, because its verdict is its own edge count and trimesh's
+answer is only evidence. Use the highest basis you honestly can, and say why when it
+is lower. The basis is shown in `gate list`, `gate show`, the report and the page; it
+changes no status, no qualification and no rho. `pack validate` requires every
+evaluator of a bundled pack to resolve to one; elsewhere an undeclared one is a note,
+and reads `undeclared`. `grounded` is not a basis word (it is the paper's word for a
+whole system).
+
+## Proposers
+
+A **proposer** is a tool a pack ships to propose options or evidence — a parts search,
+a layout optimiser, a slicer's estimate. Its output is an input; it settles nothing.
+So it is never registered as an evaluator and needs no negative control. Declare each
+in `pack.json`:
+
+```json
+"provides_proposers": [
+  {"id": "sourcing.parts_search", "basis": "sourced",
+   "description": "one line", "run": "proposers/parts_search.py"}
+]
+```
+
+`id` is dotted and distinct from every gate id in the pack; `basis` is the proposer's
+own (there is no pack default for proposers); `description` is one line of at most 200
+characters; `run` is a `.py` file under `proposers/`. `nopekit propose <id> [args]`
+runs it as `python <run> [args]` with the project as its working directory (a flag of
+the script's goes after `--`: `nopekit propose <id> -- --limit 5`): it writes
+every file it produces under `$NOPEKIT_PROPOSAL_DIR` (`$NOPEKIT_PROJECT` names the
+project) and exits 0. Each file becomes an input record with `proposer` set, and the
+input's basis is looked up from this declaration — never stated by the input. A
+non-zero exit, a run past `--timeout`, or a run that wrote anywhere in the project
+outside that directory (its ignored scratch aside) ingests nothing, naming each path
+it moved. `pack validate` checks every declared proposer exists and every
+`proposers/*.py` is declared (files starting with `_` are helpers); it never imports
+or runs one.
 
 ## `PACK.md`
 
@@ -377,6 +439,8 @@ class GateSpec:                        # what @gate(...) builds and registers fo
                                        #   must be established first (see "Prerequisites")
     operating_context: dict            # {key: (lo, hi)}: the range of its read set it was
                                        #   qualified on; outside, a pass does not count
+    basis: str = ""                    # established | sourced | model-only; "" takes the
+                                       #   pack.json default (PACK_BASIS), else "undeclared"
 
 @dataclass
 class NegativeControl:

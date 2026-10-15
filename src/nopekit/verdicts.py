@@ -1111,10 +1111,38 @@ _LEDGER_HIDDEN = frozenset({"verdicts", "exports"}) & _LEDGER_FIELD_SET
 #: Filled in memory from somewhere other than the record: `Claim.gates` from
 #: registry coverage, `physical_result`, `results` and `attributions` from
 #: `results/`, `standing` from the judge (P2.5a), `Param.gates` from the last
-#: read sets. A coverage change is not something a gate read.
+#: read sets. A coverage change is not something a gate read. Phase 2 adds
+#: `Decision.preferences` (from `preferences/`): a gate never keys on a
+#: person's act (`Decision.to_dict` drops it too).
 _IN_MEMORY_FIELDS = {"claims": ("gates", "physical_result", "results", "attributions",
                                 "standing"),
-                     "params": ("gates",)}
+                     "params": ("gates",),
+                     "decisions": ("preferences",)}
+
+#: In-memory fields a gate's copy never holds: out of the digest is not
+#: enough, because a field the gate can read but rho never keys on is a read no
+#: invalidation follows. What slipped through (review of phase 2): `decisions`
+#: reached the gate with each `Decision.preferences` attached, so a gate that
+#: branched on one kept its cached pass Fresh after `nopekit prefer` — a
+#: person's act moving a verdict nothing re-keyed (invariants 7 and 13).
+#: *Rejected:* every `_IN_MEMORY_FIELDS` entry — `Claim.gates`,
+#: `physical_result` and the rest have been on a gate's copy since P2.1, and
+#: what the bundled and project gates read of them is not phase 2's question;
+#: `preferences` is new, so nothing reads it yet.
+_HIDDEN_FROM_THE_COPY = {"decisions": ("preferences",)}
+
+
+def _without(item: Any, names: tuple) -> Any:
+    """``item`` with each in-memory field in ``names`` back at its default."""
+    if not dataclasses.is_dataclass(item) or isinstance(item, type):
+        return item
+    blank = {}
+    for spec in dataclasses.fields(item):
+        if spec.name in names:
+            blank[spec.name] = (spec.default_factory()            # type: ignore[misc]
+                                if spec.default_factory is not dataclasses.MISSING
+                                else spec.default)
+    return dataclasses.replace(item, **blank)
 
 
 #: Fields a gate's read of a record leaves out of the digest while they hold
@@ -1128,7 +1156,10 @@ _ABSENT_WHEN_EMPTY = frozenset({"owner", "fallback", "terminal", "authority",
                                 "expected_latency",
                                 # Phase 1 (SPEC 12, 13): empty lists, so a claim
                                 # that names neither digests as before.
-                                "evaluators", "requirements"})
+                                "evaluators", "requirements",
+                                # Phase 2 (SPEC 22): an input no proposer
+                                # produced digests as before.
+                                "proposer"})
 
 
 def _record_form(item: Any, strip: tuple = ()) -> Any:
@@ -1329,6 +1360,8 @@ class LedgerView(Ledger):
                 value = None
         else:
             value = copy.deepcopy(_peek(source, name))
+            if name in _HIDDEN_FROM_THE_COPY and isinstance(value, list):
+                value = [_without(item, _HIDDEN_FROM_THE_COPY[name]) for item in value]
         values[name] = value
         return value
 

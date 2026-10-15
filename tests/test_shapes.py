@@ -117,8 +117,12 @@ STATUS_TAIL = (
 )
 
 #: `gate show`'s body, after `gates.describe`'s line and the description.
-DESCRIBE = re.compile(r"^(?P<gate>\S+) +\[t(?P<tier>\d)(?: \S+)?\] +.+$")
-SHOW_TIER = re.compile(r"^  tier (?P<tier>\d)  pack (?P<pack>\S+)  entry \S*$")
+#: The basis segment follows the bracket (SPEC 38), before anything the
+#: 240-character cap could cut. `describe`'s line collapses its own spacing.
+DESCRIBE = re.compile(r"^(?P<gate>\S+) +\[t(?P<tier>\d)(?: \S+)?\] +basis "
+                      r"(?P<basis>established|sourced|model-only|undeclared) +.+$")
+SHOW_TIER = re.compile(r"^  tier (?P<tier>\d)  pack (?P<pack>\S+)  basis "
+                       r"(?P<basis>established|sourced|model-only|undeclared)  entry \S*$")
 SHOW_CLAIMS = re.compile(r"^  claims: .+$")
 SHOW_RUNNABLE = re.compile(r"^  runnable here: (?:yes|NO — .+)$")
 #: P2.2: the prerequisite edge, both ways — each line only when it has an id, so
@@ -356,6 +360,9 @@ WHY_BODY = re.compile(r"^  +\S.*$")
 #: A row under REJECTED that is not a loser: none recorded, or a loser's evidence.
 WHY_REJECTED_NONE = re.compile(r"^  \(none recorded.*\)$")
 WHY_EVIDENCE = re.compile(r"^      evidence: .+$")
+#: Under a decision's rejection (SPEC 14): its type, its return condition's
+#: state, its input — `report.rejection_facts`.
+WHY_REJECTION_FACTS = re.compile(r"^      \S.* · .+$")
 #: One artifact under GROUNDED BY, one decision under DECISIONS; the lines under
 #: each are indented further.
 WHY_ITEM = re.compile(r"^  - \S.*$")
@@ -407,7 +414,8 @@ def why_problems(stdout: str) -> list[str]:
             problems += [f"why: a REJECTED row that names no home: {line!r}"
                          for line in body if not (T.WHY_REJECTED_ROW.fullmatch(line)
                                                   or WHY_REJECTED_NONE.fullmatch(line)
-                                                  or WHY_EVIDENCE.fullmatch(line))]
+                                                  or WHY_EVIDENCE.fullmatch(line)
+                                                  or WHY_REJECTION_FACTS.fullmatch(line))]
             if len(rows) != want:
                 problems.append(f"why: REJECTED says {want}, {len(rows)} row(s) listed")
         elif name in ("GROUNDED BY", "DECISIONS") and want:
@@ -1285,8 +1293,8 @@ class GoalpostAndContextLinesShape(unittest.TestCase):
 
     def test_gate_show_places_the_operating_context(self):
         body = "\n".join([
-            "t.span  [t0]  sag  claims: c1",
-            "  tier 0  pack (project)  entry gates.g:span",
+            "t.span  [t0]  basis sourced  sag  claims: c1",
+            "  tier 0  pack (project)  basis sourced  entry gates.g:span",
             "  claims: c1",
             "  runnable here: yes",
             "  operating context: load_n in [0, 40] — outside it a pass does not count; a fail "

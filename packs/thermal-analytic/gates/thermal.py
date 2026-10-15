@@ -898,6 +898,7 @@ H_AGREEMENT_TOL = 0.10
 
 @gate(
     id="thermal.h_agreement",
+    basis="model-only",
     title="The h handed to the lumped gates is the h this pack's correlation computes",
     claims=["cross-representation", "heat-transfer-coefficient", "convection",
             "thermal-response"],

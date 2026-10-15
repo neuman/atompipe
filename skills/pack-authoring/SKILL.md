@@ -47,6 +47,22 @@ Set `origin` honestly. Extracted from a real project that shipped? Built by the
 protocol against a validation case? Ported from a paper? The next reader calibrates
 their trust on that line.
 
+Set `basis` honestly too — where each evaluator's verdict logic comes from: `"basis":
+"sourced"` in `pack.json` for the pack, and `@gate(..., basis="model-only")` for one
+that differs. `established` when the verdict is an existing non-AI tool's own answer
+(trimesh's `is_volume`, omc's `checkModel`); `sourced` when the logic follows a cited
+outside source (a textbook formula, a standard, a datasheet — cite it in
+`references/`); `model-only` when you wrote the logic with no outside source, even
+when it calls a tool's primitives. Use the highest you honestly can, and say why when
+lower. A bundled pack must declare one for every evaluator (`pack validate`). It is
+shown, never a status. Never `grounded`.
+
+A tool that proposes options or evidence — a parts search, a slicer's estimate — is a
+**proposer**, not an evaluator: declare it in `pack.json`'s `provides_proposers`
+(`{"id", "basis", "description", "run"}`, its script under `proposers/`). It writes
+its files into `$NOPEKIT_PROPOSAL_DIR`; `nopekit propose <id>` files each as an input.
+It needs no control, because a proposal settles nothing.
+
 ### 3. Write the cheapest gate first
 
 **Ship at least one tier-0 gate, and write it before the expensive one.** Analytic,

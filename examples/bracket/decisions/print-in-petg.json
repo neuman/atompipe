@@ -1,0 +1,42 @@
+{
+  "title": "Print in PETG",
+  "when": "2026-10-15T00:20:42Z",
+  "summary": "PETG, the material R4 names: it holds the pump without creeping, and it prints on the person's own 220 mm printer",
+  "rejected": [
+    {
+      "value": "PLA",
+      "why": "creeps under sustained load at room temperature — a PLA bracket that passes every evaluator here still sags over months, and no static analysis sees it",
+      "type": "infeasible",
+      "returns_if": {
+        "text": "when the load is no longer sustained: a bracket that holds the pump only while it is serviced"
+      }
+    },
+    {
+      "value": "ABS",
+      "why": "the model holds no ABS properties (MATERIALS has petg, pla and alu6061), so no evaluator here could check it",
+      "type": "unevaluated",
+      "returns_if": {
+        "text": "when ABS is added to MATERIALS with conservative FDM values and its claims are checked"
+      }
+    },
+    {
+      "value": "a machined 6061 aluminium bracket",
+      "why": "Robin prints their own parts, in PETG (R4); a machined part is bought, and at triple the mass",
+      "type": "preferred_against",
+      "by": "Robin Okafor",
+      "returns_if": {
+        "claim": "C3",
+        "quantity": "margin",
+        "comparator": "<",
+        "value": 0.1
+      }
+    }
+  ],
+  "params_changed": [
+    "material"
+  ],
+  "claims_changed": [
+    "C2",
+    "C3"
+  ]
+}

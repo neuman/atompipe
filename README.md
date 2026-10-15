@@ -154,11 +154,22 @@ my-project/
   claims/C1.json            one claim per file: what must be true, its limit, and how it settles
   params/  decisions/  needs/  inputs/  results/  views/     one record per file
   milestones/  exports/     a spend and the claims it requires; that spend's sealed exports
+  preferences/              a person's recorded preference against a rejected alternative,
+                            sealed, written only by `nopekit prefer` in their own shell
   .nopekit/project.json    the project: its name, its model entry, its live packs
   .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
   .nopekit/ledger.json     an index of every record, generated (ignored: never edit it)
   .nopekit/cache/  obs/  out/     the last check's statuses, what runs cost, scratch (ignored)
 ```
+
+A decision keeps its losers: `nopekit decide --rejected "PLA|creeps under load" --type
+infeasible --returns-if "C3 margin < 0.1"` records what lost, its type (infeasible,
+dominated, preferred against, unevaluated) and what would bring it back — `check`
+prints *may return* when that condition holds, and never changes its exit code for it.
+A preference is a person's: `--by "Robin Okafor"` names them, and only Robin's own
+`nopekit prefer <decision>`, typed in Robin's shell, records it. A pack's proposers
+(`nopekit propose <id>`) find options or evidence and file each as an input; a
+proposal settles nothing.
 
 You — or the agent — edit a record the way you edit code, and `nopekit check`
 validates it: a misspelled key in `claims/C1.json` is refused with a suggestion, never

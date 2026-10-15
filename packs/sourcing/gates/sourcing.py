@@ -575,6 +575,7 @@ def moq(ctx: GateContext) -> Verdict:
 # --------------------------------------------------------------------------- #
 @gate(
     id="bom.process_rules",
+    basis="sourced",
     title="Design inside the vendor's stated capability set",
     claims=["process-rules", "vendor-capability", "manufacturability", "dfm"],
     tier=Tier.INSTANT,

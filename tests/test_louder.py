@@ -1087,6 +1087,15 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
     ("gate", "selftest"): "prints known-bad control outcomes, not a claim's status: "
                           "a control that crashes is invariant 9's (test_admission)",
     ("decide",): "records a decision; reads no verdict",
+    # Architecture phase 2 (SPEC 14, 22). `prefer` runs only in a person's own
+    # shell (a pty no in-process world opens here); a status reaches its line
+    # only through `report.return_words`, which says a crash's Skipped as
+    # "skipped, errored" (test_returns.AConditionReadsOnlyACheckedClaim).
+    ("prefer",): "records a person's preference, refused outside their own shell; a "
+                 "claim's status reaches it only through report.return_words "
+                 "(test_returns)",
+    ("propose",): "runs a pack's proposer and files what it wrote as inputs; reads no "
+                  "verdict",
     ("packs", "list"): "lists packs", ("packs", "show"): "prints a pack's guide",
     ("packs", "validate"): "checks a pack's layout and its own controls, not a claim",
     ("packs", "add"): "opts a project into a pack",

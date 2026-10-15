@@ -1117,6 +1117,169 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "doctor_dangling": "claims/{claim}.json names requirement {id}, which has no "
                            "requirements/{id}.json",
     }),
+    # SPEC 14, §0.2 (architecture phase 2): what lost, why, and what would
+    # bring it back — `claims.rejection_rows`' tokens in words. A condition on
+    # a claim that is not Checked says so; it never silently reads false.
+    "rejection": MappingProxyType({
+        "types": MappingProxyType({
+            "infeasible": "infeasible", "dominated": "dominated",
+            "preferred_against": "preferred against", "unevaluated": "unevaluated",
+            "untyped": "untyped"}),
+        "recorded": "preferred against, recorded by {name} ({when})",
+        "not_recorded": "preferred against, not recorded by {name}",
+        "condition": "{claim} {quantity} {comparator} {value}",
+        "holds": "holds: {condition}, now {observed}{gate}",
+        "does_not_hold": "does not hold: {condition}, now {observed}{gate}",
+        "cannot": "cannot be evaluated: {claim} is {status}",
+        "cannot_no_claim": "cannot be evaluated: {claim} is not a claim",
+        "cannot_no_value": "cannot be evaluated: no value of {claim} is compared with its "
+                           "acceptance condition",
+        "cannot_no_margin": "cannot be evaluated: {gate} gives {claim} no margin ({detail})",
+        "cannot_no_limit": "cannot be evaluated: {claim} states no limit",
+        "cannot_band": "cannot be evaluated: {claim}'s acceptance condition is a band",
+        "margin_why": MappingProxyType({
+            "no-value": "it gave no value", "no-limit": "it gave no limit",
+            "band": "its limit is a band", "no-side": "its comparator has no side",
+            "zero-limit": "its limit is zero",
+            "disagrees": "its side and its outcome disagree",
+            "no-comparator": "it names no side of its limit",
+            "no-verdict": "it gave no usable verdict"}),
+        "text": "not machine-checkable: {text}",
+        "none": "no return condition",
+        "input": "source: input {input}",
+        "facts": "{type} · {condition}",
+        "may_return": "may return: {value} — rejected in decision {decision} ({type}); {state}",
+        # `decide`'s static row and the generated log: never a live state (the
+        # log is a generated document; the row is what was just written).
+        "returns_if": "returns if {condition}",
+        "returns_text": "returns if (not machine-checkable) \"{text}\"",
+        # The generated log's phrase: it is regenerated only by `report --write`,
+        # so it never says whether the person recorded it (a state that moves
+        # without the log), only where to read it.
+        "named": "preferred against, naming {name} — nopekit why {id} says whether they "
+                 "recorded it",
+        "records_it": "{name} records it in their own shell: nopekit prefer {id}",
+        "doctor_ok": "{n} decision(s), {m} rejection(s): every pointer resolves, every "
+                     "preference recorded",
+        "doctor_none": "no decision records a rejected alternative",
+        "doctor_dangling": "{where} names {what}, which has no {home}",
+        "doctor_orphan": "preferences/{id}.json: no decisions/{id}.json holds that decision",
+        "doctor_unrecorded": "{k} preferred_against rejection(s) not recorded: {items}",
+        "doctor_unrecorded_item": "{decision} ({value}, by {name}) — {name} runs: nopekit "
+                                  "prefer {decision}",
+    }),
+    # SPEC 38: where an evaluator's or a proposer's verdict logic comes from.
+    # Each word equals its token; shown, never a status. A basis word is said
+    # beside "basis" (GLOSSARY §6: `basis established`, apart from invariant
+    # 10's *prerequisite not established*) — review of phase 2.
+    "basis": MappingProxyType({
+        "established": "established", "sourced": "sourced", "model-only": "model-only",
+        "undeclared": "undeclared",
+        "doctor_ok": "every evaluator declares its basis",
+        "doctor_undeclared": "{n} evaluator(s) declare no basis and show as undeclared: "
+                             "{ids}",
+        "doctor_inputs": "{k} input(s) say they were proposed by something no discoverable "
+                         "pack declares: {ids}",
+        "proposed_by": "proposed by {id} (basis {basis})",
+    }),
+    # `decide`'s per-rejection flags (SPEC 14): each refusal writes nothing.
+    "decide": MappingProxyType({
+        "part_first": "{flag} applies to the --rejected before it, and none comes before "
+                      "it. Nothing was written.",
+        "part_twice": "{flag} is given twice for \"{value}\". Nothing was written.",
+        "both": "--returns-if and --returns-text both given for \"{value}\" — a return "
+                "condition is one or the other. Nothing was written.",
+        "bad_type": "--type \"{v}\" is not a rejection type{guess} — one of infeasible, "
+                    "dominated, preferred_against, unevaluated. Nothing was written.",
+        "grammar": "--returns-if \"{v}\" is not a return condition: say \"<claim> "
+                   "margin|value|limit <|<=|>|>= <number>\", e.g. \"C1 margin > 0.02\"; a "
+                   "condition in words goes in --returns-text. Nothing was written.",
+        "no_claim": "--returns-if names {cid}, which is no claim (claims/{cid}.json) — check "
+                    "evaluates the condition against that claim. Nothing was written.",
+        "no_input": "--input {aid!r} is no input (inputs/{aid}.json){close}. Nothing was "
+                    "written.",
+        "preferred_needs_by": "a preferred_against rejection is a person's preference: name "
+                              "them with --by \"<their name, as git knows them>\"; they "
+                              "record it with nopekit prefer <decision id>. Nothing was "
+                              "written.",
+        "by_needs_type": "--by names whose preference a rejection is, and \"{value}\" is not "
+                         "--type preferred_against. Nothing was written.",
+        "type_help": "the --rejected before it: infeasible, dominated, preferred_against "
+                     "(a person's preference, recorded with nopekit prefer) or unevaluated",
+        "by_help": "the --rejected before it is this person's preference (with --type "
+                   "preferred_against), named as git knows them",
+        "returns_if_help": "the --rejected before it returns when \"<claim> "
+                           "margin|value|limit <op> <number>\" holds, e.g. \"C1 margin > "
+                           "0.02\" — check evaluates it",
+        "returns_text_help": "what would bring the --rejected before it back, in words — "
+                             "shown, never evaluated",
+        "input_help": "the input (inputs/<id>.json) the --rejected before it rests on",
+    }),
+    # `nopekit prefer` (SPEC 14, invariant 13): the person's channel for a
+    # preference, the shape of `claim physical`'s owner path.
+    "prefer": MappingProxyType({
+        "help": "record your preference against a rejected alternative, typed in your own "
+                "shell; the rejection's \"by\" must name you as git does",
+        "value_help": "which preferred_against alternative, by its value, when the decision "
+                      "names you for several",
+        "who": "--who is not accepted: who records a preference is read from git's identity "
+               "(git config user.name and user.email), never typed. Nothing was written.",
+        "when": "--when is not accepted: a preference is dated when it is recorded. Nothing "
+                "was written.",
+        "no_decision": "no decision {id!r} — decisions/ holds each one, and nopekit why "
+                       "<decision id> shows one. Nothing was written.",
+        "none_preferred": "decision {id} has no preferred_against rejection — nothing in it "
+                          "is a person's preference to record. Nothing was written.",
+        "channel": "a preference counts only as its person records it, typed in their own "
+                   "shell, never from an agent session or a script{why}. Nothing was "
+                   "written. Ask {names} to run: nopekit prefer {id}",
+        "not_by": "decision {id} names {names} for its preferred_against rejections, and this "
+                  "shell's git identity is {who!r} — only the person named records it: run "
+                  "it in their shell, or name them in \"by\" as git names them. Nothing was "
+                  "written.",
+        "which": "decision {id} names you for {n} preferred_against rejections ({values}) — "
+                 "name one with --value. Nothing was written.",
+        "no_value": "decision {id} names you for no preferred_against rejection {value!r} — "
+                    "it names you for {values}. Nothing was written.",
+        "already": "{name}'s preference against {value!r} is already recorded ({when}) for "
+                   "the rejection as it reads now. Nothing was written.",
+        "row": "you record: your preference against {value!r} — {why}",
+        "returns_row": "reconsider: {condition}",
+        "recorded": "recorded {name}'s preference against {value!r} in preferences/{id}.json "
+                    "(entry {n})",
+    }),
+    # `nopekit propose` (SPEC 22, 25): a pack's tool proposes, never settles.
+    # The noun "proposer" stays in keys and flags (SPEC §0.9).
+    "propose": MappingProxyType({
+        "help": "run a tool a pack ships to propose options or evidence, and record each "
+                "file it writes as an input — a proposal settles nothing",
+        "row": "{id}  basis {basis}  {description}  (pack {pack})",
+        "footer": "nopekit propose <id> [arguments] runs one and records each file it writes "
+                  "as an input",
+        "empty": "no discoverable pack ships anything to propose — a pack declares it in "
+                 "pack.json's provides_proposers",
+        "errored": "{id} exited {code}; nothing was recorded. Its last lines: {tail}",
+        "timeout": "{id} ran past --timeout {t:g} s and was stopped; nothing was recorded",
+        "outside": "{id} wrote outside $NOPEKIT_PROPOSAL_DIR while it ran: {paths}; nothing "
+                   "was recorded — a proposal writes only into that directory, and what it "
+                   "wrote here is not undone: git status shows it",
+        "outside_more": " and {n} more",
+        "none": "{id} wrote no file; nothing was recorded",
+        "known": "{where} is already recorded as {aid} — its record is unchanged",
+        "done": "{n} input(s) recorded, proposed by {id} (basis {basis}). A proposal "
+                "settles nothing: extract what each shows, and let an evaluator check what "
+                "it is the source of.",
+        "desc": "proposed by {id}",
+        "ingest_known": "{where} is already recorded as {aid} {was}; its record is unchanged",
+        "ingest_was_none": "with no proposer",
+        "proposer_help": "what produced this file (a pack's provides_proposers id), when the "
+                         "agent ran it by hand",
+        "kind_help": "the kind of every file it writes (default: from each extension)",
+        "desc_help": "a description for every file it writes (default: proposed by <id>)",
+        "timeout_help": "seconds before it is stopped (default 600)",
+        "args_help": "what the script is handed; a flag of the script's goes after --, as in "
+                     "nopekit propose <id> -- --limit 5",
+    }),
 })
 
 
@@ -2045,6 +2208,131 @@ def status_word(status: Any, *, errored: bool = False) -> str:
     return shown
 
 
+# --------------------------------------------------------------------------- #
+# rejected alternatives (SPEC 14, §0.2): `claims.rejection_rows` in words
+# --------------------------------------------------------------------------- #
+def condition_text(cond: Any) -> str:
+    """A structured return condition as written — `C3 margin < 0.1` — or its
+    text; `""` for none."""
+    if cond is None:
+        return ""
+    text = str(getattr(cond, "text", "") or "")
+    if text:
+        return _one(text)
+    return HUMAN["rejection"]["condition"].format(
+        claim=_one(getattr(cond, "claim", "")), quantity=getattr(cond, "quantity", ""),
+        comparator=getattr(cond, "comparator", ""), value=_num(getattr(cond, "value", "")))
+
+
+def _type_phrase(kind: str, preference: Any, by: str = "") -> str:
+    said = HUMAN["rejection"]
+    if kind == "preferred_against":
+        if preference is not None and getattr(preference, "state", "") == "recorded":
+            return said["recorded"].format(name=_one(preference.name),
+                                           when=_one(preference.when))
+        name = getattr(preference, "name", "") if preference is not None else by
+        return said["not_recorded"].format(name=_one(name) or "no one")
+    return said["types"].get(kind or "untyped", _one(kind))
+
+
+def _status_token_word(token: str) -> str:
+    """A `STATUS_KEY` token (or `errored`) as its lower-case word."""
+    if token == "errored":
+        return status_word(ClaimStatus.BLOCKED, errored=True)
+    for status, key in claim_logic.STATUS_KEY.items():
+        if key == token:
+            return word(status)
+    return _one(token)
+
+
+def return_words(row: Any, ledger: Ledger | None = None) -> str:
+    """The state of `row`'s return condition now, in words — from its
+    `ReturnState`, never computed here. `ledger` gives a value or a limit its
+    claim's units."""
+    said = HUMAN["rejection"]
+    state = row.returns
+    cond = row.condition
+    if state.state == "none":
+        return said["none"]
+    if state.state == "not-machine-checkable":
+        return said["text"].format(text=condition_text(cond))
+    claim = _one(state.claim or getattr(cond, "claim", ""))
+    if state.state == "cannot-evaluate":
+        if state.why == "status":
+            return said["cannot"].format(claim=claim, status=_status_token_word(state.status))
+        if state.why == "no-claim":
+            return said["cannot_no_claim"].format(claim=claim)
+        if state.why == "no-margin":
+            detail = said["margin_why"].get(state.detail, _one(state.detail))
+            return said["cannot_no_margin"].format(gate=state.gate or "its evaluator",
+                                                   claim=claim, detail=detail)
+        if state.why == "no-limit":
+            return said["cannot_no_limit"].format(claim=claim)
+        if state.why == "band":
+            return said["cannot_band"].format(claim=claim)
+        return said["cannot_no_value"].format(claim=claim)
+    units = ""
+    if ledger is not None and getattr(cond, "quantity", "") in ("value", "limit"):
+        found = ledger.claim(state.claim)
+        units = str(getattr(getattr(found, "acceptance", None), "units", "") or "") \
+            if found is not None else ""
+    observed = _num(state.observed) + (f" {_one(units)}" if units else "")
+    gate = f" ({state.gate})" if state.gate else ""
+    key = "holds" if state.state == "holds" else "does_not_hold"
+    return said[key].format(condition=condition_text(cond), observed=observed, gate=gate)
+
+
+def rejection_words(row: Any, ledger: Ledger | None = None) -> tuple[str, str]:
+    """`(type phrase, condition phrase)` for one `claims.RejectionRow` — the
+    words every reader of a rejection prints (`why`, `check`'s *may return*)."""
+    return (_type_phrase(row.type, row.preference, row.by), return_words(row, ledger))
+
+
+def rejection_facts(row: Any, ledger: Ledger | None = None) -> str:
+    """`why`'s facts line under a decision's rejection: `{type} · {condition}`
+    and, when an input is its source, `· source: input {id}`."""
+    kind, condition = rejection_words(row, ledger)
+    line = HUMAN["rejection"]["facts"].format(type=kind, condition=condition)
+    if row.input:
+        line += " · " + HUMAN["rejection"]["input"].format(input=_one(row.input))
+    return line
+
+
+def may_return_line(row: Any, ledger: Ledger | None = None) -> str:
+    """`check`'s line for a rejected alternative whose return condition holds."""
+    kind, condition = rejection_words(row, ledger)
+    return HUMAN["rejection"]["may_return"].format(
+        value=_one(row.value), decision=row.decision, type=kind, state=condition)
+
+
+def rejection_suffix(rejection: Any, *, decision: str = "") -> str:
+    """What `decide` prints after a rejection it wrote, and the decision log
+    after each loser: its type, its condition as written and its input —
+    static, never a live state. `decide` says a preference it just wrote is not
+    recorded (true when it is written); the log (``decision`` given, its id)
+    says only whom it names and where to read whether they recorded it, since
+    the log is regenerated by `report --write`, not by a person's `prefer`.
+    `""` for a legacy rejection that states none of them."""
+    said = HUMAN["rejection"]
+    kind = str(getattr(rejection, "type", "") or "")
+    name = claim_logic.name_of(getattr(rejection, "by", ""))
+    if kind == "preferred_against" and decision:
+        head = said["named"].format(name=_one(name) or "no one", id=decision)
+    else:
+        head = _type_phrase(kind, None, name) if kind else ""
+    parts: list[str] = []
+    cond = getattr(rejection, "returns_if", None)
+    if cond is not None and str(getattr(cond, "text", "") or ""):
+        parts.append(said["returns_text"].format(text=_one(cond.text)))
+    elif cond is not None:
+        parts.append(said["returns_if"].format(condition=condition_text(cond)))
+    if str(getattr(rejection, "input", "") or ""):
+        parts.append(said["input"].format(input=_one(rejection.input)))
+    if not head and not parts:
+        return ""
+    return " — " + " · ".join([p for p in (head, *parts) if p])
+
+
 def requirement_statuses(ledger: Ledger, composed: Mapping[str, Any],
                          cover: Mapping[str, list[str]]) -> dict[str, Any]:
     """`claims.requirement_statuses` — the one producer, its statuses untouched —
@@ -2456,6 +2744,13 @@ def _specs(registry: Any) -> list[Any]:
     if registry is None:
         return []
     return list(registry.specs())
+
+
+def _bases(registry: Any) -> dict[str, str]:
+    """`{gate id: basis token}` of every registered evaluator (SPEC 38;
+    `gates.basis_of`'s rule): an unregistered gate is absent, and shows none."""
+    from .models import BASIS_UNDECLARED
+    return {s.id: (getattr(s, "basis", "") or BASIS_UNDECLARED) for s in _specs(registry)}
 
 
 def _unrun_specs(ledger: Ledger, registry: Any) -> list[Any]:
@@ -2977,6 +3272,7 @@ def _section_proven(ledger: Ledger, composed: Mapping[str, Any],
     checked = word(ClaimStatus.PASS)
     said = HUMAN["acceptance"]
     needs = {s.id: list(getattr(s, "needs", None) or ()) for s in _specs(registry)}
+    bases = _bases(registry)
 
     for claim in ledger.claims:
         if composed[claim.id].status is not ClaimStatus.PASS:
@@ -2984,7 +3280,9 @@ def _section_proven(ledger: Ledger, composed: Mapping[str, Any],
         if _disagreement(ledger, claim, composed[claim.id], cover):
             continue
         verdicts = _ok_verdicts(ledger, claim)
-        gates = ", ".join(_code(v.gate) for v in verdicts)
+        # SPEC 38: each evaluator's basis beside it — shown, never a status.
+        gates = ", ".join(_code(v.gate) + (f" (basis: {bases[v.gate]})" if v.gate in bases
+                                           else "") for v in verdicts)
         unlisted = dict(claim_logic.not_compared(claim, verdicts, needs))
         measured_bits = []
         evidence: list[str] = []
@@ -3746,10 +4044,13 @@ def _section_reproduce(ledger: Ledger, registry: Any, *, root: str = "") -> list
         out.append("")
         out.append("```sh")
         width = max(len(g) for g, _ in per_gate[:_MAX_REPRODUCE_GATES])
+        bases = _bases(registry)
         for gate_id, covers in per_gate[:_MAX_REPRODUCE_GATES]:
             files = code.get(gate_id)
             where = f" — {', '.join(files)}" if files else ""
-            out.append(f"nopekit check --only {gate_id.ljust(width)}   # {covers}{where}")
+            basis = f" — basis {bases[gate_id]}" if gate_id in bases else ""
+            out.append(f"nopekit check --only {gate_id.ljust(width)}   # {covers}{basis}"
+                       f"{where}")
         if len(per_gate) > _MAX_REPRODUCE_GATES:
             out.append(f"# ... and {len(per_gate) - _MAX_REPRODUCE_GATES} more;"
                        f" `nopekit gate list` prints them all")
@@ -4554,4 +4855,10 @@ __all__ = [
     "requirement_json",
     "requirement_statuses",
     "status_word",
+    "condition_text",
+    "return_words",
+    "rejection_words",
+    "rejection_facts",
+    "rejection_suffix",
+    "may_return_line",
 ]

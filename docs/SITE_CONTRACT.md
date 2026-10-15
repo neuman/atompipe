@@ -284,6 +284,7 @@ was the one a reader of the contract would never look for.
                   "measured": …, "limit": …, "comparator": "<=", "settles": "tip deflection",
                   "margin": -0.3994, "margin_why": "", "locators": [ … ], "views": [ … ],
                   "unanchored": true, "evidence": [ … ], "rho": …,
+                  "basis": "sourced",                                        // phase 2
                   "cached": true, "fresh": true, "stale_reason": "",
                   "when": "2026-09-27T14:02:11Z", "age_s": 412, … } ],
   "views":    [ { "id": "assembly", "kind": "model3d", "src": "assets/assembly.glb", … },
@@ -299,9 +300,19 @@ was the one a reader of the contract would never look for.
                                   "origin": "model/bracket.py PARAMS" } ],
                   "changed_in": "", "defended": true, "derived": false } ],
   "inputs":   [ { "id": "sk", "kind": "sketch", "path": …, "extractions": [ … ],
-                  "extracted": true, … } ],
+                  "extracted": true, "proposer": "", "basis": "", … } ],    // phase 2
   "gaps":     [ … ],
   "decisions":[ … ],
+  "rejections": [ { "decision": "print-in-petg", "index": 2,               // phase 2
+                    "value": "a machined 6061 aluminium bracket",
+                    "type": "preferred_against", "by": "Robin Okafor", "input": null,
+                    "returns_if": { "claim": "C3", "quantity": "margin",
+                                    "comparator": "<", "value": 0.1 },
+                    "returns": { "state": "does-not-hold", "why": "", "claim": "C3",
+                                 "status": "", "observed": 0.987, "gate": "bracket.bearing",
+                                 "detail": "" },
+                    "preference": { "state": "not-recorded", "name": "Robin Okafor",
+                                    "who": "", "when": "" } } ],
   "rebuild":  [ { "article": "<64 hex>", "claims": ["C5"],
                   "moved": ["config.thickness 7.0 -> 7.5"] } ],             // P2.5a
   "words":    { "pass": { "key": "checked", "word": "checked", "term": "Checked",
@@ -364,6 +375,20 @@ an agent can read the site's state without a browser.
   no word naming its authority). A claim whose file is gone and whose results file
   holds a fail is a row too (`standing: "removed"`, `store`'s `Ledger.removed`): its
   fail still counts.
+- **What lost, and where an evaluator's logic comes from (architecture phase 2).**
+  `rejections` is `summarise()["rejections"]` (`claims.rejection_rows`), tokens only:
+  every decision's every rejected alternative with its `type` (`untyped` for one
+  written before phase 2), its person (`by`, a nominee), its input, its return
+  condition as written, that condition's state now (`returns.state`: `holds`,
+  `does-not-hold`, `cannot-evaluate` — `why` says which: the claim is not Checked
+  (`status` its token), no value, no margin, no limit, a band, no claim —
+  `not-machine-checkable` or `none`) and its preference's standing (`recorded` only as
+  its person recorded it with `nopekit prefer`, invariant 13). A verdict row's `basis`
+  is its evaluator's (`established`, `sourced`, `model-only`, or `undeclared` with
+  none or no spec); an input row's `proposer` is the one that produced it and `basis`
+  that proposer's, looked up (`""` with none, `undeclared` when no discoverable pack
+  declares it). None of it is a status. The page draws none of it until the map
+  (phase 5).
 - **Requirements and mechanisms (architecture phase 1).** `requirements` is every
   `requirements/<id>.json` in record order, each row `report.requirement_json` over
   `claims.requirement_statuses` — the worst of the claims that serve it (`worst`, by

@@ -328,6 +328,45 @@ class Comparator(StrEnum):
         raise ValueError(f"unhandled comparator {self!r}")
 
 
+#: Where an evaluator's or proposer's verdict logic comes from (SPEC 38, §0.4), in the
+#: order of preference. established: the verdict is an existing non-AI tool's own answer;
+#: sourced: the logic follows a cited outside source (a textbook formula, a standard, a
+#: datasheet); model-only: the model wrote the logic with no outside source, even when it
+#: calls a tool's primitives. Shown, never a status and never a qualification route.
+#: *Rejected:* "grounded" (GLOSSARY §6 keeps it for the paper's sense of a whole system,
+#: and SPEC 38's first draft used it for the middle word); a numeric grade (a number
+#: invites arithmetic, and basis changes no status).
+BASES: tuple[str, ...] = ("established", "sourced", "model-only")
+
+#: The token and the word when neither the evaluator nor its pack declares a basis
+#: (SPEC 38: "an undeclared basis shows as undeclared"). *Rejected:* defaulting to
+#: model-only (a guess said as a declaration — the reader could not tell a pack that
+#: said so from one that said nothing).
+BASIS_UNDECLARED = "undeclared"
+
+#: A decision's rejection's type (paper §6.4, SPEC 14), in the paper's order. Tokens;
+#: the words are `report.HUMAN["rejection"]["types"]`. *Rejected:* a free text type (a
+#: reader could not tell an infeasible loser from a preferred-against one, and only the
+#: second needs a person's act); `preferred-against` with a hyphen (a JSON value and a
+#: flag value are identifiers, spelled as the other underscore tokens are).
+REJECTION_TYPES: tuple[str, ...] = ("infeasible", "dominated", "preferred_against",
+                                    "unevaluated")
+
+#: The token and the word for a rejection written before phase 2, which names no type:
+#: read, never refused (R-10), and shown as what it is.
+REJECTION_UNTYPED = "untyped"
+
+#: What a structured return condition reads (SPEC §0.2): the claim's margin — a signed
+#: fraction of its limit (`claims.margin`, D-17) — its value, in its acceptance units, or
+#: its acceptance limit.
+RETURN_QUANTITIES: tuple[str, ...] = ("margin", "value", "limit")
+
+#: The comparators a return condition may use. *Rejected:* == and != (equality on a
+#: measured float never holds, so the condition could never fire); between (a condition
+#: compares with one value — two conditions say a band).
+RETURN_COMPARATORS: tuple[str, ...] = ("<", "<=", ">", ">=")
+
+
 # --------------------------------------------------------------------------- #
 # serialisation helpers
 # --------------------------------------------------------------------------- #
@@ -398,6 +437,97 @@ class Rejected(Record):
     value: str                       # rendered value, e.g. "0.5 mm"
     why: str                         # why it lost, concretely and measurably
     evidence: str = ""               # path / run id / datasheet section, if any
+
+
+@dataclass
+class ReturnCondition(Record):
+    """What would bring a rejected alternative back (paper §7.4, SPEC §0.2) — one of
+    two shapes, and the strict reader allows exactly one (`store.return_condition_problem`):
+
+    * structured, ``{"claim", "quantity", "comparator", "value"}`` — evaluated by
+      ``claims.return_state`` against the current resolution, only while the claim
+      reads Checked: ``quantity`` is one of ``RETURN_QUANTITIES``, ``comparator``
+      one of ``RETURN_COMPARATORS``, ``value`` a finite number;
+    * ``{"text": "..."}`` — shown, never evaluated: *not machine-checkable*.
+
+    ``comparator`` is text, never a ``Comparator``: the lenient ``from_dict`` must
+    never raise on a value the strict reader names. No units: ``margin`` is a
+    fraction, and ``value`` and ``limit`` read the claim's own acceptance units
+    (SPINE_CONTRACT's limits say what an acceptance restated in other units does).
+    Phase 4's candidate ``returns_if`` is this class. *Rejected:* a ``units`` key (a
+    second home for the claim's units); ``==``/``!=``/``between`` (above)."""
+
+    claim: str = ""
+    quantity: str = ""
+    comparator: str = ""
+    value: float | None = None
+    text: str = ""
+
+    def form(self) -> dict[str, Any]:
+        """The members not at their default — the canonical form a digest, a JSON
+        row and a display read: ``{"text": ...}`` or the four structured members."""
+        out: dict[str, Any] = {}
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            if value != f.default:
+                out[f.name] = value
+        return out
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.form()
+
+
+@dataclass
+class Rejection(Rejected):
+    """A decision's rejected alternative (SPEC 14, paper §6.4): ``Rejected`` plus
+    its ``type`` (``REJECTION_TYPES``; ``""`` is an entry written before phase 2,
+    read and shown *untyped*), ``by`` (a ``preferred_against`` rejection's person —
+    a NOMINEE, like ``Claim.owner``: it counts only as that person recorded it with
+    ``nopekit prefer``, ``claims.preference_state``), ``returns_if`` (a
+    ``ReturnCondition``, or None) and ``input`` (an input id, when an input is its
+    source). Field names are the JSON keys; ``type`` and ``input`` shadow builtins
+    only inside this class's namespace, and ``typing.get_type_hints`` resolves the
+    annotations in the module first (``store._nested_fields`` reads them).
+
+    Used only by ``Decision.rejected``: the model's PARAMS and ``params/``
+    rejections stay text ``Rejected``, and the strict reader refuses these keys
+    there, naming ``decide``. *Rejected:* the new fields on ``Rejected`` itself (a
+    PARAMS row would be typed by accident, and ``modelio`` reads ``Rejected``'s
+    fields as PARAMS' closed keys); a decision-level ``by`` (one decision can hold
+    one person's preference beside an evaluator's infeasible)."""
+
+    type: str = ""
+    by: str = ""
+    returns_if: ReturnCondition | None = None
+    input: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Rejection":
+        names = {f.name for f in dataclasses.fields(cls)}
+        kw = {k: v for k, v in (data or {}).items() if k in names}
+        cond = kw.get("returns_if")
+        if isinstance(cond, dict):
+            # `{}` reads as absent (phase 1's `"mechanism": {}` precedent).
+            kw["returns_if"] = ReturnCondition.from_dict(cond) if cond else None
+        return cls(**kw)
+
+    def to_dict(self) -> dict[str, Any]:
+        """``value``, ``why`` and ``evidence`` as ``Rejected`` writes them, and the
+        four new keys only when not at their default — so a legacy rejection
+        serialises, and a gate's read of it digests, exactly as before."""
+        out: dict[str, Any] = {"value": self.value, "why": self.why,
+                               "evidence": self.evidence}
+        if self.type:
+            out["type"] = self.type
+        if self.by:
+            out["by"] = self.by
+        if self.returns_if is not None:
+            out["returns_if"] = (self.returns_if.form()
+                                 if isinstance(self.returns_if, ReturnCondition)
+                                 else self.returns_if)
+        if self.input:
+            out["input"] = self.input
+        return out
 
 
 @dataclass
@@ -1092,7 +1222,21 @@ class GateSpec(Record):
     the declaring file once through its code digest. *Rejected:* categorical
     contexts (no bundled need); a context derived from the walk (the paper's
     word is *declared*); per-claim contexts (the range is the evaluator's);
-    ``inf`` as a bound (``None`` says it). The LAST field."""
+    ``inf`` as a bound (``None`` says it)."""
+    basis: str = ""
+    """Where this evaluator's verdict logic comes from (SPEC 38, §0.4): one of
+    ``BASES`` — ``established`` (an existing non-AI tool's own answer),
+    ``sourced`` (logic that follows a cited outside source) or ``model-only``
+    (logic the model wrote with no outside source) — declared
+    ``@gate(basis=...)``, else the pack's ``pack.json`` ``basis`` (the module's
+    ``PACK_BASIS``); ``""`` reads *undeclared* (``gates.basis_of``, the one
+    reader). Registration refuses a malformed one, only when declared (R-10).
+    Shown in ``gate list``, ``gate show``, the report and ``state.json``; never a
+    status, never a qualification route (where an evaluator's code lives decides
+    that — invariant 9), and NOT part of rho (``verdicts.SPEC_FIELDS_IN_RHO``): a
+    declaration edit re-keys the declaring file once through its code digest.
+    *Rejected:* required at registration (175 test declarations and every
+    third-party pack would stop loading, R-10). The LAST field."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GateSpec":
@@ -1190,6 +1334,13 @@ class InputArtifact(Record):
     extractions: list[Extraction] = field(default_factory=list)
     licence: str = ""                # provenance matters: ingested media gets redistributed
     note: str = ""
+    proposer: str = ""
+    """The id of the proposer that produced this file (SPEC 22, 38): set by
+    `nopekit propose`, or by `ingest --proposer` for one the agent ran by hand,
+    and only on a NEW record. Its basis is looked up from the proposer's
+    declaration (`packs.proposer_basis`), never stated here: a basis the input
+    states would vouch for itself, the reason `independence` is forbidden. Empty,
+    it digests as before (`verdicts._ABSENT_WHEN_EMPTY`). The LAST field."""
 
     @property
     def extracted(self) -> bool:
@@ -1304,19 +1455,68 @@ class Decision(Record):
     title: str = ""
     when: str = ""
     summary: str = ""
-    rejected: list[Rejected] = field(default_factory=list)
+    rejected: list[Rejection] = field(default_factory=list)
     params_changed: list[str] = field(default_factory=list)
     claims_changed: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     body: str = ""                   # long-form markdown
+    preferences: tuple = ()
+    """In memory only (``FORBIDDEN_KEYS``): the decision's preferences as their
+    people recorded them — sealed, ``interactive`` entries of
+    ``preferences/<id>.json`` (``PreferenceRecord``), newest first, assembled by
+    ``store`` as ``Claim.attributions`` are. Whether one counts is
+    ``claims.preference_state``'s to judge. Hidden from every gate
+    (``verdicts._IN_MEMORY_FIELDS``): a gate never keys on a person's act. The
+    LAST field."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Decision":
         names = {f.name for f in dataclasses.fields(cls)}
         kw = {k: v for k, v in (data or {}).items() if k in names}
-        kw["rejected"] = [Rejected.from_dict(r) if isinstance(r, dict) else r
+        kw["rejected"] = [Rejection.from_dict(r) if isinstance(r, dict) else r
                           for r in (kw.get("rejected") or [])]
+        # In memory only: never from a dict (an index row that held one would
+        # be a second home for a person's act).
+        kw.pop("preferences", None)
         return cls(**kw)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Each rejection through ``Rejection.to_dict`` (the new keys only when
+        set), and ``preferences`` dropped — so a legacy decision serialises, and
+        a gate's read digests, exactly as before phase 2."""
+        out = super().to_dict()
+        out["rejected"] = [r.to_dict() if hasattr(r, "to_dict") else r
+                           for r in self.rejected]
+        out.pop("preferences", None)
+        return out
+
+
+@dataclass
+class PreferenceRecord(Record):
+    """One entry of ``preferences/<decision id>.json`` (SPEC 14, invariant 13):
+    a person's preference against a rejected alternative, appended only by
+    ``nopekit prefer`` through ``store.append_sealed`` — sealed and chained like a
+    result. ``decision`` equals the file's stem (phase 4 adds ``candidate`` as the
+    other key); ``value`` is the rejected alternative as the person read it;
+    ``name`` the nominee the rejection's ``by`` named when it was recorded;
+    ``rejection_digest`` the rejection as read (``claims.rejection_digest``);
+    ``who`` git's identity and ``when`` the clock, never typed; ``channel``
+    ``cli._channel``'s (``prefer`` writes only ``interactive``). It counts only as
+    ``claims.preference_state`` judges it: interactive, recorded by the person it
+    names, for the rejection as it reads now. *Rejected:* inside
+    ``decisions/<id>.json`` (an agent-edited file and a person's sealed act in one
+    file — invariant 11's owner laundering); inside ``results/`` (a decision is no
+    claim)."""
+
+    decision: str
+    value: str = ""
+    name: str = ""
+    rejection_digest: str = ""
+    who: str = ""
+    when: str = ""
+    channel: str = ""
+    prev: str = ""
+    digest: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -1460,6 +1660,18 @@ class PackManifest(Record):
     licence: str = "Apache-2.0"
     homepage: str = ""
     origin: str = ""                 # "extracted from a production project" / "built by protocol"
+    basis: str = ""
+    """The basis of this pack's evaluators where one declares none (SPEC 38): one
+    of ``BASES``, or ``""``. Reaches each gate module as ``PACK_BASIS``
+    (``packs._load_dir``); ``read_manifest`` refuses another value, and
+    ``pack validate`` requires every bundled evaluator to resolve to one. Never a
+    proposer's default: a proposer declares its own."""
+    provides_proposers: list = field(default_factory=list)
+    """The tools this pack ships to PROPOSE options or evidence (SPEC 22, 25):
+    raw objects ``{"id", "basis", "description", "run"}``, parsed and checked by
+    ``packs`` (``proposers``, ``proposer_problems``). A proposer is never
+    registered as an evaluator and needs no control: a proposal settles nothing.
+    The LAST field."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PackManifest":
@@ -1668,6 +1880,7 @@ RECORD_KINDS: dict[str, type] = {
     "milestones": Milestone,
     "exports": ExportRecord,
     "requirements": Requirement,
+    "preferences": PreferenceRecord,
 }
 
 #: Keys a record FILE may never carry, per kind (the class name), each with the
@@ -1684,6 +1897,9 @@ RECORD_KINDS: dict[str, type] = {
 #: from origin, and a record that states its own would launder a claim of it.
 #: Rejected: dropping these keys silently on read — the lenient reader is exactly
 #: how a typo'd key vanished and was then erased from disk (S-40).
+_PREFERENCE_HOME = ("a preference is recorded in preferences/<id>.json by `nopekit prefer "
+                    "<id>`, typed in the person's own shell")
+
 FORBIDDEN_KEYS: dict[str, dict[str, str]] = {
     "Claim": {
         "gates": "derived from gate coverage — the registry says which gates cover a claim",
@@ -1701,6 +1917,18 @@ FORBIDDEN_KEYS: dict[str, dict[str, str]] = {
     },
     "InputArtifact": {
         "bytes": "computed from the file",
+        "basis": "looked up from the proposer that produced the input (\"proposer\"), never "
+                 "stated by the input — a basis the input states would vouch for itself, "
+                 "the reason independence is forbidden",
+    },
+    # Architecture phase 2 (SPEC 14, invariant 13): a person's preference is
+    # recorded through their own channel, never written into the decision.
+    "Decision": {
+        "preferences": _PREFERENCE_HOME,
+    },
+    "Rejection": {
+        "recorded": _PREFERENCE_HOME,
+        "who": _PREFERENCE_HOME,
     },
     "Requirement": {
         "status": "a requirement's status is derived on every read — the worst of the "
@@ -1748,4 +1976,7 @@ __all__ = [
     "Locator", "View", "PackManifest", "KeyCollision", "ProjectMeta", "Ledger",
     "RECORD_KINDS", "FORBIDDEN_KEYS", "ALWAYS_WRITTEN", "Milestone", "ExportRecord",
     "LATENCY_UNITS", "Requirement", "CLAIM_MECHANISM",
+    "BASES", "BASIS_UNDECLARED", "REJECTION_TYPES", "REJECTION_UNTYPED",
+    "RETURN_QUANTITIES", "RETURN_COMPARATORS", "ReturnCondition", "Rejection",
+    "PreferenceRecord",
 ]

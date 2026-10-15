@@ -1927,10 +1927,19 @@ def state(
     stale_reasons = {gid: (resolution.rows[gid].stale_reason if gid in resolution.rows
                            else "") for gid in stale_gates}
 
+    from . import packs as pack_logic             # a reader's module: not at import
+    found_proposers = (pack_logic.proposers(root)
+                       if any(a.proposer for a in view.inputs) else {})
+    input_bases = {a.id: pack_logic.proposer_basis(found_proposers, a.proposer)
+                   for a in view.inputs if a.proposer}
     verdict_rows: list[dict] = []
+    bases = report_logic._bases(registry)
     for verdict in view.verdicts:
         how = resolution.rows.get(verdict.gate)
         row = verdict.to_dict()
+        # SPEC 38: where the evaluator's verdict logic comes from — the
+        # registry's token, `undeclared` with no spec; shown, never a status.
+        row["basis"] = bases.get(verdict.gate, "undeclared")
         if how is not None and how.cached and how.entry is not None:
             # A cached row shows its entry as recorded: the tier and pack the
             # gate RAN under. The resolver re-stamps a stale verdict with the
@@ -2141,10 +2150,16 @@ def state(
         "views": views,
         "locator_problems": problems,
         "params": [_param_row(param, view) for param in params],
-        "inputs": [{**artifact.to_dict(), "extracted": artifact.extracted}
+        # SPEC 38: an input's basis is its proposer's, looked up (`""` with no
+        # proposer, `undeclared` when no discoverable pack declares it).
+        "inputs": [{**artifact.to_dict(), "extracted": artifact.extracted,
+                    "basis": input_bases.get(artifact.id, "")}
                    for artifact in view.inputs],
         "gaps": [need.to_dict() for need in report_logic._needs(view, registry)],
         "decisions": [decision.to_dict() for decision in view.decisions],
+        # SPEC 14: every rejected alternative as tokens — its type, its return
+        # condition's state now, its preference's standing — `summarise`'s.
+        "rejections": summary["rejections"],
         # The rebuild prediction (P2.5a-D16): `claims.rebuild`, the one producer.
         "rebuild": [found.to_dict() for found in claim_logic.rebuild(view)],
     }

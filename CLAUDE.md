@@ -57,7 +57,8 @@ every class that holds each invariant):
 3. **The registry refuses a gate with no negative control.** A validator that cannot
    be shown to fail is a logger. This is not negotiable — an agent that writes
    plausible code writes plausible validators, and those launder assumption into
-   proof.
+   proof. A proposer is never registered: a proposal settles nothing, so it needs no
+   control, and a pack declares it apart (`provides_proposers`).
 4. **The report never lists a claim as Checked — in its checked section
    (`report.SECTION_PROVEN`), a status row or a JUnit pass — while any of its gates
    is unrun, skipped, errored or unqualified, or while a value one of its evaluators
@@ -119,13 +120,18 @@ below names:
 8. **The index never disagrees with the records, and no command writes a record
    it was not asked to write.** The records are files — `claims/`, `params/`,
    `decisions/`, `needs/`, `inputs/`, `results/`, `views/`, `milestones/`,
-   `exports/`, `requirements/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
+   `exports/`, `requirements/`, `preferences/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
    from them, rebuilt after every command (`doctor`, `init` and `--no-record` runs
    write none of it), so a hand edit made since the last command reaches it;
    nothing reads it for truth. `check` writes no record: every path it writes is
    ignored by git at the moment it is written, or is a new verdict entry. Each kept
    writer (`ingest`, `extract`, `decide`, `packs add`, `claim physical`) writes the
-   one record it was asked for; `export` (P2.5b) writes its export record
+   one record it was asked for; `prefer` writes one sealed entry in
+   `preferences/<decision>.json`; `propose` writes, as `ingest` does, the input
+   record and its bytes for each file its proposer wrote, and every other path it
+   writes (`.nopekit/out/propose/`) is ignored when written — a proposer that wrote
+   anywhere else in the project is refused, each path named, and nothing is
+   ingested; `export` (P2.5b) writes its export record
    (`exports/<milestone>.json`), the new verdict and control entries its re-run
    files, as `check --force` files them, and the marked ignore blocks — every other
    path it writes (`out/<milestone>/`, its package) is ignored when written; and
@@ -152,7 +158,7 @@ below names:
    the claims, quantity, comparator and units, and which limits are stated, stay held.
    That is evidence at the limits the runs visit, not at every limit: a gate that lies
    only where no run looks is named in SPINE_CONTRACT's limits. Where its code lives
-   decides which it is, never a `PACK_DIR` it sets itself. And it counts only on inputs inside
+   decides which it is, never a `PACK_DIR` it sets itself or a basis it declares. And it counts only on inputs inside
    the operating context it declares: outside, a pass does not count — the claim reads
    Gap, or Assumed under an owned fallback — and a fail still does; its known-good
    control must lie inside that context, and a mutation counts wherever it lands. `check` runs whatever of that is not on
@@ -251,7 +257,9 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     predicate the readiness sentence, `export`, the JSON summaries and the page read —
     nor a requirement more resolved than the worst claim that serves it
     (`claims.requirement_statuses`, the one producer), and *ready* never reads a
-    requirement.
+    requirement; nor evaluates a return condition on a claim the composition does not
+    read Checked — it reads *cannot be evaluated: <id> is <status>* — and `check`
+    prints each condition that holds without moving its exit code.
     A milestone (`milestones/<name>.json`) names the claims its spend requires; it is
     ready only when every one reads Checked — Assumed, Pending build and a Stale that
     waits on a person included in what is not. Every reader but `export` says *ready*
@@ -276,8 +284,30 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     `report --milestone` said the boundary's *ready* over a forged cache and `status`
     listed no milestone at all.)
 
-One more came with checkpoint P2.3 (13 and 14 are reserved for the preference and site
-mechanisms, which `docs/SPEC.md` now schedules). Enforced in
+One more came with architecture phase 2, when a decision's losers gained types and a
+person's preference a channel — a new place to pass the agent's choice off as a
+person's. Enforced in `tests/test_preferences.py`:
+
+13. **A preference counts only through the person's channel.** A `preferred_against`
+    rejection names its person in `by` — a nominee, like a claim's owner — and counts
+    only when that person records it with `nopekit prefer <decision>`, typed in their
+    own shell, confirming the decision's id: refused from an agent session or a pipe,
+    who read from the git identity, which must be the person `by` names, and when
+    from the clock (`--who` and `--when` are refused). Each preference is one sealed,
+    chained entry in `preferences/<decision>.json`, appended by the writer that seals
+    `results/` and `exports/`; a broken seal refuses the file, naming what a restore
+    discards. It counts only while the rejection still names that person and says
+    what it said when they recorded it — its value, its why, its return condition and
+    the decision's title; until then, and again after such an edit, every reader says
+    *preferred against, not recorded by <name>*. A preference moves no status and no
+    exit code. (What it closes before it could slip through: `decide --rejected
+    VALUE|WHY` recorded no who, so a preference the agent typed into a decision would
+    have read as the person's — invariant 11's owner laundering, through another
+    file. What the seal does not stop is `results/`'s limit, in
+    `docs/SPINE_CONTRACT.md`.)
+
+One more came with checkpoint P2.3, numbered 15 (14 is reserved for the site, which
+lands in architecture phase 5: `docs/SPEC.md` §8, "Invariant numbers"). Enforced in
 `tests/test_mutation.py`, over every mutation entry point in `src/`:
 
 15. **A mutation pass writes nothing, changes nothing it was handed, and never says more
@@ -304,16 +334,17 @@ named.)
 |---|---|
 | 1 | `test_invariants.SkipIsNotPass`, `test_invariants.CheckedMeansEveryEvaluatorPassed` |
 | 2 | `test_invariants.ErrorIsNotPass`, `test_louder.ErrorIsLouder`, `test_invariants.UnqualifiedIsTheSpinesWord`, `test_prerequisites.AnErroredPrerequisiteStaysLouder` |
-| 3 | `test_invariants.RegistryRefusesLoggers` |
-| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus` |
+| 3 | `test_invariants.RegistryRefusesLoggers`, `test_proposers.AProposerIsNeverAnEvaluator` |
+| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
-| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords` |
-| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey` |
+| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs` |
+| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition` |
+| 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
 | 15 | `test_mutation.MutationIsSealed` |
 
 ## House rules
@@ -346,7 +377,9 @@ Each fact has one home; everything else that shows it is an output of that home.
   `params/`, `decisions/`, `needs/`, `inputs/<id>.json`, `results/<claim-id>.json`,
   `views/*.json`, `milestones/<name>.json` (a spend and the claims it requires),
   `exports/<name>.json` (that spend's exports, sealed and chained, appended only by
-  `export`), and `.nopekit/project.json` (meta, `model_entry`, the live `packs`).
+  `export`), `preferences/<decision-id>.json` (a decision's recorded preferences,
+  sealed and chained, appended only by `prefer`: never edit one by hand), and
+  `.nopekit/project.json` (meta, `model_entry`, the live `packs`).
   `results/<claim-id>.json` holds a claim's physical results and its owner's or
   authority's attributions, sealed and chained, appended only by `claim physical`
   (P2.5a): never edit one by hand — a broken seal refuses the file.
@@ -377,7 +410,7 @@ layout in full, with each writer.
 | `src/nopekit/verdicts.py` | the per-gate verdict cache: what a gate read (`ParamTrace`, `LedgerView`, the audit hook), portable digests and the spine digest, rho, cache and control entries, freshness, admission at the gate's current version, the one resolver every reader uses, the sweep `check` runs, and `last_check.json` |
 | `src/nopekit/vcs.py` | the only git edge: argv form, a clean environment, a timeout, never raises |
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`. Plain HTML/CSS/ES modules, no build step |
-| `packs/` | domain packs. Ordinary directories: no build step, no registration |
+| `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |

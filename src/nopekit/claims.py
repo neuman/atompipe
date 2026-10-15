@@ -73,6 +73,7 @@ from .models import (
     CONTEXT_OUTSIDE,
     LATENCY_UNITS,
     Claim,
+    Comparator,
     ClaimKind,
     ClaimStatus,
     GateSpec,
@@ -80,6 +81,7 @@ from .models import (
     Need,
     NeedStatus,
     PrerequisiteKind,
+    REJECTION_UNTYPED,
     StrEnum,
     Terminal,
     TERMINALS_BY_KIND,
@@ -144,6 +146,17 @@ __all__ = [
     "yet_to_run",
     "proposal_query",
     "need_how",
+    "ReturnState",
+    "RETURN_STATES",
+    "claim_value",
+    "return_state",
+    "PREFERENCE_SCHEMA",
+    "rejection_digest",
+    "PreferenceState",
+    "preference_state",
+    "RejectionRow",
+    "rejection_rows",
+    "may_return",
 ]
 
 
@@ -1011,12 +1024,21 @@ def margin(verdict: Verdict | None) -> Margin:
         return Margin(None, "no-verdict")
     else:
         passed = verdict.outcome == "pass"
-    value, limit = verdict.measured, verdict.limit
+    comparator = getattr(verdict, "comparator", "")
+    return _margin_of(verdict.measured, verdict.limit,
+                      str(getattr(comparator, "value", comparator) or ""), passed)
+
+
+def _margin_of(value: Any, limit: Any, comparator: str, passed: bool = True) -> Margin:
+    """The margin arithmetic behind ``margin`` (D-17), for a value, a limit, a
+    comparator token and whether it passed — also the margin of a counted
+    physical result against its claim's acceptance condition
+    (``return_state``, phase 2). ``margin``'s behaviour is unchanged."""
     if not _finite_real(value):
         return Margin(None, "no-value")
     if not _finite_real(limit):
         return Margin(None, "no-limit")
-    comparator = str(getattr(verdict, "comparator", "") or "")
+    comparator = str(comparator or "")
     if not comparator:
         return Margin(None, "no-comparator")
     if comparator == "between":
@@ -1668,6 +1690,11 @@ def summarise(
     * `requirements` (SPEC decision 12) — `{id: {status, key, errored, claims,
       worst}}`, tokens only, from `requirement_statuses`, the one producer: the
       worst of the claims that serve each, Gap with none. *ready* never reads it.
+    * `rejections` (SPEC 14, §0.2) — every decision's every rejected
+      alternative as tokens (`RejectionRow.to_dict`): its type (`untyped` for a
+      legacy entry), its person, its input, its return condition and that
+      condition's state now (`return_state`), and its preference's standing.
+      Never a status and never *ready*.
 
     `n_gaps` counts gap RECORDS (`find_gaps`' Needs: an automated claim no
     registered evaluator covers), not claims reading Gap — `counts["gap"]` is
@@ -1759,6 +1786,8 @@ def summarise(
         "requirements": {rid: {"status": s.status.value, "key": s.key, "errored": s.errored,
                                "claims": list(s.claims), "worst": list(s.worst)}
                          for rid, s in requirement_statuses(ledger, composed).items()},
+        # Phase 2 (SPEC 14): every rejected alternative, from the one producer.
+        "rejections": [row.to_dict() for row in rejection_rows(ledger, composed)],
     }
 
 
@@ -2094,6 +2123,267 @@ def latency(claim: Claim, exports: Iterable[Any]) -> Latency:
     if declared is not None:
         return Latency(declared, "declared", "", declared)
     return Latency(None, "none", "", None)
+
+
+# --------------------------------------------------------------------------- #
+# what lost, and what would bring it back (SPEC 14, §0.2; paper §7.4)
+# --------------------------------------------------------------------------- #
+#: A return condition's states, as tokens: ``holds`` — evaluated, and it holds
+#: now (the alternative *may return*); ``does-not-hold``; ``cannot-evaluate`` —
+#: its claim is not Checked, or gives nothing to compare (``ReturnState.why``);
+#: ``not-machine-checkable`` — a ``{"text": ...}`` condition; ``none`` — the
+#: rejection states no condition.
+RETURN_STATES: tuple[str, ...] = ("holds", "does-not-hold", "cannot-evaluate",
+                                  "not-machine-checkable", "none")
+
+
+class ReturnState(NamedTuple):
+    """``return_state``'s answer, tokens only: ``state`` (``RETURN_STATES``);
+    ``why`` when it cannot be evaluated — ``no-claim``, ``status``,
+    ``no-value``, ``no-margin``, ``no-limit`` or ``band``; ``claim``; ``status``
+    — the claim's ``STATUS_KEY`` token, or ``errored`` for a crash's Skipped,
+    when ``why`` is ``status``; ``observed`` — what was compared; ``gate`` — the
+    evaluator whose verdict gave the value or the margin; ``detail`` —
+    ``Margin.why`` when ``why`` is ``no-margin``."""
+
+    state: str
+    why: str = ""
+    claim: str = ""
+    status: str = ""
+    observed: float | None = None
+    gate: str = ""
+    detail: str = ""
+
+
+def claim_value(claim: Claim, composed: Composed, verdicts: Iterable[Verdict]
+                ) -> Verdict | None:
+    """The verdict the composition reports for a Checked automated claim, or
+    None: among the covering passes ``composed`` cites, qualified and compared
+    with the claim's acceptance condition and meeting it (``compared_gates``'
+    set), the one with the least margin — the binding evaluator — a pass with
+    no margin last, ties in ``cites`` order. None unless ``composed`` reads
+    Checked by an evaluator (``PASS``). *Rejected:* the first compared pass
+    (the loosest evaluator would decide whether a loser returns); the mean (a
+    number no evaluator gave)."""
+    if composed is None or composed.status is not ClaimStatus.PASS:
+        return None
+    cites = list(composed.cites)
+    found = [v for v in covering_verdicts(claim, verdicts)
+             if v.gate in cites and v.outcome == "pass"
+             and not getattr(v, "unqualified", "")
+             and cross_check(claim, v).state == "holds"]
+
+    def binding(v: Verdict) -> tuple:
+        fraction = margin(v).fraction
+        return (fraction is None, fraction if fraction is not None else 0.0,
+                cites.index(v.gate))
+
+    found.sort(key=binding)
+    return found[0] if found else None
+
+
+def return_state(condition: Any, ledger: Ledger, composed: Mapping[str, Composed]
+                 ) -> ReturnState:
+    """THE evaluation of a return condition (SPEC 14, 15, §0.2) against the
+    current resolution — one function, reused by phase 4's candidates. Pure: no
+    clock, no ``stale_gates`` (a Checked composition is current by
+    construction: Stale precedes Checked on the ladder), no disk.
+
+    A text condition is *not machine-checkable*. A structured one is evaluated
+    only while its claim reads Checked — otherwise *cannot be evaluated: C1 is
+    <status>*, never silently false (SPEC §6: "it never silently fails to
+    fire"). ``limit`` reads the claim's acceptance limit (a band cannot be
+    evaluated); ``value`` and ``margin`` the verdict the composition reports
+    (``claim_value``), its margin the verdict's own (``margin``, the one margin
+    function) — or, for a claim Checked on an article, its counted result's
+    (``Standing.counted``, never the newest entry) measured value in the
+    acceptance units, its margin against the claim's acceptance condition. A
+    judged claim has no value."""
+    if not condition:
+        return ReturnState("none")
+    text = str(getattr(condition, "text", "") or "")
+    if text:
+        return ReturnState("not-machine-checkable")
+    cid = str(getattr(condition, "claim", "") or "")
+    claim = ledger.claim(cid) if cid else None
+    found = composed.get(cid) if claim is not None else None
+    if claim is None or found is None:
+        return ReturnState("cannot-evaluate", "no-claim", cid)
+    if found.status not in _RESOLVED:
+        return ReturnState("cannot-evaluate", "status", cid,
+                           "errored" if found.errored else STATUS_KEY[found.status])
+    quantity = str(getattr(condition, "quantity", "") or "")
+    acceptance = claim.acceptance
+    comparator = getattr(acceptance, "comparator", "")
+    comparator = str(getattr(comparator, "value", comparator) or "")
+    observed: float | None = None
+    gate = ""
+    if quantity == "limit":
+        if comparator == "between":
+            return ReturnState("cannot-evaluate", "band", cid)
+        if not _finite_real(getattr(acceptance, "limit", None)):
+            return ReturnState("cannot-evaluate", "no-limit", cid)
+        observed = float(acceptance.limit)
+    elif found.status is ClaimStatus.PASS:
+        verdict = claim_value(claim, found, ledger.verdicts)
+        if verdict is None:
+            return ReturnState("cannot-evaluate", "no-value", cid)
+        gate = verdict.gate
+        if quantity == "value":
+            observed = float(verdict.measured)
+        else:
+            m = margin(verdict)
+            if m.fraction is None:
+                return ReturnState("cannot-evaluate", "no-margin", cid, gate=gate,
+                                   detail=m.why)
+            observed = m.fraction
+    else:
+        # The pass that counts, never the newest entry: with no fail,
+        # ``physical_result`` is the newest result (``store._counting_result``),
+        # and a later pass recorded from an agent session or a pipe is recorded
+        # and counts for nothing — the claim stays Checked on the person's pass.
+        # What slipped through (review of phase 2): reading ``physical_result``
+        # let an uncounted 0.45 make ``value > 0.4`` hold beside a counted 0.3.
+        standing = getattr(claim, "standing", None)
+        counted = getattr(standing, "counted", None)
+        results = tuple(getattr(claim, "results", ()) or ())
+        result = (results[counted]
+                  if getattr(standing, "state", "") == "current" and isinstance(counted, int)
+                  and 0 <= counted < len(results) else None)
+        if (found.cause is not ClaimCause.ON_ARTICLE or result is None
+                or result.passed is not True or not _finite_real(result.measured)
+                or str(result.units or "").strip()
+                != str(getattr(acceptance, "units", "") or "").strip()):
+            return ReturnState("cannot-evaluate", "no-value", cid)
+        if quantity == "value":
+            observed = float(result.measured)
+        else:
+            m = _margin_of(result.measured, getattr(acceptance, "limit", None), comparator,
+                           passed=True)
+            if m.fraction is None:
+                return ReturnState("cannot-evaluate", "no-margin", cid, detail=m.why)
+            observed = m.fraction
+    try:
+        holds = Comparator(str(getattr(condition, "comparator", ""))).holds(
+            observed, float(getattr(condition, "value")))
+    except (TypeError, ValueError):
+        # A hand-built condition the strict reader would refuse: nothing to
+        # compare, said as such — never a silent false.
+        return ReturnState("cannot-evaluate", "no-value", cid, observed=observed, gate=gate)
+    return ReturnState("holds" if holds else "does-not-hold", "", cid, observed=observed,
+                       gate=gate)
+
+
+#: The schema of what a preference is bound to (``rejection_digest``): part of
+#: the sealed form, so a change to what it covers is a new number, never a
+#: silent re-reading of a recorded preference.
+PREFERENCE_SCHEMA = 1
+
+
+def _one_line(text: Any) -> str:
+    return " ".join(str(text if text is not None else "").split())
+
+
+def rejection_digest(decision: Any, rejection: Any) -> str:
+    """The rejection as a person read it when they recorded a preference
+    against it (invariant 13): the decision's id and title, the rejection's
+    value, why and return condition, sealed. A preference counts only while
+    this still matches — an edit to any of those un-records it, and reverting
+    the edit records it again. Not covered: the summary, the type, the input
+    and every other rejection (a person prefers against an alternative for a
+    reason, not against the paragraph around it)."""
+    cond = getattr(rejection, "returns_if", None)
+    return seal({"schema": PREFERENCE_SCHEMA, "decision": str(getattr(decision, "id", "")),
+                 "title": _one_line(getattr(decision, "title", "")),
+                 "value": str(getattr(rejection, "value", "") or ""),
+                 "why": _one_line(getattr(rejection, "why", "")),
+                 "returns_if": cond.form() if hasattr(cond, "form") else (cond or None)})
+
+
+class PreferenceState(NamedTuple):
+    """A ``preferred_against`` rejection's standing: ``state`` ``recorded`` or
+    ``not-recorded``; ``name`` — the person ``by`` names; ``who`` and ``when``
+    from the record that counts."""
+
+    state: str
+    name: str
+    who: str = ""
+    when: str = ""
+
+
+def preference_state(decision: Any, rejection: Any) -> PreferenceState | None:
+    """Whether a ``preferred_against`` rejection's person recorded it (invariant
+    13), or None for any other type: ``recorded`` from the newest of
+    ``decision.preferences`` that is ``interactive``, recorded by the person it
+    names (``identity_matches``), names the person ``by`` names now, the
+    alternative's value, and the rejection as it reads now
+    (``rejection_digest``); else ``not-recorded``. It re-checks the channel and
+    the identity as ``_attributed`` does, so a hand-built Decision cannot slip a
+    record past. Never ``by`` alone: a nominee, like a claim's owner."""
+    if str(getattr(rejection, "type", "") or "") != "preferred_against":
+        return None
+    name = name_of(getattr(rejection, "by", ""))
+    digest = rejection_digest(decision, rejection)
+    value = str(getattr(rejection, "value", "") or "")
+    for record in getattr(decision, "preferences", ()) or ():
+        if (getattr(record, "channel", "") == "interactive"
+                and identity_matches(getattr(record, "who", ""), getattr(record, "name", ""))
+                and name and name_of(getattr(record, "name", "")) == name
+                and str(getattr(record, "value", "")) == value
+                and str(getattr(record, "rejection_digest", "")) == digest):
+            return PreferenceState("recorded", name, str(record.who or ""),
+                                   str(record.when or ""))
+    return PreferenceState("not-recorded", name)
+
+
+class RejectionRow(NamedTuple):
+    """One rejected alternative of one decision, with what every reader shows
+    about it: its type (``REJECTION_UNTYPED`` when it states none), its person,
+    its input, its condition, the condition's state now (``return_state``) and
+    its preference's standing (``preference_state``)."""
+
+    decision: str
+    index: int
+    value: str
+    type: str
+    by: str
+    input: str
+    condition: Any
+    returns: ReturnState
+    preference: PreferenceState | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Tokens only (GLOSSARY §7: a JSON value is no human channel)."""
+        cond = self.condition
+        return {"decision": self.decision, "index": self.index, "value": self.value,
+                "type": self.type, "by": self.by or None, "input": self.input or None,
+                "returns_if": cond.form() if hasattr(cond, "form") else None,
+                "returns": dict(self.returns._asdict()),
+                "preference": (None if self.preference is None
+                               else dict(self.preference._asdict()))}
+
+
+def rejection_rows(ledger: Ledger, composed: Mapping[str, Composed]) -> list[RejectionRow]:
+    """Every decision's every rejection, in ledger order (newest decision
+    first), each with its condition's state and its preference's standing —
+    the one producer every reader of a rejection reads (``check``'s *may
+    return*, ``why``, the JSON summaries, ``state.json``)."""
+    rows: list[RejectionRow] = []
+    for decision in ledger.decisions or ():
+        for i, item in enumerate(decision.rejected or ()):
+            cond = getattr(item, "returns_if", None)
+            rows.append(RejectionRow(
+                decision.id, i, str(item.value or ""),
+                str(getattr(item, "type", "") or "") or REJECTION_UNTYPED,
+                name_of(getattr(item, "by", "")), str(getattr(item, "input", "") or ""),
+                cond, return_state(cond, ledger, composed), preference_state(decision, item)))
+    return rows
+
+
+def may_return(rows: Iterable[RejectionRow]) -> list[RejectionRow]:
+    """The rejected alternatives whose return condition holds now — what
+    ``check`` prints as *may return*, never moving its exit code."""
+    return [row for row in rows if row.returns.state == "holds"]
 
 
 def next_claim_id(ledger: Ledger, prefix: str = "C") -> str:

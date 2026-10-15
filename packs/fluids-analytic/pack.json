@@ -53,5 +53,6 @@
     "correlation validity"
   ],
   "licence": "Apache-2.0",
-  "origin": "built by the extension protocol as the tier-0 answer for fluid claims; every correlation is textbook closed form, every threshold is a stated pack default the project overrides"
+  "origin": "built by the extension protocol as the tier-0 answer for fluid claims; every correlation is textbook closed form, every threshold is a stated pack default the project overrides",
+  "basis": "sourced"
 }

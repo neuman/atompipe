@@ -86,7 +86,10 @@ ROWS = ("instruments", "opaque-inputs", "cache-entries", "two-outcomes", "sealed
         "milestones", "exports", "report",
         # Architecture phase 1 (SPEC decisions 12, 13): the requirements and the
         # mechanisms' evaluator names.
-        "requirements", "mechanisms")
+        "requirements", "mechanisms",
+        # Architecture phase 2 (SPEC 14, 38): decisions' pointers and unrecorded
+        # preferences, and every evaluator's basis — warnings, never a FAIL.
+        "decisions", "basis")
 
 #: A fixture every planted project gate can borrow: the bracket's own, which
 #: sags the known-good design 30 mm — past any limit the planted gates use.
@@ -857,6 +860,51 @@ class MilestonesExportsAndTheReport(_env.EnvCase):
         _write(self.root, "docs/readiness.md", "# an old report\n")
         _code, rows = self.rows()
         self.assertRow(rows, "report", "warn", "docs/readiness.md", "git rm docs/readiness.md")
+
+
+
+class DecisionsAndBasis(_env.EnvCase):
+    """(architecture phase 2) `doctor`'s `decisions` row names each unrecorded
+    preferred_against rejection with the command its person runs, a return
+    condition or an input naming no record, and a preference file no decision
+    holds; its `basis` row names an evaluator that declares none. Both warn and
+    never FAIL: neither moves a status."""
+
+    def test_the_bracket(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        code, rows = _doctor_in_process(project)
+        self.assertEqual(rows["decisions"]["status"], "warn")
+        self.assertIn("print-in-petg (a machined 6061 aluminium bracket, by Robin Okafor) — "
+                      "Robin Okafor runs: nopekit prefer print-in-petg",
+                      rows["decisions"]["detail"])
+        self.assertEqual((rows["basis"]["status"], rows["basis"]["detail"]),
+                         ("ok", "every evaluator declares its basis"))
+        path = os.path.join(project, "decisions", "print-in-petg.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["rejected"][0]["input"] = "no-such-quote"
+        data["rejected"][2]["returns_if"]["claim"] = "C42"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        again, rows = _doctor_in_process(project)
+        self.assertEqual(again, code, "a warning never moves doctor's exit code")
+        detail = rows["decisions"]["detail"]
+        self.assertIn("rejected[0].input names 'no-such-quote', which has no "
+                      "inputs/no-such-quote.json", detail)
+        self.assertIn("rejected[2].returns_if names 'C42', which has no claims/C42.json",
+                      detail)
+
+    def test_an_undeclared_basis_warns(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        path = os.path.join(project, "gates", "structural.py")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('    basis="model-only",\n', "", 1))
+        _code, rows = _doctor_in_process(project)
+        self.assertEqual(rows["basis"]["status"], "warn")
+        self.assertIn("1 evaluator(s) declare no basis and show as undeclared: bracket.bed_fit",
+                      rows["basis"]["detail"])
 
 
 if __name__ == "__main__":

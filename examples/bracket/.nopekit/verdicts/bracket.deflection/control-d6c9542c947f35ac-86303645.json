@@ -2,12 +2,12 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.deflection",
-  "rho": "f11c1ba42a7ab2d7ee594d1420d98d933b15762c578294c6dcaa881081020cc6",
-  "static": "65f3bbf68617f5b96593becab3778ca1759c682b08d5a3dbb10cc42b20d9c025",
+  "rho": "d6c9542c947f35acd59e93a3a95b31017f47b525bf75eb8696c9c4bf4c309c17",
+  "static": "ad446d4157732473bc138206bf2a446247a4a6fad384d5a022bf394c1912b70b",
   "static_parts": {
-    "spine": "7d5aa8d7e879f51e43ce49fa1732d6ac66e2e4d43e9384b0e9c90270c56b10c8",
+    "spine": "bbb0d218546a4947749cd3151d636523a587bb269c1c8ac14eedbb045b52cb06",
     "code": {
-      "digest": "5520d0044d67360dabf62772863955b4b7678e7f76c1f62f99bb01ef09e13c9e",
+      "digest": "3cd3bc1d5386bbc6950c4c5997a234bc95c3885a5a49703715cef1638c85633b",
       "files": [
         "gates/structural.py"
       ]
@@ -168,5 +168,5 @@
   "measured": 30.0,
   "limit": 0.5,
   "units": "mm",
-  "digest": "41ba4439abeee776e1a994af7071bfc5f7630ac5ee54385e4702fa80709136ec"
+  "digest": "a0aa0329aabadb5049d81adcd16d35a30b445839714ac799d7dcaccec0894e46"
 }

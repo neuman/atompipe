@@ -729,7 +729,7 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         self.assertEqual(list(index), [
             "generated", "schema", "records_digest", "meta", "claims", "params", "decisions",
             "needs", "inputs", "results", "attributions", "views", "milestones", "exports",
-            "requirements", "unregistered_inputs", "problems"])
+            "requirements", "preferences", "unregistered_inputs", "problems"])
         # P2.5b: a milestone's export entries are records as stored — their
         # `counted` is what the export saw, sealed, not a status now.
         self.assertEqual(index["generated"], store.INDEX_BANNER)
@@ -875,8 +875,10 @@ class LegacyLedgerMigrates(_env.EnvCase):
 
         self.assertEqual([d.id for d in ledger.decisions], ["thicker-arm", "older"],
                          "decisions read newest first")
-        self.assertEqual(ledger.decisions[0].rejected,
+        self.assertEqual([models.Rejected(r.value, r.why, r.evidence)
+                          for r in ledger.decisions[0].rejected],
                          [Rejected(value="4.0 mm", why="sagged", evidence="runs/0002")])
+        self.assertEqual(ledger.decisions[0].rejected[0].type, "", "a legacy loser reads untyped")
         self.assertEqual(ledger.decisions[0].body, "### Why\n\nIt sagged.")
         self.assertEqual(ledger.views[0].data, {"series": [[1, 2]]})
         self.assertEqual(ledger.meta, ProjectMeta.from_dict(legacy["meta"]))
@@ -1436,7 +1438,37 @@ def _migrated_bracket(dest: str) -> str:
                          "how": "the tip deflection, closed form"}
     data["requirements"] = ["R1"]
     _write(path, json.dumps(data, indent=3))
+    # Architecture phase 2 (SPEC 14): a typed rejection written by hand, and a
+    # preference sealed by this file's own copy of the seal form — so a command
+    # that rewrote a decision's typed rejection, or the sealed file, is caught.
+    path = os.path.join(project, "decisions", "thickness-stays-7-mm.json")
+    data = json.loads(_read_bytes(path))
+    data["rejected"].append({"value": "an aluminium arm", "why": "Dana prints her own parts",
+                             "by": "Dana", "type": "preferred_against",
+                             "returns_if": {"value": 0.05, "claim": "C1", "comparator": "<",
+                                            "quantity": "margin"}})
+    _write(path, json.dumps(data, indent=3))
+    _write(os.path.join(project, "preferences", "thickness-stays-7-mm.json"),
+           json.dumps({"preferences": [_sealed_preference(_PREFERENCE, "thickness-stays-7-mm",
+                                                          "")]}, indent=2) + "\n")
     return project
+
+
+#: One preference, as `prefer` records it (SPEC 14) — written by hand and sealed
+#: by `_sealed_preference`, its digest not the live rejection's (a fixture of
+#: the code under test changes shape with it).
+_PREFERENCE = {"decision": "thickness-stays-7-mm", "value": "an aluminium arm", "name": "Dana",
+               "rejection_digest": "e" * 64, "who": "Dana <dana@example.invalid>",
+               "when": "2026-10-14T10:00:00Z", "channel": "interactive"}
+
+
+def _sealed_preference(entry: dict, stem: str, prev: str) -> dict:
+    """``entry`` sealed and chained as a preference entry: the seal over the
+    entry with the seal's schema, the record kind, the decision and the list."""
+    body = {k: v for k, v in entry.items() if k not in ("prev", "digest")}
+    body["prev"] = prev
+    form = {"schema": 1, "kind": "preferences", "file": stem, "list": "preferences", **body}
+    return {**body, "digest": util.seal(form)}
 
 
 #: One export of `print-v1`, as `export` records it (P2.5b-D9) — written by hand
@@ -1532,6 +1564,11 @@ def _touched_records(before: dict, after: dict) -> list[str]:
 _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("status",), False), (("status", "--json"), False),
     (("why", "thickness"), False), (("why", "C1"), False),
+    # Architecture phase 2: a decision's `why`. (`propose`'s listing reads
+    # pack.json files only; what `propose` writes is held by
+    # `test_the_phase_2_writers_write_their_one_record` and
+    # test_proposers.ProposeWritesOnlyItsInputs — the fast tier's pay-back.)
+    (("why", "thickness-stays-7-mm"), False),
     (("why", "arm_length", "--json"), False),
     (("gap",), False), (("gap", "--json"), False), (("gap", "--propose"), False),
     (("report",), False), (("report", "--json"), False),
@@ -1908,6 +1945,37 @@ class NoCommandWritesARecord(_env.EnvCase):
                         f"the fixture lacks a record kind, so a command that rewrites one "
                         f"could not be seen: {sorted(set(store.RECORD_DIRS) - kinds)}")
         self._no_record_written(project, legacy=False, watched=True)
+
+    def test_the_phase_2_writers_write_their_one_record(self):
+        """(architecture phase 2) `prefer` from a pipe writes nothing; `decide`
+        with typed rejections, `propose` and `ingest --proposer` each write the
+        one record (and the bytes) they were asked to, and nothing else."""
+        import _decisions
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        base, _name = _decisions.fixture_pack(self.tmp())
+        env = {"NOPEKIT_PACK_PATH": base}
+        evidence = _write(os.path.join(self.tmp(), "quote.txt"), "an anchor quote\n")
+
+        def run(*argv):
+            before = _records(project)
+            proc = _env.nopekit(list(argv), cwd=project, identity=True, env=env)
+            return proc, _touched_records(before, _records(project))
+
+        proc, touched = run("prefer", "thickness-stays-7-mm")
+        self.assertEqual((proc.returncode, touched), (2, []), proc.stderr)
+        proc, touched = run("decide", "--title", "Keep PETG", "--summary", "s",
+                            "--rejected", "PLA|creeps", "--type", "infeasible",
+                            "--returns-text", "indoors")
+        self.assertEqual(touched, ["decisions/keep-petg.json"], proc.stderr)
+        proc, touched = run("propose", _decisions.PROPOSER_ID)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len([t for t in touched if t.startswith("inputs/")
+                              and t.count("/") == 1]), 2, touched)
+        self.assertFalse([t for t in touched if not t.startswith("inputs/")], touched)
+        proc, touched = run("ingest", evidence, "--proposer", _decisions.PROPOSER_ID, "--json")
+        (artifact,) = json.loads(proc.stdout)["ingested"]
+        self.assertEqual(sorted(touched), sorted([f"inputs/{artifact['id']}.json",
+                                                  artifact["path"]]))
 
     def test_no_command_writes_a_record_on_a_legacy_project(self):
         """A legacy `ledger.json` IS the records: every command but `check` and the
@@ -2998,6 +3066,63 @@ class RequirementsAreRecords(_env.EnvCase):
         self.assertEqual([(r["status"], r["detail"]) for r in rows],
                          [("FAIL", "claims/C7.json names requirement R2, which has no "
                                    "requirements/R2.json")])
+
+
+class PreferencesAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 2: SPEC 14) `preferences/<decision>.json`
+    is a record kind — last, beyond the legacy ledger — the index lists each
+    file's entries as stored and names a file no decision holds, a return
+    condition on no claim and a rejection's input that is no record; `agree`
+    sees a new entry; a whole-ledger `save` never writes the kind."""
+
+    def test_its_place(self):
+        from nopekit import models
+        self.assertEqual(store.RECORD_DIRS[-1], "preferences")
+        self.assertEqual(list(models.RECORD_KINDS)[-1], "preferences")
+        self.assertIn("preferences", store._BEYOND_LEGACY)
+        self.assertIn("preferences/", store.INDEX_BANNER)
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        import _decisions
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        self.assertEqual(store.build_index(root)["preferences"], {})
+        entry = store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                                    _decisions.entry_for(root))
+        self.assertTrue(any("preferences" in p for p in store.agree(root))
+                        or not os.path.exists(store.ledger_path(root)), store.agree(root))
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        self.assertEqual(store.build_index(root)["preferences"], {"print-in-petg": [entry]})
+        store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                            dict(_decisions.entry_for(root), when="2026-10-15T00:00:00Z"))
+        self.assertTrue(any(p.startswith("preferences") for p in store.agree(root)),
+                        store.agree(root))
+        store.append_sealed(root, "preferences", "gone", "preferences",
+                            dict(_decisions.entry_for(root), decision="gone"))
+        _decisions.edit_rejection(root, 2, returns_if={"claim": "C42", "quantity": "margin",
+                                                       "comparator": "<", "value": 0.1},
+                                  input="no-such-input")
+        problems = store.build_index(root)["problems"]
+        for said in ("preferences/gone.json: no decisions/gone.json holds that decision",
+                     "decisions/print-in-petg.json: rejected[2].returns_if names 'C42', which "
+                     "has no claims/C42.json",
+                     "decisions/print-in-petg.json: rejected[2].input names 'no-such-input', "
+                     "which has no inputs/no-such-input.json"):
+            self.assertIn(said, problems)
+
+    def test_save_never_writes_them(self):
+        import _decisions
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                            _decisions.entry_for(root))
+        path = os.path.join(root, "preferences", "print-in-petg.json")
+        before = _read_bytes(path)
+        ledger = store.load(root)
+        self.assertEqual(len(ledger.decisions[0].preferences), 1)
+        store.save(root, ledger)
+        self.assertEqual(_read_bytes(path), before)
+        written = json.loads(_read_bytes(os.path.join(root, "decisions", "print-in-petg.json")))
+        self.assertNotIn("preferences", written)
 
 
 class MilestonesAreRecords(_env.EnvCase):

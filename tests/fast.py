@@ -14,7 +14,28 @@ that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
 The budget is 90 s as ONE process on an otherwise idle machine. Architecture
-phase 1 (requirements and mechanisms) paid back what it added, measured as two
+phase 2 (decisions keep their losers) paid back what it added and measured flat,
+within the machine's noise, as two rounds of two interleaved pairs in one session on
+2026-10-14 (load average 0.9-2.2): 91.3 s and 98.3 s, then 94.1 s and 94.4 s wall
+(66.8-69.0 s user) for its 764 tests, against 89.4 s and 91.5 s, then 92.7 s and
+95.2 s (65.5-69.6 s user) for e138fc8's 775 — at the line, not under it, so the next
+change that adds pays first. What it added (~3.5 s): its invariant classes'
+in-process rows (~1.9 s: `prefer` over every agent marker, a pipe, another identity
+and a mistyped id, each with its planted violator; a nominee alone; the sealed file's
+tamperings; the binding to what the person read; a return condition read only on a
+Checked claim, `check`'s *may return* and every reader agreeing; basis never a
+status, a key or a qualification route; a proposer never an evaluator), the
+`why <decision>` row in both records sweeps (~0.9 s) and the bracket's decision in
+every sweep's index. What it paid (~3.8 s): its own rows of no invariant class
+(the typed rejection's reader, the earlier seals pinned, every bundled basis, an
+input's looked-up basis, the packs line), the writer scan and its subprocess rows
+to the gate; `propose`'s listing out of the records sweeps (it reads pack.json files
+only; `propose`'s writes are held by test_proposers and the phase's writers row);
+and six entries of no invariant class to the full suite, each named where it was:
+test_stdlib_only (CI's first step runs the same walk), test_codeload,
+test_vocabulary.StatusWordsComeFromOneTable, test_admission.SweepOrder,
+test_prerequisites.UnselectedDependentFollowsTheSweep and
+test_louder.WorstIsTheMostUrgent. Architecture phase 1 (requirements and mechanisms) paid back what it added, measured as two
 interleaved pairs in one session on 2026-10-14 (load average 0.7-2.3): 92.3 s and
 89.8 s wall (65.5 s user) for its 769 tests, against 90.4 s and 91.3 s wall (67.4-67.7 s
 user) for 94b9963's 751. What it added (~4 s): its invariant classes' in-process rows
@@ -218,9 +239,10 @@ FAST: list[str] = [
     # the edge, no git outside `vcs`. Weakening an invariant test is the cheapest
     # way to green, so this runs every iteration. 2.8 s.
     "test_meta",
-    # House rule: the spine is standard library only. CI's own AST walk, run
-    # over the spine and over a planted third-party import. 0.3 s.
-    "test_stdlib_only",
+    # (House rule: the spine is standard library only. test_stdlib_only — CI's
+    # own AST walk over the spine and a planted third-party import, 0.4 s — is
+    # left to the full suite by architecture phase 2's pay-back: CI's first step
+    # runs the same walk on every push, before any test.)
     # The one place that decides a tool is missing: the line between SKIPPED
     # (BLOCKED) and a run. 0.2 s.
     "test_availability",
@@ -258,7 +280,10 @@ FAST: list[str] = [
     "test_louder.ErrorIsLouder.test_render_terminal",
     "test_louder.ErrorIsLouder.test_every_command_is_rendered_or_says_why",
     "test_louder.ErrorIsLouder.test_the_checkers_refuse_what_they_forbid",
-    "test_louder.WorstIsTheMostUrgent",
+    # (WorstIsTheMostUrgent — `last_check.json`'s worst claim by
+    # `claims.SEVERITY_ORDER`, 0.3 s — is left to the full suite by architecture
+    # phase 2's pay-back: no invariant class; the order it reads is held by
+    # test_status_table.StatusTable here.)
     # Today's resolve_status table, the report's section order, and invariant 4
     # over a pass beside an evaluator that is not admitted — in process, and
     # end to end on a gate refused at its first check (eight commands, the
@@ -285,9 +310,10 @@ FAST: list[str] = [
     # to the full suite (below): the predicate it reads is held here, in process.
     # (P2.5a's pay-back: StatusLinesSpeakTheTable — three projects run through
     # every command, ~5 s — is left to the full suite: no invariant reads it, and
-    # StatusWordsComeFromOneTable holds its routing here.)
+    # StatusWordsComeFromOneTable held its routing here until architecture phase
+    # 2's pay-back left it to the full suite too, 0.8 s: no invariant reads it,
+    # and StatusWordsAreTheGlossarys holds the words themselves here.)
     "test_vocabulary.StatusWordsAreTheGlossarys",
-    "test_vocabulary.StatusWordsComeFromOneTable",
     "test_vocabulary.ReadyIsThePredicate",
     # P2.3's words (V4): patching `HUMAN["qualification"]` moves every channel
     # that shows a qualification, and none says a §2 Never-say. One bracket copy,
@@ -346,9 +372,11 @@ FAST: list[str] = [
     "test_trace",
     # Digests from bytes; the stat cache never serves a stale one (S-22). 0.1 s.
     "test_digests",
-    # The recording loader: code a gate or fixture loads is keyed by its bytes.
-    # 0.4 s.
-    "test_codeload",
+    # (The recording loader — code a gate or fixture loads is keyed by its bytes,
+    # test_codeload, 0.4 s — is left to the full suite by architecture phase 2's
+    # pay-back: test_trace above holds the record it keys by, and an iteration
+    # touching `modelio`'s loader runs test_codeload whole, as the escalation
+    # rule below says for the recording loader.)
     # Every JSON file the spine writes is JSON (S-47). 0.1 s.
     "test_strict_json",
 
@@ -370,9 +398,10 @@ FAST: list[str] = [
     "test_admission.AdmissionIsDemonstrated.test_a_model_edit_that_defuses_a_control_is_not_admitted",
     # (S-05 and S-07 through the commands a human types — the four cheapest
     # CLI rows, ~8 s — were left to the gate by P2.5a's pay-back, named below.)
-    # A missing tool reads skipped, never "not admitted"; availability comes
-    # before admission. 0.4 s.
-    "test_admission.SweepOrder",
+    # (A missing tool reads skipped, never "not admitted"; availability comes
+    # before admission: test_admission.SweepOrder, 0.7 s, left to the full suite
+    # by architecture phase 2's pay-back — no invariant class, and invariant 1's
+    # SkipIsNotPass holds the skip's reading here.)
     # Invariant 9's paired rule (P2.3, V1 and V2): both controls, in process on
     # one planted project per case — an always-False gate, a known-bad-shown one,
     # a crashed half, channels, tiers, the early cutoff over both halves; and
@@ -475,7 +504,9 @@ FAST: list[str] = [
     "test_prerequisites.TierInversionRefused",
     "test_prerequisites.NeedsIsNotARhoEdge",
     "test_prerequisites.NeedsDeclarationsAreExact",
-    "test_prerequisites.UnselectedDependentFollowsTheSweep",
+    # (UnselectedDependentFollowsTheSweep, 0.3 s, left to the full suite by
+    # architecture phase 2's pay-back: no invariant class, and the merged view
+    # it reads is PrerequisiteFailureIsNeverAPass's above.)
     # The review of P2.2: applying the rule twice moves nothing (`cli._swept`
     # applies it over a view `resolve` already ruled on). In process, 0.2 s.
     "test_prerequisites.ApplyingTheRuleTwiceMovesNothing",
@@ -712,6 +743,41 @@ FAST: list[str] = [
     "test_records.RequirementsAreRecords.test_the_index_lists_them_and_names_the_problems",
     "test_records.RequirementsAreRecords.test_a_legacy_project_keeps_its_requirements",
     "test_records.RequirementsAreRecords.test_a_requirement_id_that_is_a_claim_id_is_named",
+    # -- architecture phase 2 (SPEC 14, 22, 25, 38): decisions keep their
+    # losers. In process, each with its planted violator: a preference only
+    # through the person's channel — every agent marker, a pipe, another
+    # identity, a mistyped id; `by` alone; a sealed, chained file; bound to what
+    # the person read (13); a return condition read only on a Checked claim,
+    # `check`'s *may return* moving no exit code, every reader agreeing (12);
+    # basis never a status, a key or a qualification route (4, 7, 9); a proposer
+    # never an evaluator, `propose` refusing with nothing written (3, 8); the
+    # preference record kind (8). The pty, the real environment's markers, a
+    # committed tamper's git walk, the writer scan and the proposer subprocess
+    # rows are left to the gate, below; the classes of no invariant (the typed
+    # rejection's reader, the earlier seals pinned, every bundled basis, an
+    # input's looked-up basis, the packs line) to the full suite, as the phase's
+    # own pay-back.
+    "test_preferences.APreferenceIsAPersonsAct.test_the_person_records_it_in_their_own_shell",
+    "test_preferences.APreferenceIsAPersonsAct.test_every_channel_but_the_persons_is_refused",
+    "test_preferences.APreferenceIsAPersonsAct.test_each_refusal_says_why",
+    "test_preferences.APreferenceIsAPersonsAct.test_who_and_when_are_refused_before_the_project_is_read",
+    "test_preferences.APreferenceIsAPersonsAct.test_a_planted_prefer_that_skips_the_marker_is_caught",
+    "test_preferences.APreferenceIsAPersonsAct.test_value_names_which_alternative",
+    "test_preferences.ANomineeAloneNeverCounts",
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_the_sealed_file_reads",
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_a_hand_written_unsealed_file_is_refused",
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_each_tampering_is_refused",
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_the_writer_refuses_to_extend_a_broken_file",
+    "test_preferences.APreferenceIsBoundToWhatThePersonRead",
+    "test_returns.AConditionReadsOnlyACheckedClaim",
+    "test_returns.MayReturnNeverMovesTheExitCode",
+    "test_returns.EveryReaderAgreesOnAReturnCondition",
+    "test_basis.ABasisNeverChangesAStatus",
+    "test_basis.ABasisIsNeverAKey",
+    "test_basis.ABasisNeverQualifies",
+    "test_proposers.AProposerIsNeverAnEvaluator",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_in_process_a_refusal_writes_nothing",
+    "test_records.PreferencesAreRecords",
 ]
 
 
@@ -719,6 +785,36 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Architecture phase 2's end-to-end halves: `prefer` in a real pty and under
+    # the real environment's markers (pty ~1 s each; the in-process rows above
+    # hold the rule over every marker), a committed tamper walking git for the
+    # restore (the advice's walk is results/' and exports', held in their own
+    # classes), and `propose`/`ingest --proposer`/typed `decide` through
+    # subprocesses (each refusal's rule is held in process above). An iteration
+    # touching `cmd_prefer`, `cmd_propose`, the preference file's reader or
+    # writer, or `artifacts.ingest` runs test_preferences, test_proposers and
+    # test_records whole.
+    "test_preferences.APreferenceIsAPersonsAct.test_a_pty_records_it_end_to_end",
+    "test_preferences.APreferenceIsAPersonsAct.test_the_markers_end_to_end",
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_a_committed_tamper_names_the_commit_to_restore",
+    # The planted twin of the one-record check (~0.35 s): a `prefer` that also
+    # rewrote its decision. The real `prefer`'s before-and-after runs every
+    # iteration in test_the_person_records_it_in_their_own_shell above.
+    "test_preferences.APreferenceIsAPersonsAct.test_a_planted_prefer_that_writes_more_is_caught",
+    # The AST scan for a second writer of `preferences/` (0.3 s: it parses
+    # cli.py and verdicts.py) is a static property of the source; the export
+    # twin above holds the same rule over the same writer every iteration.
+    "test_preferences.ThePreferenceFileIsSealedAndChained.test_the_only_writer_is_append_sealed",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_two_files_two_records",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_each_failure_ingests_nothing",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_an_unknown_proposer_is_refused",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_ingest_proposer_records_it_on_a_new_record_only",
+    # The review of phase 2's propose rows, through subprocesses like the rest
+    # of the class: the ignored scratch a proposer may write, and nopekit's own
+    # flags after the id with `--json` on a run that wrote no file.
+    "test_proposers.ProposeWritesOnlyItsInputs.test_ignored_scratch_is_not_outside",
+    "test_proposers.ProposeWritesOnlyItsInputs.test_its_own_flags_never_reach_the_script",
+    "test_records.NoCommandWritesARecord.test_the_phase_2_writers_write_their_one_record",
     # Architecture phase 1's end-to-end halves (~2 s): a pass typed in a pty on
     # an older-spelled claim, read Checked after the file is respelled (11);
     # the bracket's requirements through `status --json`, `report --json` and

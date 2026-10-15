@@ -113,8 +113,11 @@ _MIGRATED_DIRS = (".nopekit/verdicts/", "claims/", "params/", "decisions/", "nee
 #: held (architecture phase 1, SPEC decision 12): a legacy copy carrying them
 #: would hold four requirements no claim serves, each reading Gap, in every
 #: legacy world. *Rejected:* adding them to `_MIGRATED_DIRS` (the migration did
-#: not write them).
-_ADDED_AFTER_MIGRATION = ("requirements/",)
+#: not write them). Architecture phase 2 adds the decision `nopekit decide` wrote
+#: (SPEC 14: typed rejections and a preferred_against by an invented person) —
+#: already left out of a legacy copy by `decisions/` above, and named here
+#: because the migration did not write it either.
+_ADDED_AFTER_MIGRATION = ("requirements/", "decisions/print-in-petg.json")
 
 #: The thickness default in `model/bracket.py`, as the model spells it. Exactly
 #: one line may match: a second match (a comment quoting the line, a second

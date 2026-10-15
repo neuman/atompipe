@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import ast
 import dataclasses
+import difflib
 import importlib.util
 import json
 import math
@@ -58,7 +59,9 @@ import os
 import platform
 import posixpath
 import re
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -78,6 +81,7 @@ from .models import (
     Ledger,
     PhysicalResult,
     ProjectMeta,
+    REJECTION_TYPES,
     Tier,
     Verdict,
     sha256_file,
@@ -941,10 +945,29 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
     # decision 12): the caller's compositions, never the raw opinion.
     composed = claims.compositions(view, registry=registry,
                                    stale_gates=resolution.stale_gates)
+    # SPEC 14, 38: each rejection's condition and preference from the same
+    # view and compositions, and each input's basis from its proposer.
     return decisions.why(shown, name, view=views,
                          coverage=claims.effective_gates(ledger, registry),
                          read_sets=read_sets, verdicts=resolution.verdicts,
-                         composed=composed)
+                         composed=composed, rows=claims.rejection_rows(view, composed),
+                         bases=_input_bases(root, ledger))
+
+
+def _input_bases(root: str, ledger: Ledger) -> dict[str, str]:
+    """`{input id: basis token}` for every input a proposer produced — looked
+    up from the proposer's declaration in any discoverable pack, `undeclared`
+    when none declares it now (SPEC 38: never stated by the input)."""
+    found = None
+    out: dict[str, str] = {}
+    for artifact in ledger.inputs:
+        pid = getattr(artifact, "proposer", "") or ""
+        if not pid:
+            continue
+        if found is None:
+            found = packs.proposers(root)
+        out[artifact.id] = packs.proposer_basis(found, pid)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -1164,6 +1187,19 @@ def _freshness_rows(resolution: verdicts.Resolution,
     return out
 
 
+#: How many pack names `status`'s packs line spells before "and N more": eight
+#: fit one terminal line beside the count. *Rejected:* six with no "more" (the
+#: count and the names disagreed: "7 available" over six names).
+_PACKS_NAMED = 8
+
+
+def _names(names: list[str], cap: int = _PACKS_NAMED) -> str:
+    """`a, b, c` — or the first ``cap``, then `, and N more`."""
+    shown = ", ".join(names[:cap])
+    more = len(names) - cap
+    return shown + (f", and {more} more" if more > 0 else "")
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """The one-screen answer to "where is this project".
 
@@ -1278,12 +1314,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         entry = view.meta.model_entry or "(none recorded)"
         _say(f"model: {entry} DOES NOT LOAD — {model_error.splitlines()[0]}")
 
+    # Every pack it counts, up to `_PACKS_NAMED`, then how many more. What
+    # slipped through: the line said "7 available" and named six, cut at a
+    # slice nobody announced.
     if installed:
         _say(f"packs: {', '.join(installed)} "
-             f"({len(available)} available: {', '.join(available[:6]) or 'none'})")
+             f"({len(available)} available: {_names(available) or 'none'})")
     elif available:
         _say(f"packs: none installed; {len(available)} available "
-             f"({', '.join(available[:6])}) — `nopekit packs add <name>`")
+             f"({_names(available)}) — `nopekit packs add <name>`")
 
     # Mentioned only when the project has one: a line telling every project
     # without a site that it does not have a site is noise in the one command
@@ -1706,6 +1745,10 @@ def cmd_check(args: argparse.Namespace) -> int:
     # THE exit code. Every line below prints from it and the JUnit report is
     # rendered from it; nothing after this point decides anything.
     code = 0 if ready else 1
+    # SPEC 14, 15: each rejected alternative whose return condition holds now —
+    # from the same view and compositions, after the code is fixed; nothing
+    # reads it back into `code` (invariant 12: it never moves the exit code).
+    returning = claims.may_return(claims.rejection_rows(view, composed))
 
     # The sweep's own notes — the writer's warnings, entries it ignored. They
     # were collected and printed nowhere: a forced run that wrote a FAIL beside
@@ -1785,6 +1828,9 @@ def cmd_check(args: argparse.Namespace) -> int:
                 if row.admission is not None and row.admission.qualification is not None],
             # P2.5a-D16: the rebuild prediction, additive.
             "rebuild": summary["rebuild"],
+            # Additive (SPEC 14): the rejected alternatives that may return; the
+            # full list is `summary.rejections`.
+            "may_return": [row.to_dict() for row in returning],
         })
         return code
 
@@ -1797,6 +1843,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         _say(line)
     for line in _mechanism_lines(view, registry):
         _say(line)
+    for row in returning:
+        _say(report.may_return_line(row, view))
     for note in notes:
         _say(f"note: {note}")
 
@@ -2522,25 +2570,43 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     `inputs/<bucket>/` (the payload, not a record) and writes exactly one record,
     `inputs/<id>.json`, pinning the sha256. Bytes already ingested come back as
     their existing record and rewrite nothing.
+
+    `--proposer <id>` records which proposer produced the file, for one the
+    agent ran by hand (SPEC 22): refused before the lock when no discoverable
+    pack declares it, and set only on a NEW record. It is the agent's word —
+    the basis it shows is display only (SPINE_CONTRACT's limits).
     """
     root = _root(args)
     now = utcnow_iso()
     landed: list[Any] = []
+    proposer = getattr(args, "proposer", None) or ""
+    found = packs.find_proposer(root, proposer) if proposer else None
+    known: list[str] = []
 
     with _lock(root):
         ledger = _migrate(root, apply=True, now=now)
         for source in args.paths:
+            before = {a.id: a.proposer for a in ledger.inputs}
             if source.startswith(("http://", "https://")):
                 artifact = artifacts.ingest_link(
                     root, ledger, source, description=args.desc,
-                    kind=args.kind or ArtifactKind.LINK, when=now)
+                    kind=args.kind or ArtifactKind.LINK, when=now, proposer=proposer)
             else:
                 artifact = artifacts.ingest(
                     root, ledger, source, kind=args.kind, description=args.desc,
                     when=now, copy=not args.no_copy, licence=args.licence,
-                    note=args.note)
+                    note=args.note, proposer=proposer)
             store.write_record(root, "inputs", artifact)
             landed.append(artifact)
+            if proposer and artifact.id in before and before[artifact.id] != proposer:
+                said = report.HUMAN["propose"]
+                was = (said["ingest_was_none"] if not before[artifact.id] else
+                       report.HUMAN["basis"]["proposed_by"].format(
+                           id=before[artifact.id],
+                           basis=packs.proposer_basis(packs.proposers(root),
+                                                      before[artifact.id])))
+                known.append(said["ingest_known"].format(
+                    where=artifact.path or artifact.url, aid=artifact.id, was=was))
 
     if args.json:
         _dump({"ingested": [a.to_dict() for a in landed],
@@ -2550,11 +2616,195 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     for artifact in landed:
         where = artifact.path or artifact.url
         size = f"  {human_bytes(artifact.bytes)}" if artifact.bytes else ""
-        _say(f"{artifact.id:<20} {str(artifact.kind):<12} {where}{size}")
+        by = ""
+        if found is not None and artifact.proposer == found.id:
+            by = " — " + report.HUMAN["basis"]["proposed_by"].format(id=found.id,
+                                                                   basis=found.basis)
+        _say(f"{artifact.id:<20} {str(artifact.kind):<12} {where}{size}{by}")
+    for line in known:
+        _say(line)
     _say(f"{len(landed)} artifact(s) registered. An artifact with no extraction is decoration:")
     for artifact in landed[:3]:
         _say(f"  nopekit extract {artifact.id} --what '<what it tells you>' "
              f"--grounds <param-or-claim>")
+    return 0
+
+
+#: The tail of a proposer's output a refusal quotes: enough to name the
+#: exception, never a screen of traceback.
+_PROPOSE_TAIL = 3
+
+#: How many moved paths the out-of-directory refusal names before "and N more":
+#: enough to see what the proposer touched; `git status` has the rest.
+_PROPOSE_MOVED = 8
+
+#: What `_project_files` leaves out, relative to the project: the ignored
+#: outputs and scratch of `store`'s two ignore blocks (`.nopekit/out/` holds
+#: every proposal directory) and git's own directory. Everything else a
+#: proposer could write — records, `model/`, `gates/`, `selftest/`, input
+#: payloads, the tracked verdict cache, `site/` — is watched.
+_PROPOSE_UNWATCHED_DIRS = frozenset({".git", f"{store.NOPEKIT_DIR}/{store.OUT_NAME}",
+                                     f"{store.NOPEKIT_DIR}/{store.CACHE_NAME}",
+                                     f"{store.NOPEKIT_DIR}/{store.OBS_NAME}",
+                                     f"{store.NOPEKIT_DIR}/export", f"{store.NOPEKIT_DIR}/runs",
+                                     store.PACKAGES_NAME})
+_PROPOSE_UNWATCHED_FILES = frozenset({f"{store.NOPEKIT_DIR}/{store.LEDGER_NAME}",
+                                      f"{store.NOPEKIT_DIR}/{store.LEGACY_LEDGER_NAME}",
+                                      store.REPORT_NAME})
+
+
+def _project_files(root: str) -> dict[str, tuple[int, int]]:
+    """Every file under the project but its ignored outputs and scratch, as
+    ``{relative path: (size, mtime_ns)}`` — what ``propose`` compares around a
+    run. A stat, not a digest: a proposal can run against a project with large
+    evidence, and any write moves the mtime. Bytecode is left out (a proposer
+    that imports the model writes it beside each module)."""
+    found: dict[str, tuple[int, int]] = {}
+    for here, dirs, names in os.walk(root):
+        rel = os.path.relpath(here, root).replace(os.sep, "/")
+        rel = "" if rel == "." else rel + "/"
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__"
+                         and f"{rel}{d}" not in _PROPOSE_UNWATCHED_DIRS)
+        for name in names:
+            key = f"{rel}{name}"
+            if key in _PROPOSE_UNWATCHED_FILES or name.endswith((".pyc", ".pyo")) \
+                    or (key.startswith(f"{store.NOPEKIT_DIR}/")
+                        and name.endswith((".tmp", ".lock"))):
+                continue
+            try:
+                st = os.lstat(os.path.join(here, name))
+            except OSError:
+                continue
+            found[key] = (st.st_size, st.st_mtime_ns)
+    return found
+
+
+def cmd_propose(args: argparse.Namespace) -> int:
+    """Run a tool a pack ships to propose options or evidence, and record each
+    file it wrote as an input (SPEC 22, 25) — a proposal settles nothing.
+
+    With no id, it lists every proposer a discoverable pack declares. With one,
+    it runs `python <run> [args]` as a subprocess, outside the lock, with the
+    project as its working directory and `$NOPEKIT_PROPOSAL_DIR` a fresh
+    directory under `.nopekit/out/propose/` (ignored scratch); then, under the
+    lock, ingests every regular file it wrote there, in sorted order, recording
+    `proposer` on each NEW input record — `ingest`'s one record per file, and
+    nothing else. Refused, recording nothing: a non-zero exit, a run past
+    `--timeout`, and a run that wrote anywhere in the project outside its
+    directory (`_project_files`, every path named): a proposal settles nothing,
+    so a design edit made by one must not land unannounced. What slipped
+    through (review of phase 2): the guard was `records_digest`, so a proposer
+    that appended to `model/*.py`, `gates/` or the verdict cache was ingested
+    and nothing said so. Detected, never undone, as `export` treats a generator;
+    a write that puts back a file's size and mtime is past it (SPINE_CONTRACT's
+    limits).
+
+    nopekit's own flags are nopekit's wherever they are typed; the script gets
+    the plain arguments after the id, and every argument after the first `--`
+    (split off in `main`), a flag of its own included — one typed before `--` is
+    an unrecognised argument, said aloud. What slipped through (review of phase
+    2): the script's arguments were `argparse.REMAINDER`, so `propose <id>
+    --json` handed `--json` to the script and printed sentences, and `--timeout
+    30` kept 600 s — silently.
+    *Rejected:* importing the script in process (a proposer is a stranger's
+    code with its own dependencies, and the spine's loader traces what it
+    imports — for evaluators); a proposal record (SPEC 22: the options are kept
+    or dropped in a decision); refusing nopekit's flag names after the id under
+    `REMAINDER` (argparse drops the `--` before handing it over, so `<id> --
+    --json` and `<id> --json` arrive alike).
+    """
+    root = _root(args)
+    said = report.HUMAN["propose"]
+    if args.id is None:
+        found = packs.proposers(root)
+        if args.json:
+            _dump({"proposers": [dict(p._asdict()) for p in found.values()]})
+            return 0
+        if not found:
+            _say(said["empty"])
+            return 0
+        for proposer in found.values():
+            _say(said["row"].format(id=proposer.id, basis=proposer.basis,
+                                    description=proposer.description, pack=proposer.pack))
+        _say(said["footer"])
+        return 0
+    proposer = packs.find_proposer(root, args.id)
+    extra = list(args.args or [])
+    before = _project_files(root)
+    stamp = utcnow_iso().replace(":", "")
+    base = os.path.join(store.out_dir(root), "propose", proposer.id)
+    out = os.path.join(base, stamp)
+    n = 1
+    while os.path.exists(out):
+        n += 1
+        out = os.path.join(base, f"{stamp}-{n}")
+    os.makedirs(out)
+    env = {**os.environ, "NOPEKIT_PROPOSAL_DIR": out,
+           "NOPEKIT_PROJECT": os.path.abspath(root)}
+    try:
+        proc = subprocess.run([sys.executable, proposer.run, *extra], cwd=root,
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=args.timeout, env=env)
+    except subprocess.TimeoutExpired:
+        raise NopekitError(said["timeout"].format(id=proposer.id, t=args.timeout)) from None
+    if proc.returncode != 0:
+        lines = [line for line in (proc.stderr or proc.stdout or "").splitlines()
+                 if line.strip()]
+        tail = " / ".join(report._one(line) for line in lines[-_PROPOSE_TAIL:]) or "(nothing)"
+        raise NopekitError(said["errored"].format(id=proposer.id, code=proc.returncode,
+                                                  tail=tail))
+    after = _project_files(root)
+    moved = sorted(rel for rel in set(before) | set(after) if before.get(rel) != after.get(rel))
+    if moved:
+        shown = ", ".join(moved[:_PROPOSE_MOVED])
+        if len(moved) > _PROPOSE_MOVED:
+            shown += said["outside_more"].format(n=len(moved) - _PROPOSE_MOVED)
+        raise NopekitError(said["outside"].format(id=proposer.id, paths=shown))
+    files: list[str] = []
+    for here, dirs, names in os.walk(out):
+        dirs.sort()
+        files += [os.path.join(here, name) for name in sorted(names)
+                  if os.path.isfile(os.path.join(here, name))
+                  and not os.path.islink(os.path.join(here, name))]
+    if not files:
+        if args.json:
+            # The same document a run that wrote files prints: a script that
+            # parses `propose --json` must not meet a sentence on a run that
+            # succeeded (review of phase 2).
+            _dump({"proposer": dict(proposer._asdict()), "ingested": [], "known": []})
+            return 0
+        _say(said["none"].format(id=proposer.id))
+        return 0
+
+    now = utcnow_iso()
+    note = f"nopekit propose {proposer.id} {shlex.join(extra)}".strip()
+    landed: list[Any] = []
+    known: list[str] = []
+    with _lock(root):
+        ledger = _migrate(root, apply=True, now=now)
+        for path in files:
+            held = {a.id for a in ledger.inputs}
+            artifact = artifacts.ingest(
+                root, ledger, path, kind=args.kind,
+                description=args.desc or said["desc"].format(id=proposer.id),
+                when=now, note=note, proposer=proposer.id)
+            if artifact.id in held:
+                known.append(said["known"].format(where=artifact.path or artifact.url,
+                                                  aid=artifact.id))
+                continue
+            store.write_record(root, "inputs", artifact)
+            landed.append(artifact)
+    by = report.HUMAN["basis"]["proposed_by"].format(id=proposer.id, basis=proposer.basis)
+    if args.json:
+        _dump({"proposer": dict(proposer._asdict()),
+               "ingested": [a.to_dict() for a in landed], "known": known})
+        return 0
+    for artifact in landed:
+        where = artifact.path or artifact.url
+        _say(f"{artifact.id:<20} {str(artifact.kind):<12} {where} — {by}")
+    for line in known:
+        _say(line)
+    _say(said["done"].format(n=len(landed), id=proposer.id, basis=proposer.basis))
     return 0
 
 
@@ -2608,8 +2858,11 @@ def cmd_inputs(args: argparse.Namespace) -> int:
         rows = [a for a in rows if str(a.kind) == args.kind]
     facts = {a.id: _input_bytes(root, a, digests) for a in rows}
 
+    # SPEC 38: an input's basis is its proposer's, looked up — never stated.
+    bases = _input_bases(root, ledger)
     if args.json:
-        _dump({"inputs": [dict(a.to_dict(), **facts[a.id], grounds=grounded.get(a.id, []))
+        _dump({"inputs": [dict(a.to_dict(), **facts[a.id], grounds=grounded.get(a.id, []),
+                               basis=bases.get(a.id, ""))
                           for a in rows],
                "total": len(ledger.inputs),
                "unextracted": len(artifacts.unextracted(ledger)),
@@ -2635,6 +2888,9 @@ def cmd_inputs(args: argparse.Namespace) -> int:
         elif row["drift"]:
             note += (f" — DRIFT: changed since it was ingested (pinned "
                      f"{row['pinned'][:12]}, now {row['sha256'][:12]})")
+        if artifact.proposer:
+            note += " — " + report.HUMAN["basis"]["proposed_by"].format(
+                id=artifact.proposer, basis=bases.get(artifact.id) or "undeclared")
         _say(f"{mark} {artifact.id:<20} {str(artifact.kind):<12} {where:<40} {note}")
     unread = [a for a in rows if not a.extractions]
     if unread:
@@ -3629,6 +3885,9 @@ def _gate_row(spec: Any, registry: gates.Registry | None = None) -> dict[str, An
     # is declared: a reader that finds no key must not guess "unbounded".
     row["operating_context"] = {key: list(pair) for key, pair in
                                 (getattr(spec, "operating_context", None) or {}).items()}
+    # SPEC 38: where its verdict's logic comes from, always present —
+    # `undeclared` when neither the evaluator nor its pack says.
+    row["basis"] = gates.basis_of(spec)
     return row
 
 
@@ -3833,7 +4092,8 @@ def cmd_gate_show(args: argparse.Namespace) -> int:
     track = list((resolution.track or {}).get(spec.id) or ())
     code_now = verdicts.code_digest(spec, fn, anchors=resolution.anchors).digest
     if args.json:
-        _dump({"gate": spec.to_dict(), "needed_by": needed_by, "available": ok,
+        _dump({"gate": spec.to_dict(), "basis": gates.basis_of(spec),
+               "needed_by": needed_by, "available": ok,
                "availability": reason,
                "last_verdict": _resolved_row(verdict, resolution) if verdict else None,
                "last_selftest": _last_selftest(admission),
@@ -3845,7 +4105,8 @@ def cmd_gate_show(args: argparse.Namespace) -> int:
     _say(gates.describe(spec))
     if spec.description:
         _say(f"  {spec.description}")
-    _say(f"  tier {int(spec.tier)}  pack {spec.pack or '(project)'}  entry {spec.entry}")
+    _say(f"  tier {int(spec.tier)}  pack {spec.pack or '(project)'}  "
+         f"basis {gates.basis_of(spec)}  entry {spec.entry}")
     _say(f"  claims: {', '.join(spec.claims) or '(none — this gate settles nothing)'}")
     _say(f"  runnable here: {'yes' if ok else 'NO — ' + reason}")
     if spec.needs:
@@ -4760,16 +5021,11 @@ def cmd_decide(args: argparse.Namespace) -> int:
     """
     root = _root(args)
     now = utcnow_iso()
-    rejected: list[Any] = []
-    for raw in args.rejected or ():
-        parts = [piece.strip() for piece in raw.split("|")]
-        # A single-piece value is passed through as a string so `decisions.add`
-        # raises its own sentence about reasonless rejections, which says more
-        # than anything this parser could.
-        rejected.append(tuple(parts) if len(parts) >= 2 else raw)
+    rejected = _rejection_items(getattr(args, "rejection_parts", None) or ())
 
     with _lock(root):
         ledger = _migrate(root, apply=True, now=now)
+        _refuse_dangling_rejections(ledger, rejected)
         decision = decisions.add(
             ledger,
             title=args.title,
@@ -4789,9 +5045,254 @@ def cmd_decide(args: argparse.Namespace) -> int:
         return 0
     _say(f"{decision.id}  {decision.title}  ({decision.when})")
     for item in decision.rejected:
-        _say(f"  rejected {item.value}: {item.why}")
+        _say(f"  rejected {item.value}: {item.why}{report.rejection_suffix(item)}")
+    # A preference is a person's (SPEC 14, invariant 13): `by` names a nominee,
+    # and only that person's own `prefer` records it.
+    preferred = [item for item in decision.rejected
+                 if getattr(item, "type", "") == "preferred_against"]
+    for item in preferred:
+        line = report.HUMAN["rejection"]["records_it"].format(
+            name=report._one(item.by), id=decision.id)
+        if len(preferred) > 1:
+            line += f" --value {shlex.quote(item.value)}"
+        _say(f"  {line}")
     _say(f"  record: {rel(path, root)}")
     return 0
+
+
+#: `decide --returns-if`'s grammar: `<claim> margin|value|limit <op> <number>`.
+_RETURNS_IF = re.compile(r"^\s*(\S+)\s+(margin|value|limit)\s*(<=|>=|<|>)\s*(\S+)\s*$")
+
+
+class _RejectedFlag(argparse.Action):
+    """`--rejected VALUE|WHY[|EVIDENCE]`: opens one rejection in the ordered list
+    the part-flags after it apply to (`_RejectionPart`)."""
+
+    def __call__(self, parser: Any, namespace: Any, values: Any, option_string: Any = None
+                 ) -> None:
+        parts = list(getattr(namespace, self.dest, None) or [])
+        parts.append(("rejected", option_string, values))
+        setattr(namespace, self.dest, parts)
+
+
+class _RejectionPart(argparse.Action):
+    """`--type`, `--by`, `--returns-if`, `--returns-text`, `--input`: each applies
+    to the `--rejected` before it, in the one ordered list `cmd_decide` reads —
+    so a flag can never attach to the wrong loser by argparse's own grouping.
+    *Rejected:* parallel `append` lists (the fifth `--type` would pair with
+    whichever `--rejected` came fifth, whatever the order typed)."""
+
+    def __call__(self, parser: Any, namespace: Any, values: Any, option_string: Any = None
+                 ) -> None:
+        parts = list(getattr(namespace, self.dest, None) or [])
+        parts.append(("part", option_string, values))
+        setattr(namespace, self.dest, parts)
+
+
+def _rejection_items(parts: Iterable[tuple]) -> list[Any]:
+    """`decide`'s rejections from its ordered flags (SPEC 14), each refused
+    before anything is read with the reason and "Nothing was written."."""
+    said = report.HUMAN["decide"]
+    entries: list[dict[str, Any]] = []
+    for kind, flag, value in parts:
+        if kind == "rejected":
+            entries.append({"raw": value, "flags": {}})
+            continue
+        if not entries:
+            raise NopekitError(said["part_first"].format(flag=flag))
+        entry = entries[-1]
+        shown = report._one(str(entry["raw"]).split("|", 1)[0].strip())
+        if flag in entry["flags"]:
+            raise NopekitError(said["part_twice"].format(flag=flag, value=shown))
+        entry["flags"][flag] = value
+    items: list[Any] = []
+    for entry in entries:
+        raw = entry["raw"]
+        pieces = [piece.strip() for piece in str(raw).split("|")]
+        flags = entry["flags"]
+        if len(pieces) < 2:
+            # A single-piece value is passed through as a string so
+            # `decisions.add` raises its own sentence about reasonless
+            # rejections, which says more than anything this parser could.
+            items.append(raw)
+            continue
+        value = pieces[0]
+        item: dict[str, Any] = {"value": value, "why": pieces[1]}
+        if len(pieces) > 2:
+            item["evidence"] = "|".join(pieces[2:])
+        kind = flags.get("--type")
+        if kind is not None:
+            if kind not in REJECTION_TYPES:
+                close = difflib.get_close_matches(str(kind), REJECTION_TYPES, n=1, cutoff=0.6)
+                raise NopekitError(said["bad_type"].format(
+                    v=kind, guess=f' (did you mean "{close[0]}"?)' if close else ""))
+            item["type"] = kind
+        if "--returns-if" in flags and "--returns-text" in flags:
+            raise NopekitError(said["both"].format(value=value))
+        if "--returns-if" in flags:
+            found = _RETURNS_IF.match(flags["--returns-if"])
+            number = None
+            if found:
+                try:
+                    number = float(found.group(4))
+                except ValueError:
+                    number = None
+            if not found or number is None or not math.isfinite(number):
+                raise NopekitError(said["grammar"].format(v=flags["--returns-if"]))
+            item["returns_if"] = {"claim": found.group(1), "quantity": found.group(2),
+                                  "comparator": found.group(3), "value": number}
+        if "--returns-text" in flags:
+            item["returns_if"] = {"text": flags["--returns-text"]}
+        if "--by" in flags:
+            if kind != "preferred_against":
+                raise NopekitError(said["by_needs_type"].format(value=value))
+            item["by"] = flags["--by"]
+        elif kind == "preferred_against":
+            raise NopekitError(said["preferred_needs_by"])
+        if "--input" in flags:
+            item["input"] = flags["--input"]
+        items.append(item)
+    return items
+
+
+def cmd_prefer(args: argparse.Namespace) -> int:
+    """The person's channel for a preference (SPEC 14, invariant 13): `nopekit
+    prefer <decision> [--value VALUE]`, the shape of `claim physical`'s owner
+    path. What it closes before it could slip through: `decide --rejected
+    VALUE|WHY` records no who, so a preference the agent typed into a decision
+    would have read as the person's — invariant 11's owner laundering, through
+    another file.
+
+    In order, refused with nothing written: a refused flag (`--who`, `--when`,
+    before the project is read); a value that is not text; the decision; a
+    preferred_against rejection in it; git's identity (`who`); an agent session
+    or a pipe — refused outright, never recorded as counting for nothing; the
+    rejections whose `by` names this identity; `--value` among them, or exactly
+    one not yet recorded. Then the prompt, the decision's id typed by the
+    person, and one sealed entry appended (`store.append_sealed`). A repeat
+    writes nothing and exits 0. Under the lock it migrates a legacy ledger first
+    and writes `preferences/<decision>.json` and nothing else; outside the lock
+    it re-reads and prints the rejection as `claims.preference_state` composes
+    it — never computed from the entry it wrote.
+    """
+    said = report.HUMAN["prefer"]
+    signing = report.HUMAN["signing"]
+    for flag, key in REFUSED_FLAGS.items():
+        if getattr(args, key, None) is not None:
+            raise NopekitError(said[key])
+    for flag, value in (("<decision>", args.id), ("--value", args.value)):
+        if value is not None and _not_text(value):
+            raise NopekitError(signing["not_text"].format(flag=flag))
+    root = _root(args)
+    now = utcnow_iso()
+    environ = dict(os.environ)
+    isatty = bool(sys.stdin and sys.stdin.isatty())
+    with _lock(root):
+        ledger = _migrate(root, apply=True, now=now)
+        decision = next((d for d in ledger.decisions if d.id == args.id), None)
+        if decision is None:
+            raise NopekitError(said["no_decision"].format(id=args.id))
+        preferred = [(i, item) for i, item in enumerate(decision.rejected or ())
+                     if getattr(item, "type", "") == "preferred_against"]
+        if not preferred:
+            raise NopekitError(said["none_preferred"].format(id=decision.id))
+        who = vcs.ident(root)
+        if not who:
+            raise NopekitError(signing["no_identity"])
+        names = ", ".join(dict.fromkeys(report._one(item.by) for _i, item in preferred))
+        marker = _agent_marker(environ)
+        if marker or not isatty:
+            why = (signing["marker"].format(marker=marker) if marker
+                   else signing["assume_pipe"])
+            raise NopekitError(said["channel"].format(why=why, names=names, id=decision.id))
+        mine = [(i, item) for i, item in preferred if claims.identity_matches(who, item.by)]
+        if not mine:
+            raise NopekitError(said["not_by"].format(id=decision.id, names=names, who=who))
+        if args.value is not None:
+            chosen = [(i, item) for i, item in mine if item.value == args.value]
+            if not chosen:
+                raise NopekitError(said["no_value"].format(
+                    id=decision.id, value=args.value,
+                    values=", ".join(repr(item.value) for _i, item in mine)))
+            index, item = chosen[0]
+            state = claims.preference_state(decision, item)
+            if state is not None and state.state == "recorded":
+                _say(said["already"].format(name=report._one(state.name), value=item.value,
+                                            when=state.when))
+                return 0
+        else:
+            open_ = [(i, item) for i, item in mine
+                     if getattr(claims.preference_state(decision, item), "state",
+                                "") != "recorded"]
+            if not open_:
+                index, item = mine[0]
+                state = claims.preference_state(decision, item)
+                _say(said["already"].format(name=report._one(item.by), value=item.value,
+                                            when=getattr(state, "when", "")))
+                return 0
+            if len(open_) > 1:
+                raise NopekitError(said["which"].format(
+                    id=decision.id, n=len(open_),
+                    values=", ".join(repr(it.value) for _i, it in open_)))
+            index, item = open_[0]
+        rows = [f"{decision.id} {report._one(decision.title)}",
+                "  " + said["row"].format(value=item.value, why=report._one(item.why))]
+        if item.returns_if is not None:
+            rows.append("  " + said["returns_row"].format(
+                condition=report.condition_text(item.returns_if)))
+        rows.append("  " + signing["recorded_by"].format(who=report._one(who)))
+        answer = _confirm(decision.id, rows)
+        channel = _channel(isatty, environ, answer, decision.id)
+        entry = {"decision": decision.id, "value": item.value,
+                 "name": claims.name_of(item.by),
+                 "rejection_digest": claims.rejection_digest(decision, item),
+                 "who": who, "when": now, "channel": channel}
+        store.append_sealed(root, "preferences", decision.id, "preferences", entry)
+        path = os.path.join(root, "preferences", f"{decision.id}.json")
+        n = len(store.read_record(path, "preferences").raw)
+
+    # Read back, outside the lock: the rejection as every reader composes it,
+    # on the view `status` judges.
+    ledger = _load(root)
+    registry, _problems = _registry(root, ledger, strict=False)
+    model, projection, model_error = _projection_safe(root, ledger)
+    view, resolution = _resolved(root, ledger, registry, projection, model_error,
+                                 now=now, model=model)
+    composed = claims.compositions(view, registry=registry,
+                                   stale_gates=resolution.stale_gates)
+    row = next(r for r in claims.rejection_rows(view, composed)
+               if r.decision == args.id and r.index == index)
+    ledger = view
+    decision = next(d for d in view.decisions if d.id == args.id)
+    if args.json:
+        _dump({"decision": decision.id,
+               "recorded": {"who": who, "when": now, "channel": channel, "value": item.value},
+               "entry": n, "record": f"preferences/{decision.id}.json",
+               "rejection": row.to_dict()})
+        return 0
+    _say(said["recorded"].format(name=report._one(item.by), value=item.value,
+                                 id=decision.id, n=n))
+    _say(f"  {report._one(row.value)} — {report.rejection_facts(row, ledger)}")
+    return 0
+
+
+def _refuse_dangling_rejections(ledger: Ledger, items: Iterable[Any]) -> None:
+    """`decide` refuses a return condition on no claim and an input that is no
+    record, at write time (the reader reads both, R-10; `doctor` warns)."""
+    said = report.HUMAN["decide"]
+    claim_ids = {c.id for c in ledger.claims}
+    input_ids = [a.id for a in ledger.inputs]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cid = (item.get("returns_if") or {}).get("claim")
+        if cid is not None and cid not in claim_ids:
+            raise NopekitError(said["no_claim"].format(cid=cid))
+        aid = item.get("input")
+        if aid is not None and aid not in input_ids:
+            close = difflib.get_close_matches(str(aid), input_ids, n=3, cutoff=0.6)
+            raise NopekitError(said["no_input"].format(
+                aid=aid, close=f" — close: {', '.join(close)}" if close else ""))
 
 
 # --------------------------------------------------------------------------- #
@@ -6780,6 +7281,72 @@ def _doctor_requirement_rows(results: list[dict], ledger: Ledger) -> None:
         _check(results, "requirements", "ok", said["doctor_none"])
 
 
+def _doctor_decision_rows(results: list[dict], root: str, ledger: Ledger) -> None:
+    """`doctor`'s `decisions` row (SPEC 14), always present, writing nothing and
+    never a FAIL: a return condition or an input naming no record, a preference
+    file no decision holds, and each preferred_against rejection its person has
+    not recorded — warnings, since none moves a status."""
+    said = report.HUMAN["rejection"]
+    claim_ids = {c.id for c in ledger.claims}
+    input_ids = {a.id for a in ledger.inputs}
+    decision_ids = {d.id for d in ledger.decisions}
+    warnings: list[str] = []
+    unrecorded: list[str] = []
+    m = 0
+    for decision in ledger.decisions:
+        for i, item in enumerate(decision.rejected or ()):
+            m += 1
+            where = f"decisions/{decision.id}.json rejected[{i}]"
+            cond = getattr(item, "returns_if", None)
+            cid = getattr(cond, "claim", "") if cond is not None else ""
+            if cid and cid not in claim_ids:
+                warnings.append(said["doctor_dangling"].format(
+                    where=where + ".returns_if", what=repr(cid), home=f"claims/{cid}.json"))
+            aid = getattr(item, "input", "") or ""
+            if aid and aid not in input_ids:
+                warnings.append(said["doctor_dangling"].format(
+                    where=where + ".input", what=repr(aid), home=f"inputs/{aid}.json"))
+            state = claims.preference_state(decision, item)
+            if state is not None and state.state != "recorded":
+                unrecorded.append(said["doctor_unrecorded_item"].format(
+                    decision=decision.id, value=report._one(item.value),
+                    name=report._one(state.name)))
+    for stem, _path in store._record_files(root, "preferences"):
+        if stem not in decision_ids:
+            warnings.append(said["doctor_orphan"].format(id=stem))
+    if unrecorded:
+        warnings.append(said["doctor_unrecorded"].format(k=len(unrecorded),
+                                                         items=_listed(unrecorded)))
+    if warnings:
+        _check(results, "decisions", "warn", _listed(warnings))
+    elif m:
+        _check(results, "decisions", "ok", said["doctor_ok"].format(
+            n=len(ledger.decisions), m=m))
+    else:
+        _check(results, "decisions", "ok", said["doctor_none"])
+
+
+def _doctor_basis_rows(results: list[dict], root: str, ledger: Ledger, registry: Any) -> None:
+    """`doctor`'s `basis` row (SPEC 38), always present, never a FAIL: the
+    evaluators that declare no basis (they show as undeclared), and the inputs
+    naming a proposer no discoverable pack declares."""
+    said = report.HUMAN["basis"]
+    undeclared = gates.registry_summary(registry)["undeclared_basis"]
+    found = packs.proposers(root) if any(a.proposer for a in ledger.inputs) else {}
+    orphans = [a.id for a in ledger.inputs if a.proposer and a.proposer not in found]
+    warnings: list[str] = []
+    if undeclared:
+        warnings.append(said["doctor_undeclared"].format(n=len(undeclared),
+                                                         ids=_listed(undeclared, ", ")))
+    if orphans:
+        warnings.append(said["doctor_inputs"].format(k=len(orphans),
+                                                     ids=_listed(orphans, ", ")))
+    if warnings:
+        _check(results, "basis", "warn", "; ".join(warnings))
+    else:
+        _check(results, "basis", "ok", said["doctor_ok"])
+
+
 def _doctor_milestone_rows(results: list[dict], root: str, ledger: Ledger) -> None:
     """`doctor`'s P2.5b rows, each writing nothing:
 
@@ -7140,6 +7707,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _check(results, "mechanisms", "ok", said["doctor_ok"])
     else:
         _check(results, "mechanisms", "ok", said["doctor_none"])
+    _doctor_decision_rows(results, root, view)
+    _doctor_basis_rows(results, root, view, registry)
     _doctor_seal_row(results, registry,
                      _context(root, ledger, model, projection, ALL_TIERS, quiet=True))
 
@@ -7303,7 +7872,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--note", default="")
     p.add_argument("--no-copy", action="store_true",
                    help="register in place instead of copying into inputs/")
+    p.add_argument("--proposer", default=None, metavar="ID",
+                   help=report.HUMAN["propose"]["proposer_help"])
     p.set_defaults(func=cmd_ingest)
+
+    said_propose = report.HUMAN["propose"]
+    p = sub.add_parser("propose", parents=[common], help=said_propose["help"],
+                       description=said_propose["help"])
+    p.add_argument("--kind", choices=[k.value for k in ArtifactKind],
+                   help=said_propose["kind_help"])
+    p.add_argument("--desc", default="", help=said_propose["desc_help"])
+    p.add_argument("--timeout", type=float, default=600.0, metavar="S",
+                   help=said_propose["timeout_help"])
+    p.add_argument("id", nargs="?", default=None)
+    # `*`, never `REMAINDER`: nopekit's own flags after the id stay nopekit's
+    # (review of phase 2), and a flag of the script's goes after `--`.
+    p.add_argument("args", nargs="*", metavar="ARG", help=said_propose["args_help"])
+    p.set_defaults(func=cmd_propose)
 
     p = sub.add_parser("inputs", parents=[common], help="list ingested evidence")
     p.add_argument("--unextracted", action="store_true",
@@ -7442,22 +8027,47 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("why", parents=[common],
-                       help="one param's, claim's or requirement's full history, instead "
-                            "of the whole log")
+                       help="one param's, claim's, requirement's or decision's full "
+                            "history, instead of the whole log")
     p.add_argument("name")
     p.set_defaults(func=cmd_why)
 
+    said_decide = report.HUMAN["decide"]
     p = sub.add_parser("decide", parents=[common],
                        help="record a decision, including what LOST and why")
     p.add_argument("--title", required=True)
     p.add_argument("--summary", required=True)
-    p.add_argument("--rejected", action="append", default=[], metavar="VALUE|WHY",
-                   help='what lost and the concrete reason: "0.5 mm|the router could not close"')
+    p.add_argument("--rejected", action=_RejectedFlag, dest="rejection_parts",
+                   metavar="VALUE|WHY",
+                   help='what lost and the concrete reason: "0.5 mm|the router could not '
+                        'close"; the flags below apply to the --rejected before them')
+    p.add_argument("--type", action=_RejectionPart, dest="rejection_parts",
+                   metavar="TYPE", help=said_decide["type_help"])
+    p.add_argument("--by", action=_RejectionPart, dest="rejection_parts", metavar="NAME",
+                   help=said_decide["by_help"])
+    p.add_argument("--returns-if", action=_RejectionPart, dest="rejection_parts",
+                   metavar="CONDITION", help=said_decide["returns_if_help"])
+    p.add_argument("--returns-text", action=_RejectionPart, dest="rejection_parts",
+                   metavar="TEXT", help=said_decide["returns_text_help"])
+    p.add_argument("--input", action=_RejectionPart, dest="rejection_parts", metavar="ID",
+                   help=said_decide["input_help"])
+    p.set_defaults(rejection_parts=None)
     p.add_argument("--param", action="append", default=[], help="param names this moved")
     p.add_argument("--claim", action="append", default=[], help="claim ids this moved")
     p.add_argument("--evidence", action="append", default=[])
     p.add_argument("--body", default="", help="long-form markdown")
     p.set_defaults(func=cmd_decide)
+
+    said_prefer = report.HUMAN["prefer"]
+    p = sub.add_parser("prefer", parents=[common], help=said_prefer["help"],
+                       description=said_prefer["help"])
+    p.add_argument("id", metavar="decision")
+    p.add_argument("--value", default=None, metavar="VALUE", help=said_prefer["value_help"])
+    # Refused flags (REFUSED_FLAGS), as for `claim physical`: parsed so a
+    # pasted command meets its reason; never in --help.
+    p.add_argument("--when", default=None, help=argparse.SUPPRESS)
+    p.add_argument("--who", default=None, help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_prefer)
 
     # -- packs ------------------------------------------------------------ #
     # `pack` is an alias because the extension protocol and `packs.py`'s own
@@ -7607,8 +8217,16 @@ def main(argv: list[str] | None = None) -> int:
         # `parse_args` reports an unrecognized flag from the TOP-LEVEL parser, so
         # `nopekit check --tierr 1` printed the list of subcommands instead of
         # the list of `check`'s flags — the one thing the reader needed.
-        args, unknown = parser.parse_known_args(
-            list(sys.argv[1:] if argv is None else argv))
+        raw = list(sys.argv[1:] if argv is None else argv)
+        args, unknown = parser.parse_known_args(raw)
+        if getattr(args, "func", None) is cmd_propose and "--" in raw:
+            # `propose <id> [ARG ...] -- [script args]`: what follows the first
+            # `--` is the script's whole, and what precedes it is parsed as any
+            # command's — argparse alone hands a positional after a flag
+            # (`<id> --json -- --json`) to nobody (review of phase 2).
+            cut = raw.index("--")
+            args, unknown = parser.parse_known_args(raw[:cut])
+            args.args = list(getattr(args, "args", None) or []) + raw[cut + 1:]
         if unknown:
             chosen = getattr(args, "_parser", None) or parser
             chosen.error(f"unrecognized arguments: {' '.join(unknown)}")

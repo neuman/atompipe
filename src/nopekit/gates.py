@@ -170,8 +170,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, NamedTuple
 
 from . import modelio
-from .models import (CONTEXT_OUTSIDE, Acceptance, Comparator, GateSpec, Ledger, NegativeControl,
-                     PrerequisiteKind, Tier, Verdict)
+from .models import (BASES, BASIS_UNDECLARED, CONTEXT_OUTSIDE, Acceptance, Comparator, GateSpec,
+                     Ledger, NegativeControl, PrerequisiteKind, Tier, Verdict)
 from .util import NopekitError, ensure_dir, rel, short_hash
 from .verdicts import (GateTrace, LedgerView, ParamTrace, SweepMemo, _pack_dir_of, acceptance_of,
                        claims_named, memo_entries, not_yet, replay, sweep_memo, traced_context,
@@ -204,6 +204,7 @@ __all__ = [
     "load_project_gates",
     "describe",
     "registry_summary",
+    "basis_of",
     "plan",
     "Reading",
     "Unmet",
@@ -1201,6 +1202,11 @@ class Registry:
         if problem:
             # R-10: only the new declaration is refused (P2.4-D14).
             raise NopekitError(f"gate {gate_id!r}: {problem}")
+        problem = basis_problem(getattr(spec, "basis", ""))
+        if problem:
+            # R-10: refused only when one is declared (SPEC 38); none reads
+            # "undeclared". Said "evaluator", the human word (SPEC §0.9).
+            raise NopekitError(f"evaluator {gate_id!r}: {problem}")
         fresh = _own_copy(spec)
         if existing is not None and not replace:              # idempotent re-import
             old_spec, _old_fn = existing
@@ -1469,6 +1475,7 @@ def gate(
     requires_one_of: Iterable[str] = (),
     needs: Iterable[str] = (),
     operating_context: dict | None = None,
+    basis: str = "",
 ) -> Callable[[Callable[[GateContext], Any]], Callable[[GateContext], Any]]:
     """Declare a gate: build its :class:`~nopekit.models.GateSpec` and register it.
 
@@ -1518,8 +1525,13 @@ def gate(
     ``operating_context`` declares the range of its read set this gate was
     qualified on (``GateSpec.operating_context``, P2.4): ``{"load_n": (0.0,
     40.0)}``, ``None`` for an open end. Every passing run must read each key,
-    and outside the range a pass does not count while a fail still does. The
-    last keyword, like the field.
+    and outside the range a pass does not count while a fail still does.
+
+    ``basis`` says where this gate's verdict logic comes from (SPEC 38):
+    ``established``, ``sourced`` or ``model-only``; left empty, the defining
+    module's ``PACK_BASIS`` (``packs.load_gates`` sets it from ``pack.json``'s
+    ``basis``, the ``PACK`` precedent), else *undeclared*. Shown, never a
+    status. The last keyword, like the field.
 
     ``fn.gate_spec`` is this declaration, not the record the registry holds —
     the registry keeps its own copy.
@@ -1548,6 +1560,7 @@ def gate(
 
         module = sys.modules.get(getattr(fn, "__module__", "") or "")
         module_pack = getattr(module, "PACK", "") if module is not None else ""
+        module_basis = getattr(module, "PACK_BASIS", "") if module is not None else ""
 
         spec = GateSpec(
             id=id,
@@ -1566,6 +1579,7 @@ def gate(
             operating_context=(operating_context if operating_context is None
                                or not isinstance(operating_context, dict)
                                else dict(operating_context)) or {},
+            basis=basis or str(module_basis or ""),
         )
         # Resolved at DECORATION time, not when `gate()` was called: the
         # ambient registry is whatever loader is importing this module right now.
@@ -4372,6 +4386,27 @@ def load_project_gates(root: str, registry: Registry) -> list[str]:
 # --------------------------------------------------------------------------- #
 # description and summary
 # --------------------------------------------------------------------------- #
+def basis_of(spec: Any) -> str:
+    """``spec``'s basis token (SPEC 38): its declared basis, else
+    ``undeclared`` — the ONE reader, so no renderer guesses one."""
+    return str(getattr(spec, "basis", "") or "") or BASIS_UNDECLARED
+
+
+def basis_problem(basis: Any) -> str:
+    """Why ``basis`` is no basis, or ``""`` (``""`` is undeclared, never a
+    problem: R-10). ``grounded`` is told where the word belongs."""
+    if basis in ("", None) or basis in BASES:
+        return ""
+    problem = (f"basis {basis!r} is not a basis — say where its verdict's logic comes from: "
+               f"established (an existing non-AI tool's own answer), sourced (logic that "
+               f"follows a cited outside source: a textbook formula, a standard, a "
+               f"datasheet) or model-only (logic the model wrote with no outside source)")
+    if str(basis).strip().casefold() == "grounded":
+        problem += (' — "grounded" is the paper\'s word for a whole system (GLOSSARY §6); '
+                    "the basis word is sourced")
+    return problem
+
+
 def describe(spec: GateSpec) -> str:
     """One dense line for `nopekit gate list`. Never more than one.
 
@@ -4379,11 +4414,14 @@ def describe(spec: GateSpec) -> str:
     costs, what it settles, whether it can run here, and what its control is. The
     control is included on purpose — it is the fact that makes the gate's green
     tick mean anything, so it belongs in the listing and not three commands away.
+    The basis (SPEC 38) follows the bracket, before anything the 240-character
+    cap could cut.
     """
     bits = [f"{spec.id}  [t{int(spec.tier)}"]
     if spec.pack:
         bits[0] += f" {spec.pack}"
     bits[0] += "]"
+    bits.append(f"basis {basis_of(spec)}")
     tools = list(spec.requires_tools or []) + list(spec.requires_python or [])
     if spec.requires_one_of:
         tools.append("one of " + "|".join(spec.requires_one_of))
@@ -4433,8 +4471,10 @@ def registry_summary(registry: Registry) -> dict[str, Any]:
     tools: set[str] = set()
     modules: set[str] = set()
     unavailable: list[dict[str, str]] = []
+    by_basis = {token: 0 for token in (*BASES, BASIS_UNDECLARED)}
 
     for spec in specs:
+        by_basis[basis_of(spec)] = by_basis.get(basis_of(spec), 0) + 1
         key = str(int(spec.tier))
         by_tier[key] = by_tier.get(key, 0) + 1
         pack = spec.pack or "(project)"
@@ -4467,4 +4507,8 @@ def registry_summary(registry: Registry) -> dict[str, Any]:
             s.id for s in specs
             if not (s.negative_control and (s.negative_control.fixture or "").strip())
         ],
+        # SPEC 38: where each evaluator's verdict logic comes from, shown,
+        # never a status.
+        "by_basis": by_basis,
+        "undeclared_basis": [s.id for s in specs if basis_of(s) == BASIS_UNDECLARED],
     }

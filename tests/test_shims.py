@@ -205,13 +205,24 @@ class ShimsWriteExactlyOneFile(_env.EnvCase):
                          "S-36: extract wrote a back-reference into a param record")
 
     def test_decide_writes_one_decision_record(self):
+        # The bracket ships its decision log (architecture phase 2: it holds a
+        # decision), so the property is that `decide` leaves it as it was — the
+        # log is `report --write`'s output, never `decide`'s.
+        log = os.path.join(self.project, "docs", "decisions.md")
+
+        def held() -> bytes | None:
+            if not os.path.exists(log):
+                return None
+            with open(log, "rb") as fh:
+                return fh.read()
+        before = held()
         proc = self._one_shim("decide", "--title", "Thickness stays 7 mm",
                               "--summary", "the deflection gate fails on purpose",
                               "--rejected", "4.0 mm|3.75 mm deflection, 7.5x the limit",
                               "--json", want={"decisions/thickness-stays-7-mm.json"})
         data = _json(proc)
         self.assertEqual(data["id"], "thickness-stays-7-mm")
-        self.assertFalse(os.path.exists(os.path.join(self.project, "docs", "decisions.md")),
+        self.assertEqual(held(), before,
                          "decide regenerated the decision log; it is report --write's output")
 
     def test_packs_add_writes_only_project_json(self):

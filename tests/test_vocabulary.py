@@ -292,6 +292,11 @@ _BRACKET_RUNS = (("check", ["check", "--junit"]), ("status", ["status"]),
                  # Architecture phase 1: `gap` lists claims by status, with their
                  # mechanisms, so its lines are a channel too; and `why R1`.
                  ("gap", ["gap"]), ("why.R1", ["why", "R1"]),
+                 # Architecture phase 2: a decision's `why` (each loser's type and
+                 # return condition), `prefer` refusing a pipe (the person's channel
+                 # speaks too), and `propose`'s listing.
+                 ("why.decision", ["why", "print-in-petg"]),
+                 ("prefer", ["prefer", "print-in-petg"]), ("propose", ["propose"]),
                  ("site.init", ["site", "init"]), ("site.build", ["site", "build"]),
                  # P2.5b (critique 11 of its design): the milestone list, the
                  # boundary's dry run and the milestone's report are channels too.

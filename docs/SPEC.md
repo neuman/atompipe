@@ -104,8 +104,8 @@ part of it.
 
 ## 3. What stays
 
-1. **The invariants** in `CLAUDE.md` (numbered 1 to 12 and 15; 13 and 14 are
-   reserved, see section 8) and the tests that hold them. Nothing below weakens one.
+1. **The invariants** in `CLAUDE.md` (numbered 1 to 13 and 15; 14 is reserved, see
+   section 8) and the tests that hold them. Nothing below weakens one.
 2. **Git is the groundspace.** A checkout is one state; commits are the history. No
    second history store, no snapshot per check. Reason: git already has parent
    pointers, authorship, signing and merges; a copy of that inside the tree is the
@@ -503,8 +503,8 @@ decisions above. Overturn any of them here.
   output or `REPORT.md`.
 - **The README badge** (36) is a marked block `init` appends at the bottom of
   `README.md`, with an absolute image URL, so it works before `site init`.
-- **Invariant numbers**: 13 is reserved for "a preference counts only through the
-  person's channel" (phase 2) and 14 for "the site never says more than the
+- **Invariant numbers**: 13 is "a preference counts only through the person's
+  channel" (landed in phase 2) and 14 is reserved for "the site never says more than the
   resolution, and stamped prose is flagged when behind" (phase 5). Each lands with
   its tests, its `INVARIANT_CLASSES` row and its `CLAUDE.md` row.
 - **The fast tier** keeps its 90-second rule: a phase that adds time pays it back.
@@ -575,6 +575,87 @@ decisions above. Overturn any of them here.
   exists, and that there is no `bin/`.
 - **The fast tier's pay-back:** `test_status_table.UnqualifiedReadsGap` and one
   `check` run in `test_renderers` moved to the full suite.
+
+**Phase 2** (decisions keep their losers), decided while building it:
+
+- **Typed rejections live on `Rejection(Rejected)`**, used only by `Decision.rejected`.
+  PARAMS and `params/` keep text `Rejected`; typed keys there are refused, naming
+  `decide`.
+- **`by` sits on each preferred_against rejection**, not on the decision: one decision
+  can hold one person's preference beside an evaluator's infeasible, as each phase 4
+  candidate will. preferred_against without `by`, and `by` on any other type, are
+  refused.
+- **Return conditions** compare with `<`, `<=`, `>` or `>=`. `"returns_if": {}` reads as
+  absent. There are no units. A dangling claim or input is an index problem and a
+  doctor warning; `decide` refuses both at write time. `write_record` holds a decision
+  to the reader's rules before it writes.
+- **The value the composition reports** for a Checked claim is the compared covering
+  pass with the least margin (`claims.claim_value`). The margin is that verdict's own
+  (`claims.margin`, now over a shared `_margin_of`). A Checked physical claim gives its
+  counted result's measured value, in the acceptance units only. A judged claim has no
+  value. `limit` on a band cannot be evaluated.
+- **A preference binds** to the decision's id and title and the rejection's value, why
+  and return condition (`claims.rejection_digest`, schema 1). Its file is
+  `preferences/<decision id>.json`, a new sealed kind whose seal names the kind and the
+  file, written through the exports branch of `append_sealed`, extracted unchanged. Its
+  in-memory home is `Decision.preferences`, hidden from every gate.
+- **`prefer` records one alternative per run** (`--value` when several name you). It
+  is refused outright from an agent session or a pipe. A repeat writes nothing. It
+  prints the rejection read back on the view `status` judges.
+- **Basis** reaches a pack's gates through a `PACK_BASIS` module global. It is shown as
+  a `basis <word>` segment after `gate list`'s bracket (the line collapses its spacing
+  as before, so the shape is single-spaced), in `gate show`'s tier line, in the
+  report's Evaluator cell and Reproduce comment, and on `state.json` verdict rows; not
+  in JUnit. `pack validate` requires it only of bundled packs.
+- **Bundled bases** are §5.4 of the phase design's table, unchanged after reading each
+  gate: beam-analytic, fluids-analytic and thermal-analytic `sourced`
+  (`beam.input_sanity` and `thermal.h_agreement` `model-only`); cad-solid, fdm-print,
+  openmodelica and sourcing `model-only` (`cad.is_volume`, `modelica.checks`,
+  `compiles`, `simulates` and `result_claim` `established`; `bom.process_rules`
+  `sourced`); the bracket's four structural gates `sourced`, `bed_fit` and `min_wall`
+  `model-only`.
+- **Proposers** are scripts declared in `provides_proposers` (`id`, `basis`,
+  `description`, `run`), found in any discoverable pack, and run as a subprocess with
+  `NOPEKIT_PROPOSAL_DIR` (and `NOPEKIT_PROJECT`). A write anywhere in the project
+  outside that directory (its ignored scratch aside), a non-zero exit or a timeout
+  refuses the ingest. Human sentences say "proposed by". No bundled proposer ships.
+- **`check` prints only "may return"**, after the mechanism warnings; its JSON gains
+  `may_return`. `status` adds no line. `doctor` gains warn-only `decisions` and `basis`
+  rows.
+- **`state.json`'s rejection rows are a top-level `rejections` key**, beside
+  `decisions`: the document has no `summary` key to carry them.
+- **The bracket** gains `decisions/print-in-petg.json`, written by `decide` (title
+  "Print in PETG", so the slug is the id), with three types and an unrecorded
+  preference by an invented person, Robin Okafor (the phase design named another, a persona the private bench scores — `test_priors` refuses it in shipped text). Each sentence follows the model: PLA is
+  infeasible on the model's own creep sentence; ABS is *unevaluated*, not dominated —
+  the model holds no ABS properties, so "no stiffer than PETG" could not be said from
+  it. No preference file is committed.
+- **The status packs line** names up to eight available packs, then "and N more".
+- **Invariant 13** lands in `tests/test_preferences.py`. Return-condition honesty maps
+  to 12; basis maps to 4, 7 and 9; proposers map to 3 and 8.
+- **The basis words, sharpened** (38): *established* when the verdict or proposal is
+  an existing non-AI tool's own answer, *sourced* when its logic follows a cited
+  outside source, *model-only* when the model wrote the logic, even when it calls a
+  tool's primitives. Decision 38's "wraps an existing non-AI tool" would have made
+  `cad.watertight` (its own edge count over a trimesh mesh) established; the
+  glossary, PACK_FORMAT and the skills say the sharper rule.
+
+**Review of phase 2**, decided while fixing what it found:
+
+- **A physical claim's value is the counted pass's** (`Standing.counted`), never the
+  newest entry: a later pass from an agent session is recorded, counts for nothing,
+  and must not make a return condition hold.
+- **A gate's copy of `decisions` holds no `preferences`** (`verdicts._HIDDEN_FROM_THE_COPY`):
+  out of the digest was not enough. The claim's in-memory fields stay on the copy, as
+  since P2.1.
+- **`propose` watches the whole project**, by size and mtime (`cli._project_files`),
+  not the records digest, and names every moved path; the limit is in SPINE_CONTRACT.
+- **`propose`'s script arguments are `nargs="*"`**, and `main` hands everything after
+  the first `--` to the script: nopekit's own flags stay nopekit's after the id, and
+  a flag of the script's goes after `--` (an unrecognised argument before it is said
+  aloud). `--json` prints JSON on a run that wrote no file.
+- **A basis word is said beside "basis"**: `proposed by <id> (basis <word>)`, and
+  `propose`'s listing row `<id>  basis <word>  <description>`.
 
 ## 9. Retired
 

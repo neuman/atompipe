@@ -1419,5 +1419,34 @@ def _outlived_project() -> dict:
     return run
 
 
+
+class ThePacksLineNamesWhatItCounts(_env.EnvCase):
+    """(f of architecture phase 2) `status`'s packs line names every pack it
+    counts, up to eight, then how many more. What slipped through: it said "7
+    available" and named six, cut at a slice nobody announced."""
+
+    def _line(self, root: str, names: list[str], installed: list[str]) -> str:
+        import contextlib
+        import io
+        from nopekit import cli, packs
+        out = io.StringIO()
+        with mock.patch.object(packs, "available", lambda *_a, **_k: list(names)), \
+                mock.patch.object(packs, "installed", lambda *_a, **_k: list(installed)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["-C", root, "status"])
+        return next(line for line in out.getvalue().splitlines()
+                    if line.startswith("packs:"))
+
+    def test_seven_and_twelve(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        seven = [f"p{i}" for i in range(1, 8)]
+        self.assertEqual(self._line(root, seven, []),
+                         "packs: none installed; 7 available (p1, p2, p3, p4, p5, p6, p7) — "
+                         "`nopekit packs add <name>`")
+        twelve = [f"p{i}" for i in range(1, 13)]
+        self.assertEqual(self._line(root, twelve, ["p1"]),
+                         "packs: p1 (12 available: p1, p2, p3, p4, p5, p6, p7, p8, and 4 more)")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

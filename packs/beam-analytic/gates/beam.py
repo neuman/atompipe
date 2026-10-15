@@ -806,6 +806,7 @@ def model_validity(ctx: GateContext) -> Verdict:
 # --------------------------------------------------------------------------- #
 @gate(
     id="beam.input_sanity",
+    basis="model-only",
     title="The projection is in this pack's units and sign convention",
     claims=["structural", "stiffness", "strength", "stability", "fastener",
             "model-validity"],

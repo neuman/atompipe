@@ -70,9 +70,11 @@ the key and the suggestion, instead of being dropped. A parameter's value, units
 rationale live in the model (its `Config` field and that field's docstring), and the
 alternatives that lost in the model's `PARAMS` — never copy them into `params/`.
 
-Six commands write one record for you, with the time stamped for you:
+These commands write one record for you, with the time stamped for you:
 `nopekit ingest` (copies the file in and pins its hash), `nopekit extract`,
-`nopekit decide`, `nopekit packs add`, `nopekit claim physical` and
+`nopekit decide`, `nopekit packs add`, `nopekit claim physical`, `nopekit propose`
+(one input per file its proposer wrote), `nopekit prefer` (the person's, appending to
+`preferences/<decision>.json`, sealed — never yours to run or edit) and
 `nopekit export <milestone>` (appends to `exports/<milestone>.json`; never edit it —
 it is sealed, like `results/`). `check` writes
 no record — only verdicts under `.nopekit/verdicts/`, which you commit with the
@@ -248,12 +250,38 @@ nopekit status                # where is this project
 nopekit check                 # tier-0 gates, seconds — run this constantly
 nopekit check --tier 2        # the full sweep, before any spend decision
 nopekit gap --propose         # every claim whose mechanism has yet to run, and packs that might run it
-nopekit why <name>            # one param's, claim's or requirement's full history
+nopekit why <name>            # one param's, claim's, requirement's or decision's full history
 nopekit report --write        # REPORT.md, the readiness report — an ignored output
 nopekit export <m> --dry-run  # ready for milestone <m>? re-runs everything it requires
 nopekit site build            # rebuild the page after a sweep
 nopekit decide --title ...    # record a decision, including what LOST
+nopekit decide ... --rejected "PLA|creeps" --type infeasible --returns-if "C3 margin < 0.1"
+                              # each --type/--by/--returns-if/--returns-text/--input applies
+                              #   to the --rejected before it
+nopekit prefer <decision>     # the PERSON's: ask them to run it; never run it for them
+nopekit propose [<id> args]   # a pack's proposer: list them, or run one and file what it wrote
+nopekit ingest <file> --proposer <id>   # a file you got by running a proposer by hand
 ```
+
+**A decision keeps its losers.** Give each rejected alternative its type —
+`infeasible`, `dominated`, `preferred_against` (a person's preference) or
+`unevaluated` — and, where you can say it, what would bring it back: `--returns-if
+"<claim> margin|value|limit <op> <number>"`, which `check` evaluates (it prints a *may
+return* line only when a condition holds, and never changes the exit code; silence is
+not "does not hold" — `nopekit why <decision>` shows each condition's state: *holds*,
+*does not hold*, or *cannot be evaluated: <claim> is <status>* while the claim is not
+Checked), or `--returns-text`, shown and never evaluated. A `preferred_against`
+names its person with `--by "<their name, as git knows them>"`; it reads *preferred
+against, not recorded by <name>* until that person runs `nopekit prefer <decision>` in
+their own shell. Ask them to. Never run it for them, never write `preferences/` — it
+refuses an agent session and a pipe, and a hand-written file is refused on every
+command.
+
+**Basis.** Every evaluator and proposer says where its logic comes from:
+`established` (an existing non-AI tool's own answer), `sourced` (a cited outside
+source) or `model-only` (logic you wrote with no outside source). `gate list` shows it.
+Use the highest basis available, and say why when you go lower. It never changes a
+status.
 
 Change a parameter, run `nopekit check`, read the verdict lines. That is the loop.
 It must stay fast — if tier 0 is not seconds, something is miscategorised.

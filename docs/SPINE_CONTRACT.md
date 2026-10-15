@@ -40,6 +40,9 @@ is `cli.py`'s.
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
 | a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
+| a person's preference against a rejected alternative (architecture phase 2) | `preferences/<decision-id>.json`, append-only, sealed and chained | tracked | `prefer <decision>`, typed in the person's own shell — never by hand |
+| a rejected alternative's type, its person, its return condition, its input (architecture phase 2) | `decisions/<id>.json`'s `rejected` | tracked | the agent, or `decide`'s flags |
+| which proposer produced an input (architecture phase 2) | `inputs/<id>.json`'s `proposer` — its basis is looked up from the proposer, never stated | tracked | `propose`, `ingest --proposer` |
 | the readiness report (P2.5b; was `docs/readiness.md`) | `REPORT.md` at the root | ignored | `report --write` |
 | a milestone's package: what the spend gets (P2.5b) | `out/<milestone>/` at the root | ignored | `export <milestone>` |
 
@@ -101,6 +104,13 @@ EXT_KIND_HINTS: dict[str, ArtifactKind]       # ".stl" -> CAD; `nopekit ingest`'
 class NeedStatus(StrEnum): OPEN | PROPOSED | DEFERRED | INSTALLING | SATISFIED | ABANDONED
 class Comparator(StrEnum): LE | LT | GE | GT | EQ | NE | BETWEEN
     def holds(self, measured, limit, limit_hi=None) -> bool
+BASES = ("established", "sourced", "model-only")   # phase 2 (SPEC 38): where an evaluator's
+                                              # or a proposer's verdict logic comes from
+BASIS_UNDECLARED = "undeclared"               # the token and the word with none declared
+REJECTION_TYPES = ("infeasible", "dominated", "preferred_against", "unevaluated")  # SPEC 14
+REJECTION_UNTYPED = "untyped"                 # a rejection written before phase 2
+RETURN_QUANTITIES = ("margin", "value", "limit")   # what a return condition reads
+RETURN_COMPARATORS = ("<", "<=", ">", ">=")   # no ==/!= (never holds on a measured float)
 class Record:                                 # mixin: the symmetric dict round trip
     def to_dict(self) -> dict
     @classmethod
@@ -113,7 +123,16 @@ fails when a record kind gains a field that is not in its own block — a field 
 `id` or `note` appears somewhere in every document, so "somewhere" proves nothing.
 ```python
 class Rejected(Record):         # an alternative that LOST: the highest-value field there is
-    value: str; why: str; evidence: str = ""
+    value: str; why: str; evidence: str = ""        # PARAMS and params/ keep this, text only
+class ReturnCondition(Record):  # phase 2 (SPEC §0.2): what would bring a loser back
+    claim: str = ""; quantity: str = ""; comparator: str = ""; value: float | None = None
+    text: str = ""                  # {"text"} alone: shown, never evaluated
+    def form(self) -> dict          # the members not at their default: digest, JSON, display
+class Rejection(Rejected):      # phase 2 (SPEC 14): a decision's rejected alternative
+    type: str = ""                  # REJECTION_TYPES; "" a legacy entry, read untyped
+    by: str = ""                    # preferred_against only: a NOMINEE, like Claim.owner
+    returns_if: ReturnCondition | None = None
+    input: str = ""                 # an input id, when an input is its source
 class Param(Record):            # one model parameter with its full provenance
     name: str; value: Any; units: str = ""; rationale: str = ""
     rejected: list[Rejected]; source: str = ""; grounded_by: list[str]   # InputArtifact ids
@@ -186,6 +205,8 @@ class InputArtifact(Record):    # a piece of evidence the user supplied
     id: str; path: str = ""; url: str = ""; kind: ArtifactKind = OTHER
     description: str = ""; sha256: str = ""; bytes: int = 0; added: str = ""
     extractions: list[Extraction]; licence: str = ""; note: str = ""
+    proposer: str = ""              # phase 2 (SPEC 22): the proposer that produced it, on a
+                                    #   NEW record only; its basis is looked up, never stated
     extracted -> bool                                                    # property
 class Locator(Record):          # WHERE a verdict applies (docs/SITE_CONTRACT.md)
     view: str; target: str = ""; kind: str = "part"; label: str = ""; severity: str = ""
@@ -194,9 +215,17 @@ class View(Record):             # one thing the site renders and verdicts addres
     id: str; kind: ViewKind = IMAGE; title: str = ""; src: str = ""; description: str = ""
     gates: list[str]; data: dict; meta: dict; pack: str = ""; order: int = 100
 class Decision(Record):         # one decision-log entry; names what LOST
-    id: str; title: str = ""; when: str = ""; summary: str = ""; rejected: list[Rejected]
+    id: str; title: str = ""; when: str = ""; summary: str = ""
+    rejected: list[Rejection]       # phase 2: typed; to_dict writes the new keys only when set
     params_changed: list[str]; claims_changed: list[str]; evidence: list[str]
     body: str = ""                                                       # long-form markdown
+    preferences: tuple = ()         # in memory: interactive PreferenceRecords, newest first
+class PreferenceRecord(Record): # phase 2 (invariant 13): one entry of preferences/<id>.json
+    decision: str                   # the file's stem (phase 4 adds candidate)
+    value: str = ""; name: str = "" # the alternative, and the nominee "by" named, as read
+    rejection_digest: str = ""      # claims.rejection_digest: the rejection as read
+    who: str = ""; when: str = ""; channel: str = ""   # git's identity, the clock, the channel
+    prev: str = ""; digest: str = ""   # the chain and the seal (store.append_sealed)
 class Milestone(Record):        # P2.5b: milestones/<name>.json — a named spend; the stem IS the id
     id: str; description: str = ""; requires: list[str]   # the claim ids it needs Checked
     generator: str = ""             # "<path>.py:<function>": what export builds the article with
@@ -221,6 +250,8 @@ class PackManifest(Record):     # pack.json, tier 1 (docs/PACK_FORMAT.md)
     provides_generators: list[str]; key_scope: str = ""; requires_tools: list[str]
     requires_python: list[str]; max_tier: Tier = INSTANT; lenses: list[str]
     authors: list[str]; licence: str = "Apache-2.0"; homepage: str = ""; origin: str = ""
+    basis: str = ""                 # phase 2: its evaluators' default basis (PACK_BASIS)
+    provides_proposers: list        # phase 2: [{id, basis, description, run}], raw (packs)
 class KeyCollision(Record):     # one projection key two installed packs read differently
     key: str; packs: list[str]; meanings: dict[str, str]; scoped: dict[str, str]
     primary: dict[str, str]; live: bool = False
@@ -249,8 +280,8 @@ types, not about the disk:
 RECORD_KINDS: dict[str, type]    # record dir -> kind: claims Claim, params Param,
                                  # decisions Decision, needs Need, inputs InputArtifact,
                                  # results PhysicalResult, views View, milestones Milestone,
-                                 # exports ExportRecord, requirements Requirement
-                                 # (store.RECORD_DIRS' order)
+                                 # exports ExportRecord, requirements Requirement,
+                                 # preferences PreferenceRecord (store.RECORD_DIRS' order)
 FORBIDDEN_KEYS: dict[str, dict[str, str]]   # class name -> {key: the home that owns it};
                                  # "*" applies at every depth of every kind
 ALWAYS_WRITTEN: frozenset[tuple[str, str]]  # {("Claim", "kind"), ("Acceptance", "comparator")}
@@ -441,7 +472,8 @@ LEGACY_LEDGER_NAME = "ledger.legacy.json"   # what a migrated ledger.json is ren
 PROJECT_SCHEMA = 2                    # project.json's schema; a newer one is refused
 RECORD_DIRS = ("claims", "params", "decisions", "needs", "inputs", "results", "views",
                "milestones", "exports",   # P2.5b's: never on a legacy project
-               "requirements")            # phase 1 (SPEC decision 12), last
+               "requirements",            # phase 1 (SPEC decision 12)
+               "preferences")             # phase 2 (SPEC 14, invariant 13), last
 VERDICTS_NAME = "verdicts"; CACHE_NAME = "cache"; OBS_NAME = "obs"   # under .nopekit/
 INDEX_BANNER: str                     # the index's "generated" value: edit the records, never this
 LEGACY_GITIGNORE_TEMPLATES: tuple[str, str]  # init's .nopekit/.gitignore at 1e09113, and at 1.2
@@ -467,8 +499,17 @@ CONTRADICTS_KEYS = ("gate", "code", "rho", "value", "units", "inside")
 class ResultsFile(list):        # P2.5a: list[PhysicalResult], plus .attributions and .raw
 def append_signed(root, claim_id, list_name, entry: dict) -> dict  # a results entry: append_sealed's
 def append_sealed(root, kind, stem, list_name, entry: dict) -> dict  # P2.5b: THE writer of a sealed
-                                       #   entry — results/<id>.json's lists, exports/<m>.json's
+                                       #   entry — results/<id>.json's lists, exports/<m>.json's,
+                                       #   and (phase 2) preferences/<decision>.json's
 class ExportsFile(list):        # P2.5b: list[ExportRecord], plus .raw (the file as stored)
+class PreferencesFile(list):    # phase 2: list[PreferenceRecord], plus .raw (the file as stored)
+SEALED_KINDS = ("exports", "preferences")   # one sealed list per file; write_record refuses them
+REJECTION_KEYS = ("type", "by", "returns_if", "input")   # phase 2: a decision's, refused on a
+                                #   param record's loser (its losers stay text)
+PROPOSER_ID: re.Pattern         # phase 2: a dotted proposer id, an input's "proposer"
+def rejection_problem(item, stem="<decision id>") -> str   # phase 2: why a decision's rejection
+                                #   breaks SPEC 14's rules, as the tail after rejected[i], or ""
+def return_condition_problem(cond) -> str   # phase 2: why a returns_if is no condition, or ""
 MILESTONE_NAME: re.Pattern      # P2.5b: ^[a-z0-9][a-z0-9._-]{0,63}$ — a milestone file's stem
 REQUIREMENT_ID: re.Pattern      # phase 1: ^R[1-9][0-9]*$ — a requirement file's stem, and every
                                 #   id a claim's "requirements" names
@@ -2139,8 +2180,14 @@ def goalpost_runs(spec, fn, good_ctx, good_verdict, *, trace=None) -> tuple[Goal
                                                         #   AFTER the walk, every site on the trace
 def load_fixture(ref: str, root: str) -> Any            # "mod:fn" or "path/to/file.py"
 def load_project_gates(root, registry) -> list[str]     # <root>/gates/*.py; the ids they register
-def describe(spec) -> str                               # one dense line for `nopekit gate list`
-def registry_summary(registry) -> dict                  # JSON-safe: what can run here, and what cannot
+def describe(spec) -> str                               # one dense line for `nopekit gate list`;
+                                                        #   "basis <word>" right after the bracket
+def registry_summary(registry) -> dict                  # JSON-safe: what can run here, and what cannot;
+                                                        #   phase 2: by_basis, undeclared_basis
+def basis_of(spec) -> str                               # phase 2 (SPEC 38): its basis, or "undeclared"
+# gate(..., basis="") — the last keyword: established | sourced | model-only; empty takes
+#   the module's PACK_BASIS (pack.json's "basis"); register refuses a malformed one only
+#   when declared, and tells "grounded" its word. Never in rho, never a status.
 ```
 `gate(registry=None)` decorates into `active_registry()`, which is `REGISTRY` unless a
 `use_registry(...)` block says otherwise. That block is the seam a loader needs (both
@@ -2426,7 +2473,41 @@ class RequirementStatus(NamedTuple): id; status; errored; claims; worst; disagre
                                               #   report.requirement_statuses' to fill
 def requirement_statuses(ledger, composed) -> dict[str, RequirementStatus]   # THE producer:
                                               #   the worst serving claim by severity; Gap with none
+# Architecture phase 2 (SPEC 14, §0.2): what lost, and what would bring it back
+RETURN_STATES = ("holds", "does-not-hold", "cannot-evaluate", "not-machine-checkable", "none")
+class ReturnState(NamedTuple): state; why = ""; claim = ""; status = ""; observed = None
+                               gate = ""; detail = ""   # why: no-claim | status | no-value |
+                                              #   no-margin | no-limit | band; tokens only
+def claim_value(claim, composed, verdicts) -> Verdict | None   # the verdict the composition
+                                              #   reports: the compared covering pass with the
+                                              #   least margin; None unless Checked by evaluators
+def return_state(condition, ledger, composed) -> ReturnState   # THE evaluation, pure; only
+                                              #   on a claim reading Checked (phase 4 reuses it)
+PREFERENCE_SCHEMA = 1
+def rejection_digest(decision, rejection) -> str   # sealed: decision id and title, the
+                                              #   rejection's value, why and returns_if
+class PreferenceState(NamedTuple): state; name; who = ""; when = ""   # recorded | not-recorded
+def preference_state(decision, rejection) -> PreferenceState | None   # None unless
+                                              #   preferred_against; never by alone (inv. 13)
+class RejectionRow(NamedTuple): decision; index; value; type; by; input; condition; returns
+                                preference    # def to_dict(self) -> dict: tokens only
+def rejection_rows(ledger, composed) -> list[RejectionRow]   # every decision's every loser
+def may_return(rows) -> list[RejectionRow]    # returns.state == "holds": check's lines
 ```
+**What lost, and what would bring it back (architecture phase 2).** `return_state` is
+the one evaluation of a return condition, for `check`'s *may return* lines, `why`, the
+JSON summaries (`summarise()["rejections"]`) and `state.json` — and phase 4's
+candidates. It reads the composition the caller judged and nothing else: a condition on
+a claim that is not Checked reads `cannot-evaluate`/`status` (a Checked composition is
+current by construction: Stale precedes Checked on the ladder); `margin` is the binding
+verdict's own (`margin`, now over a shared `_margin_of`, unchanged), `value` its
+measured value, `limit` the claim's acceptance limit (a band cannot be evaluated). A
+claim Checked on an article gives its counted result's measured value when its units
+are the acceptance's; a judged claim gives none. `preference_state` re-checks the
+channel and the identity, as `_attributed` does for owners, and binds a preference to
+`rejection_digest`: an edit to the title, or to the rejection's value, why or condition,
+un-records it; reverting records it again.
+
 **A claim's mechanism and its requirements (architecture phase 1).** The evaluators
 a claim's mechanism names are a cross-check, never coverage: `mechanism_problems` is
 the one place that compares them with the registry, for `check`'s and `doctor`'s
@@ -2675,7 +2756,25 @@ def available(root=None) -> list[str]                      # every pack name dis
 def key_scope(manifest) -> str                             # "fdm-print" -> "fdm" (from its gate ids)
 def key_vocabulary(name, root=None) -> dict[str, dict]     # every projection key the pack reads
 def key_collisions(names, root=None, *, projection_keys=()) -> list[KeyCollision]
+# Architecture phase 2 (SPEC 22, 25, 38): proposers — tools that propose, never settle
+PROPOSERS_DIR = "proposers"
+PROPOSER_KEYS = ("id", "basis", "description", "run")   # one provides_proposers entry
+class Proposer(NamedTuple): id; basis; description; run; pack; pack_dir   # run absolute
+def proposers(root=None) -> dict[str, Proposer]     # every discoverable pack's, first in
+                                                    #   search order wins; no `packs add` needed
+def find_proposer(root, pid) -> Proposer            # or NopekitError: no pack declares it
+def proposer_basis(found, pid) -> str               # "" with none, its basis, or "undeclared"
+def proposer_problems(pack_dir, manifest, gate_ids) -> list[str]   # validate's: never imports
 ```
+A proposer is a script run as `python <run> [args]` by `nopekit propose`, with the
+project as its working directory and `$NOPEKIT_PROPOSAL_DIR` a fresh directory under
+`.nopekit/out/propose/`; it is never imported by the spine, never registered as an
+evaluator, and needs no control (invariant 3: a proposal settles nothing).
+`read_manifest` refuses a `basis` that is not one of `BASES` (the `max_tier`
+precedent), `_load_dir` sets it on each gate module as `PACK_BASIS` beside `PACK` and
+`PACK_DIR` — part of `load_source_module`'s cache key, never of the code digest — and
+`validate` requires every evaluator of a bundled pack to resolve to a basis (a note
+elsewhere) and runs `proposer_problems`.
 `key_collisions` is what makes two packs wanting one word DETECTABLE rather than
 discoverable: it diffs the installed packs' vocabularies (from each
 `selftest/baseline.json`'s keys, `_notes` and `_aliases`) and reports any key two
@@ -2753,9 +2852,10 @@ def add(ledger, *, title, summary, when, rejected=(), params_changed=(),
 def render_log(ledger) -> str                # markdown, NEWEST FIRST
 def write_log(root, ledger) -> str           # docs/decisions.md — `report --write`'s output
 def why(ledger, name: str, *, view=None, coverage=None, read_sets=None,
-        verdicts=None, composed=None) -> str # one param, claim or requirement: value,
-                                             # rationale, rejected alternatives, gates,
-                                             # grounding, and the decisions that moved it
+        verdicts=None, composed=None, rows=None, bases=None) -> str
+                                             # one param, claim, requirement or decision:
+                                             # value, rationale, rejected alternatives,
+                                             # gates, grounding, and the decisions that moved it
 def changed_in(ledger, name: str) -> str     # the decision that last moved a param: derived
 ```
 From checkpoint 1.3 (U27) `add` no longer sets `Param.changed_in` — a copy in the param
@@ -2773,6 +2873,18 @@ its reason, and the decisions that name it. A claim's block gains `serves: R1, R
 and a MECHANISM section (`report.mechanism_line`, and the evaluators it expects); the
 `how` text moved there from WHY. It prints no registry warning: those are `check`'s and
 `doctor`'s.
+From architecture phase 2 `why` resolves a decision id after an exact requirement (and
+case-insensitively after the folded requirements): `_why_decision` prints the decision
+and each rejected alternative with a facts line — its type (a preference said recorded
+or not by whom), its return condition's state now, its input
+(`report.rejection_facts`) — from `rows` (the caller's `claims.rejection_rows`, on the
+view it judged; composed from `claims.compositions(ledger)` without them). A param's and
+a claim's REJECTED rows gain the same line under a decision's rejection, never under a
+PARAMS or param-record row; a typed decision row replaces its untyped copy when they
+dedupe. `bases` maps an input id to its proposer's basis (`proposed by <id> (basis <basis>)`
+under GROUNDED BY). `add` takes rejections as dicts with `type`, `by`, `returns_if` and
+`input`, held to `store.rejection_problem`; `render_log` adds each loser's type and
+condition as written, never a live state.
 `why` is the context-window win: an agent pulls one parameter's full history
 instead of reading a 1,672-line decision log.
 
@@ -2836,6 +2948,14 @@ def requirement_line(ledger, composed, cover=None) -> str | None   # status's on
 def requirement_json(requirement, found) -> dict       # the one JSON row: status --json, report --json,
                                              #   state.json — {id, statement, source, status, key, word,
                                              #   errored, claims, worst, disagree}
+# Architecture phase 2 (SPEC 14): a rejection's words, from claims.rejection_rows' tokens
+def condition_text(cond) -> str              # "C3 margin < 0.1", or the text
+def return_words(row, ledger=None) -> str    # the condition's state now: "holds: …, now 0.987
+                                             #   (bracket.bearing)", "cannot be evaluated: C1 is failing"
+def rejection_words(row, ledger=None) -> tuple[str, str]   # (type phrase, condition phrase)
+def rejection_facts(row, ledger=None) -> str # why's facts line: "{type} · {condition}[ · source: input …]"
+def may_return_line(row, ledger=None) -> str # check's line for a condition that holds
+def rejection_suffix(rejection) -> str       # decide's row and the log's: static, never a live state
 ```
 **Requirements and mechanisms in the renderers (architecture phase 1).** Every status a
 requirement shows is `claims.requirement_statuses`', worded here: `status` prints one
@@ -3172,7 +3292,11 @@ nopekit ask [--kind]                     # what evidence to request from the use
 nopekit check [--tier N] [--only GATE] [--force] [--no-record]   nopekit gate list|selftest|show
 nopekit report [--write] [--milestone M]   nopekit why <param-or-claim>
 nopekit export [M [--dry-run] [--proceed --why TEXT]]   # P2.5b: the boundary that spends
-nopekit decide --title ... --summary ...  nopekit packs [list|show|validate|add]
+nopekit decide --title ... --summary ... [--rejected V|W [--type T] [--by NAME]
+               [--returns-if "C1 margin > 0.02" | --returns-text TEXT] [--input ID]]...
+nopekit prefer <decision> [--value V]    # phase 2: the person's channel, never the agent's
+nopekit propose [<proposer> [ARGS...]] [--kind] [--desc] [--timeout S]   # phase 2
+nopekit ingest <path...> [--proposer ID] nopekit packs [list|show|validate|add]
 nopekit model [--write]                  nopekit doctor
 nopekit check [--junit [PATH]]
 nopekit gate selftest [GATE ...] [--pack NAME|DIR] [--user-packs] [--allow-empty] [--junit [PATH]]
@@ -3197,6 +3321,29 @@ limit warnings (`_mechanism_lines`) and adds `mechanism_problems` to `--json`; t
 code never moves. `status --json` and `report --json` add `requirements`
 (`_requirement_rows`); `why` takes the view's compositions (`_why_text`); `doctor` has a
 `requirements` and a `mechanisms` row (`_doctor_requirement_rows`).
+
+**Decisions, preferences and proposers at the edge** (architecture phase 2). `decide`'s
+part-flags (`_RejectedFlag`, `_RejectionPart`) fill one ordered list, so each `--type`,
+`--by`, `--returns-if`, `--returns-text` and `--input` applies to the `--rejected`
+before it (`_rejection_items`); a return condition on no claim or an input that is no
+record is refused under the lock (`_refuse_dangling_rejections`), nothing written.
+`prefer` (`cmd_prefer`) is `claim physical … assume`'s order: the refused flags before
+the project is read, then under the lock the decision, a preferred_against in it,
+git's identity, the channel — an agent marker or a pipe refused outright — the
+rejections whose `by` is this identity, the prompt and the decision's id typed, and one
+sealed entry (`store.append_sealed`); it reads the rejection back on `status`'s view.
+`propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
+non-zero exit, a timeout or any project file outside its directory that moved
+(`_project_files`, a stat of the project but its ignored scratch, each path named),
+then ingests each file under the lock (the script's arguments are the plain ones after
+the id and everything after the first `--`, which `main` splits off), `proposer` set
+on a new record only; `ingest --proposer` does the same for a file
+the agent got by hand. `check` prints a *may return* line for each rejection whose
+condition holds after its code is fixed and adds `may_return` to `--json`; `doctor`
+gains warn-only `decisions` and `basis` rows (`_doctor_decision_rows`,
+`_doctor_basis_rows`); `inputs` shows each input's proposer and looked-up basis
+(`_input_bases`); `status`'s packs line names up to eight packs, then how many more
+(`_names`).
 
 **Records at the edge** (checkpoint 1.3, spec §3.15). A record is a file, and a
 command writes exactly the one record it was asked to write — never the whole
@@ -4018,7 +4165,60 @@ every entry re-keys once, and the bracket's committed cache was regenerated with
   the three strings that named `"note"` name `"mechanism": {"how": …}`; a C5 with its
   test written down no longer reads `; no test written down`.
 
+## What phase 2 of the architecture moved
+
+Decisions keep their losers (`docs/SPEC.md` §7 step 2: decisions 14, 22, 25, 38). The
+spine digest moved (models, gates, verdicts); every entry re-keys once, and the
+bracket's committed cache was regenerated with it. Nothing here moves a status, a
+qualification, a rho or `check`'s exit code.
+
+- **Typed rejections** (`Rejection(Rejected)`, `decisions/` only): `type`, `by`,
+  `returns_if` (`ReturnCondition`) and `input`, held by the strict reader
+  (`store.rejection_problem`) and by `write_record` before a decision is written; a
+  legacy entry reads untyped; PARAMS and `params/` keep text `Rejected`.
+- **Return conditions** are evaluated by one function (`claims.return_state`), only on
+  a claim reading Checked; `check` prints *may return* lines after its code is fixed,
+  and its JSON gains `may_return`; `summarise()["rejections"]` carries every row.
+- **Preferences** (`preferences/<decision>.json`, `PreferenceRecord`): the third
+  sealed kind, through `append_sealed`'s list writer (extracted from the exports
+  branch, unchanged for exports); `Decision.preferences` in memory, hidden from every
+  gate (out of the digest by `verdicts._IN_MEMORY_FIELDS["decisions"]`, off the
+  gate's copy by `verdicts._HIDDEN_FROM_THE_COPY`); `claims.preference_state` judges
+  one; `nopekit prefer` is the channel (invariant 13).
+- **Basis** (`GateSpec.basis`, `pack.json` `basis`, `PACK_BASIS`): shown in `gate
+  list`, `gate show`, the report and `state.json`; never in rho
+  (`verdicts.SPEC_FIELDS_IN_RHO` unchanged). The bundled gate files with an override
+  re-key once in every project.
+- **Proposers** (`provides_proposers`, `proposers/`, `InputArtifact.proposer`,
+  `nopekit propose`, `ingest --proposer`): scripts, never imported, never registered.
+- **`why <decision>`** shows a decision and every loser's facts line; the refusal
+  "is a decision id" is gone.
+
 ## Limits: what the spine cannot see, named
+
+- **A re-sealed preference is a forgery the seal does not catch (architecture phase
+  2),** as a results file's (below): `preferences/<id>.json` is sealed and chained
+  with a plain sha256, and a process that recomputes it, calls `store.append_sealed`
+  in process, or opens a pty with the agent markers unset mints a person's preference.
+  P3's permission rule is the lock.
+- **`ingest --proposer` is the agent's word (architecture phase 2).** It records which
+  proposer produced a file the agent ran by hand; nothing ran it, so the basis it
+  shows can be claimed for a file no proposer wrote. Display only: a basis moves no
+  status.
+- **`propose`'s guard is a stat of the project (architecture phase 2).** A proposer
+  that writes outside `$NOPEKIT_PROPOSAL_DIR` is refused, each moved path named, when
+  any file in the project but its ignored outputs and scratch (`cli._project_files`:
+  `.git/`, `.nopekit/out/`, `cache/`, `obs/`, the index, `/out/`, `/REPORT.md`,
+  bytecode) changes size or mtime, appears or goes — records, `model/`, `gates/`,
+  evidence bytes and the verdict cache included. Detected, never undone. A write
+  outside the project, into the ignored scratch, or one that puts a file's size and
+  mtime back is not seen. (Review of phase 2: the guard was the records digest, and a
+  proposer that edited `model/` was ingested silently.)
+- **A basis is declared, never verified (architecture phase 2).** `sourced` says the
+  logic follows a cited source; nothing reads the citation. Review reads it.
+- **A `value` or `limit` return condition reads the claim as it is now (architecture
+  phase 2).** It has no units of its own: an acceptance condition restated in other
+  units changes what it compares, silently but visibly (`why` prints the units).
 
 - **A mechanism's `how` is words, and nothing checks it (architecture phase 1).** It
   says what would settle a claim, and for a physical claim it is the written test a

@@ -74,7 +74,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # P2.2: a crash behind a prerequisite reaches a claim bound only to the
         # dependent, and must read as loud there as anywhere (its critique).
         "test_prerequisites.AnErroredPrerequisiteStaysLouder"],
-    3: "test_invariants.RegistryRefusesLoggers",
+    3: ["test_invariants.RegistryRefusesLoggers",
+        # Architecture phase 2: a proposer is declared apart and never
+        # registered — a proposal settles nothing, so it needs no control.
+        "test_proposers.AProposerIsNeverAnEvaluator"],
     # 4 over a pass beside an evaluator that is not admitted (P2.0): an
     # invariant-9 change that drops the refused verdict would leave the pass
     # alone and the claim under PROVEN. In process on a planted verdict, and
@@ -97,7 +100,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # Architecture phase 1: a requirement is never more resolved than its
         # worst claim, and a mechanism's evaluator list moves no status.
         "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
-        "test_mechanism.AMechanismNeverMovesAStatus"],
+        "test_mechanism.AMechanismNeverMovesAStatus",
+        # Architecture phase 2: an evaluator's declared basis moves no status.
+        "test_basis.ABasisNeverChangesAStatus"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.
@@ -108,13 +113,18 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_fig4.TwoArticlesExactly",
         # Architecture phase 1: both spellings of a claim key alike, and an edit
         # re-keys only the gates that read what moved.
-        "test_mechanism.TheMechanismMovesNoKey"],
+        "test_mechanism.TheMechanismMovesNoKey",
+        # Architecture phase 2: basis is never in rho.
+        "test_basis.ABasisIsNeverAKey"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
         "test_records.MilestonesAreRecords", "test_records.TheExportRecordIsSealedAndChained",
         # Architecture phase 1: requirements are records.
-        "test_records.RequirementsAreRecords"],
+        "test_records.RequirementsAreRecords",
+        # Architecture phase 2: preferences are records, and `propose` writes
+        # only the inputs its proposer produced.
+        "test_records.PreferencesAreRecords", "test_proposers.ProposeWritesOnlyItsInputs"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -131,7 +141,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_context.AFailOutsideStillCounts",
         "test_context.KnownGoodOutsideIsUnqualified",
         "test_context.AMutationPassingOutsideStillCounts",
-        "test_goalposts.AGoalpostIsNeverAKey"],
+        "test_goalposts.AGoalpostIsNeverAKey",
+        # Architecture phase 2: a declared basis is never a qualification route.
+        "test_basis.ABasisNeverQualifies"],
     # 10 (P2.2): the rule in the run loop, the resolver and the composition; a
     # cached pass behind a failed guard, end to end in process; and the graph
     # the rule walks — a cycle or an inversion refused at registration.
@@ -168,7 +180,21 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Architecture phase 1: every reader agrees on a requirement, and
          # *ready* stays the claims'.
          "test_requirements.EveryReaderAgreesOnARequirement",
-         "test_requirements.ReadinessStaysTheClaims"],
+         "test_requirements.ReadinessStaysTheClaims",
+         # Architecture phase 2: a return condition is evaluated only on a claim
+         # the composition reads Checked, `check`'s *may return* never moves its
+         # exit code, and every reader says one condition's state alike.
+         "test_returns.AConditionReadsOnlyACheckedClaim",
+         "test_returns.MayReturnNeverMovesTheExitCode",
+         "test_returns.EveryReaderAgreesOnAReturnCondition"],
+    # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
+    # through the person's channel — never from an agent session or a pipe,
+    # never by `by` alone, never from a file that is not sealed and chained, and
+    # only for the rejection the person read.
+    13: ["test_preferences.APreferenceIsAPersonsAct",
+         "test_preferences.ANomineeAloneNeverCounts",
+         "test_preferences.ThePreferenceFileIsSealedAndChained",
+         "test_preferences.APreferenceIsBoundToWhatThePersonRead"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: "test_mutation.MutationIsSealed",
@@ -369,8 +395,9 @@ class TheInvariantTableIsTheMap(unittest.TestCase):
         mapping[3] = []
         problems = _table_problems(_read(CLAUDE_MD), mapping)
         self.assertEqual(problems, [
-            "invariant 3: CLAUDE.md's table names ['test_invariants.RegistryRefusesLoggers'], "
-            "which INVARIANT_CLASSES does not map"])
+            "invariant 3: CLAUDE.md's table names ['test_invariants.RegistryRefusesLoggers', "
+            "'test_proposers.AProposerIsNeverAnEvaluator'], which INVARIANT_CLASSES does not "
+            "map"])
 
     def test_no_table_is_caught(self):
         text = _read(CLAUDE_MD)

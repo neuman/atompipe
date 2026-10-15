@@ -102,6 +102,11 @@ RECORD_KINDS = (
     "InputArtifact", "Extraction", "PhysicalResult", "View", "ProjectMeta",
     # Architecture phase 1 (SPEC decision 12): the person's words.
     "Requirement",
+    # Architecture phase 2 (SPEC 14, 22, 25, 38): a typed rejection, its return
+    # condition, a person's preference, and pack.json (`basis`,
+    # `provides_proposers`). What slipped through (review of phase 2): none was
+    # named here, so a field planted in any of the four passed the suite.
+    "Rejection", "ReturnCondition", "PreferenceRecord", "PackManifest",
 )
 
 #: What PACK_FORMAT owes a pack author, class by class: `(where the class is
@@ -982,6 +987,15 @@ class RecordFieldsAreDocumented(unittest.TestCase):
         self.assertEqual(problems,
                          ["Claim.planted_field_u01 (field) is not in "
                           "SPINE_CONTRACT's `class Claim` block"])
+
+    def test_a_planted_field_in_a_phase_2_record_is_caught(self):
+        source = _read(os.path.join(SPINE_SRC, "models.py"))
+        for kind in ("Rejection", "ReturnCondition", "PreferenceRecord", "PackManifest"):
+            with self.subTest(kind):
+                planted = _plant_field(source, kind, "planted_field_p2: str = ''")
+                self.assertEqual(record_problems(planted, _read(SPINE_CONTRACT)),
+                                 [f"{kind}.planted_field_p2 (field) is not in "
+                                  f"SPINE_CONTRACT's `class {kind}` block"])
 
     def test_a_field_documented_under_another_class_does_not_count(self):
         source = "class Claim:\n    note: str = ''\n"

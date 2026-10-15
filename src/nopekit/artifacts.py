@@ -338,6 +338,7 @@ def ingest(
     copy: bool = True,
     licence: str = "",
     note: str = "",
+    proposer: str = "",
 ) -> InputArtifact:
     """Take a real file into the project: copy, hash, and return its RECORD.
 
@@ -527,6 +528,9 @@ def ingest(
         added=when,
         licence=licence,
         note=note,
+        # SPEC 22: the proposer that produced the file, on a NEW record only —
+        # re-ingesting known bytes never changes who proposed them.
+        proposer=proposer,
     )
     ledger.inputs.append(artifact)
     return artifact
@@ -540,6 +544,7 @@ def ingest_link(
     description: str = "",
     kind: ArtifactKind | str = ArtifactKind.LINK,
     when: str = "",
+    proposer: str = "",
 ) -> InputArtifact:
     """Register a URL as evidence. No file, no fetch. Returns its record.
 
@@ -593,6 +598,7 @@ def ingest_link(
         sha256=sha,
         bytes=0,
         added=when,
+        proposer=proposer,
     )
     ledger.inputs.append(artifact)
     return artifact

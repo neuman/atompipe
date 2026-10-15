@@ -74,6 +74,14 @@ in order:
 Write down what you picked, what you rejected, and why — this is rule 3 of the
 method and it applies to tooling exactly as it applies to constants.
 
+Then declare the evaluator's **basis** (SPEC 38) — where its verdict's logic comes
+from — and use the highest one available: `established` when the verdict is the
+tool's own answer (its check, its solver's result), `sourced` when your code follows
+a cited outside source (a textbook formula, a standard, a datasheet: cite it in the
+pack's `references/`), `model-only` when you wrote the logic with no outside source.
+When you go lower than the tool would allow, say why beside the declaration. The basis
+is shown in `gate list` and the report; it changes no status and no qualification.
+
 ### 4. Install it — pinned — and smoke-test before any project data touches it
 
 **Just install it.** This step is not optional and it is not somebody else's job. An

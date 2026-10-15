@@ -65,5 +65,6 @@
     "kernel tolerance budget"
   ],
   "licence": "Apache-2.0",
-  "origin": "built by the extension protocol around trimesh, from defects seen repeatedly in exported mechanical assemblies"
+  "origin": "built by the extension protocol around trimesh, from defects seen repeatedly in exported mechanical assemblies",
+  "basis": "model-only"
 }
