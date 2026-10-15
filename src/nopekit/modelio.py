@@ -3083,6 +3083,16 @@ class ParamView:
     `param_view` the read sets — `()` otherwise, which is "not asked", and a
     reader that prints a "protected by" column passes them.
 
+    `read_by` and `sourced_from` are the observed view's two graph lists
+    (architecture phase 3a, SPEC 10 and 19), filled by `graph.observe` and by
+    nothing in this module: `read_by` the registered evaluators whose SERVED
+    verdict entry read this value (`graph.value_names`' path rule), and
+    `sourced_from` the graph node ids that source it — `input:<id>`, and
+    `claim:<id>` for an assumption the value IS. The two reader lists can
+    differ, on purpose: `gates` follows the last EXECUTED run (`obs/`, ignored,
+    empty on a fresh clone), `read_by` the entry the resolution stands on, which
+    a fresh clone has too.
+
     Not persisted; `to_dict` is the JSON shape for readers that write one
     (`last_check.json`'s `params`, `state.json`'s `params` rows).
     """
@@ -3100,6 +3110,8 @@ class ParamView:
     record: str = ""
     model_error: str = ""
     gates: tuple[str, ...] = ()
+    read_by: tuple[str, ...] = ()
+    sourced_from: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -3111,6 +3123,7 @@ class ParamView:
             "source": self.source, "grounded_by": list(self.grounded_by),
             "tags": list(self.tags), "home": self.home, "record": self.record,
             "model_error": self.model_error, "gates": list(self.gates),
+            "read_by": list(self.read_by), "sourced_from": list(self.sourced_from),
         }
 
 

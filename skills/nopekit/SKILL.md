@@ -60,8 +60,9 @@ stale now.
 | `claims/<id>.json` | one claim — the file name is its id |
 | `decisions/<slug>.json` | one decision, including what LOST |
 | `inputs/<id>.json` | one piece of evidence and what was extracted from it (its bytes stay in `inputs/<bucket>/`) |
-| `params/<name>.json` | only the provenance the model cannot hold: `source`, `grounded_by`, `tags` |
+| `params/<name>.json` | only the provenance the model cannot hold: `source`, `grounded_by`, `tags`. To say a value IS an assumption, put the assumption claim's id in `grounded_by` (`{"grounded_by": ["C6"]}`): every claim whose evaluator reads that value then rests on it |
 | `needs/<id>.json` | a gap someone enriched (candidates, a chosen tool) |
+| `claims/<id>.json` `"resolves"` | on a PHYSICAL claim only: the assumption ids its test replaces — shown, it moves no status |
 | `milestones/<name>.json` | one spend — a print, a board order, a field test: the claim ids it `requires` and the `generator` (`<path>.py:<function>`) that builds what it gets |
 | `.nopekit/project.json` | the project: `"model_entry"` — the model file that is the single source of truth — and `"packs"`, the live packs |
 
@@ -80,6 +81,14 @@ it is sealed, like `results/`). `check` writes
 no record — only verdicts under `.nopekit/verdicts/`, which you commit with the
 records, and ignored scratch (the one exception: a project still in the old one-file
 layout is migrated to record files by its first `check`).
+
+**`nopekit round` ends a round**: a tier-0 check, the site rebuilt when `site/`
+exists, and `.nopekit/round.json` — the round record, every status as a token and the
+typed graph, tracked — written when anything it records moved. It prints one
+paragraph (what changed since the last round) and never blocks. It does not commit
+yet, and no hook runs it yet. Never edit `.nopekit/round.json`, and never read a
+status from it: `nopekit status` is where statuses are, and it says whether the round
+record is current, behind or edited by hand.
 
 ## The shape
 
@@ -250,7 +259,9 @@ nopekit status                # where is this project
 nopekit check                 # tier-0 gates, seconds — run this constantly
 nopekit check --tier 2        # the full sweep, before any spend decision
 nopekit gap --propose         # every claim whose mechanism has yet to run, and packs that might run it
-nopekit why <name>            # one param's, claim's, requirement's or decision's full history
+nopekit why <name>            # one param's, claim's, requirement's or decision's full history:
+                              #   what reads a value and sources it, what a claim rests on
+nopekit round                 # end a round: tier-0 check, site, the round record
 nopekit report --write        # REPORT.md, the readiness report — an ignored output
 nopekit export <m> --dry-run  # ready for milestone <m>? re-runs everything it requires
 nopekit site build            # rebuild the page after a sweep

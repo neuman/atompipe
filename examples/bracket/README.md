@@ -163,6 +163,8 @@ selftest/bad_configs.py       tracked   one known-bad fixture per gate
 requirements/R1.json … R4.json tracked  what the person asked for, in their words
 claims/C1.json … C7.json      tracked   what must be true: one record per claim, the
                                         filename is its id. Edit these by hand.
+params/load_n.json            tracked   the one param record: load_n IS assumption C6
+                                        (`"grounded_by": ["C6"]`), so C1 rests on C6
 decisions/print-in-petg.json  tracked   a decision and what lost, typed, with return
                                         conditions (written by `nopekit decide`)
 docs/decisions.md             tracked   the decision log, generated from decisions/ by
@@ -177,6 +179,9 @@ exports/print-v1.json         tracked   written by `nopekit export print-v1` onl
 .nopekit/verdicts/<gate>/    tracked   the verdict cache: one entry per gate and one
                                         control entry per gate, keyed on the bytes
                                         each one read. Evidence, committed.
+.nopekit/round.json          tracked   the round record: every status as a token and
+                                        the typed graph, written only by `nopekit round`;
+                                        an output — never edit it, never read it for truth
 .gitignore, .gitattributes,   tracked   marked blocks nopekit maintains: bytecode is
 .nopekit/.gitignore                    ignored, line endings are pinned (digests are
                                         over bytes), outputs are ignored
@@ -187,9 +192,13 @@ out/print-v1/                 ignored   the package `nopekit export print-v1` wr
 .nopekit/cache/, obs/, out/  ignored   this checkout's memory, costs and gate scratch
 ```
 
-There is no `params/` directory: a parameter record holds only what the model cannot
-(where a number came from), and every value, rationale and rejected alternative here
-lives in `model/bracket.py`.
+There is one param record, `params/load_n.json`, and it holds only what the model
+cannot: that the rated load IS an assumption. C6 says the load is static and centred
+on the arm; `load_n` is that static load, so its `grounded_by` names C6, and because
+`bracket.deflection` reads `load_n`, C1's verdict rests on C6 (`nopekit why C1` says
+`rests on: C6 (gap; bracket.deflection read load_n)`). It moves no status: C1 fails
+on its own, and C6 reads Gap until its owner records it. Every value, rationale and
+rejected alternative lives in `model/bracket.py`.
 
 ## Move a limit in the claim, never in the gate
 
@@ -218,8 +227,16 @@ red until it does, and names these commands. To regenerate, from this directory:
 rm -rf .nopekit/verdicts .nopekit/cache .nopekit/obs .nopekit/out
 nopekit check              # exits 1: bracket.deflection fails on purpose
 nopekit gate selftest      # writes nothing new: the controls were just recorded
+nopekit round              # the round record of the regenerated cache
 git add -A .
 ```
+
+The bracket also commits its round record, `.nopekit/round.json` — the resolution at
+the end of a round, as tokens, with the typed graph. A change that moves what it holds
+without moving the cache (the composition, the graph, a bracket record) ends with
+`nopekit round` alone; `tests/test_bracket_cache.py` (`TheCommittedRoundRecordIsCurrent`)
+goes red until it does. On a fresh clone `nopekit round` writes nothing and `git status`
+stays clean.
 
 The readiness report is not committed: `nopekit report --write` renders `REPORT.md`
 here, an output git ignores — it was `docs/readiness.md`, tracked, until it drifted

@@ -714,6 +714,24 @@ def why_problems(channel: str, text: str, *, floor: tuple[str, ...]) -> list[Pro
             + lead_problems(channel, rows, lead=False))
 
 
+def round_problems(channel: str, text: str, *, appeared: bool) -> list[Problem]:
+    """`round`'s paragraph (architecture phase 3a): its count line splits the
+    crashes out (`N skipped (k errored)`), and — over the committed record,
+    where every probe claim is new — each errored claim appears as `skipped,
+    errored`, never as a bare skip."""
+    out: list[Problem] = []
+    n = len(ERRORED_CLAIMS) + len(SKIPPED_CLAIMS)
+    if f"{n} skipped ({len(ERRORED_CLAIMS)} errored)" not in text:
+        out.append(Problem(f"{channel}.counts", "counts", "*",
+                           "the count line does not split the crashes out", text[:400]))
+    if appeared:
+        for cid in ERRORED_CLAIMS:
+            if f"{cid} new (skipped, errored)" not in text:
+                out.append(Problem(channel, "tone", cid, "not said skipped, errored",
+                                   text[:400]))
+    return out
+
+
 def doctor_problems(text: str) -> list[Problem]:
     """Each errored evaluator is named in a loud row above every row that names
     the missing tool (F-4). The floor: the tool's rows are there to be outranked."""
@@ -1039,7 +1057,11 @@ def _SKIP_FIRST(composed: Any) -> int:
 # --------------------------------------------------------------------------- #
 #: (key, argv), in the order they run. The two check runs come before the model
 #: edit that makes C4 Stale; everything after reads it.
-_BEFORE_EDIT = (("check", ["check", "--junit"]), ("check.json", ["check", "--json"]))
+_BEFORE_EDIT = (("check", ["check", "--junit"]), ("check.json", ["check", "--json"]),
+                # Architecture phase 3a: the round over the committed bracket's
+                # round record — every probe claim appears, a crash's as
+                # `skipped, errored`.
+                ("round", ["round"]))
 #: The planted project's one milestone (P2.5b), requiring every probe claim.
 PROBE_MILESTONE = "probe"
 _AFTER_EDIT = (
@@ -1056,12 +1078,18 @@ _AFTER_EDIT = (
     # P2.5b: the boundary's dry run over a milestone requiring every probe — its
     # rows are the unresolved required claims, a crash's loud among them.
     ("export.probe", ["export", PROBE_MILESTONE, "--dry-run"]),
-    # Last: it records a result, and every command above reads P8 without one.
+    # Last but the round: it records a result, and every command above reads P8
+    # without one.
     # With its evidence (P2.5a-D9: a pass on a physical claim needs a file), and
     # under the test identity (D5: with none, nothing is recorded).
     ("claim.physical", ["claim", "physical", PHYSICAL_PROBE, "--pass",
                         "--evidence=photos/p8.jpg"]),
 )
+#: Architecture phase 3a, after everything above AND after the files are read:
+#: its tier-0 check re-runs what the edit invalidated and it rebuilds the site,
+#: so every reader and file before it sees C4 Stale. Its count line splits the
+#: crashes out.
+_AFTER_FILES = (("round.after", ["round"]),)
 
 #: Every CLI command path that renders a claim's status or an evaluator's
 #: verdict, each run above. `test_every_command_is_rendered_or_says_why` holds
@@ -1070,7 +1098,9 @@ RENDERED = frozenset({("check",), ("status",), ("report",), ("why",), ("claim", 
                       ("claim", "show"), ("claim", "physical"), ("gate", "show"),
                       ("doctor",), ("site", "init"), ("site", "build"),
                       # P2.5b: run above over the probe milestone.
-                      ("export",)})
+                      ("export",),
+                      # Architecture phase 3a: before and after the edit.
+                      ("round",)})
 
 #: The rest, each with why it shows no errored claim or verdict. A new command
 #: that does — `export <milestone>`, `export --dry-run`, the `/ready` path (P2,
@@ -1212,6 +1242,8 @@ def _louder_project() -> _Run:
                       ("last_check", ".nopekit/cache/last_check.json")):
         with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as fh:
             files[name] = fh.read()
+    for key, argv in _AFTER_FILES:
+        out[key] = _env.nopekit(argv, cwd=root, home=home, identity=True)
     run = _Run(root, out, files)
     _check_the_fixture(run)
     _SHARED.append(run)
@@ -1254,6 +1286,8 @@ def cli_problems(run: _Run) -> list[Problem]:
             if "last verdict:" in ln]
     out += row_problems("gate.show", gate_rows(last), cites=False, floor=("errored",))
     out += doctor_problems(run.out["doctor"].stdout)
+    out += round_problems("round", run.out["round"].stdout, appeared=True)
+    out += round_problems("round.after", run.out["round.after"].stdout, appeared=False)
     # P2.5b: `export <m> --dry-run`'s rows — the unresolved required claims, in
     # severity order, each as `check` prints a BLOCKING row.
     out += row_problems("export.probe", claim_rows(run.out["export.probe"].stdout.splitlines()),
@@ -1685,6 +1719,11 @@ class ErrorIsLouder(_env.EnvCase):
     def test_doctor(self):
         self._holds("doctor")
 
+    def test_round(self):
+        self._holds("round")
+        planted = "round 2: P2 new (skipped). 15 claims · 8 skipped."
+        self.assertTrue(round_problems("planted", planted, appeared=True))
+
     def test_site_state(self):
         self._holds("site.")
 
@@ -1702,7 +1741,7 @@ class ErrorIsLouder(_env.EnvCase):
         self.assertEqual(sorted(RENDERED & set(NOT_A_STATUS_RENDERER)), [])
         ran = {tuple(a for a in argv if not a.startswith("-") and a not in ERRORED_CLAIMS
                      and a not in ERRORED_GATES and a != PROBE_MILESTONE)
-               for _k, argv in _BEFORE_EDIT + _AFTER_EDIT}
+               for _k, argv in _BEFORE_EDIT + _AFTER_EDIT + _AFTER_FILES}
         self.assertEqual(sorted(RENDERED - ran), [], "a rendered command nobody runs")
         planted = cli_mod.build_parser()
         sub = next(a for a in planted._actions if isinstance(a, argparse._SubParsersAction))

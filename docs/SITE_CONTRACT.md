@@ -80,6 +80,13 @@ missing tool's tone, and P2.1 files a crash under `blocked` — so that page rea
 exactly like a missing tool, and took READY from `readiness.ready`. The shell stays
 the project's; nothing else under `site/` is.
 
+**`nopekit round` builds the site too** (architecture phase 3a): when `site/` exists,
+the round builds it after its tier-0 check, from the same resolution its round record
+(`.nopekit/round.json`) is computed from, so the page and the record cannot disagree
+about a claim. The map (the next phase) will bake its data from `graph.build` and
+`graph.tokens` — the typed graph and the status tokens beside it, joined by id —
+through `site build`; `state.json` carries no graph yet.
+
 `site build` never runs gates. It renders what `verdicts.resolve` makes of the
 verdict cache (`.nopekit/verdicts/`) — which never runs a gate either — and says how
 old each result is and whether it is current, because a site that silently re-ran
@@ -271,6 +278,7 @@ was the one a reader of the contract would never look for.
                   "mechanism": { "by": "closed_form", "how": "Euler-Bernoulli tip …",
                                  "evaluators": ["bracket.deflection", …] },  // phase 1
                   "requirements": ["R1"],                                    // phase 1
+                  "resolves": [ ],                    // phase 3a: a physical claim's assumptions
                   "physical_result": { "passed": true, …, "counts": false,
                                        "why": "a pass recorded from an agent session does not count",
                                        "recorded": "recorded by Dana, from an agent session",
@@ -296,6 +304,7 @@ was the one a reader of the contract would never look for.
                   "rationale": …, "derived_from": [ ], "source": "", "grounded_by": [ ],
                   "tags": [ ], "home": "model/bracket.py Config.thickness", "record": "",
                   "model_error": "", "gates": ["bracket.min_wall"],
+                  "read_by": ["bracket.min_wall"], "sourced_from": [ ],      // phase 3a
                   "rejected": [ { "value": "4.0 mm", "why": …, "evidence": "",
                                   "origin": "model/bracket.py PARAMS" } ],
                   "changed_in": "", "defended": true, "derived": false } ],
@@ -491,8 +500,11 @@ an agent can read the site's state without a browser.
   model states none); `home` is where the value lives; `source`, `grounded_by` and
   `tags` are the record's (`record` its path, `""` when there is none); `rejected`
   is both homes' losers, each with its `origin`; `gates` are the registered gates
-  whose last executed reads name it; `changed_in` is the newest decision that moved
-  it. `defended` is the one undefended rule `doctor`, `status` and the report print
+  whose last executed reads name it; `read_by` (architecture phase 3a) the
+  registered evaluators whose served verdict entry read it — the graph's `reads`
+  edges, which a fresh clone has too, so the two can differ — and `sourced_from` the
+  graph node ids that source it (`input:<id>`, and `claim:<id>` for an assumption the
+  value is); `changed_in` is the newest decision that moved it. `defended` is the one undefended rule `doctor`, `status` and the report print
   (`modelio.undefended_params`): `false` for a number the model holds that no home
   defends, `true` otherwise, and `null` where the model holds no number — `value`
   is then `null` too, and `model_error` says why (the model does not load), or it

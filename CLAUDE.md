@@ -35,6 +35,13 @@ commands; `examples/bracket/README.md` ("The committed cache") has them in full.
 rewrote the bracket's tracked ledger and added a run file, so `git status` was never
 clean and nobody read it.)
 
+The bracket also commits its round record, `.nopekit/round.json`. A change that
+moves what it holds — the cache regeneration above, the composition (`claims.py`),
+`graph.py`, `rounds.py`, `report.requirement_statuses` or `_disagreement`, or one of
+the bracket's records — ends with `PYTHONPATH=../../src python3 -m nopekit round` in
+`examples/bracket`, in the same change; `tests/test_bracket_cache.py`
+(`TheCommittedRoundRecordIsCurrent`) goes red until it does and names the command.
+
 ## Invariants — do not break these
 
 The entire value of this project is that its report refuses to claim anything it has
@@ -112,7 +119,11 @@ below names:
    its package hands the builder: it moves only when something its generator read
    moves, and the rebuild prediction names exactly those articles (P2.5b) — a file it
    linked into its package is a read, and one there that no write the trace saw put
-   makes the article the whole design (review of P2.5b).
+   makes the article the whole design (review of P2.5b). The round record is never
+   shown as current once the records, the verdict cache or the design it was computed
+   from moved, or once what it holds is not what `round` would write now (an
+   evaluator's code, its controls or a pack moved the resolution): `status` and
+   `doctor` say it is behind, naming what moved (architecture phase 3a).
    (Observed before this: one hash of the whole model decided every gate, and a model
    that failed to import compared equal, so three claims read Checked for a design that
    could not be built.)
@@ -134,9 +145,17 @@ below names:
    ingested; `export` (P2.5b) writes its export record
    (`exports/<milestone>.json`), the new verdict and control entries its re-run
    files, as `check --force` files them, and the marked ignore blocks — every other
-   path it writes (`out/<milestone>/`, its package) is ignored when written; and
-   `report --write` writes `REPORT.md`, an output git ignores. The one carve-out is the one-time legacy migration,
-   which only `check` and those writers perform; every other command reads a legacy
+   path it writes (`out/<milestone>/`, its package) is ignored when written;
+   `report --write` writes `REPORT.md`, an output git ignores; and `round` writes
+   what `check` writes, what `site build` writes when `site/` exists, and the round
+   record. `.nopekit/round.json`, the round record, is a tracked output and not a
+   record: only `round` writes it (and, from phase 4, `merge`), at most once a run,
+   only when what it holds moved, and as the round record of the state after the
+   run; `check` and every other command never write it, and nothing reads it for
+   truth — a reader that finds its self-digest broken says it was edited by hand,
+   whatever schema it claims, and one that finds it moved past says it is behind
+   (invariant 7). The one carve-out is the one-time legacy migration,
+   which only `check`, `round` and those writers perform; every other command reads a legacy
    ledger in memory and writes nothing. (Observed before this: `check`, a sweep, saved the whole ledger on
    every run, so a claim a human edited between two commands was put back from the
    sweep's memory, and `gap`, which reads like a query, filed every gap it found as
@@ -254,7 +273,8 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
 12. **No reader says more than the composition, and the boundary that spends
     re-executes.** No renderer shows a claim more resolved than `claims.compose`
     composes it, nor says *ready* more generously than `claims.unresolved` — the one
-    predicate the readiness sentence, `export`, the JSON summaries and the page read —
+    predicate the readiness sentence, `export`, the JSON summaries, the page and the
+    round record read —
     nor a requirement more resolved than the worst claim that serves it
     (`claims.requirement_statuses`, the one producer), and *ready* never reads a
     requirement; nor evaluates a return condition on a claim the composition does not
@@ -338,12 +358,12 @@ named.)
 | 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
-| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs` |
+| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth` |
 | 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus` |
 | 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
 | 15 | `test_mutation.MutationIsSealed` |
 
@@ -385,7 +405,8 @@ Each fact has one home; everything else that shows it is an output of that home.
   (P2.5a): never edit one by hand — a broken seal refuses the file.
 - **The model** — `model/*.py` owns every parameter's value, units and rationale, and
   in `PARAMS` what lost to it; a param record holds only the provenance the model
-  cannot (`source`, `grounded_by`, `tags`).
+  cannot (`source`, `grounded_by`, `tags`). An assumption claim's id in
+  `grounded_by` says the value IS that assumption (the graph's `sources` edge).
 - **The verdict cache** — tracked, `.nopekit/verdicts/<gate id>/`: one file per
   rho (the hash of everything the gate read) and one per control outcome at a
   version, never rewritten. Git plus this cache is the history; there is no run history.
@@ -396,6 +417,13 @@ Each fact has one home; everything else that shows it is an output of that home.
   `report --write`) and `out/<milestone>/` (the package `export` wrote). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
+- **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at
+  the end of a round as tokens (every claim's and requirement's status key, the
+  counts, readiness, each evaluator's outcome) and the typed graph, with the digests
+  of the records, the verdict cache and the design it was computed from, a round
+  number and its own digest. Written only by `nopekit round` (and, from phase 4,
+  `merge`), never by `check`; nothing reads it for truth — `status` and `doctor`
+  say only whether it is current, behind or edited by hand.
 
 `docs/SPINE_CONTRACT.md` ("Where facts live", then `store.py`'s section) has the
 layout in full, with each writer.
@@ -409,6 +437,8 @@ layout in full, with each writer.
 | `src/nopekit/milestones.py` | the boundary that spends: a milestone's closure, the export's refusals and judgment, disagreements, the test card, the package |
 | `src/nopekit/verdicts.py` | the per-gate verdict cache: what a gate read (`ParamTrace`, `LedgerView`, the audit hook), portable digests and the spine digest, rho, cache and control entries, freshness, admission at the gate's current version, the one resolver every reader uses, the sweep `check` runs, and `last_check.json` |
 | `src/nopekit/vcs.py` | the only git edge: argv form, a clean environment, a timeout, never raises |
+| `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map will draw |
+| `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |

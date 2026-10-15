@@ -67,11 +67,11 @@ import tempfile
 import textwrap
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 from . import __version__
-from . import (artifacts, claims, decisions, gates, milestones, modelio, packs, report, site,
-               store, vcs, verdicts)
+from . import (artifacts, claims, decisions, gates, graph, milestones, modelio, packs, report,
+               rounds, site, store, vcs, verdicts)
 from .models import (
     ArtifactKind,
     Claim,
@@ -882,7 +882,8 @@ def _param_views(root: str, ledger: Ledger, model: Any, model_error: str, *,
 
 def _shown_params(root: str, ledger: Ledger, model: Any, model_error: str,
                   resolution: verdicts.Resolution,
-                  registry: gates.Registry | None) -> list[modelio.ParamView]:
+                  registry: gates.Registry | None, *,
+                  projection: Any = None) -> list[modelio.ParamView]:
     """The parameters as `status`, `report`, the page and `doctor` show them:
     `_param_views` with each view's gates read off the resolution's read sets.
 
@@ -895,49 +896,43 @@ def _shown_params(root: str, ledger: Ledger, model: Any, model_error: str,
     and a field nobody explained was flagged by `doctor` and nothing else. One
     view, one rule (`modelio.undefended_params`), every reader. `site build`
     and the page-staleness judgement (`_site_judgement`) both take theirs from
-    here, so a page built from it reads current against it."""
-    return _param_views(root, ledger, model, model_error,
-                        read_sets=_registered_reads(resolution.read_sets, registry))
-
-
-def _grounding(ledger: Ledger, views: Iterable[modelio.ParamView]) -> dict[str, list[str]]:
-    """`{parameter or claim: [artifact ids]}`, derived on every read: the
-    extractions' `grounds`, then what a record declares by hand
-    (`artifacts.grounding`), then what the model's `PARAMS` declares (each
-    view's `grounded_by`) — first-seen order, each id once.
-
-    `why` and `inputs` both read THIS map, so they cannot disagree (S-36). What
-    slipped through: the edge an extraction implies was copied into the
-    parameter it grounds, so deleting the extraction left `why arm_length`
-    saying "GROUNDED BY arm" while `inputs` said `arm` was "NEVER READ"; and once
-    the copy was gone, with nothing derived in its place, the two disagreed the
-    other way round — `inputs` said `arm` grounds `arm_length`, `why` said
-    nothing did."""
-    found = {name: list(ids) for name, ids in artifacts.grounding(ledger).items()}
-    for view in views:
-        bucket = found.setdefault(view.name, [])
-        bucket += [aid for aid in view.grounded_by if aid not in bucket]
-    return {name: ids for name, ids in found.items() if ids}
+    here, so a page built from it reads current against it. From architecture
+    phase 3a each view carries `read_by` and `sourced_from` (`graph.observe`):
+    the served entries' readers and what sources the value, beside `gates`;
+    ``projection`` names the derived values a read of the whole `ctx.params`
+    reads (`graph.derived_names`) — without it such a read reads the choices."""
+    return graph.observe(
+        _param_views(root, ledger, model, model_error,
+                     read_sets=_registered_reads(resolution.read_sets, registry)),
+        ledger=ledger, resolution=resolution, registry=registry, choices=_choices(model),
+        derived=graph.derived_names(projection))
 
 
 def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
               model_error: str, view: Ledger, resolution: verdicts.Resolution,
-              name: str) -> str:
+              name: str, *, projection: Any = None) -> str:
     """`decisions.why` with all four of its inputs from where they live now
     (spec §3.10, U29): each parameter from `param_view` (the model's value, and
     what lost in both homes); a claim's gates from registry coverage
     (`claims.effective_gates`); a parameter's gates from what each gate read when
     it last executed (`verdicts.last_read_sets`, registered gates only); every gate
     line from the resolver's effective verdicts; and grounding from the
-    extractions (`_grounding`). Nothing here is a stored copy: a record may no
+    extractions (`artifacts.value_grounding`). Nothing here is a stored copy: a record may no
     longer hold `gates`, `value` or a grounding back-reference at all."""
     registered = set(registry.ids())
     read_sets = {gate: reads for gate, reads in verdicts.last_read_sets(root).items()
                  if gate in registered}
     views = _param_views(root, ledger, model, model_error)
-    grounds = _grounding(ledger, views)
+    grounds = artifacts.value_grounding(ledger, views)
     views = [dataclasses.replace(v, grounded_by=tuple(grounds.get(v.name, ())))
              for v in views]
+    # Architecture phase 3a (SPEC 10, 19): what reads each value, what sources
+    # it, and what each claim rests on — from the graph, the one producer.
+    bases = _input_bases(root, ledger)
+    views = graph.observe(views, ledger=ledger, resolution=resolution, registry=registry,
+                          choices=_choices(model), derived=graph.derived_names(projection))
+    built = graph.of(root, view, resolution, registry, projection=projection, model=model,
+                     views=views, bases=bases)
     shown = dataclasses.replace(
         view, claims=[dataclasses.replace(claim, grounded_by=list(grounds.get(claim.id, ())))
                       for claim in view.claims])
@@ -951,7 +946,8 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
                          coverage=claims.effective_gates(ledger, registry),
                          read_sets=read_sets, verdicts=resolution.verdicts,
                          composed=composed, rows=claims.rejection_rows(view, composed),
-                         bases=_input_bases(root, ledger))
+                         bases=bases, graph=built,
+                         entry=ledger.meta.model_entry or "")
 
 
 def _input_bases(root: str, ledger: Ledger) -> dict[str, str]:
@@ -1214,6 +1210,11 @@ def cmd_status(args: argparse.Namespace) -> int:
       moved, never which check it touched (M11.7). (Headed `stale:` until P2.1.)
     * `last check run:` — when `check` last swept the whole project
       (`last_check.json`), with its age; `never` before the first.
+    * `round record:` — whether `.nopekit/round.json` is current with the
+      records, the verdict cache and the design, behind them (naming what
+      moved), edited by hand, unreadable or a newer nopekit's (architecture
+      phase 3a, `_round_state`). Never what it holds: every status above is the
+      resolver's.
     * `note:` — an entry recorded under another library version (provenance,
       never staleness, Q1.3), and at most one line for controls whose fixture
       code moved since they were demonstrated (they count; the next check run
@@ -1240,7 +1241,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     installed = packs.installed(root, ledger=ledger)
     available = packs.available(root)
     unread = artifacts.unextracted(view)
-    params = _shown_params(root, ledger, model, model_error, resolution, registry)
+    params = _shown_params(root, ledger, model, model_error, resolution, registry,
+                           projection=projection)
     undefended = modelio.undefended_params(params)
     summary = claims.summarise(view, registry, stale_gates=stale_gates)
     composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
@@ -1250,6 +1252,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     last = _last_check(root)
     last_when = str(last.get("when") or "")
     last_age = _seconds_between(last_when, now) if last_when else None
+    # The round record's STATE only (architecture phase 3a): current, behind,
+    # edited by hand. Never its statuses or readiness — nothing reads it for
+    # truth, and the statuses above are the resolver's.
+    round_state = _round_state(root, ledger, model, projection, resolution, registry, view,
+                               model_error=model_error, shown=params)
 
     if args.json:
         _dump({
@@ -1286,6 +1293,10 @@ def cmd_status(args: argparse.Namespace) -> int:
             # SPEC decision 12, additive: each requirement, its status from the
             # one producer over the compositions above.
             "requirements": _requirement_rows(view, composed, registry),
+            # Architecture phase 3a, additive: the round record's state, never
+            # what it holds.
+            "round": {"state": round_state.state, "round": round_state.round,
+                      "moved": list(round_state.moved), "why": round_state.why},
         })
         return 0
 
@@ -1308,6 +1319,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         _say(f"last check run: {last_when}{age}")
     else:
         _say("last check run: never")
+    _say(report.HUMAN["round"]["state_head"].format(line=_round_state_line(round_state)))
     for line in _note_lines(resolution):
         _say(line)
     if model_error:
@@ -1588,6 +1600,79 @@ def _check_summary(rows: list[verdicts.SweepRow], counts: Mapping[str, int], tie
     return f"{line} — tier {tier}"
 
 
+class _Checked(NamedTuple):
+    """What `_check_run` did: the sweep's ``result``, the ``view`` and
+    ``resolution`` judged from it (this sweep's rows laid over the resolver's),
+    the ``registry``, ``model`` and ``projection`` it ran on, and ``elapsed``."""
+
+    result: Any
+    view: Any
+    resolution: Any
+    registry: Any
+    model: Any
+    projection: Any
+    elapsed: float
+
+
+def _check_run(root: str, ledger: Ledger, *, tier: int, only: list[str] | None,
+               force: bool, record: bool, now: str,
+               on_row: Callable[[verdicts.SweepRow], None] | None, quiet: bool,
+               registry: gates.Registry | None = None) -> _Checked:
+    """`check`'s locked body after the migration, and `round`'s check
+    (architecture phase 3a): the strict registry, the model, the sweep, the view
+    judged from it, and — recorded — `last_check.json` and the index. Under the
+    caller's lock. Raises what `check` raises (a pack that does not import, a
+    model that does not load); writes exactly what `check` writes, and never
+    the round record (invariant 8: only `round` writes that, after this
+    returns). ``registry`` is the caller's strict one, when it loaded it first."""
+    if registry is None:
+        registry, _ = _registry(root, ledger, strict=True)
+    model, projection = _projection(root, ledger)
+    ctx = _context(root, ledger, model, projection, tier, quiet=quiet)
+
+    if projection is None and registry.specs():
+        _warn(f"warning: {_no_entry(root)} — until then, gates that read "
+              f"ctx.params will error")
+
+    started = time.perf_counter()
+    result = verdicts.sweep(root, registry, ctx, projection=projection, ledger=ledger,
+                            max_tier=tier, only=only, force=force, record=record,
+                            now=now, on_row=on_row)
+    elapsed = time.perf_counter() - started
+
+    view, resolution = _resolved(root, ledger, registry, projection, "", now=now,
+                                 model=model, sweep=result)
+    if record:
+        # `params` is the parameter view (1.3): the model's value and where it
+        # lives, and what lost in both homes — beside the statuses, so the
+        # agent's second read has the numbers `why` would print. It was `{}`
+        # from 1.2 until the view existed. From phase 3a each row also names
+        # the evaluators whose served entry read it and what sources it
+        # (`graph.observe`).
+        views = graph.observe(
+            modelio.param_view(ledger, model,
+                               read_sets=_registered_reads(resolution.read_sets, registry)),
+            ledger=ledger, resolution=resolution, registry=registry,
+            choices=_choices(model), derived=graph.derived_names(projection))
+        verdicts.write_last_check(root, result, resolution, now=now,
+                                  params={view_.name: view_.to_dict() for view_ in views})
+        # The index, still under the lock, so the sweep that just migrated a
+        # legacy project leaves it indexed before any reader can look.
+        # `main` touches it again after the command; unchanged, that writes
+        # nothing.
+        _touch_index(root)
+    return _Checked(result, view, resolution, registry, model, projection, elapsed)
+
+
+def _choices(model: Any) -> tuple[str, ...]:
+    """The model's choices — its `Config` fields — for a read of the whole
+    `config` (`graph.value_names`); none without a model."""
+    config = getattr(model, "config", None)
+    if config is None or not dataclasses.is_dataclass(config):
+        return ()
+    return tuple(f.name for f in dataclasses.fields(config))
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     """Run what moved, serve what did not, and exit non-zero while anything critical blocks.
 
@@ -1670,13 +1755,6 @@ def cmd_check(args: argparse.Namespace) -> int:
         # First, under the lock and before anything reads the project: a legacy
         # ledger migrates here, once (in memory under `--no-record`).
         ledger = _migrate(root, apply=record, now=now)
-        registry, _ = _registry(root, ledger, strict=True)
-        model, projection = _projection(root, ledger)
-        ctx = _context(root, ledger, model, projection, tier, quiet=args.json)
-
-        if projection is None and registry.specs():
-            _warn(f"warning: {_no_entry(root)} — until then, gates that read "
-                  f"ctx.params will error")
 
         def _landed(row: verdicts.SweepRow) -> None:
             # `sweep` calls this the instant a gate's row exists, before the next
@@ -1685,28 +1763,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             if line is not None:
                 _say(line)
 
-        started = time.perf_counter()
-        result = verdicts.sweep(root, registry, ctx, projection=projection, ledger=ledger,
-                                max_tier=tier, only=only, force=force, record=record,
-                                now=now, on_row=_landed)
-        elapsed = time.perf_counter() - started
-
-        view, resolution = _resolved(root, ledger, registry, projection, "", now=now,
-                                     model=model, sweep=result)
-        if record:
-            # `params` is the parameter view (1.3): the model's value and where it
-            # lives, and what lost in both homes — beside the statuses, so the
-            # agent's second read has the numbers `why` would print. It was `{}`
-            # from 1.2 until the view existed.
-            views = modelio.param_view(
-                ledger, model, read_sets=_registered_reads(resolution.read_sets, registry))
-            verdicts.write_last_check(root, result, resolution, now=now,
-                                      params={view.name: view.to_dict() for view in views})
-            # The index, still under the lock, so the sweep that just migrated a
-            # legacy project leaves it indexed before any reader can look.
-            # `main` touches it again after the command; unchanged, that writes
-            # nothing.
-            _touch_index(root)
+        ran = _check_run(root, ledger, tier=tier, only=only, force=force, record=record,
+                         now=now, on_row=_landed, quiet=args.json)
+        result, view, resolution, registry = ran.result, ran.view, ran.resolution, ran.registry
+        projection, elapsed = ran.projection, ran.elapsed
 
         stale_gates = resolution.stale_gates
         blockers = claims.blocking(view, registry, stale_gates=stale_gates)
@@ -1892,6 +1952,200 @@ def cmd_check(args: argparse.Namespace) -> int:
     for found in claims.rebuild(view):
         _say(report.rebuild_line(found))
     return code
+
+
+# --------------------------------------------------------------------------- #
+# round: the end of a round (SPEC 18, 24 — without the hook and the commit)
+# --------------------------------------------------------------------------- #
+def _round_inputs(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
+                  projection: Any, view: Ledger, resolution: verdicts.Resolution, *,
+                  model_error: str = "",
+                  shown: list | None = None) -> tuple[dict, dict]:
+    """``(body, computed_now)``: the round record's content for ``view`` under
+    ``resolution`` — `graph.build` over the design an article reads
+    (`verdicts.design_of`) and `graph.tokens` from the compositions `status`
+    shows — and the digests it is computed from. Pure but for reading the
+    records and the cache to digest them; writes nothing. ``shown`` is the
+    caller's `_shown_params`, when it has them."""
+    anchors = resolution.anchors or verdicts.Anchors(root=os.path.abspath(root))
+    design = verdicts.design_of(root, projection, model, anchors=anchors,
+                                resolution=resolution)
+    if shown is None:
+        shown = _shown_params(root, ledger, model, model_error, resolution, registry,
+                              projection=projection)
+    built = graph.build(view, resolution, registry, projection=projection, design=design,
+                        views=shown, bases=_input_bases(root, ledger))
+    found = graph.tokens(view, resolution, registry)
+    computed_now = rounds.computed_from(root, design)
+    return rounds.body(computed_now, found, built), computed_now
+
+
+def _round_state(root: str, ledger: Ledger, model: Any, projection: Any,
+                 resolution: verdicts.Resolution, registry: Any, view: Ledger, *,
+                 model_error: str = "", shown: list | None = None) -> rounds.RoundState:
+    """Whether `.nopekit/round.json` is current with the project as it is — for
+    `status` and `doctor`, which say so and read nothing else of it: its three
+    digests against the project's, and what it records against what `round`
+    would write now (`_round_inputs`), so a move the digests do not cover — an
+    evaluator's code, its controls, a pack — reads behind, naming the
+    resolution (`rounds.RESOLUTION`)."""
+    content, computed_now = _round_inputs(root, ledger, registry, model, projection, view,
+                                          resolution, model_error=model_error, shown=shown)
+    return rounds.state(root, computed_now, content)
+
+
+def _round_state_line(found: rounds.RoundState) -> str:
+    """The round record's state in words, without `status`'s prefix — `doctor`'s
+    row and `status`'s line say the same sentence."""
+    said = report.HUMAN["round"]
+    number = f"round {found.round}, " if found.round is not None else ""
+    if found.state == "absent":
+        return said["state_absent"]
+    if found.state == "current":
+        return said["state_current"].format(round=number)
+    if found.state == "behind":
+        return said["state_behind"].format(round=number, what=report.round_moved(found.moved))
+    if found.state == "edited":
+        return said["state_edited"].format(round=number)
+    if found.state == "newer":
+        return said["state_newer"].format(schema=found.schema)
+    return said["state_unreadable"].format(why=found.why or "not JSON")
+
+
+def _first_line(exc: BaseException) -> str:
+    return (str(exc).strip().splitlines() or [""])[0]
+
+
+def cmd_round(args: argparse.Namespace) -> int:
+    """End a round (SPEC decisions 18 and 24, without the hook and the commit,
+    which phase 6 adds): a tier-0 check exactly as `check --tier 0` runs it
+    (verdicts recorded, the one-time migration included), the site rebuilt when
+    `site/` exists, and `.nopekit/round.json` written when anything it records
+    moved — the round number one past the last — then ONE short paragraph: what
+    changed since the last round record, the count line, readiness as last
+    evaluated, and what the check and the site did.
+
+    **It never blocks.** It is the Stop hook's future body, and Claude Code
+    reads a hook's exit 2 as "block the turn": every `NopekitError` is caught
+    here and said in one line, exit 0 — a held lock, a record that does not
+    read, a model that does not load (the check is refused, no site is built —
+    `site build` refuses that model too — and the record is still written: a
+    round that cannot build the model says so), failing claims, outside a
+    project. Only a traceback (a crash) exits 1. A pack that
+    does not import writes no record: one built over an import error would list
+    every claim it covers as a gap, the artefact `site build` refuses to
+    publish.
+
+    The record is computed from `_resolved` with no sweep overlay — what
+    `status` shows — after the check and the site, and the site and the record
+    share that one resolution. What `round` writes: what `check` writes, what
+    `site build` writes when `site/` exists, the round record at most once and
+    only when its bytes change, and the index (`main`'s `_after`)."""
+    said = report.HUMAN["round"]
+    root = store.find_root(getattr(args, "dir", None))
+    if root is None:
+        text = said["no_project"]
+        if args.json:
+            _dump({"round": None, "written": False, "path": None, "summary": text})
+        else:
+            _say(text)
+        return 0
+    now = utcnow_iso()
+    check = {"ran": False, "why": "", "executed": 0, "cached": 0}
+    site_info = {"present": os.path.isdir(os.path.join(root, site.SITE_DIR)),
+                 "built": False, "warnings": 0, "why": ""}
+    try:
+        with _lock(root):
+            ledger = _migrate(root, apply=True, now=now)
+            try:
+                registry, _ = _registry(root, ledger, strict=True)
+            except NopekitError as exc:
+                return _round_not_run(args, _first_line(exc))
+            try:
+                ran = _check_run(root, ledger, tier=0, only=None, force=False, record=True,
+                                 now=now, on_row=None, quiet=True, registry=registry)
+            except NopekitError as exc:
+                check["why"] = _first_line(exc)
+            else:
+                check.update(ran=True,
+                             executed=int(ran.result.counts.get("executed", 0)),
+                             cached=int(ran.result.counts.get("cached", 0)))
+            ledger = _load(root)
+            model, projection, model_error = _projection_safe(root, ledger)
+            view, resolution = _resolved(root, ledger, registry, projection, model_error,
+                                         now=now, model=model)
+            # A model that does not load builds no site: `site build` refuses it
+            # (`_projection` raises), and a page built here would publish what
+            # it refuses. What slipped through (review of phase 3a): `round`
+            # built it anyway, "Site built with 1 warning", from the broken
+            # model's resolution, its parameter views silent on the failure.
+            if site_info["present"] and model_error:
+                site_info["why"] = (model_error.strip().splitlines() or [""])[0]
+            elif site_info["present"]:
+                try:
+                    summary = _site_build(root, ledger, registry, model, projection, view,
+                                          resolution, now=now)
+                except NopekitError as exc:
+                    site_info["why"] = _first_line(exc)
+                else:
+                    site_info.update(built=True, warnings=len(summary.get("warnings") or ()))
+            content, _computed = _round_inputs(root, ledger, registry, model, projection,
+                                               view, resolution, model_error=model_error)
+            done = rounds.write(root, content)
+    except NopekitError as exc:
+        return _round_not_run(args, _first_line(exc))
+    composed = claims.compositions(view, registry=registry,
+                                   stale_gates=resolution.stale_gates)
+    text = report.round_paragraph(
+        _round_shape(done), done.round, done.changes, view=view, composed=composed,
+        check=check, site=site_info, wrote=done.written, schema=done.previous.schema,
+        path=rounds.ROUND_REL)
+    if args.json:
+        changes = done.changes
+        _dump({
+            "round": done.round, "written": done.written,
+            "path": rounds.ROUND_REL if done.round is not None else None,
+            "previous": {"state": done.previous.state, "round": done.previous.round},
+            "changes": {
+                "compared": changes.compared, "replaced": changes.replaced,
+                "claims": [{"id": f.id, "from": f.before, "to": f.after}
+                           for f in changes.claims],
+                "requirements": [{"id": f.id, "from": f.before, "to": f.after}
+                                 for f in changes.requirements],
+                "verdicts": list(changes.verdicts), "instructions": list(changes.instructions),
+                "instructions_unrecorded": bool(changes.unrecorded),
+                "readiness": ({"from": changes.readiness[0], "to": changes.readiness[1]}
+                              if changes.readiness else None),
+                "moved": list(changes.moved)},
+            "counts": content["counts"], "readiness": content["readiness"],
+            "check": check, "site": site_info, "summary": text,
+        })
+    else:
+        _say(text)
+    return 0
+
+
+def _round_shape(done: rounds.Written) -> str:
+    """Which sentence opens `round`'s paragraph."""
+    if done.refused == "newer":
+        return "newer"
+    if not done.written:
+        return "unchanged"
+    if done.previous.state == "absent":
+        return "first"
+    if done.previous.state in ("edited", "unreadable"):
+        return "replaced"
+    return "written"
+
+
+def _round_not_run(args: argparse.Namespace, why: str) -> int:
+    """`round not run: <why>.`, exit 0 — a round never blocks."""
+    text = report.HUMAN["round"]["not_run"].format(why=why.rstrip(".") or "it did not run")
+    if args.json:
+        _dump({"round": None, "written": False, "path": None, "summary": text})
+    else:
+        _say(text)
+    return 0
 
 
 def _blocking_line(claim: Claim, status: ClaimStatus, reason: str, *,
@@ -2311,7 +2565,8 @@ def _export_build(root: str, ledger: Ledger, milestone: Any, view: Ledger, regis
     # view and model error, over the boundary's re-executed view — and as the
     # boundary's: its sentence plain, each result recorded on this article, the
     # test card under the head (review of P2.5b, findings 3 and 16).
-    params = _shown_params(root, ledger, model, model_error, resolution, registry)
+    params = _shown_params(root, ledger, model, model_error, resolution, registry,
+                           projection=projection)
     card = milestones.test_card(view, composed, milestone, built.article["hash"],
                                 view.exports)
     report_md = report.render_markdown(view, registry, stale_gates=resolution.stale_gates,
@@ -2840,13 +3095,21 @@ def cmd_inputs(args: argparse.Namespace) -> int:
     Each row carries its record (`inputs/<id>.json`), the digest of its bytes
     now against the one pinned at ingest — `DRIFT` when they differ, `MISSING`
     when the bytes are gone (`_input_bytes`) — and what it grounds, from the
-    same derived map `why` reads (`_grounding`, S-36). A READ: no lock, no
+    same derived map `why` reads (`artifacts.value_grounding`, S-36). A READ: no lock, no
     record, and the digest cache is consulted, never saved.
     """
     root = _root(args)
     ledger = _load(root)
     model, _projection_unused, model_error = _projection_safe(root, ledger)
-    grounds = _grounding(ledger, _param_views(root, ledger, model, model_error))
+    grounds = artifacts.value_grounding(ledger, _param_views(root, ledger, model, model_error))
+    # The listing is about inputs (architecture phase 3a): a value's grounded_by
+    # may name an assumption claim's id, which is no input — left out here,
+    # shown by `why` and drawn by the graph.
+    input_ids = {a.id for a in ledger.inputs}
+    claim_ids = {c.id for c in ledger.claims}
+    grounds = {target: [aid for aid in ids if aid in input_ids or aid not in claim_ids]
+               for target, ids in grounds.items()}
+    grounds = {target: ids for target, ids in grounds.items() if ids}
     grounded: dict[str, list[str]] = {}
     for target, ids in grounds.items():
         for aid in ids:
@@ -3070,7 +3333,8 @@ def cmd_claim_show(args: argparse.Namespace) -> int:
     found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates)
     status = found.status
 
-    why = _why_text(root, ledger, registry, model, model_error, view, resolution, claim.id)
+    why = _why_text(root, ledger, registry, model, model_error, view, resolution, claim.id,
+                    projection=projection)
     if args.json:
         _dump(dict(report.claim_json(claim, composed=found, exports=view.exports),
                    status=str(status),
@@ -4844,7 +5108,8 @@ def cmd_report(args: argparse.Namespace) -> int:
     stale_gates = resolution.stale_gates
     stale_reasons = _stale_reasons(resolution)
     banner = _load_failure_banner(problems, model_error)
-    params = _shown_params(root, ledger, model, model_error, resolution, registry)
+    params = _shown_params(root, ledger, model, model_error, resolution, registry,
+                           projection=projection)
     milestone = None
     if getattr(args, "milestone", None):
         milestone = view.milestone(args.milestone)
@@ -4981,7 +5246,7 @@ def cmd_why(args: argparse.Namespace) -> int:
     answered "no parameter named thickness" about the number the bracket's
     failing claim turns on; with the model mid-edit it still names it, and says
     the model does not load instead of a number (`_param_views`). What grounds
-    it is derived from the extractions, the map `inputs` reads (`_grounding`,
+    it is derived from the extractions, the map `inputs` reads (`artifacts.value_grounding`,
     S-36). All of it through `_why_text`, which `claim show` shares.
     """
     root = _root(args)
@@ -4991,7 +5256,7 @@ def cmd_why(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     text = _why_text(root, ledger, registry, model, model_error, view, resolution,
-                     args.name)
+                     args.name, projection=projection)
     if args.json:
         _dump({"name": args.name, "why": text})
         return 0
@@ -5867,7 +6132,8 @@ def _site_judgement(root: str, resolved: tuple | None) -> dict:
         model, projection, model_error = _projection_safe(root, ledger)
         view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                      now="", model=model)
-        params = _shown_params(root, ledger, model, model_error, resolution, registry)
+        params = _shown_params(root, ledger, model, model_error, resolution, registry,
+                               projection=projection)
     else:
         view, registry, resolution, params = resolved
     return site.state(root, view, registry, resolution=resolution, params=params)
@@ -5952,6 +6218,24 @@ def cmd_site_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _site_build(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
+                projection: Any, view: Ledger, resolution: verdicts.Resolution, *,
+                now: str) -> dict:
+    """`site build`'s work under the caller's lock, over the caller's resolution:
+    the viewgens, `site.build`, and the launch entry. `round` calls it with the
+    resolution its round record is computed from (architecture phase 3a), so
+    the page and the record cannot disagree about a claim."""
+    view_registry, _ = _view_registry(root, ledger)
+    summary = site.build(root, view, registry, view_registry, model=model,
+                         projection=projection, now=now, resolution=resolution,
+                         params=_shown_params(root, ledger, model, "", resolution, registry,
+                                              projection=projection))
+    # A groundspace made before `init` wrote one gains its launch entry here, the
+    # first time its site is built; an existing file is never touched.
+    summary["launch"] = site.ensure_launch(root, _project_name(root, ledger))
+    return summary
+
+
 def cmd_site_build(args: argparse.Namespace) -> int:
     """Run the viewgens, collect the ledger, and write `site/data/` + `site/assets/`.
 
@@ -5990,7 +6274,6 @@ def cmd_site_build(args: argparse.Namespace) -> int:
     with _lock(root):
         ledger = _load(root)
         registry, _ = _registry(root, ledger)
-        view_registry, _ = _view_registry(root, ledger)
         model, projection = _projection(root, ledger)
         now = utcnow_iso()
         # The page renders the resolver's answer, the one every other reader
@@ -5998,13 +6281,8 @@ def cmd_site_build(args: argparse.Namespace) -> int:
         # and `status` built from one resolution cannot disagree about a gate.
         view, resolution = _resolved(root, ledger, registry, projection, "", now=now,
                                      model=model)
-        summary = site.build(root, view, registry, view_registry, model=model,
-                             projection=projection, now=now, resolution=resolution,
-                             params=_shown_params(root, ledger, model, "", resolution,
-                                                  registry))
-        # A groundspace made before `init` wrote one gains its launch entry here, the
-        # first time its site is built; an existing file is never touched.
-        summary["launch"] = site.ensure_launch(root, _project_name(root, ledger))
+        summary = _site_build(root, ledger, registry, model, projection, view, resolution,
+                              now=now)
 
     problems = summary.get("locator_problems") or []
     counts = summary.get("counts") or {}
@@ -7281,6 +7559,57 @@ def _doctor_requirement_rows(results: list[dict], ledger: Ledger) -> None:
         _check(results, "requirements", "ok", said["doctor_none"])
 
 
+def _doctor_graph_rows(results: list[dict], root: str, ledger: Ledger, view: Ledger,
+                       registry: Any, resolution: verdicts.Resolution, model: Any,
+                       projection: Any, model_error: str) -> None:
+    """`doctor`'s `graph` row (architecture phase 3a, SPEC 19), always present,
+    writing nothing: one FAIL per record pointer the graph cannot follow
+    (`store.pointer_problems`, which the index names too) and per `PARAMS`
+    grounding that names neither an input nor an assumption; else the graph's
+    size and what it rests on. A pointer that is wrong makes no edge — a
+    `rests on` that silently vanished would read as a pass resting on nothing."""
+    problems = store.pointer_problems(ledger)
+    input_ids = {a.id for a in ledger.inputs}
+    kinds = {c.id: getattr(c.kind, "value", str(c.kind)) for c in ledger.claims}
+    recorded = {p.name for p in ledger.params}
+    views = _shown_params(root, ledger, model, model_error, resolution, registry,
+                          projection=projection)
+    for view_ in views:
+        if view_.name in recorded:
+            continue                       # its record's pointers are named above
+        for aid in view_.grounded_by:
+            found = store.grounded_by_problem(view_.home or view_.name, view_.name, aid,
+                                              input_ids, kinds)
+            if found:
+                problems.append(found)
+    for problem in problems:
+        _check(results, "graph", "FAIL", problem)
+    if problems:
+        return
+    built = graph.of(root, view, resolution, registry, projection=projection, model=model,
+                     views=views, bases=_input_bases(root, ledger))
+    said = report.HUMAN["round"]
+    detail = said["graph_ok"].format(
+        n=len(built.nodes), m=len(built.edges),
+        k=sum(1 for e in built.edges if e.type == "rests_on"),
+        r=sum(1 for e in built.edges if e.type == "resolves"))
+    if built.trace is None:
+        detail += said["graph_untraced"]
+    _check(results, "graph", "ok", detail)
+
+
+def _doctor_round_row(results: list[dict], root: str, ledger: Ledger, model: Any,
+                      projection: Any, resolution: verdicts.Resolution, registry: Any,
+                      view: Ledger, model_error: str) -> None:
+    """`doctor`'s `round` row (architecture phase 3a, SPEC 18): the round
+    record's state, never a FAIL — it is an output, and nothing reads it for
+    truth. Warns when it is behind, edited by hand, unreadable or newer."""
+    found = _round_state(root, ledger, model, projection, resolution, registry, view,
+                         model_error=model_error)
+    _check(results, "round", "ok" if found.state in ("absent", "current") else "warn",
+           _round_state_line(found))
+
+
 def _doctor_decision_rows(results: list[dict], root: str, ledger: Ledger) -> None:
     """`doctor`'s `decisions` row (SPEC 14), always present, writing nothing and
     never a FAIL: a return condition or an input naming no record, a preference
@@ -7481,7 +7810,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     in memory and what it "will migrate on next command" into, never migrated
     here; `run-history` — a leftover `.nopekit/runs/`; `index` — whether
     `.nopekit/ledger.json` agrees with the records, never rebuilt here (it is
-    the one command `_touch_index` skips).
+    the one command `_touch_index` skips). From architecture phase 3a, `graph`
+    — the record pointers the typed graph cannot follow, a FAIL each — and
+    `round` — the round record's state, a warning when it is behind, edited,
+    unreadable or newer, never a FAIL (it is an output).
 
     Exit 1 on any FAIL so it is usable in CI as an environment gate. Warnings do
     not fail: a solver that is not installed here is a real fact about the
@@ -7709,12 +8041,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         _check(results, "mechanisms", "ok", said["doctor_none"])
     _doctor_decision_rows(results, root, view)
     _doctor_basis_rows(results, root, view, registry)
+    _doctor_graph_rows(results, root, ledger, view, registry, resolution, model, projection,
+                       model_error)
+    _doctor_round_row(results, root, ledger, model, projection, resolution, registry, view,
+                      model_error)
     _doctor_seal_row(results, registry,
                      _context(root, ledger, model, projection, ALL_TIERS, quiet=True))
 
     site_info = _site_state(root, resolved=(
         view, registry, resolution,
-        _shown_params(root, ledger, model, model_error, resolution, registry)))
+        _shown_params(root, ledger, model, model_error, resolution, registry,
+                      projection=projection)))
     if site_info["present"]:
         # Only when there is a site. A doctor row about a surface the project
         # never opted into is a row that is always there and never actionable,
@@ -7849,6 +8186,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "index; a legacy ledger migrates in memory only")
     _junit_flag(p, "this run")
     p.set_defaults(func=cmd_check)
+
+    # -- round (architecture phase 3a: no hook, no commit yet) -------------- #
+    round_help = report.HUMAN["round"]["help"].format(path=rounds.ROUND_REL)
+    p = sub.add_parser("round", parents=[common], help=round_help, description=round_help)
+    p.set_defaults(func=cmd_round)
 
     # -- ask -------------------------------------------------------------- #
     p = sub.add_parser("ask", parents=[common],

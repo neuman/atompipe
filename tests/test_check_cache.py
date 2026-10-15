@@ -456,8 +456,14 @@ class CheckServesTheCache(unittest.TestCase):
     def test_every_reader_resolves_through_one_helper(self):
         """cli:H3, R-5: every command that shows a verdict gets it from `_resolved`."""
         readers = {"cmd_status", "cmd_claim_list", "cmd_claim_show", "cmd_report",
-                   "cmd_site_build", "cmd_gate_show", "cmd_why", "cmd_doctor", "cmd_check"}
-        callers = _callers_of(_read(CLI_PY), "_resolved")
+                   "cmd_site_build", "cmd_gate_show", "cmd_why", "cmd_doctor", "cmd_check",
+                   "cmd_round"}
+        source = _read(CLI_PY)
+        callers = _callers_of(source, "_resolved")
+        # Architecture phase 3a: `check`'s locked body is `_check_run`, which
+        # `round` shares — through `_resolved` like every reader.
+        self.assertIn("_check_run", callers)
+        callers |= _callers_of(source, "_check_run")
         self.assertEqual(readers - callers, set(),
                          "these readers do not go through _resolved")
 

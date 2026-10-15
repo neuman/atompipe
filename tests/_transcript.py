@@ -190,6 +190,17 @@ LAST_CHECK = re.compile(
     r"^last check run: (?:never|(?P<when>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
     r" \((?P<age>[^()]+) ago\))$")
 
+#: `status`: the round record's state, right after the last check run
+#: (architecture phase 3a) — never what it holds.
+ROUND_RECORD = re.compile(
+    r"^round record: (?:none — `nopekit round` writes the first"
+    r"|(?:round (?P<round>\d+), )?(?:current with the records, the verdict cache and the "
+    r"design|behind the records — (?P<moved>.+) moved since it was written; `nopekit round` "
+    r"writes the next|edited by hand — its digest does not match what it holds; `nopekit "
+    r"round` writes it again, and nothing reads it for truth)"
+    r"|does not read \(.+\) — `nopekit round` writes it again"
+    r"|written by a newer nopekit \(schema \d+\) — this one neither reads nor rewrites it)$")
+
 #: `status`: an instrument recorded under another library version (Q1.3).
 NOTE_INSTRUMENT = re.compile(
     r"^note: (?P<gate>\S+) — recorded under (?P<module>\S+) (?P<recorded>\S+); "
@@ -278,7 +289,7 @@ SHAPES = {
     "ROW": ROW, "CACHED_ROW": CACHED_ROW, "CHECK_SUMMARY": CHECK_SUMMARY,
     "CONTROLS_SUMMARY": CONTROLS_SUMMARY, "BLOCKING_HEAD": BLOCKING_HEAD,
     "BLOCKING_ROW": BLOCKING_ROW, "STALE_LINE": STALE_LINE, "STALE_MORE": STALE_MORE,
-    "STALE_NONE": STALE_NONE, "LAST_CHECK": LAST_CHECK,
+    "STALE_NONE": STALE_NONE, "LAST_CHECK": LAST_CHECK, "ROUND_RECORD": ROUND_RECORD,
     "NOTE_INSTRUMENT": NOTE_INSTRUMENT, "NOTE_PENDING": NOTE_PENDING,
     "MODEL_BROKEN": MODEL_BROKEN, "BASELINES_FAILED": BASELINES_FAILED,
     "QUALIFICATION_LINE": QUALIFICATION_LINE, "QUALIFICATION_SHOW": QUALIFICATION_SHOW,

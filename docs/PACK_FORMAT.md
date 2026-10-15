@@ -311,6 +311,13 @@ need that names the gate itself, a glob or a duplicate. `Verdict.blocked_by` and
 `blocked_kind` are the spine's mark for a gate not run behind a prerequisite;
 `run_gate` clears both on whatever a gate returns.
 
+**In the graph** (architecture phase 3a, `graph.py`): each evaluator is a node with
+its pack, its basis and its tier; its `needs` are `needs` edges, the claims it covers
+(its `claims` and tags, through the registry) are `settles` edges, and what its
+served verdict entry read are `reads` edges to the values it read. Nothing a pack
+declares changes for this: the graph reads what the registry and the verdict cache
+already hold.
+
 ### Which side of the limit passes (`comparator`)
 
 ```python

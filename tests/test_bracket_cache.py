@@ -51,7 +51,7 @@ import _projects
 import _transcript as T
 import test_fresh_clone
 import test_spine_digest
-from nopekit import verdicts
+from nopekit import cli, rounds, verdicts
 
 #: The bracket's six gates, in registration order.
 BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearing",
@@ -61,8 +61,16 @@ BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearin
 #: regeneration is idempotent; examples/bracket/README.md spells out every step.
 REGENERATE = ("the committed bracket cache was written by another spine or model: in "
               "examples/bracket run `rm -rf .nopekit/verdicts && nopekit check; "
-              "nopekit gate selftest` and commit the result "
+              "nopekit gate selftest; nopekit round` and commit the result "
               "(examples/bracket/README.md, \"The committed cache\")")
+
+#: What a stale committed round record says (architecture phase 3a): a change
+#: that moves what it holds — the cache, the composition (`claims.py`,
+#: `report.requirement_statuses`), `graph.py`, `rounds.py` or a bracket record —
+#: ends with `nopekit round` in examples/bracket.
+ROUND_FIX = ("the committed round record is not the bracket's round record now: in "
+             "examples/bracket run `nopekit round` and commit .nopekit/round.json "
+             "(examples/bracket/README.md, \"The committed cache\")")
 
 #: What it says instead when the walk, not the cache, is what moved.
 NOT_PORTABLE = ("the canonical AST walk is not portable to Python {version}: "
@@ -429,6 +437,7 @@ class CacheCheckersRefuse(_env.EnvCase):
     def test_the_message_names_the_fix(self):
         self.assertIn("rm -rf .nopekit/verdicts && nopekit check", fix_message(portable=True))
         self.assertIn("nopekit gate selftest", fix_message(portable=True))
+        self.assertIn("nopekit round", fix_message(portable=True))
         # P2.5b (R-6, the same property): the report is an ignored output, so
         # regenerating the cache writes no tracked report.
         self.assertNotIn("report --write", fix_message(portable=True))
@@ -437,6 +446,63 @@ class CacheCheckersRefuse(_env.EnvCase):
         self.assertIn(platform.python_version(), not_portable)
         self.assertNotIn("rm -rf", not_portable)
         self.assertEqual(fix_message(), fix_message(portable=walk_is_portable()))
+
+
+def round_record_problems(root: str) -> list[str]:
+    """What is wrong with ``root``'s round record against the project as it
+    stands: it does not read, its seal is broken, or anything it holds — the
+    digests it was computed from, the tokens, the graph — is not what `round`
+    would write now (`cli._round_inputs`, in process)."""
+    found = rounds.read(root)
+    if found.state != "ok":
+        return [f"{rounds.ROUND_REL} reads {found.state} {found.why}".rstrip()]
+    ledger = cli._load(root)
+    registry, _ = cli._registry(root, ledger)
+    model, projection, error = cli._projection_safe(root, ledger)
+    view, resolution = cli._resolved(root, ledger, registry, projection, error,
+                                     now="2026-10-15T00:00:00Z", model=model)
+    body, _now = cli._round_inputs(root, ledger, registry, model, projection, view,
+                                   resolution, model_error=error)
+    return [f"{rounds.ROUND_REL}: {key} is not what `nopekit round` writes now"
+            for key in rounds.KEYS
+            if key not in ("generated", "round", "self") and found.doc.get(key) != body[key]]
+
+
+class TheCommittedRoundRecordIsCurrent(_env.EnvCase):
+    """(architecture phase 3a) The bracket commits `.nopekit/round.json`, and it
+    is the round record of the committed tree: its seal holds, everything it
+    holds is what `round` would write now, and on a fresh git copy `round`
+    writes nothing and leaves `git status` empty. A non-spine edit (the
+    composition, the graph, a bracket record) moves it without moving the cache
+    — this is what catches that."""
+
+    def test_the_committed_record_is_current(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        problems = round_record_problems(project)
+        if problems:
+            self.fail("\n".join(problems) + "\n" + ROUND_FIX)
+
+    def test_a_fresh_clone_rounds_to_nothing(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True,
+                                         git=True)
+        proc = _env.nopekit(["round", "--json"], cwd=project)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertFalse(_json(proc)["written"], ROUND_FIX)
+        porcelain = _env.git(["status", "--porcelain"], cwd=project)
+        self.assertEqual(porcelain.stdout, "", ROUND_FIX)
+
+    def test_a_stale_record_is_named(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        path = os.path.join(project, "claims", "C7.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["rationale"] = "a bracket record edited and the round record left behind"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        self.assertEqual(round_record_problems(project),
+                         [f"{rounds.ROUND_REL}: computed_from is not what `nopekit round` "
+                          f"writes now"])
+        self.assertIn("nopekit round", ROUND_FIX)
 
 
 class BracketIsMigrated(unittest.TestCase):
@@ -459,13 +525,20 @@ class BracketIsMigrated(unittest.TestCase):
             self.assertIn(rel, self.files, f"{rel} is not committed ({self.source} listing)")
         self.assertEqual(json.loads(self.read(".nopekit/project.json"))["schema"], 2)
 
-    def test_the_index_the_run_history_and_params_are_not(self):
+    def test_the_index_the_run_history_are_not_and_params_hold_only_provenance(self):
         leftovers = sorted(rel for rel in self.files
                            if rel in (".nopekit/ledger.json", ".nopekit/ledger.legacy.json")
-                           or rel.startswith((".nopekit/runs/", "params/")))
-        self.assertEqual(leftovers, [], "the index is an output (D-06), the run history "
-                                        "is gone (D-05), and no param record is written "
-                                        "where the model states the prose (§3.15)")
+                           or rel.startswith(".nopekit/runs/"))
+        self.assertEqual(leftovers, [], "the index is an output (D-06) and the run history "
+                                        "is gone (D-05)")
+        # Architecture phase 3a: exactly one param record — load_n IS the
+        # assumption C6 — and only provenance in it: no param record is written
+        # where the model states the prose (§3.15).
+        params = sorted(rel for rel in self.files if rel.startswith("params/"))
+        self.assertEqual(params, ["params/load_n.json"])
+        keys = set(json.loads(self.read("params/load_n.json")))
+        self.assertLessEqual(keys, {"source", "grounded_by", "tags"})
+        self.assertIn(".nopekit/round.json", self.files)
 
     def test_c1_is_the_phase_1_example_key_for_key(self):
         pairs = json.loads(self.read("claims/C1.json"), object_pairs_hook=list)

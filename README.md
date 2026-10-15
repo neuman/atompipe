@@ -158,6 +158,8 @@ my-project/
                             sealed, written only by `nopekit prefer` in their own shell
   .nopekit/project.json    the project: its name, its model entry, its live packs
   .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
+  .nopekit/round.json      the round record: every status as a token and the typed graph,
+                           at the end of a round (tracked; written only by `nopekit round`)
   .nopekit/ledger.json     an index of every record, generated (ignored: never edit it)
   .nopekit/cache/  obs/  out/     the last check's statuses, what runs cost, scratch (ignored)
 ```
@@ -251,6 +253,7 @@ nopekit ask                   what evidence to request from the human
 nopekit ingest <files>        sketches, photos, CAD, datasheets, measurements
 nopekit extract <artifact>    what was read out of it, and what that grounds
 nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
+nopekit round                 end a round: a tier-0 check, the site, the round record; never blocks
 nopekit gap [--propose]       every claim whose mechanism has yet to run, and packs that might run it
 nopekit why <name>            one param's, claim's or requirement's full history
 nopekit gate selftest         every negative control; fails any gate that can't fail

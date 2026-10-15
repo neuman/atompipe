@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 from . import store
@@ -703,6 +704,30 @@ def grounding(ledger: Ledger, *, include_declared: bool = True) -> dict[str, lis
     return out
 
 
+def value_grounding(ledger: Ledger, views: Iterable[Any]) -> dict[str, list[str]]:
+    """`{parameter or claim: [ids]}`, derived on every read: the extractions'
+    `grounds`, then what a record declares by hand (`grounding`), then what the
+    model's `PARAMS` declares (each view's `grounded_by`; `views` are
+    `modelio.ParamView`s) — first-seen order, each id once. From architecture
+    phase 3a an id may be an assumption claim's (the value IS that assumption,
+    SPEC 19); the graph's `sources` edge reads it so, and `inputs` filters it
+    out of its own listing.
+
+    `why`, `inputs` and the graph all read THIS map, so they cannot disagree
+    (S-36). What slipped through: the edge an extraction implies was copied into
+    the parameter it grounds, so deleting the extraction left `why arm_length`
+    saying "GROUNDED BY arm" while `inputs` said `arm` was "NEVER READ"; and once
+    the copy was gone, with nothing derived in its place, the two disagreed the
+    other way round — `inputs` said `arm` grounds `arm_length`, `why` said
+    nothing did. Moved here from `cli._grounding` (phase 3a): the graph module
+    cannot import the CLI, and a second copy is the S-36 shape again."""
+    found = {name: list(ids) for name, ids in grounding(ledger).items()}
+    for view in views:
+        bucket = found.setdefault(view.name, [])
+        bucket += [aid for aid in view.grounded_by if aid not in bucket]
+    return {name: ids for name, ids in found.items() if ids}
+
+
 def inputs_hash(ledger: Ledger) -> str:
     """Stable digest over every ingested artifact's (id, sha256).
 
@@ -946,6 +971,6 @@ __all__ = [
     "ASK_FOR", "ASK_PRIORITY", "ENOUGH", "DIR_KIND_HINTS",
     "prompts_for", "kind_for", "bucket_for",
     "find_by_hash", "ingest", "ingest_link",
-    "add_extraction", "unextracted", "grounding", "inputs_hash",
+    "add_extraction", "unextracted", "grounding", "value_grounding", "inputs_hash",
     "requests_by_kind", "suggest_requests",
 ]

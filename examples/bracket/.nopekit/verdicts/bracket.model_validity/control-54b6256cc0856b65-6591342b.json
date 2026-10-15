@@ -2,10 +2,10 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.model_validity",
-  "rho": "b1732905cf7860bbfffcf89cae9e203a0a761d416b400a89e1e51cc2b76d4468",
-  "static": "7a6e86576a8fa72eaf33566eea9f345a5dec16ba60c74d69c35b5b216c2a2784",
+  "rho": "54b6256cc0856b65463b6a1d30e4c537a8ee7f6702994b9d56e6221a56733f76",
+  "static": "3ef8a7fc1d48961a5ef21eff8ed307f5e059504a9f6c2d1ae1544e9ba6a6bf0d",
   "static_parts": {
-    "spine": "bbb0d218546a4947749cd3151d636523a587bb269c1c8ac14eedbb045b52cb06",
+    "spine": "efe26bb919b42085641557a440a5650d6bf909cb54a70a23e2f51d4d06826efd",
     "code": {
       "digest": "b296b9f02a670006bfdb03b1af25a79dd23b4722ee0c292a9b2ec0238917a133",
       "files": [
@@ -102,5 +102,5 @@
   "measured": 2.5,
   "limit": 5.0,
   "units": "L/h",
-  "digest": "c98800f268457fedc80c9a08f33d281012406d8f14243a8521b83fb0b36de3d1"
+  "digest": "0ea8e5905e5b6b1d30581da2fb81ade7f87898f10297c820060ffceccf80f25a"
 }

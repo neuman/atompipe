@@ -287,6 +287,11 @@ def status_problems(stdout: str) -> list[str]:
     else:
         got = repr(lines[at]) if at < len(lines) else "the end of the output"
         problems.append(f"status: expected `last check:` at line {at + 1}, got {got}")
+    if at < len(lines) and T.ROUND_RECORD.fullmatch(lines[at]):
+        at += 1
+    else:
+        got = repr(lines[at]) if at < len(lines) else "the end of the output"
+        problems.append(f"status: expected `round record:` at line {at + 1}, got {got}")
     while at < len(lines) and T.NOTE_INSTRUMENT.fullmatch(lines[at]):
         at += 1
     if at < len(lines) and T.NOTE_PENDING.fullmatch(lines[at]):

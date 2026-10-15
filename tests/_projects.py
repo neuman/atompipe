@@ -117,7 +117,12 @@ _MIGRATED_DIRS = (".nopekit/verdicts/", "claims/", "params/", "decisions/", "nee
 #: (SPEC 14: typed rejections and a preferred_against by an invented person) —
 #: already left out of a legacy copy by `decisions/` above, and named here
 #: because the migration did not write it either.
-_ADDED_AFTER_MIGRATION = ("requirements/", "decisions/print-in-petg.json")
+_ADDED_AFTER_MIGRATION = ("requirements/", "decisions/print-in-petg.json",
+                          # Architecture phase 3a (SPEC 18): the round record, an
+                          # output `nopekit round` writes and the legacy bracket
+                          # never had. (`params/load_n.json`, the same phase's, is
+                          # already left out by `params/` above.)
+                          ".nopekit/round.json")
 
 #: The thickness default in `model/bracket.py`, as the model spells it. Exactly
 #: one line may match: a second match (a comment quoting the line, a second

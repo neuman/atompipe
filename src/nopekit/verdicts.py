@@ -168,6 +168,8 @@ __all__ = [
     "moving_limits", "moved_goalposts",
     # P2.5a: the article a physical result is bound to, the judge, the one view
     "article_of", "judge_results", "Contradiction", "track_record", "view", "REMOVED",
+    # architecture phase 3a: the design an article names, for the round record
+    "design_of",
 ]
 
 
@@ -1159,7 +1161,12 @@ _ABSENT_WHEN_EMPTY = frozenset({"owner", "fallback", "terminal", "authority",
                                 "evaluators", "requirements",
                                 # Phase 2 (SPEC 22): an input no proposer
                                 # produced digests as before.
-                                "proposer"})
+                                "proposer",
+                                # Phase 3a (SPEC 19): a physical claim naming no
+                                # assumption it resolves digests as before —
+                                # without this, every gate that reads a claim
+                                # would re-key the day the field existed.
+                                "resolves"})
 
 
 def _record_form(item: Any, strip: tuple = ()) -> Any:
@@ -7533,6 +7540,32 @@ def _built_from(root: str, projection: Any, model: Any, *, anchors: Anchors,
     return {"params": params, "model": code, "files": named}
 
 
+def design_of(root: str, projection: Any, model: Any, *, anchors: Anchors,
+              resolution: Any = None, digests: FileDigests | None = None) -> dict | None:
+    """The current design as an article names it: ``_built_from``'s
+    ``{"params", "model", "files"}`` over every value the projection holds, the
+    model's code closure, and the project files the design names and the
+    registered evaluators' served verdicts read — or ``None`` when the projection
+    or the model is ``None``, or the code closure was not recorded.
+
+    ``article_of``'s body, extracted (architecture phase 3a) so the round
+    record's ``design`` digest and the graph's instruction nodes are the
+    article's own reading of the design, never a second one: ``article_of``
+    calls this, so every article hash is unchanged. No git call: the revision
+    and ``dirty`` are ``article_of``'s provenance, never part of what the design
+    is. *Rejected:* a second walk of the projection for the round record (two
+    readings of "what the design is", and the one nobody tests drifts)."""
+    if projection is None or model is None:
+        return None
+    digests = digests if digests is not None else FileDigests()
+    flat, _conflicts = modelio.flat_params(projection)
+    files = set(_named_files(root, flat.values()))
+    if resolution is not None:
+        files |= set(_read_files(root, resolution, anchors))
+    return _built_from(root, projection, model, anchors=anchors, digests=digests,
+                       files=files)
+
+
 def article_of(root: str, projection: Any, model: Any, *, anchors: Anchors | None = None,
                digests: FileDigests | None = None, resolution: Any = None) -> dict:
     """The article a physical result recorded NOW is bound to (P2.5a-D8): the
@@ -7567,13 +7600,8 @@ def article_of(root: str, projection: Any, model: Any, *, anchors: Anchors | Non
         return {}
     anchors = anchors if anchors is not None else (
         getattr(resolution, "anchors", None) or Anchors(root=os.path.abspath(root)))
-    digests = digests if digests is not None else FileDigests()
-    flat, _conflicts = modelio.flat_params(projection)
-    files = set(_named_files(root, flat.values()))
-    if resolution is not None:
-        files |= set(_read_files(root, resolution, anchors))
-    built = _built_from(root, projection, model, anchors=anchors, digests=digests,
-                        files=files)
+    built = design_of(root, projection, model, anchors=anchors, resolution=resolution,
+                      digests=digests)
     if built is None:
         return {}
     module = getattr(model, "module", model)

@@ -45,6 +45,7 @@ is `cli.py`'s.
 | which proposer produced an input (architecture phase 2) | `inputs/<id>.json`'s `proposer` — its basis is looked up from the proposer, never stated | tracked | `propose`, `ingest --proposer` |
 | the readiness report (P2.5b; was `docs/readiness.md`) | `REPORT.md` at the root | ignored | `report --write` |
 | a milestone's package: what the spend gets (P2.5b) | `out/<milestone>/` at the root | ignored | `export <milestone>` |
+| the round record: the resolution at the end of a round, as tokens, with the typed graph and the digests it was computed from (architecture phase 3a) | `.nopekit/round.json` — an output, never read for truth | tracked | `round` (`rounds.write`); from phase 4 `merge`; never `check` |
 
 The index and `last_check.json` are the whole project in two reads (D-06); neither
 is read for truth by any spine code, and the index never holds a status, a coverage
@@ -135,7 +136,8 @@ class Rejection(Rejected):      # phase 2 (SPEC 14): a decision's rejected alter
     input: str = ""                 # an input id, when an input is its source
 class Param(Record):            # one model parameter with its full provenance
     name: str; value: Any; units: str = ""; rationale: str = ""
-    rejected: list[Rejected]; source: str = ""; grounded_by: list[str]   # InputArtifact ids
+    rejected: list[Rejected]; source: str = ""; grounded_by: list[str]   # InputArtifact ids, or
+                                 # an assumption claim's id (phase 3a: the value IS it)
     gates: list[str]; derived_from: list[str]; changed_in: str = ""; tags: list[str]
     is_derived -> bool                                                   # property
 class Acceptance(Record):       # the machine-checkable threshold behind a claim
@@ -189,6 +191,10 @@ class Claim(Record):            # something that must be true for the design to 
     evaluators: list[str]             # phase 1: on disk mechanism.evaluators only — a
                                       #   cross-check, never coverage (S-37); not sealed
     requirements: list[str]           # phase 1: the requirement ids it serves; not sealed
+    resolves: list[str]               # phase 3a: a PHYSICAL claim's — the assumption ids its
+                                      #   test replaces (SPEC 19); a display edge, moves no
+                                      #   status, not sealed; refused on another kind, on
+                                      #   itself, on a non-id or a repeat
     results: tuple = ()               # in memory: every entry of results/<id>.json, oldest first
     attributions: tuple = ()          # in memory: interactive AttributionRecords, newest first
     standing: Standing | None = None  # in memory: set by verdicts.view only
@@ -295,7 +301,9 @@ refusal: `Claim.gates` (derived from gate coverage), `Claim.physical_result` (it
 filled with `meta.model_entry`), `Param.gates` and `Param.changed_in` (derived),
 `InputArtifact.bytes` (computed from the file), `Requirement.status` (derived on every
 read, `claims.requirement_statuses`) and `Requirement.claims` (a claim names the
-requirements it serves), and `"*"`: `independence` anywhere —
+requirements it serves), `Claim.rests_on` (computed by the graph from what its
+evaluators read, `graph.build`), `Param.read_by` and `Param.sourced_from` (the observed
+view, `graph.observe` — phase 3a), and `"*"`: `independence` anywhere —
 derived from origin, never a field the proposer fills in. The **dataclass fields stay**:
 `claims.resolve_status` still reads `Claim.gates` in memory, `Ledger.verdicts` is still
 filled by readers, and `Ledger.to_dict()` still emits `verdicts` (tests:H4); only the
@@ -526,6 +534,14 @@ def write_index(root) -> bool           # True when .nopekit/ledger.json changed
 def agree(root) -> list[str]            # every way the index disagrees with the records
 def records_digest(root, *, exclude=()) -> str   # sha256 over the record files and project.json;
                                         # exclude: record dirs left out (export's manifest: "exports")
+def pointer_problems(ledger) -> list[str]   # phase 3a: the graph's record pointers it cannot
+                                        # follow — a param's grounded_by naming a non-assumption
+                                        # claim or an id both an input and a claim, a resolves
+                                        # naming no claim or a non-assumption; the index's and
+                                        # doctor's graph row's one producer
+def grounded_by_problem(where, name, aid, input_ids, claim_kinds) -> str | None
+                                        # one grounded_by id: an input, or an assumption the
+                                        # value IS; else why not (doctor reads PARAMS' through it)
 class MigrationPlan(NamedTuple):
     ledger: Ledger; files: dict[str, bytes]; notice: str
 def migrate_legacy(root, *, apply: bool, when: str,
@@ -984,7 +1000,11 @@ class ParamView:                 # one parameter as a reader shows it
     #   origin ("model/bracket.py PARAMS" or "params/<name>.json");
     # source, grounded_by, tags — from the record; model_error — why there is no value;
     # home — where the value lives ("" when the model holds none); record — its file or "";
-    # gates — derived from read sets when param_view was handed them, () otherwise
+    # gates — derived from read sets when param_view was handed them, () otherwise;
+    # read_by, sourced_from — phase 3a, filled by graph.observe only: the registered
+    #   evaluators whose SERVED entry read it, and the node ids that source it
+    #   (input:<id>, claim:<id> for an assumption). gates follows the last executed run
+    #   (obs/), read_by the entry the resolution stands on: the two can differ
 def param_view(ledger, model, *, model_error="", read_sets=None) -> list[ParamView]
 def param_readers(name, read_sets) -> list[str]  # gates whose last executed reads name it
     # (first two keys of a path; deeper keys do not count) — the one copy of the rule:
@@ -1686,6 +1706,10 @@ def apply_prerequisites(resolution, registry) -> Resolution   # rung 7: the rule
 # P2.5a: the article a physical result is bound to, the judge, the one view
 def article_of(root, projection, model, *, anchors=None, digests=None,
                resolution=None) -> dict          # {} when the model does not load
+def design_of(root, projection, model, *, anchors, resolution=None,
+              digests=None) -> dict | None       # phase 3a: article_of's built_from — {params,
+                                                 #   model, files} — extracted; None when the
+                                                 #   model does not load; no git call
 def judge_results(ledger, here) -> dict[str, Standing]   # resolve's rung 8, never cached
 class Contradiction(NamedTuple): gate; code; claim; article; when; who; channel; value;
                                  measured; units; removed   # removed: review of P2.5a
@@ -2409,6 +2433,8 @@ KEY_ORDER: tuple[str, ...]                                   # the eight tokens,
 OUTCOME_ORDER: tuple[str, ...]                               # fail, error, prerequisite-errored, prerequisite, skipped, unqualified, outside-context, unrun, pass
 def severity(composed) -> int                                # its place in SEVERITY_ORDER
 def outcome_rank(verdict) -> int                             # its place in OUTCOME_ORDER; None = unrun
+def outcome_key(verdict) -> str                              # phase 3a: its OUTCOME_ORDER token; "unrun"
+                                                             #   for None — the round record's
 def covers(spec, claim) -> bool                              # claim id OR any claim tag in spec.claims
 def covering_verdicts(claim, verdicts) -> list[Verdict]      # the same id-or-tag rule, on verdicts
 def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None) -> Composed
@@ -2681,6 +2707,11 @@ def inputs_hash(ledger) -> str                       # over sorted (id, sha256);
 def unextracted(ledger) -> list[InputArtifact]       # evidence nobody read = decoration
 def grounding(ledger, *, include_declared=True) -> dict[str, list[str]]
                                                      # param/claim id -> artifact ids, DERIVED
+def value_grounding(ledger, views) -> dict[str, list[str]]
+                                                     # phase 3a (was cli._grounding): grounding,
+                                                     # then each ParamView's PARAMS grounded_by —
+                                                     # the ONE map why, inputs and the graph read;
+                                                     # an id may be an assumption claim's
 def requests_by_kind(ledger, *, project_kind="", limit=6) -> list[tuple[str, str]]  # (kind, prompt)
 def suggest_requests(ledger, *, project_kind="") -> list[str]
     # the ASK list, filtered to what is MISSING. This is what makes intake actively
@@ -2852,10 +2883,18 @@ def add(ledger, *, title, summary, when, rejected=(), params_changed=(),
 def render_log(ledger) -> str                # markdown, NEWEST FIRST
 def write_log(root, ledger) -> str           # docs/decisions.md — `report --write`'s output
 def why(ledger, name: str, *, view=None, coverage=None, read_sets=None,
-        verdicts=None, composed=None, rows=None, bases=None) -> str
+        verdicts=None, composed=None, rows=None, bases=None, graph=None,
+        entry="") -> str
                                              # one param, claim, requirement or decision:
                                              # value, rationale, rejected alternatives,
-                                             # gates, grounding, and the decisions that moved it
+                                             # gates, grounding, and the decisions that moved it;
+                                             # with `graph` (a `graph.Graph`, phase 3a) also
+                                             # "read by:", "sourced from:", "rests on:" (and,
+                                             # untraced, that only direct reads were followed),
+                                             # "resolves:", "resolved by:", and a derived value
+                                             # an evaluator read, by name (`entry` names the
+                                             # model file its block cites); without it none of
+                                             # those, and a derived name is "no such name"
 def changed_in(ledger, name: str) -> str     # the decision that last moved a param: derived
 ```
 From checkpoint 1.3 (U27) `add` no longer sets `Param.changed_in` — a copy in the param
@@ -2940,6 +2979,12 @@ def mechanism_body(claim) -> str             # "<by's display word> — <how>", 
 def mechanism_line(claim) -> str             # mechanism_body, labelled "mechanism: " (gap's line)
 def mechanism_problem_words(problem) -> str  # one claims.MechanismProblem, in words: no status moves
 def status_word(status, *, errored=False) -> str   # word, with ", errored" for a crash's Skipped
+status_token_word = _status_token_word       # phase 3a: a STATUS_KEY token (or "errored") in words
+def round_paragraph(shape, number, changes, *, view, composed, check, site, wrote, schema,
+                    path) -> str             # phase 3a: `round`'s one paragraph — what changed,
+                                             #   the count line, ready as last evaluated, the
+                                             #   check, the site; HUMAN["round"]'s words
+def round_moved(moved) -> str                # "the records, the verdict cache and the design"
 def requirement_statuses(ledger, composed, cover) -> dict[str, RequirementStatus]
                                              # claims.requirement_statuses, each row's disagree
                                              #   filled: serving claims _disagreement names (D18)
@@ -3143,6 +3188,132 @@ phase-1.md 1.1):
   passed by the CLI from Phase 1.2. The CLI edge — unlink the target first, one exit
   code, write atomically at the single exit, the `.xml` suffix rule — is `cli.py`'s.
 
+### `graph.py`  (deps: models, util, store, artifacts, claims, gates, verdicts; report only inside `tokens`)
+The typed falsification graph (SPEC decision 19, architecture phase 3a): one graph
+from the records, the registry, the resolution and the verdict entries it served —
+their read sets, never `obs/`. Not in `verdicts.SPINE_MODULES`: an edit here keys no
+verdict. No clock, no git, no file writes, no words. The site's map (the next phase)
+calls `build` and `tokens` — or `of` — directly, and joins the two by id.
+```python
+SCHEMA = 1
+NODE_KINDS = ("requirement", "claim", "evaluator", "value", "instruction", "input",
+              "milestone", "decision")                 # the order nodes sort in
+EDGE_TYPES = ("serves", "settles", "reads", "derives", "sources", "rests_on", "resolves",
+              "contradicts", "needs", "requires", "decides")   # the order edges sort in
+VALUE_ROLES = ("choice", "derived", "absent")
+class Node(NamedTuple): id; kind; attrs               # id "<kind>:<key>"; attrs JSON scalars,
+                                                      #   one schema per kind (below)
+class Edge(NamedTuple): type; source; target
+class Trace(Protocol): key; derives                   # phase 3b supplies it: (choice, derived)
+class Graph:                                          # frozen: nodes, edges, trace, instructions
+    def node(self, nid) -> Node | None
+    def out(self, nid, type=None) -> tuple[str, ...]  # targets, edge order
+    def into(self, nid, type=None) -> tuple[str, ...] # sources, edge order
+    def values(self, role=None) -> tuple[Node, ...]
+    def read_by(self, name) -> tuple[str, ...]        # evaluator ids, natural order
+    def sourced_from(self, name) -> tuple[str, ...]   # node ids, node order
+    def rests_on(self, cid) -> tuple[str, ...]        # assumption claim ids
+    def via(self, cid, aid) -> tuple[tuple[str, str, str], ...]   # (evaluator, read, sourced)
+    def to_dict(self) -> dict                         # {schema, trace, instructions,
+                                                      #   nodes: {id: attrs}, edges: {type: {src: [dst]}}}
+class Tokens(NamedTuple): claims; requirements; evaluators; milestones; readiness; counts; disagree
+def node_id(kind, key) -> str
+def value_names(path, choices, derived=()) -> tuple[str, ...]   # THE path rule:
+                                                      #   ["config", k] -> k, ["config"] -> every
+                                                      #   choice, [k] -> k, [] (the whole of
+                                                      #   ctx.params) -> every choice and derived
+def derived_names(projection) -> tuple[str, ...]      # the projection's derived keys, less an
+                                                      #   echoed `config`
+def served_reads(resolution, registry) -> dict[str, tuple[tuple, ...]]   # registered gates'
+                                                      #   Row.entry param paths
+def value_sources(ledger, views) -> dict[str, tuple[str, ...]]   # name -> input:/claim: ids,
+                                                      #   from artifacts.value_grounding
+def observe(views, *, ledger, resolution, registry, choices=(), derived=()) -> list[ParamView]
+                                                      # each view's read_by and sourced_from
+def build(view, resolution, registry, *, projection, design, views=(), bases=None,
+          trace=None) -> Graph
+def tokens(view, resolution, registry, *, composed=None) -> Tokens
+def of(root, view, resolution, registry, *, projection, model, views=(), bases=None,
+       trace=None) -> Graph                           # build, design = verdicts.design_of
+```
+**Nodes.** A requirement, a milestone and a decision carry no attrs; a claim
+`{claim_kind, by, critical, removed}` (every `view.claims`, a `Ledger.removed`
+fail-holder included); an evaluator `{pack, basis, tier, registered}` (every registered
+spec, then any gate a `needs` or a `contradicts` names that is not registered, with
+`null` pack, basis and tier); a value `{role, digest[, value]}` — every choice, and
+every other name an edge or a parameter view names (a derived value nothing reads,
+sources, decides or derives is no node), its `value` written only for a finite int,
+float or bool; an instruction `{digest}` per file of the model's code closure as an
+article digests it (`model/bracket.py`, `<root>/` stripped); an input `{proposer,
+basis}`.
+
+**Edges, each from one source.** `serves` (`Claim.requirements`), `settles`
+(`claims.effective_gates`: coverage, never the mechanism's list), `reads` (the served
+entry's param paths through `value_names`; a never-run evaluator has none), `derives`
+(the trace's; `{}` and `trace: null` without one), `sources` (an input id as
+`input:<id>`, an assumption's as `claim:<id>`), `rests_on` (computed: a claim rests
+on assumption A when an evaluator that settles it read a value A sources, closed
+upward over `derives`), `resolves` (`Claim.resolves`, physical to assumption only),
+`contradicts` (`Resolution.track`), `needs` (`GateSpec.needs`), `requires`
+(`Milestone.requires`), `decides` (`params_changed`, `claims_changed`). An edge is made
+only when both ends are nodes: a pointer to a missing or wrong-kind record makes none,
+and `store.pointer_problems` names it. **No edge changes a status:** `claims.compose`
+never reads this module (`test_graph.AnEdgeChangesNoStatus`). **Tokens** are each from
+its one producer — `claims.STATUS_KEY` of `compositions` (or `errored`),
+`report.requirement_statuses`, `claims.unresolved`, `claims.summarise`'s counts,
+`report._disagreement` — over the view `status` judges, never a sweep's overlay. An
+evaluator's `outcome` is `claims.outcome_key`'s, in `OUTCOME_ORDER`'s words: a crash is
+`error` there (and `prerequisite-errored` behind a crashed prerequisite), where a
+claim's and a requirement's token says `errored` — one vocabulary per kind of node.
+
+### `rounds.py`  (deps: models, util, store)
+The round record, `.nopekit/round.json` (SPEC decision 18, architecture phase 3a): an
+output, tracked, never read for truth. Imported only by `cli`
+(`test_round.NothingReadsTheRoundRecordForTruth`). No clock, no git.
+```python
+ROUND_REL = ".nopekit/round.json"; ROUND_NAME = "round.json"; SCHEMA = 1
+HEADER: str                                           # the one sentence it holds
+MOVED = ("records", "verdicts", "design")             # what it is computed from
+RESOLUTION = "resolution"                             # what `state` names when none of MOVED
+                                                      #   moved and what it records differs
+KEYS = ("generated", "schema", "round", "computed_from", "readiness", "milestones",
+        "counts", "claims", "requirements", "disagree", "evaluators", "graph", "self")
+class Previous(NamedTuple): state; doc; round; schema; why   # absent | ok | edited |
+                                                      #   unreadable | newer
+class RoundState(NamedTuple): state; round; moved; schema; why   # absent | current | behind |
+                                                      #   edited | unreadable | newer
+class Flip(NamedTuple): id; before; after
+class Changes(NamedTuple): compared; replaced; claims; requirements; verdicts; instructions;
+                           readiness; moved; unrecorded=False   # instructions compared only
+                                                      #   when both records hold the model's code
+class Written(NamedTuple): written; round; previous; changes; refused
+def path_of(root) -> str
+def verdicts_digest(root) -> str                      # every file under .nopekit/verdicts/
+def computed_from(root, design) -> dict               # {records, verdicts, design}
+def body(computed, tokens, graph) -> dict             # the content, round and self unset
+def self_digest(doc) -> str                           # util.seal of doc minus "self"
+def sealed(content, round_) -> dict                   # KEYS order, round set, self set
+def render(doc) -> bytes                              # indent 2, UTF-8 as itself, one newline
+def read(root) -> Previous                            # strict JSON; never raises on content
+def state(root, computed_now, content=None) -> RoundState   # content: what round would
+                                                      #   write now; differing -> behind (RESOLUTION)
+def changes(previous, body, computed_now) -> Changes
+def write(root, body) -> Written                      # only when what it holds moved
+```
+**The seal comes first.** A record whose self-digest does not hold reads `edited`
+whatever its `schema` says — the seal rule is the format's at every schema — so a hand
+edit that bumps `schema` is rewritten by the next round; only a sealed record with a
+greater schema reads `newer`. **Behind** names the records, the verdict cache or the
+design when one of their digests moved, else the resolution when what the record holds
+differs from what `round` would write now (`cli._round_state` hands `state` that body):
+an evaluator's code, its controls, a pack or a tool moved it. **The write rule.**
+Nothing over a newer schema (a newer nopekit's record is never downgraded); nothing when the record on disk reads `ok` and holds the same on every key
+but `generated`, `schema`, `round` and `self`; otherwise round = the previous round + 1
+(an edited record's included), else 1, and bytes only where they differ. **The design
+digest** is `util.seal(verdicts.design_of(...))` — the current article's `built_from` —
+so a model or data-file edit that files no verdict still reads behind; there is no spine
+or version digest, so an upgrade is not "behind the records".
+
 ### `site.py`  (deps: models, util, store, claims, decisions, report, modelio, gates, verdicts)
 The project site's spine half: viewgens, and the one JSON document the page reads.
 The page's half is plain HTML, CSS and ES modules in `site_template/`, copied by
@@ -3295,6 +3466,7 @@ nopekit export [M [--dry-run] [--proceed --why TEXT]]   # P2.5b: the boundary th
 nopekit decide --title ... --summary ... [--rejected V|W [--type T] [--by NAME]
                [--returns-if "C1 margin > 0.02" | --returns-text TEXT] [--input ID]]...
 nopekit prefer <decision> [--value V]    # phase 2: the person's channel, never the agent's
+nopekit round                            # phase 3a: tier-0 check, site, the round record; exits 0
 nopekit propose [<proposer> [ARGS...]] [--kind] [--desc] [--timeout S]   # phase 2
 nopekit ingest <path...> [--proposer ID] nopekit packs [list|show|validate|add]
 nopekit model [--write]                  nopekit doctor
@@ -3332,6 +3504,33 @@ the project is read, then under the lock the decision, a preferred_against in it
 git's identity, the channel — an agent marker or a pipe refused outright — the
 rejections whose `by` is this identity, the prompt and the decision's id typed, and one
 sealed entry (`store.append_sealed`); it reads the rejection back on `status`'s view.
+`round` (`cmd_round`, architecture phase 3a, SPEC 18 and 24 without the hook and the
+commit) takes the lock, migrates a legacy project as `check` does, loads the strict
+registry (a pack that does not import: `round not run`, no record), runs `_check_run` at
+tier 0 (`check`'s locked body, extracted: what `check` writes, and never the round
+record; a model that does not load refuses the check, builds no site — `site build`
+refuses that model too — and the record is still written), resolves once with no sweep
+overlay — what `status` shows — builds the site from that resolution when `site/` exists
+(`_site_build`, `site build`'s locked body), and writes
+the round record (`_round_inputs`: `graph.build` over `verdicts.design_of`, and
+`graph.tokens`; `rounds.write`). It prints one paragraph (`report.round_paragraph`) and
+exits 0 whatever the project says; every `NopekitError` is said in one line, and only a
+traceback exits 1 — a hook's exit 2 would block the turn. `status` prints a `round
+record:` line after `last check run:` and `status --json` a `round` object (`_round_state`:
+the record's state — its digests against the project's, and what it holds against the
+body `round` would write now — never what it holds); `doctor` has a warn-only `round` row and a
+`graph` row that FAILs on `store.pointer_problems` and on `PARAMS` grounding naming a
+non-assumption claim.
+```python
+def _check_run(root, ledger, *, tier, only, force, record, now, on_row, quiet,
+               registry=None) -> _Checked   # check's locked body after the migration
+def _site_build(root, ledger, registry, model, projection, view, resolution, *,
+                now) -> dict                # site build's locked work, over the caller's resolution
+def _round_inputs(root, ledger, registry, model, projection, view, resolution, *,
+                  model_error="", shown=None) -> tuple[dict, dict]   # (rounds.body, computed_from)
+def _round_state(root, ledger, model, projection, resolution, registry, view, *,
+                 model_error="", shown=None) -> rounds.RoundState
+```
 `propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
 non-zero exit, a timeout or any project file outside its directory that moved
 (`_project_files`, a stat of the project but its ignored scratch, each path named),
@@ -3423,16 +3622,19 @@ def _entry_edit(root) -> str        # '"model_entry" in .nopekit/project.json' (
 def _param_views(root, ledger, model, model_error, *, read_sets=None) -> list[modelio.ParamView]
     # param_view, plus — when the model does not load — a bare view (no value, model_error
     # set) for each name modelio.static_param_prose finds in the model's TEXT and no record holds
-def _shown_params(root, ledger, model, model_error, resolution, registry) -> list[modelio.ParamView]
+def _shown_params(root, ledger, model, model_error, resolution, registry, *,
+                  projection=None) -> list[modelio.ParamView]
     # _param_views with gates from the resolution's read sets (registered gates only): what
-    # status, report, site build, the page-staleness judgement and doctor show and judge
+    # status, report, site build, the page-staleness judgement and doctor show and judge;
+    # read_by and sourced_from from graph.observe (projection: the derived names a read
+    # of the whole ctx.params reads)
 def _registered_reads(read_sets, registry) -> dict   # read sets of the registered gates only
-def _grounding(ledger, views) -> dict[str, list[str]]
-    # {param or claim: [artifact ids]}: extractions, then records' grounded_by
-    # (artifacts.grounding), then PARAMS' grounded_by — derived on every read
-def _why_text(root, ledger, registry, model, model_error, view, resolution, name) -> str
-    # decisions.why with view=_param_views (grounded_by from _grounding),
-    # coverage=claims.effective_gates, read_sets=verdicts.last_read_sets, verdicts=resolved
+def _why_text(root, ledger, registry, model, model_error, view, resolution, name, *,
+              projection=None) -> str
+    # decisions.why with view=_param_views (grounded_by from artifacts.value_grounding,
+    # read_by and sourced_from from graph.observe), coverage=claims.effective_gates,
+    # read_sets=verdicts.last_read_sets, verdicts=resolved, graph=graph.of(...)
+    # (phase 3a: read by, sourced from, rests on, resolves, resolved by)
 def _input_bytes(root, artifact, digests) -> dict
     # {"record", "sha256" (now), "pinned", "drift", "exists"} — the index's input-row rule
 ```
@@ -4194,7 +4396,58 @@ qualification, a rho or `check`'s exit code.
 - **`why <decision>`** shows a decision and every loser's facts line; the refusal
   "is a decision id" is gone.
 
+## What phase 3a of the architecture moved
+
+The graph and the round record (`docs/SPEC.md` §7 step 3a: decisions 18 and 19). The
+spine digest moved (models: `Claim.resolves`, `FORBIDDEN_KEYS`; modelio: `ParamView`'s
+two fields; verdicts: `design_of`, `_ABSENT_WHEN_EMPTY`); every entry re-keys once, and
+the bracket's committed cache was regenerated with it. Article hashes are unchanged
+(`design_of` is `article_of`'s body). Nothing here moves a status, a qualification, a
+rho or `check`'s exit code, and `check` writes no new path.
+
+- **`graph.py`** builds the typed graph and its tokens; **`rounds.py`** the round
+  record. Neither is a spine module; only `cli` imports `rounds`.
+- **`nopekit round`** — a tier-0 check, the site, the round record, one paragraph,
+  exit 0. No hook and no commit yet (phase 6 of the sequence).
+- **`Claim.resolves`** (physical claims; strict reader) and an assumption's id in
+  `params/<name>.json` `grounded_by` (the value IS the assumption), both pointers the
+  index and `doctor` check (`store.pointer_problems`).
+- **The observed view** (`ParamView.read_by`, `sourced_from`, filled by
+  `graph.observe`) in `last_check.json`, `state.json` and `why`. `status` and the
+  report carry the view for the undefended rule only, and print neither field.
+- **`why`** says what reads a value and what sources it, what a claim rests on,
+  resolves or is resolved by, and resolves a derived value an evaluator read by name.
+- **`cli._grounding`** moved to `artifacts.value_grounding` (the graph cannot import
+  the CLI); `claims.outcome_key` and `report.status_token_word` are new public names.
+
 ## Limits: what the spine cannot see, named
+
+- **A resealed round record reads as no hand edit (architecture phase 3a).** Its
+  self-digest is tamper evidence against a hand edit, not a lock: anyone who can write
+  the file can recompute it. Resealed, a forged token still reads behind the records,
+  naming the resolution (what it holds is not what `round` would write now); one
+  resealed with a greater `schema` reads `newer` and is neither compared nor rewritten.
+  Nothing reads it for truth — every status is the resolver's — so a forgery changes
+  what `git log -p` shows about a past round, never what any command decides now.
+- **The round record is machine-independent only where the resolution is.** A missing
+  tool (an evaluator Skipped here and not there), a remembered crash in the ignored
+  cache, and an input's basis looked up over the user's packs each move its tokens by
+  machine. They are shown, never normalised away (invariants 1 and 2).
+- **A Stale evaluator's `reads` edges come from the entry the resolver stands on** —
+  what it read last time, not what it would read now.
+- **Instruction nodes inherit the code closure's known misses** (SPEC decision 11): a
+  sibling loaded by `spec_from_file_location` and imported lazily (PETGasus's
+  `topopt.py`) is no node, and a file `build()` reads is none.
+- **`rests_on` is a direct read until the trace (phase 3b).** C1 rests on C6 because
+  `bracket.deflection` read `load_n`; a claim whose evaluator reads a derived value
+  computed from an assumption-sourced choice rests on nothing until `derives` edges
+  exist.
+- **"Behind" sees inputs, not nopekit.** An upgrade that changes a composition moves
+  no digest the record holds, so the record reads current until `round` writes it
+  again; `TheCommittedRoundRecordIsCurrent` is what catches it for the bracket.
+- **`gates` and `read_by` can differ.** `ParamView.gates` follows the last executed
+  run (`obs/`), `read_by` the entry the resolution stands on; after a fresh clone the
+  first is empty and the second is not.
 
 - **A re-sealed preference is a forgery the seal does not catch (architecture phase
   2),** as a results file's (below): `preferences/<id>.json` is sealed and chained

@@ -662,6 +662,152 @@ decisions above. Overturn any of them here.
 - **A basis word is said beside "basis"**: `proposed by <id> (basis <word>)`, and
   `propose`'s listing row `<id>  basis <word>  <description>`.
 
+**Phase 3a** (the graph and the round record), decided while building it:
+
+- **The graph is structure; the statuses sit beside it.** `graph.build` returns nodes
+  and typed edges with no status, `graph.tokens` the status tokens by id, and the round
+  record holds both; the site joins them by id. Statuses inside the nodes were rejected:
+  two homes in one file, and a flip of C1 diffing as a nested change instead of
+  `"C1": "failing"`.
+- **Node ids are `<kind>:<key>`;** an instruction's key is the article's portable code
+  path with `<root>/` stripped (`model/bracket.py`). Nodes sort by kind, then
+  naturally; edges by type, then source, then target. `to_dict` writes nodes as `{id:
+  attrs}` and edges as `{type: {source: [targets]}}`, every type present, no edge
+  attributes (`Graph.via` recomputes a `rests_on` edge's evaluator and values for `why`).
+- **Each kind's attrs are always present:** a claim `{claim_kind, by, critical,
+  removed}`, an evaluator `{pack, basis, tier, registered}`, a value `{role, digest}`
+  and `value` only for a finite int, float or bool, an instruction `{digest}`, an input
+  `{proposer, basis}`; a requirement, a milestone and a decision none.
+- **Value nodes** are every choice and every other name an edge or a parameter view
+  names; a derived value nothing reads, sources, decides or derives is no node (it
+  keeps a 27 KB field out of the record). Roles are choice, derived or absent; a choice
+  and a derived key of one name are one node, the choice.
+- **An edge needs two nodes.** A pointer to a missing or wrong-kind record makes no
+  edge (the index and doctor name it); an unregistered evaluator a `needs` or a
+  `contradicts` names is a `registered: false` node.
+- **`reads` come from the registered gates' served `Row.entry`**, never `obs/` or
+  `Resolution.read_sets`, through one path rule (`graph.value_names`: `["config", k]`
+  reads `k`, `["config"]` every choice, `[k]` `k`, `[]` every value — review of 3a).
+  `settles` is `claims.effective_gates`; `sources` is the one grounding map, moved from
+  `cli._grounding` to `artifacts.value_grounding`.
+- **`rests_on`** is computed for claims of every kind, never to itself, and closes the
+  read values upward over `derives` edges, so phase 3b's trace adds edges and no code
+  (a stub trace in `test_graph` proves it). With no trace the graph says `trace:
+  null`, `derives: {}`, and doctor "derivation not traced yet".
+- **`Claim.resolves`** is declared after `requirements`, written only when non-empty,
+  refused on a non-physical claim, on the claim itself, on a non-id and on a repeat; a
+  dangling or non-assumption target is an index problem and a doctor `graph` FAIL. Not
+  in the claim digest, absent-when-empty for a gate's read, and it moves no status.
+- **An assumption's id in a param's `grounded_by`** says the value IS that assumption.
+  An id that is both an input and a claim reads as the input and is an index problem; a
+  non-assumption claim there is one too; `PARAMS` grounding gets the same check in
+  doctor's `graph` row. `Claim.grounded_by` keeps meaning inputs only.
+- **`FORBIDDEN_KEYS`** gains `Claim.rests_on`, `Param.read_by` and
+  `Param.sourced_from`, each naming where the fact is derived.
+- **The observed view** (`ParamView.read_by`, `sourced_from`, filled by
+  `graph.observe`; `gates` kept as it was, so the two can differ) reaches
+  `last_check.json`, `state.json` and `why`; `status` and the report carry the view for
+  the undefended rule only and print neither field. `graph.observe` takes
+  the model's choice names (`choices=`), the one thing a read of the whole `config`
+  needs that a parameter view does not carry — a keyword the design did not list.
+- **`why`** prints `read by:` and `sourced from:` for a parameter, `rests on:`,
+  `resolves:` and `resolved by:` for a claim (each only when handed the graph, which
+  the CLI always passes), an assumption in GROUNDED BY as `[assumption]`, and a short
+  block for a derived value an evaluator read; `inputs --json` leaves claim ids out of
+  its grounding map.
+- **The round record is computed from three digests:** the records
+  (`store.records_digest`), the verdict cache (every file's bytes under
+  `.nopekit/verdicts/`) and the design (the seal of `verdicts.design_of`, the current
+  article's `built_from`, extracted from `article_of` with every article hash
+  unchanged). No spine or version digest: an upgrade is not "behind the records".
+- **The file:** keys in a fixed order, indent 2, `ensure_ascii=False`, NaN refused, one
+  newline; `self` is the seal of the rest; the one sentence is `HEADER`; a crash reads
+  `errored`; `disagree` lists claims and requirements whose status and evidence
+  disagree, so a contradiction never sits there as a silent `checked`.
+- **Reader states:** absent, unreadable (strict JSON: duplicate keys and NaN refused;
+  a merge conflict lands here), newer (schema above 1, never rewritten), edited (the
+  seal does not match), current or behind (naming the records, the verdict cache or the
+  design).
+- **The write rule:** nothing when the record reads `ok` and holds the same on every
+  key but its own four; otherwise the previous round + 1 (an edited record's
+  included), else 1; never over a newer schema; bytes only when they differ.
+  `rounds.sealed` is public, so invariant 8's test computes the record of the state
+  after a run exactly as `write` does.
+- **`round` resolves once, after its check,** with no sweep overlay (what `status`
+  shows), and the site and the record share that resolution.
+- **`round` never exits 2:** every `NopekitError` is said in one line with exit 0; a
+  model that does not load refuses the check and the record is still written; a pack
+  that does not import writes no record (`_check_run` takes the strict registry
+  `round` loaded first, to tell that refusal from the model's — a keyword the design
+  did not list); only a traceback exits 1.
+- **`round`** migrates a legacy project as `check` does (invariant 8's carve-out
+  names it), is not in `_INDEX_UNTOUCHED`, and prints one paragraph: flips capped at
+  eight, new verdicts at four ids, status words from `report.status_token_word`,
+  *ready* as last evaluated.
+- **`status`** prints a `round record:` line after `last check run:` and `status
+  --json` a `round` object (its state, never its statuses); `doctor` gains a warn-only
+  `round` row and a `graph` row that FAILs on a pointer problem.
+- **`graph.py` and `rounds.py` are not spine modules** and join `CLOCKLESS_MODULES`;
+  only `cli` imports `rounds`, and the literal file name is a value only in `rounds.py`
+  (a docstring may say where the record lives). Their invariant classes map to rows 7,
+  8 and 12; no invariant number is new (14 stays reserved).
+- **The bracket** gains `params/load_n.json` (`{"grounded_by": ["C6"]}`), so C1 rests
+  on C6, and a committed `.nopekit/round.json` (round 1). No claim and no `resolves`
+  were added, so the transcript's counts hold; the cache's regeneration ends with
+  `nopekit round`.
+- **Invariant 8's property test** explains a write of the round record only when its
+  bytes moved and equal the record recomputed in process from the state after the run,
+  never as a path allowance.
+- **The louder project's after-edit round** runs after the files it reads are read:
+  its tier-0 check re-runs what the edit invalidated and rebuilds the site, which every
+  reader before it must see Stale.
+- **The fast tier's pay-back:** `test_vocabulary.QualificationWordsComeFromOneTable`,
+  `test_freshness`, `test_readers` and `test_trace` moved to the full suite, none an
+  invariant class; the phase added ~3.8 s in process (its invariant rows and
+  `round`'s watched run in the records sweep), and two interleaved pairs then measured
+  flat against c26fcd5 (92.0 and 92.6 s wall against 92.5 and 92.3 s).
+- **New public names:** `verdicts.design_of`, `store.pointer_problems` and
+  `grounded_by_problem`, `artifacts.value_grounding` (`cli._grounding` deleted),
+  `claims.outcome_key`, `report.status_token_word` (the private name kept),
+  `report.round_paragraph` and `round_moved`. `site.judgement_digest` is not renamed
+  until the site phase; no graph key goes into `state.json`, and no graph command is
+  added.
+
+**Review of phase 3a**, decided while fixing what it found:
+
+- **A read of the whole `ctx.params` reads every value.** `.copy()`, `.items()` or
+  `json.dumps(ctx.params)` record one bare path, `[]`; `graph.value_names` reads it as
+  every choice and every derived key (`graph.derived_names`: the projection's, less an
+  echoed `config`), so the evaluator draws its `reads` edges, its claim its `rests_on`,
+  and `why` its `read by:`. `observe` and `_shown_params` take the projection's derived
+  names for it.
+- **`contradicts` starts at the claim**, not at a physical-result node (decision 19
+  says "a physical fail"): `Resolution.track` names the claim whose sealed fail
+  contradicts the evaluator, and a result is an entry of that claim's sealed file, not a
+  record of its own. A result node would be a node per sealed entry, joined to nothing
+  else; the claim is what the map draws.
+- **The seal comes before the schema.** The self-digest rule is the record's format at
+  every schema; a record whose seal fails reads `edited`, whatever its `schema`, and
+  `round` writes it again. Only a sealed record with a greater schema reads `newer`.
+- **Behind names the resolution** when none of the three digests moved and the record
+  still differs from the body `round` would write now (`rounds.RESOLUTION`): an
+  evaluator's code, its controls, a pack or a tool. `status` and `doctor` compute that
+  body (`cli._round_state`). Digesting each evaluator's code and controls into
+  `computed_from` was rejected: a second copy of the cache's own keying, blind to a pack
+  installed or a tool gone. A forgery resealed by hand therefore reads behind.
+- **A model that does not load builds no site in `round`**, as `site build` refuses it;
+  the paragraph says "Site not built: <the model's error>".
+- **Instructions are compared only when both records hold the model's code.** A model
+  that stops loading says "instructions not recorded (the model does not load)" (and
+  `--json`'s `instructions_unrecorded`), never every file moved.
+- **`why <claim>`, untraced, says only direct reads were followed** for every claim an
+  evaluator settles, with or without a `rests on:` line.
+- **GLOSSARY §4** gains round, choice, derived value, instructions and read by; the
+  decision row's italic *choice* now says the value a decision picked is a choice.
+- **The fast tier's pay-back:** the review added ~1.3 s of invariant rows and moved
+  `doctor`'s round row to the gate and the graph's and the round record's bytes on
+  another path to the full suite; measured flat on wall against 6440bad, +0.6 s user.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

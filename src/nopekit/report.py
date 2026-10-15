@@ -1248,6 +1248,78 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "recorded": "recorded {name}'s preference against {value!r} in preferences/{id}.json "
                     "(entry {n})",
     }),
+    # Architecture phase 3a (SPEC 18, 24): `nopekit round`'s one paragraph, and
+    # the round record's state as `status` and `doctor` say it. `{path}` is
+    # `rounds.ROUND_REL`, filled by the caller: the file's name has one home.
+    # *Ready* is said as last evaluated (invariant 12): nothing a round reads
+    # was re-run at a boundary.
+    "round": MappingProxyType({
+        "help": "end a round: a tier-0 check, the site rebuilt when site/ exists, and {path} "
+                "written when anything it records moved; never blocks",
+        "written": "round {n}: {changes}.",
+        "first": "round 1: the first round record.",
+        "replaced": "round {n}: the last round record was {how}, so nothing is compared.",
+        "replaced_how": MappingProxyType({"edited": "edited by hand",
+                                          "unreadable": "unreadable"}),
+        "unchanged": "round {n} stands: nothing it records moved.",
+        "newer": "round: {path} was written by a newer nopekit (schema {schema}); this one "
+                 "does not rewrite it.",
+        "ready": "Ready, as last evaluated.",
+        "not_ready": "NOT ready, as last evaluated: {k} of {n} required {claims} {are} "
+                     "unresolved.",
+        "check_ran": "Tier-0 check: {executed} run, {cached} from the cache.",
+        "check_not_run": "Tier-0 check not run: {why}.",
+        "site_built": " Site built.",
+        "site_warnings": " Site built with {n} {warnings} — `nopekit site build` lists them.",
+        "site_failed": " Site not built: {why}.",
+        "wrote": " Wrote {path}.",
+        "not_run": "round not run: {why}.",
+        "no_project": "round: no nopekit project here — nothing to record.",
+        "flip": "{id} {before} -> {after}",
+        "appeared": "{id} new ({after})",
+        "gone": "{id} gone (was {before})",
+        "more": "and {n} more",
+        "verdicts": "{n} new {verdicts} ({ids})",
+        "ids_more": "+{k} more",
+        "instructions": "instructions moved ({paths})",
+        "instructions_unrecorded": "instructions not recorded (the model does not load)",
+        "no_status": "no status moved ({what} moved)",
+        "moved": MappingProxyType({"records": "the records", "verdicts": "the verdict cache",
+                                   "design": "the design",
+                                   "resolution": "the resolution (an evaluator's code, its "
+                                                 "controls, a pack or a tool)"}),
+        "state_head": "round record: {line}",
+        "state_absent": "none — `nopekit round` writes the first",
+        "state_current": "{round}current with the records, the verdict cache and the design",
+        "state_behind": "{round}behind the records — {what} moved since it was written; "
+                        "`nopekit round` writes the next",
+        "state_edited": "{round}edited by hand — its digest does not match what it holds; "
+                        "`nopekit round` writes it again, and nothing reads it for truth",
+        "state_unreadable": "does not read ({why}) — `nopekit round` writes it again",
+        "state_newer": "written by a newer nopekit (schema {schema}) — this one neither reads "
+                       "nor rewrites it",
+        "graph_ok": "{n} nodes, {m} edges ({k} rests on, {r} resolves)",
+        "graph_untraced": "; derivation not traced yet — each rests-on edge is a direct read",
+        # `why`'s lines (SPEC 10, 19): what reads a value, what sources it, and
+        # what a claim rests on, resolves or is resolved by.
+        "read_by": "read by: {ids}",
+        "read_by_none": "read by: none — no evaluator's verdict on record read it",
+        "sourced_from": "sourced from: {items}",
+        "sourced_from_none": "sourced from: nothing recorded",
+        "source_assumption": "assumption {id} ({word})",
+        "source_input": "input {id}",
+        "derived_from_untraced": "derived from: not traced yet",
+        "value_head": "value {name}{value}   (derived by build() in {entry})",
+        "rests_on": "rests on: {items}",
+        "rests_on_item": "{id} ({word}; {via})",
+        "rests_on_via": "{evaluator} read {value}",
+        "rests_on_untraced": "rests on, through derived values: not traced yet — only the "
+                             "values its evaluators read directly are followed",
+        "resolves": "resolves: {items}",
+        "resolved_by": "resolved by: {items}",
+        "item": "{id} ({word})",
+        "item_missing": "{id} (no such claim)",
+    }),
     # `nopekit propose` (SPEC 22, 25): a pack's tool proposes, never settles.
     # The noun "proposer" stays in keys and flags (SPEC §0.9).
     "propose": MappingProxyType({
@@ -2243,6 +2315,116 @@ def _status_token_word(token: str) -> str:
         if key == token:
             return word(status)
     return _one(token)
+
+
+#: The public name of `_status_token_word` (architecture phase 3a): `round`'s
+#: summary says a flipped status token in the same words as a return condition,
+#: and the private name stays for its callers.
+status_token_word = _status_token_word
+
+
+def round_moved(moved: Iterable[str]) -> str:
+    """`the records, the verdict cache and the design` — what moved since a
+    round record, in `HUMAN["round"]["moved"]`'s words, in the record's order."""
+    said = HUMAN["round"]["moved"]
+    names = [said.get(key, key) for key in moved]
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _flip_words(flip: Any) -> str:
+    said = HUMAN["round"]
+    if flip.before is None:
+        return said["appeared"].format(id=flip.id, after=_status_token_word(flip.after))
+    if flip.after is None:
+        return said["gone"].format(id=flip.id, before=_status_token_word(flip.before))
+    return said["flip"].format(id=flip.id, before=_status_token_word(flip.before),
+                               after=_status_token_word(flip.after))
+
+
+#: How many claim and requirement flips `round`'s paragraph names before `and N
+#: more`, and how many new verdicts it names. Why 8: the status line's
+#: requirement cap — one short paragraph is the hook's whole message, and a
+#: round that flipped thirty claims says how many, never all thirty. *Rejected:*
+#: every flip (a wall in a hook's message); none (the one flip a person needs
+#: is the reason the paragraph exists).
+_ROUND_FLIPS = 8
+_ROUND_VERDICT_IDS = 4
+
+
+def _round_changes(changes: Any) -> str:
+    said = HUMAN["round"]
+    flips = [_flip_words(f) for f in (*changes.claims, *changes.requirements)]
+    parts: list[str] = []
+    if flips:
+        shown = flips[:_ROUND_FLIPS]
+        if len(flips) > _ROUND_FLIPS:
+            shown.append(said["more"].format(n=len(flips) - _ROUND_FLIPS))
+        parts.append(", ".join(shown))
+    if changes.verdicts:
+        ids = list(changes.verdicts[:_ROUND_VERDICT_IDS])
+        if len(changes.verdicts) > _ROUND_VERDICT_IDS:
+            ids.append(said["ids_more"].format(k=len(changes.verdicts) - _ROUND_VERDICT_IDS))
+        parts.append(said["verdicts"].format(n=len(changes.verdicts),
+                                             verdicts=_plural(len(changes.verdicts), "verdict"),
+                                             ids=", ".join(ids)))
+    if changes.instructions:
+        parts.append(said["instructions"].format(paths=", ".join(
+            nid.split(":", 1)[-1] for nid in changes.instructions)))
+    if getattr(changes, "unrecorded", False):
+        parts.append(said["instructions_unrecorded"])
+    if not parts:
+        parts.append(said["no_status"].format(what=round_moved(changes.moved)
+                                              or round_moved(("records",))))
+    return "; ".join(parts)
+
+
+def round_paragraph(shape: str, number: Any, changes: Any, *, view: Ledger,
+                    composed: Mapping[str, Any], check: Mapping[str, Any],
+                    site: Mapping[str, Any], wrote: bool, schema: Any, path: str) -> str:
+    """`nopekit round`'s one paragraph (architecture phase 3a): what changed since
+    the last round record (``shape``: ``written``, ``first``, ``replaced``,
+    ``unchanged`` or ``newer``), the count line, *ready* as last evaluated
+    (`claims.unresolved`, through `readiness`), what the tier-0 check did, the
+    site, and the write. One paragraph, because it is the Stop hook's message
+    (phase 6)."""
+    said = HUMAN["round"]
+    if shape == "newer":
+        opening = said["newer"].format(path=path, schema=schema)
+    elif shape == "first":
+        opening = said["first"]
+    elif shape == "replaced":
+        opening = said["replaced"].format(
+            n=number, how=said["replaced_how"].get(changes.replaced, changes.replaced))
+    elif shape == "unchanged":
+        opening = said["unchanged"].format(n=number)
+    else:
+        opening = said["written"].format(n=number, changes=_round_changes(changes))
+    found = readiness(view, composed)
+    if found["ready"]:
+        ready = said["ready"]
+    else:
+        k = len(found["unresolved"]) + len(found["missing"])
+        n = len(found["required"]) + len(found["missing"])
+        ready = said["not_ready"].format(k=k, n=n, claims=_plural(n, "claim"),
+                                         are="is" if k == 1 else "are")
+    if check.get("ran"):
+        ran = said["check_ran"].format(executed=check.get("executed", 0),
+                                       cached=check.get("cached", 0))
+    else:
+        ran = said["check_not_run"].format(why=str(check.get("why") or "").rstrip("."))
+    if not site.get("present"):
+        built = ""
+    elif site.get("built") and site.get("warnings"):
+        built = said["site_warnings"].format(n=site["warnings"],
+                                             warnings=_plural(site["warnings"], "warning"))
+    elif site.get("built"):
+        built = said["site_built"]
+    else:
+        built = said["site_failed"].format(why=str(site.get("why") or "").rstrip("."))
+    tail = said["wrote"].format(path=path) if wrote else ""
+    return f"{opening} {count_line(composed)}. {ready} {ran}{built}{tail}"
 
 
 def return_words(row: Any, ledger: Ledger | None = None) -> str:
@@ -4861,4 +5043,8 @@ __all__ = [
     "rejection_facts",
     "rejection_suffix",
     "may_return_line",
+    # architecture phase 3a: the round's summary
+    "status_token_word",
+    "round_paragraph",
+    "round_moved",
 ]

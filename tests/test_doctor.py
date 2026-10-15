@@ -89,7 +89,11 @@ ROWS = ("instruments", "opaque-inputs", "cache-entries", "two-outcomes", "sealed
         "requirements", "mechanisms",
         # Architecture phase 2 (SPEC 14, 38): decisions' pointers and unrecorded
         # preferences, and every evaluator's basis — warnings, never a FAIL.
-        "decisions", "basis")
+        "decisions", "basis",
+        # Architecture phase 3a (SPEC 18, 19): the graph's pointers, and the
+        # round record's state (`test_round.ABehindRoundRecordSaysSo` plants
+        # each warning).
+        "graph", "round")
 
 #: A fixture every planted project gate can borrow: the bracket's own, which
 #: sags the known-good design 30 mm — past any limit the planted gates use.

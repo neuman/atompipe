@@ -540,7 +540,7 @@ class Param(Record):
     rationale: str = ""              # why THIS value; the physics, not the restatement
     rejected: list[Rejected] = field(default_factory=list)
     source: str = ""                 # "datasheet: TI SLYS045C Fig 6-2" / "inputs/sketches/hull.png"
-    grounded_by: list[str] = field(default_factory=list)   # InputArtifact ids
+    grounded_by: list[str] = field(default_factory=list)   # InputArtifact ids, or an assumption claim's id: the value IS that assumption
     gates: list[str] = field(default_factory=list)         # gate ids that protect it
     derived_from: list[str] = field(default_factory=list)  # other param names
     changed_in: str = ""             # decision id / revision where it last moved
@@ -859,6 +859,20 @@ class Claim(Record):
     must not refuse every command); the index and `doctor` name it. Not in
     `claim_digest` (serving a requirement asks no re-test); empty, it digests as
     before."""
+    resolves: list[str] = field(default_factory=list)
+    """The assumption claim ids this PHYSICAL claim's test replaces (SPEC decision
+    19): the graph's ``resolves`` edge, physical claim to assumption. A display
+    edge only — it moves no status: the assumption reads what its own owner and
+    mechanism say, and the test reads what its results say. Not in
+    ``claims.claim_digest``: a person attests the test, not the link. The strict
+    reader refuses it on a claim that is not physical, on the claim itself, and
+    on a non-id or a repeat; an id no file holds, or one naming a claim of
+    another kind, is read and named by the index and doctor's ``graph`` row (the
+    milestone precedent, P2.5b-D3: a renamed record must not refuse every
+    command). Empty, it digests as before (``verdicts._ABSENT_WHEN_EMPTY``).
+    What slipped through before it: no record linked a test to the assumption
+    it replaces, so a passing physical test left the assumption reading as if
+    nobody had looked."""
     results: tuple = ()
     """In memory only (``FORBIDDEN_KEYS``): every entry of
     ``results/<id>.json``'s ``results``, oldest first, assembled by ``store``;
@@ -1908,12 +1922,20 @@ FORBIDDEN_KEYS: dict[str, dict[str, str]] = {
         "attributions": "an owner or an authority is recorded in results/<id>.json by "
                         "`nopekit claim physical <id> assume`, typed in their own shell",
         "standing": "the resolver judges a result's standing on every read",
+        # Architecture phase 3a (SPEC 19): an edge of the graph, derived on
+        # every read, never a field a claim states about itself.
+        "rests_on": "derived — a claim rests on an assumption when an evaluator that "
+                    "settles it read a value that assumption sources (`nopekit why <id>` "
+                    "shows it)",
     },
     "Param": {
         "value": "the model ({model}) owns it",
         "derived_from": "the model ({model}) owns it",
         "gates": "derived — the gates that read it when they last ran",
         "changed_in": "derived — the decisions that name it in params_changed",
+        # Architecture phase 3a (SPEC 10, 19): the observed view's two lists.
+        "read_by": "derived — the evaluators whose verdict on record read this value",
+        "sourced_from": "derived — from grounded_by and the extractions",
     },
     "InputArtifact": {
         "bytes": "computed from the file",

@@ -77,7 +77,7 @@ import shlex
 import sys
 import types
 import typing
-from typing import Any, Callable, NamedTuple, Sequence
+from typing import Any, Callable, Collection, Mapping, NamedTuple, Sequence
 
 from . import vcs
 from .models import (
@@ -1073,6 +1073,27 @@ def _parse_record(label: str, kind: str, stem: str, raw: bytes, *, model_entry: 
                            pattern=REQUIREMENT_ID,
                            noun="requirement id (R1, R2, …, the stem of a file in "
                                 "requirements/)")
+        # Architecture phase 3a (SPEC 19): the assumptions a physical test
+        # replaces. Bound only when present (R-10). A pointer to no claim, or to
+        # a claim of another kind, is read and named by the index (the
+        # milestone precedent); what can never be right is refused here.
+        if "resolves" in data:
+            from .claims import _PLAIN_ID      # a reader's rule, at read time: no cycle
+            _check_id_list(label, "resolves", data["resolves"], pattern=_PLAIN_ID,
+                           noun="claim id (the stem of a file in claims/)")
+            # Its own name: `kind` is the record kind the limit check below
+            # reads. What slipped through (review of phase 3a): this line
+            # reassigned it, so a physical claim with `resolves` skipped the
+            # text-limit refusal and `claim physical --measured` passed a value
+            # the typed limit refuted.
+            claim_kind = data.get("kind") or ClaimKind.MEASURABLE.value
+            if claim_kind != ClaimKind.PHYSICAL.value:
+                raise NopekitError(f'{label}: "resolves" is a physical claim\'s field — a '
+                                   f"physical test is what replaces an assumption, and "
+                                   f"{stem} is {claim_kind}")
+            if stem in data["resolves"]:
+                raise NopekitError(f'{label}: "resolves" names {stem} itself — a test '
+                                   f"resolves an assumption, never itself")
     acceptance = data.get("acceptance") if kind == "claims" else None
     if isinstance(acceptance, dict):
         for key in ("limit", "limit_hi"):
@@ -2853,6 +2874,68 @@ def _row(record: Any) -> dict[str, Any]:
     return {idf: getattr(record, idf), **_encode(record, drop=idf)}
 
 
+def grounded_by_problem(where: str, name: str, aid: str, input_ids: Collection[str],
+                        claim_kinds: Mapping[str, str]) -> str | None:
+    """Why one id in a value's `grounded_by` is not a pointer the graph can follow,
+    or ``None`` (architecture phase 3a, SPEC 19). ``where`` is the file that says
+    it — `params/<name>.json`, or the model's `PARAMS` home for a value no record
+    holds; ``claim_kinds`` maps each claim id to its kind's value.
+
+    An input id is grounding; an assumption claim's id means the value IS that
+    assumption (the graph's `sources` edge from the assumption). An id that is
+    both reads as the input, and is named: which one was meant is a guess. A
+    claim of any other kind grounds nothing, and an id that is neither keeps the
+    words this problem always had."""
+    is_input = aid in input_ids
+    kind = claim_kinds.get(aid)
+    if is_input and kind is None:
+        return None
+    if kind == ClaimKind.ASSUMPTION.value and not is_input:
+        return None
+    if is_input:
+        return (f"{where}: grounded_by names {aid!r}, which is both inputs/{aid}.json and "
+                f"claims/{aid}.json — rename one; the graph reads it as the input")
+    if kind is not None:
+        # GLOSSARY's word for the link (review of phase 3a: this said "a value
+        # is grounded by an input", the row's Never-say, split across two
+        # pieces so no scan read it whole).
+        return (f"{where}: grounded_by names {aid!r}, a {kind} claim — a value is sourced "
+                f"from an input (inputs/<id>.json) or is an assumption (a claim of kind "
+                f"assumption)")
+    return f"{where}: grounded_by names {aid!r}, which has no inputs/{aid}.json"
+
+
+def pointer_problems(ledger: Ledger) -> list[str]:
+    """The graph's record pointers that name nothing it can draw (architecture
+    phase 3a, SPEC 19), as sentences, in record order: each `params/<name>.json`
+    `grounded_by` id (`grounded_by_problem`), and each physical claim's
+    `resolves` id naming no claim or a claim that is not an assumption. Pure:
+    the index (`build_index`) and doctor's `graph` row both ask this, so the two
+    cannot disagree. A pointer named here makes no edge in `graph.build`; it is
+    never refused by the strict reader, so a renamed claim never refuses every
+    command (the milestone precedent, P2.5b-D3)."""
+    input_ids = {a.id for a in ledger.inputs}
+    kinds = {c.id: getattr(c.kind, "value", str(c.kind)) for c in ledger.claims}
+    problems: list[str] = []
+    for param in ledger.params:
+        for aid in param.grounded_by:
+            found = grounded_by_problem(f"params/{param.name}.json", param.name, aid,
+                                        input_ids, kinds)
+            if found:
+                problems.append(found)
+    for claim in ledger.claims:
+        for aid in getattr(claim, "resolves", None) or ():
+            kind = kinds.get(aid)
+            if kind is None:
+                problems.append(f"claims/{claim.id}.json: resolves names {aid!r}, which has "
+                                f"no claims/{aid}.json")
+            elif kind != ClaimKind.ASSUMPTION.value:
+                problems.append(f"claims/{claim.id}.json: resolves names {aid!r}, a {kind} "
+                                f"claim — a physical test resolves an assumption (a claim "
+                                f"of kind assumption)")
+    return problems
+
+
 def build_index(root: str, *, digests: FileDigests | None = None) -> dict[str, Any]:
     """The index, `.nopekit/ledger.json`'s content: a PURE function of the record
     files and of the bytes of the inputs they name. No clock, no model, no
@@ -2874,7 +2957,11 @@ def build_index(root: str, *, digests: FileDigests | None = None) -> dict[str, A
     `problems` are missing bytes, drift and dangling links — a claim naming a
     requirement no file holds, a requirement id that is also a claim's, a
     return condition or a rejection's input naming no record, and a preference
-    file no decision holds, among them.
+    file no decision holds, among them — and, from architecture phase 3a, the
+    graph's pointers (`pointer_problems`): a param's `grounded_by` naming a
+    claim that is not an assumption, or an id that is both an input and a
+    claim, and a physical claim's `resolves` naming no claim or a claim that is
+    not an assumption.
 
     It never holds a status, a coverage or a verdict: those depend on the
     registry and the verdict cache, live in `.nopekit/cache/last_check.json`,
@@ -2933,11 +3020,7 @@ def build_index(root: str, *, digests: FileDigests | None = None) -> dict[str, A
             if aid not in input_ids:
                 problems.append(f"claims/{claim.id}.json: grounded_by names {aid!r}, which "
                                 f"has no inputs/{aid}.json")
-    for param in ledger.params:
-        for aid in param.grounded_by:
-            if aid not in input_ids:
-                problems.append(f"params/{param.name}.json: grounded_by names {aid!r}, which "
-                                f"has no inputs/{aid}.json")
+    problems += pointer_problems(ledger)
     for need in ledger.needs:
         for cid in need.claim_ids:
             if cid not in claim_ids:
@@ -3850,6 +3933,8 @@ __all__ = [
     "read_project", "write_project", "read_record", "write_record",
     "load", "save", "is_legacy",
     "build_index", "write_index", "agree", "records_digest",
+    # architecture phase 3a: the graph's record pointers
+    "pointer_problems", "grounded_by_problem",
     "MigrationPlan", "migrate_legacy", "ensure_ignore_blocks", "init",
     "append_sealed", "ExportsFile", "MILESTONE_NAME", "ARTICLE_KEYS", "REPORT_NAME",
     "PACKAGES_NAME", "generator_parts",

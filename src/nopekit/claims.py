@@ -101,6 +101,7 @@ __all__ = [
     "OUTCOME_ORDER",
     "severity",
     "outcome_rank",
+    "outcome_key",
     "covers",
     "covering_verdicts",
     "compose",
@@ -949,6 +950,20 @@ _EXPLAINS = OUTCOME_ORDER[:OUTCOME_ORDER.index("outside-context") + 1]
 
 def _explains_as(verdict: Verdict) -> str:
     return OUTCOME_ORDER[min(outcome_rank(verdict), len(OUTCOME_ORDER) - 1)]
+
+
+def outcome_key(verdict: Verdict | None) -> str:
+    """One verdict's outcome token, in `OUTCOME_ORDER`'s words — `fail`,
+    `error`, `prerequisite-errored`, `prerequisite`, `skipped`, `unqualified`,
+    `outside-context` or `pass` — and `unrun` when there is none: the round
+    record's evaluator token (architecture phase 3a), from the one table
+    `outcome_rank` reads, never a second spelling. An evaluator's crash is
+    `error`; a claim's is `errored` (`graph.Tokens`) — two vocabularies, one
+    for each kind of node. (Review of phase 3a: this listed `errored` here, a
+    token it never returns, and a renderer keyed on it would draw no crash.)"""
+    if verdict is None:
+        return "unrun"
+    return _explains_as(verdict)
 
 
 def explaining_verdict(claim: Claim, verdicts: Iterable[Verdict]) -> Verdict | None:

@@ -1042,6 +1042,14 @@ class EveryCacheReaderSaysAsLastEvaluated(_env.EnvCase):
         self.assertRegex(text, r"\bis ready, as last evaluated: ")
         self.assertEqual(cache_ready_problems(text), [])
 
+    def test_the_round_paragraph(self):
+        """(architecture phase 3a) `round` reads the cache — its tier-0 check
+        serves the forged pass from it — so its *ready* is as last evaluated."""
+        text = P.run(self.root, "round", code=0).stdout
+        self.assertIn("Ready, as last evaluated.", text)
+        self.assertNotRegex(text, r"(?<!NOT )\bready(?!, as last evaluated)")
+        self.assertEqual(cache_ready_problems(text), [])
+
     def test_the_boundary_says_it_plainly(self):
         """The control: the boundary's sentence over its re-run, at 8.0 where it
         is ready, carries no qualifier — and the checker refuses it as a cache

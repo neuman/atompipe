@@ -297,6 +297,11 @@ _BRACKET_RUNS = (("check", ["check", "--junit"]), ("status", ["status"]),
                  # speaks too), and `propose`'s listing.
                  ("why.decision", ["why", "print-in-petg"]),
                  ("prefer", ["prefer", "print-in-petg"]), ("propose", ["propose"]),
+                 # Architecture phase 3a: what reads and sources a value, a derived
+                 # value's block, and what a claim rests on (`round` has a world of
+                 # its own, `round_world`, so its paragraph holds a flip).
+                 ("why.load_n", ["why", "load_n"]), ("why.C1", ["why", "C1"]),
+                 ("why.deflection", ["why", "deflection"]),
                  ("site.init", ["site", "init"]), ("site.build", ["site", "build"]),
                  # P2.5b (critique 11 of its design): the milestone list, the
                  # boundary's dry run and the milestone's report are channels too.
@@ -311,6 +316,28 @@ def bracket_world() -> World:
                                       migrated=True)
         _run_world("bracket", root, _BRACKET_RUNS, _FILES)
     return _WORLDS["bracket"]
+
+
+def round_world() -> World:
+    """The bracket after C1's limit moved, and the `round` that names the flip
+    (architecture phase 3a): its one paragraph is a channel — flip words,
+    requirement words, the count line and *ready* as last evaluated."""
+    if "round" not in _WORLDS:
+        root = _projects.bracket_copy(os.path.join(_tmp("nopekit-vocab-round-"), "bracket"),
+                                      migrated=True)
+        path = os.path.join(root, "claims", "C1.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["acceptance"] = dict(data["acceptance"], limit=0.8)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        _run_world("round", root, (("round", ["round"]),))
+    return _WORLDS["round"]
+
+
+#: `why`'s graph lines (architecture phase 3a), scanned beside its gate lines.
+_WHY_GRAPH = ("read by:", "sourced from:", "rests on", "resolves:", "resolved by:",
+              "derived from:", "value ")
 
 
 def empty_world() -> World:
@@ -457,9 +484,12 @@ def vocabulary_problems(worlds: dict[str, World], banned: set[str], masks: list[
                 out += scan(f"{name}.{key}", _markdown_lines(text), banned, masks, reasons)
         for key in [k for k in world.out if k.startswith("why")]:
             gates = [ln for ln in world.out[key].stdout.splitlines() if "(none —" in ln
-                     or ln.strip().startswith("[")]
+                     or ln.strip().startswith("[") or ln.strip().startswith(_WHY_GRAPH)]
             if gates:
                 out += scan(f"{name}.{key}", gates, banned, masks)
+        if "round" in world.out:
+            out += scan(f"{name}.round", _lines(world.out["round"].stdout),
+                        set(banned) | set(wider), masks, reasons)
         if "junit" in world.files:
             out += scan(f"{name}.junit", _junit_messages(world.files["junit"]), banned, masks,
                         reasons)
@@ -504,7 +534,7 @@ class StatusLinesSpeakTheTable(unittest.TestCase):
     def worlds(cls) -> dict[str, World]:
         return {"louder": _louder(), "refused": _refused(), "bracket": bracket_world(),
                 "empty": empty_world(), "unevaluated": unevaluated_world(),
-                "invalidated": _invalidated()}
+                "invalidated": _invalidated(), "round": round_world()}
 
     def _lists(self):
         text = _glossary()
@@ -539,6 +569,27 @@ class StatusLinesSpeakTheTable(unittest.TestCase):
                     {"p": World("", {"export.dry": _Proc(text)}, {})}, banned, masks, reasons,
                     wider)
                 self.assertTrue(found, planted)
+
+    def test_round_and_the_graph_lines_are_scanned(self):
+        """Architecture phase 3a: `round`'s paragraph — with a flip in it — and
+        `why`'s graph lines reach the scan, and a Never-say planted in either is
+        caught. What slipped through (review of phase 3a): neither was a run of
+        any world."""
+        banned, masks, reasons = self._lists()
+        wider = never_says(_glossary(), 4) | never_says(_glossary(), 5)
+        said = round_world().out["round"].stdout
+        self.assertIn("C1 failing -> checked", said)
+        world = bracket_world()
+        self.assertIn("read by: bracket.deflection", world.out["why.load_n"].stdout)
+        self.assertIn("rests on: C6", world.out["why.C1"].stdout)
+        word = sorted(banned)[0]
+        for key, text in (("round", said + f"C2 checked -> {word}\n"),
+                          ("why.load_n", world.out["why.load_n"].stdout
+                           + f"  read by: a {word} evaluator\n")):
+            with self.subTest(key):
+                found = vocabulary_problems({"p": World("", {key: _Proc(text)}, {})},
+                                            banned, masks, reasons, wider)
+                self.assertTrue(found, key)
 
     def test_every_sentence_branch_is_reached(self):
         """The worlds reach each readiness branch: not ready, never evaluated,

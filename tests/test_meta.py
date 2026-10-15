@@ -115,7 +115,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # re-keys only the gates that read what moved.
         "test_mechanism.TheMechanismMovesNoKey",
         # Architecture phase 2: basis is never in rho.
-        "test_basis.ABasisIsNeverAKey"],
+        "test_basis.ABasisIsNeverAKey",
+        # Architecture phase 3a: a round record the records, the cache or the
+        # design moved past is never shown as current.
+        "test_round.ABehindRoundRecordSaysSo"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
@@ -124,7 +127,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_records.RequirementsAreRecords",
         # Architecture phase 2: preferences are records, and `propose` writes
         # only the inputs its proposer produced.
-        "test_records.PreferencesAreRecords", "test_proposers.ProposeWritesOnlyItsInputs"],
+        "test_records.PreferencesAreRecords", "test_proposers.ProposeWritesOnlyItsInputs",
+        # Architecture phase 3a: only `round` writes the round record, and
+        # nothing reads it for truth.
+        "test_round.OnlyRoundWritesTheRoundRecord",
+        "test_round.NothingReadsTheRoundRecordForTruth"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -186,7 +193,12 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # exit code, and every reader says one condition's state alike.
          "test_returns.AConditionReadsOnlyACheckedClaim",
          "test_returns.MayReturnNeverMovesTheExitCode",
-         "test_returns.EveryReaderAgreesOnAReturnCondition"],
+         "test_returns.EveryReaderAgreesOnAReturnCondition",
+         # Architecture phase 3a: the round record says what the composition
+         # says, a forged one moves nothing, and no graph edge moves a status.
+         "test_round.TheRoundRecordSaysWhatTheCompositionSays",
+         "test_round.NothingReadsTheRoundRecordForTruth",
+         "test_graph.AnEdgeChangesNoStatus"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and
@@ -778,7 +790,11 @@ _CLOCK_ATTRS = frozenset({
 #: The spine modules that must never read the clock: they shape a verdict, a
 #: record or a digest, and a timestamp read inside one makes two identical runs
 #: write different bytes. The first three exist today; the others arrive in P1.2.
-CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs")
+CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs",
+                     # Architecture phase 3a: the graph and the round record are
+                     # clock-free by construction — their bytes must not move
+                     # with the time a command ran.
+                     "graph", "rounds")
 
 
 def _clock_findings(source: str, filename: str = "<planted>") -> list[str]:

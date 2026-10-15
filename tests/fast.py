@@ -13,7 +13,26 @@ least one violation test of every invariant runs every iteration, and a break
 that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
-The budget is 90 s as ONE process on an otherwise idle machine. Architecture
+The budget is 90 s as ONE process on an otherwise idle machine. The review of
+phase 3a added ~1.3 s (the evaluator edit that reads behind, the hand-bumped schema,
+the forgery read back through five more readers, the doctor row) and paid ~1.3 s:
+the doctor row to the gate, and the graph's and the round record's bytes on another
+path to the full suite. Measured as two interleaved pairs on 2026-10-15 under a load
+of 1.9-2.6 (not idle): 109.0 s and 92.5 s wall (68.8-68.9 s user) for its 647 tests,
+against 96.2 s and 92.5 s (68.1-68.3 s user) for 6440bad's 647 — flat on wall in the
+quieter pair, +0.6 s user: at the line, so the next change that adds pays first.
+Architecture phase 3a (the graph and the round record) paid back what it added and measured flat,
+within the machine's noise, as two interleaved pairs in one session on 2026-10-14
+(load average 0.8-1.4): 92.0 s and 92.6 s wall (68.0-68.3 s user) for its 647 tests,
+against 92.5 s and 92.3 s (67.5-67.7 s user) for c26fcd5's 767 — at the line, so the
+next change that adds pays first. What it added (~3.8 s): its invariant classes'
+in-process rows (`round` beside every other command, the source scan with its planted
+reader, a resealed forgery, the record against the composition, the behind states,
+an edge moving no status), the graph's in-process neighbours, and `round`'s watched
+run in the records sweep (~1.3 s). What it paid, measured first at +5 s wall and then
+in three steps: test_vocabulary.QualificationWordsComeFromOneTable, test_freshness,
+test_readers and test_trace to the full suite — none an invariant class, each named
+where it was. Architecture
 phase 2 (decisions keep their losers) paid back what it added and measured flat,
 within the machine's noise, as two rounds of two interleaved pairs in one session on
 2026-10-14 (load average 0.9-2.2): 91.3 s and 98.3 s, then 94.1 s and 94.4 s wall
@@ -315,10 +334,11 @@ FAST: list[str] = [
     # and StatusWordsAreTheGlossarys holds the words themselves here.)
     "test_vocabulary.StatusWordsAreTheGlossarys",
     "test_vocabulary.ReadyIsThePredicate",
-    # P2.3's words (V4): patching `HUMAN["qualification"]` moves every channel
-    # that shows a qualification, and none says a §2 Never-say. One bracket copy,
-    # every command twice, in process. ~3 s.
-    "test_vocabulary.QualificationWordsComeFromOneTable",
+    # (Architecture phase 3a's pay-back: QualificationWordsComeFromOneTable —
+    # patching `HUMAN["qualification"]` moves every channel that shows a
+    # qualification, one bracket copy, every command twice, ~3 s — is left to the
+    # full suite: no invariant class reads it, and an iteration touching a
+    # qualification word or its routing runs test_vocabulary whole.)
     # (P2.5a's pay-back: test_json_keys — the kept JSON keys, read through the
     # louder project's commands, ~7 s — is left to the full suite: no invariant
     # reads it; an iteration touching a JSON channel runs it whole.)
@@ -362,21 +382,28 @@ FAST: list[str] = [
     "test_mutation.MutationIsSealed.test_the_oracle_agrees_with_the_ground_truth",
     "test_mutation.MutationIsSealed.test_the_oracle_reads_a_gate_as_run_gate_does",
     "test_mutation.MutationIsSealed.test_the_tripwire_refuses_what_it_forbids",
-    # Freshness, admission state and the one resolver: what any reader may call
-    # current. Invariants 7 and 9 are read through it. 2.1 s.
-    "test_freshness",
-    # The report and the site keep no staleness rule of their own. 1.7 s.
-    "test_readers",
-    # What a gate read is what its verdict is keyed by: invariant 7 is exactly
-    # as honest as this record. 1.5 s.
-    "test_trace",
+    # (Architecture phase 3a's pay-back: test_freshness — freshness, admission
+    # state and the one resolver, 2.1 s — is left to the full suite: no invariant
+    # class reads it, invariants 7 and 9 are held here by their own classes, which
+    # read it through `resolve`, and an iteration touching `verdicts.freshness`,
+    # `admission_state` or `resolve` runs it whole.)
+    # (Architecture phase 3a's pay-back, continued: test_readers — the report and
+    # the site keep no staleness rule of their own, 1.7 s — is left to the full
+    # suite: no invariant class reads it, the louder and status-table rows here
+    # render through the same resolver, and an iteration touching a renderer's
+    # staleness runs it whole.)
+    # (Architecture phase 3a's pay-back, last: test_trace — what a gate read is
+    # what its verdict is keyed by, 1.5 s — is left to the full suite: no
+    # invariant class reads it, invariant 7's classes here key through it, and an
+    # iteration touching `ParamTrace`, `LedgerView` or the audit hook runs it whole.)
     # Digests from bytes; the stat cache never serves a stale one (S-22). 0.1 s.
     "test_digests",
     # (The recording loader — code a gate or fixture loads is keyed by its bytes,
     # test_codeload, 0.4 s — is left to the full suite by architecture phase 2's
-    # pay-back: test_trace above holds the record it keys by, and an iteration
-    # touching `modelio`'s loader runs test_codeload whole, as the escalation
-    # rule below says for the recording loader.)
+    # pay-back: test_trace held the record it keys by until phase 3a left it to
+    # the full suite too, and an iteration touching `modelio`'s loader runs
+    # test_codeload and test_trace whole, as the escalation rule below says for
+    # the recording loader.)
     # Every JSON file the spine writes is JSON (S-47). 0.1 s.
     "test_strict_json",
 
@@ -583,6 +610,10 @@ FAST: list[str] = [
     # this tier green, and IndexNeverDisagreesWithRecords cannot see it, because
     # the index is rebuilt after the command and agrees. 11-16 s.
     "test_records.NoCommandWritesARecord.test_no_command_writes_a_record_on_a_migrated_project",
+    # Architecture phase 3a: `round`, watched, writes what `check` writes and
+    # exactly the round record of the state after it, and nothing the second
+    # time. ~1.3 s.
+    "test_records.NoCommandWritesARecord.test_round_writes_what_check_writes_and_its_round_record",
     # The strict reader (S-40: a typo'd key erased from disk by a command that
     # reads like a query), and a legacy ledger carrying a forged PASS. <0.3 s.
     "test_records.StrictReader",
@@ -778,6 +809,38 @@ FAST: list[str] = [
     "test_proposers.AProposerIsNeverAnEvaluator",
     "test_proposers.ProposeWritesOnlyItsInputs.test_in_process_a_refusal_writes_nothing",
     "test_records.PreferencesAreRecords",
+    # Architecture phase 3a (invariants 7, 8 and 12): only `round` writes the
+    # round record, in process over every other command (~0.6 s); nothing reads it
+    # for truth — the source scan, its planted reader and a resealed forgery in
+    # process, read back through `report`, `claim list`, `why`, `gap` and the
+    # page (~1.3 s); it says what the composition says; it says when the
+    # records, the cache, the design or the resolution moved past it, and a
+    # hand-bumped schema is an edit (~1.2 s); and no graph edge moves a status.
+    # `round`'s watched run in the records sweep is in the NoCommandWritesARecord
+    # entries above (~1.3 s). Its review added ~1 s here and paid it below.
+    "test_round.OnlyRoundWritesTheRoundRecord",
+    "test_round.NothingReadsTheRoundRecordForTruth.test_the_spine_reads_it_nowhere",
+    "test_round.NothingReadsTheRoundRecordForTruth.test_a_planted_reader_is_caught",
+    "test_round.NothingReadsTheRoundRecordForTruth.test_a_forged_record_moves_nothing",
+    "test_round.TheRoundRecordSaysWhatTheCompositionSays",
+    "test_round.ABehindRoundRecordSaysSo.test_status_says_current_then_what_moved",
+    "test_round.ABehindRoundRecordSaysSo.test_each_input_is_seen",
+    "test_round.ABehindRoundRecordSaysSo.test_a_state_blind_to_the_cache_is_caught",
+    "test_round.ABehindRoundRecordSaysSo.test_edited_unreadable_and_newer",
+    "test_round.ABehindRoundRecordSaysSo.test_an_evaluator_edit_reads_behind",
+    "test_round.TheRoundRecordIsByteStable.test_it_is_tracked_in_an_init_project",
+    "test_graph.AnEdgeChangesNoStatus",
+    # The graph's neighbours, in process (<0.3 s together): its bytes under a
+    # reversed listing and other words; the observed view agreeing with it; and
+    # the pointers it refuses to follow. The review of phase 3a's pay-back
+    # (~0.8 s, neither an invariant class): its bytes on another path, and the
+    # round record's on two paths and under other words, to the full suite —
+    # the committed record's currency (test_bracket_cache) and the two hash
+    # seeds' row hold byte stability there.
+    "test_graph.TheGraphIsDeterministic.test_listing_order_moves_nothing",
+    "test_graph.TheGraphIsDeterministic.test_words_move_nothing_and_no_statement_is_written",
+    "test_graph.ObservedViewAgreesWithTheGraph",
+    "test_graph.PointersAreChecked",
 ]
 
 
@@ -785,6 +848,25 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Architecture phase 3a's subprocess halves: `round` with a site (what `site
+    # build` writes is held by the records sweep's site rows), the index after a
+    # round (every writer's index row is the full suite's), the louder project's
+    # two rounds and the forged cache's round paragraph (each a world of commands
+    # run once; `round_paragraph`'s words are held in process by test_round), and
+    # `check` and `export --dry-run` over a forged round record (the in-process
+    # forgery row above holds the same readers). An iteration touching
+    # `cmd_round`, `rounds.py` or `graph.py` runs test_round, test_graph and
+    # test_records whole.
+    "test_records.NoCommandWritesARecord.test_round_with_a_site_writes_no_record",
+    "test_records.IndexNeverDisagreesWithRecords.test_round_leaves_the_index_agreeing",
+    "test_louder.ErrorIsLouder.test_round",
+    "test_export.EveryCacheReaderSaysAsLastEvaluated.test_the_round_paragraph",
+    "test_round.NothingReadsTheRoundRecordForTruth.test_check_and_export_ignore_a_forged_record",
+    # The review of phase 3a's `doctor` row (~0.5 s, three in-process doctors):
+    # it prints `_round_state_line`, the sentence `status`'s line in the rows
+    # above holds over the same `_round_state`; an iteration touching
+    # `_doctor_round_row` runs test_round whole.
+    "test_round.ABehindRoundRecordSaysSo.test_doctor_says_what_status_says",
     # Architecture phase 2's end-to-end halves: `prefer` in a real pty and under
     # the real environment's markers (pty ~1 s each; the in-process rows above
     # hold the rule over every marker), a committed tamper walking git for the
@@ -1001,13 +1083,15 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_staleness.StaleIsNotCurrent.test_cli_a_forced_cheap_run_never_lays_its_pass_over_the_costlier_fail",
     "test_staleness.StaleIsNotCurrent.test_cli_a_pass_at_other_inputs_never_clears_a_crash_here",
     # Every command run on a LEGACY project, checked for a written record, and
-    # the legacy-project `check` and shim (~12 s). The property, its planted
+    # the legacy-project `check`, `round` (review of phase 3a, ~4 s) and shim
+    # (~12 s). The property, its planted
     # violator and the migrated-project sweep are in FAST; these add the
     # one-time migration's carve-out, which only a change to a command's write
     # path or to the migration can break: such an iteration runs test_records
     # whole (module docstring).
     "test_records.NoCommandWritesARecord.test_no_command_writes_a_record_on_a_legacy_project",
     "test_records.NoCommandWritesARecord.test_check_on_a_legacy_project_writes_only_the_migration",
+    "test_records.NoCommandWritesARecord.test_round_on_a_legacy_project_writes_only_the_migration",
     "test_records.NoCommandWritesARecord.test_a_shim_on_a_legacy_project_writes_the_migration_and_its_record",
     # P2.5b's pay-back (~2 s): the index arriving with that one-time migration,
     # `check` and each shim on a legacy copy — the same carve-out, the same

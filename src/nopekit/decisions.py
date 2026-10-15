@@ -568,6 +568,26 @@ class _Evidence:
     bases: Mapping[str, str] | None = None
     """`{input id: basis token}` of the proposer that produced each input
     (`packs.proposer_basis`); None reads `undeclared` for any proposer."""
+    graph: Any = None
+    """The typed graph (`graph.build`, architecture phase 3a): with it, `why`
+    says what reads a value, what sources it, and what a claim rests on,
+    resolves or is resolved by; None prints none of those lines."""
+    composed: Mapping[str, Any] | None = None
+    """The caller's compositions, for the status word beside an assumption."""
+    entry: str = ""
+    """The model's entry file, named where a derived value comes from."""
+
+    def word(self, ledger: Ledger, cid: str) -> str:
+        """`cid`'s status word, from the caller's compositions."""
+        from . import claims as claim_logic, report    # readers' modules: not at import
+        composed = self.composed
+        if composed is None:
+            composed = claim_logic.compositions(ledger)
+            object.__setattr__(self, "composed", composed)
+        found = composed.get(cid)
+        if found is None:
+            return report.HUMAN["round"]["item_missing"].format(id=cid)
+        return report.status_word(found.status, errored=found.errored)
 
     def row(self, ledger: Ledger, key: tuple) -> Any:
         rows = self.rows
@@ -687,6 +707,14 @@ def _grounding_lines(ledger: Ledger, artifact_ids: Sequence[str], names: set[str
     lines: list[str] = []
     for aid in artifact_ids:
         artifact = ledger.artifact(aid)
+        assumed = ledger.claim(aid) if artifact is None else None
+        if assumed is not None and assumed.kind == ClaimKind.ASSUMPTION:
+            # Architecture phase 3a (SPEC 19): an assumption's id in a value's
+            # grounded_by — the value IS that assumption. Never MISSING: the
+            # claim exists, and the graph draws it as the value's source.
+            lines += _wrap(f"- {aid}  [assumption]  {_one_line(assumed.statement)}",
+                           indent="  ", hanging="    ")
+            continue
         if artifact is None:
             # Dangling reference: say so rather than skipping it. A silently
             # dropped id reads as "no grounding", which is a different problem
@@ -915,6 +943,8 @@ def _why_view(ledger: Ledger, view: Any, views: Sequence[Any], evidence: _Eviden
     feeds = [v.name for v in views if view.name in (v.derived_from or ())]
     if feeds:
         out += _wrap("feeds: " + ", ".join(feeds), indent="  ")
+    if evidence.graph is not None:
+        out += _value_graph_lines(ledger, view.read_by, view.sourced_from, evidence)
     if view.source:
         out += _wrap(f"source: {view.source}", indent="  ")
     moved_in = changed_in(ledger, view.name)
@@ -950,6 +980,90 @@ def _why_view(ledger: Ledger, view: Any, views: Sequence[Any], evidence: _Eviden
         "(none — this value has never been revisited)"
     )
 
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _value_graph_lines(ledger: Ledger, read_by: Sequence[str], sourced_from: Sequence[str],
+                       evidence: _Evidence) -> list[str]:
+    """`read by:` and `sourced from:` (architecture phase 3a, SPEC 10, 19): the
+    evaluators whose verdict on record read the value, and the inputs and
+    assumptions that source it, each assumption with its status word."""
+    from . import report                             # a reader's module: not at import
+    said = report.HUMAN["round"]
+    lines = _wrap(said["read_by"].format(ids=", ".join(read_by)) if read_by
+                  else said["read_by_none"], indent="  ", hanging="    ")
+    items = []
+    for nid in sourced_from:
+        kind, _, key = nid.partition(":")
+        if kind == "claim":
+            items.append(said["source_assumption"].format(id=key,
+                                                          word=evidence.word(ledger, key)))
+        else:
+            items.append(said["source_input"].format(id=key))
+    lines += _wrap(said["sourced_from"].format(items=", ".join(items)) if items
+                   else said["sourced_from_none"], indent="  ", hanging="    ")
+    return lines
+
+
+def _claim_graph_lines(ledger: Ledger, claim: Claim, evidence: _Evidence) -> list[str]:
+    """`rests on:`, `resolves:` and `resolved by:` (architecture phase 3a, SPEC
+    19), each only when there is one — from the graph, never recomputed here —
+    and, while derivation is not traced, the caveat that only direct reads
+    were followed."""
+    from . import report                             # a reader's module: not at import
+    built = evidence.graph
+    if built is None:
+        return []
+    said = report.HUMAN["round"]
+    held = {c.id for c in ledger.claims}
+    lines: list[str] = []
+    rests = list(built.rests_on(claim.id))
+    if rests:
+        items = []
+        for aid in rests:
+            via = ", ".join(dict.fromkeys(
+                said["rests_on_via"].format(evaluator=ev, value=up)
+                for ev, _read, up in built.via(claim.id, aid)))
+            items.append(said["rests_on_item"].format(id=aid, word=evidence.word(ledger, aid),
+                                                      via=via))
+        lines += _wrap(said["rests_on"].format(items="; ".join(items)), indent="  ",
+                       hanging="    ")
+    # Untraced, every claim an evaluator settles says that only direct reads
+    # were followed — with or without a rests-on line above. What slipped
+    # through (review of phase 3a): `why C2` printed nothing here, though its
+    # evaluator read a stress derived from the load an assumption sources, so
+    # a Checked claim read as standing on nothing unconfirmed.
+    if built.trace is None and built.into(f"claim:{claim.id}", "settles"):
+        lines += _wrap(said["rests_on_untraced"], indent="  ", hanging="    ")
+    resolves = list(getattr(claim, "resolves", None) or ())
+    if resolves:
+        items = [said["item"].format(id=aid, word=evidence.word(ledger, aid)) if aid in held
+                 else said["item_missing"].format(id=aid) for aid in resolves]
+        lines += _wrap(said["resolves"].format(items=", ".join(items)), indent="  ",
+                       hanging="    ")
+    by = [nid.partition(":")[2] for nid in built.into(f"claim:{claim.id}", "resolves")]
+    if by:
+        items = [said["item"].format(id=cid, word=evidence.word(ledger, cid)) for cid in by]
+        lines += _wrap(said["resolved_by"].format(items=", ".join(items)), indent="  ",
+                       hanging="    ")
+    return lines
+
+
+def _why_value_node(ledger: Ledger, node: Any, evidence: _Evidence) -> str:
+    """A value the graph holds that no parameter view does — a derived value an
+    evaluator read (architecture phase 3a): its value, where it is derived, what
+    reads it and what sources it. Its derivation is the trace's (phase 3b)."""
+    from . import report                             # a reader's module: not at import
+    said = report.HUMAN["round"]
+    name = node.id.partition(":")[2]
+    attrs = node.attrs
+    shown = f" = {_view_value(attrs['value'], '')}" if "value" in attrs else ""
+    out = [said["value_head"].format(name=name, value=shown,
+                                     entry=evidence.entry or "the model")]
+    built = evidence.graph
+    out += _value_graph_lines(ledger, built.read_by(name), built.sourced_from(name), evidence)
+    if built.trace is None:
+        out += _wrap(said["derived_from_untraced"], indent="  ")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -992,6 +1106,7 @@ def _why_claim(ledger: Ledger, claim: Claim, evidence: _Evidence) -> str:
         out += _wrap(said_req["serves"].format(ids=", ".join(
             rid if rid in held else said_req["serves_missing"].format(id=rid)
             for rid in serves)), indent="  ")
+    out += _claim_graph_lines(ledger, claim, evidence)
     if str(getattr(claim, "authority", "") or "").strip():
         out += _wrap(f"authority: {claim.authority}", indent="  ")
     # P2.5b-D19: a measurement's latency, declared until an article an export
@@ -1249,7 +1364,8 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
         verdicts: Iterable[Verdict] | None = None,
         composed: Mapping[str, Any] | None = None,
         rows: Iterable[Any] | None = None,
-        bases: Mapping[str, str] | None = None) -> str:
+        bases: Mapping[str, str] | None = None,
+        graph: Any = None, entry: str = "") -> str:
     """Everything known about one parameter, claim, requirement or decision, as
     one dense plain-text block.
 
@@ -1281,7 +1397,10 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     Resolution order: exact param name, exact claim id, exact requirement id
     (SPEC decision 12), exact decision id (SPEC 14), then the same four
     case-insensitively, then a name the decision log mentions but no record
-    holds. `rows` are the caller's `claims.rejection_rows` (on the view it
+    holds — with `graph` (architecture phase 3a), a value the graph holds that
+    no parameter view does is found by its exact name after the four, and each
+    parameter and claim gains its graph lines. `rows` are the caller's
+    `claims.rejection_rows` (on the view it
     judged) and `bases` each input's proposer basis; with none, the rows are
     composed from `claims.compositions(ledger)`. A param and a claim sharing a
     name is pathological; the param wins and the claim is still findable by
@@ -1315,7 +1434,7 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
                          verdicts=_first_by_gate(verdicts),
                          rows=None if rows is None else {(r.decision, r.index): r
                                                          for r in rows},
-                         bases=bases)
+                         bases=bases, graph=graph, composed=composed, entry=entry)
     views = _as_views(view)
 
     def param_named(match) -> str | None:
@@ -1338,6 +1457,11 @@ def why(ledger: Ledger, name: str, *, view: Any = None,
     decision = next((d for d in ledger.decisions if d.id == wanted), None)
     if decision is not None:
         return _why_decision(ledger, decision, evidence)
+    # Architecture phase 3a: a value the graph holds that no parameter view does
+    # — a derived value an evaluator read — by its exact name only.
+    node = graph.node(f"value:{wanted}") if graph is not None else None
+    if node is not None:
+        return _why_value_node(ledger, node, evidence)
 
     folded = wanted.casefold()
     text = param_named(lambda candidate: candidate.casefold() == folded)

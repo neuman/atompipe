@@ -61,7 +61,7 @@ import _env
 import _projects
 import _transcript
 from nopekit import claims as claims_mod
-from nopekit import modelio, models, store, util
+from nopekit import cli, modelio, models, rounds, store, util
 from nopekit.models import (
     Acceptance,
     Claim,
@@ -764,6 +764,17 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
     # was edited by hand since the last command — the index is the one file an
     # agent reads first, and a hand edit is how records change (D-06). Each
     # command runs in a fresh process on the enriched bracket (`_migrated_bracket`).
+    def test_round_leaves_the_index_agreeing(self):
+        """(architecture phase 3a) `round` after a hand edit leaves the index
+        agreeing with the records, as every writing command does."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        _env.nopekit(["status"], cwd=project)
+        _hand_edit(project, 0)
+        self.assertNotEqual(store.agree(project), [])
+        proc = _env.nopekit(["round"], cwd=project, identity=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(store.agree(project), [])
+
     def test_every_command_leaves_the_index_agreeing(self):
         """Before each command a record is edited by hand, so the index is behind;
         after it, the index exists and agrees with the records. `doctor`, `init`
@@ -1451,6 +1462,11 @@ def _migrated_bracket(dest: str) -> str:
     _write(os.path.join(project, "preferences", "thickness-stays-7-mm.json"),
            json.dumps({"preferences": [_sealed_preference(_PREFERENCE, "thickness-stays-7-mm",
                                                           "")]}, indent=2) + "\n")
+    # Architecture phase 3a: the bracket's committed round record, so a command
+    # that rewrote it — every command but `round` — is caught (it reads behind
+    # here, which is the point: nothing but `round` may bring it current).
+    _write(os.path.join(project, *rounds.ROUND_REL.split("/")),
+           _read_bytes(os.path.join(_projects.BRACKET, *rounds.ROUND_REL.split("/"))))
     return project
 
 
@@ -1819,8 +1835,35 @@ def _ignored(test: _env.EnvCase, rules: dict[str, bytes],
     return {p for p in proc.stdout.splitlines() if p}
 
 
+def round_record_after(project: str, previous: bytes | None) -> bytes:
+    """The round record of ``project`` as it stands — the record `round` writes
+    after its run: computed in process (`cli._round_inputs`), at the round one
+    past ``previous``'s (1 when there is none or it does not read)."""
+    ledger, registry = cli._load(project), None
+    registry, _ = cli._registry(project, ledger)
+    model, projection, error = cli._projection_safe(project, ledger)
+    view, resolution = cli._resolved(project, ledger, registry, projection, error,
+                                     now=_WHEN, model=model)
+    body, _now = cli._round_inputs(project, ledger, registry, model, projection, view,
+                                   resolution, model_error=error)
+    number = 1
+    if previous is not None:
+        try:
+            number = int(json.loads(previous)["round"]) + 1
+        except (ValueError, KeyError, TypeError):
+            number = 1
+    return rounds.render(rounds.sealed(body, number))
+
+
+#: The one problem a write of the round record outside its licence reads as.
+_ROUND_WRITE = ("write {path} (event {i}): the round record, written by a command other "
+                "than round, or with the bytes it already held, or not the round record of "
+                "the state after the run")
+
+
 def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
-                 carve_out: frozenset = frozenset()) -> list[str]:
+                 carve_out: frozenset = frozenset(),
+                 round_record: bytes | None = None) -> list[str]:
     """Every touch in ``run`` the property does not explain. A path a run writes
     must be
 
@@ -1830,7 +1873,11 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
     * with ``blocks``, a git rule file that now carries the marked block — the
       ensure step, which writes each such file once; or
     * one of ``carve_out``'s ``(op, path)`` touches: the one-time legacy
-      migration's own files, and a shim's own record.
+      migration's own files, and a shim's own record; or
+    * with ``round_record`` (architecture phase 3a: `round`'s run only), ONE
+      write of `.nopekit/round.json` whose bytes moved and are exactly
+      ``round_record`` — the round record of the state after the run, computed
+      by the test. Never a path allowance: any other write of it is named.
 
     A rule file written twice in one run is unexplained whatever it holds."""
     touches = _touches(run)
@@ -1838,6 +1885,15 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
     for i, _op, path in touches:
         first.setdefault(path, i)
     problems: list[str] = []
+    rel = rounds.ROUND_REL
+    if round_record is not None:
+        mine = [(i, op) for i, op, path in touches if path == rel]
+        licensed = (len(mine) == 1 and mine[0][1] == "write"
+                    and run.before.get(rel) != run.after.get(rel)
+                    and run.after.get(rel) == round_record)
+        if not licensed:
+            problems += [_ROUND_WRITE.format(path=rel, i=i) for i, _op in mine]
+        touches = [t for t in touches if t[2] != rel]
     pending: dict[str, tuple[dict[str, bytes], dict[str, bool], list[tuple[int, str, str]]]] = {}
     written: dict[str, int] = {}
     for i, op, path in touches:
@@ -1883,6 +1939,15 @@ def _migration(project: str) -> tuple[store.MigrationPlan, frozenset]:
                            | {("remove", _LEGACY_REL), ("write", _KEPT_REL)})
 
 
+def _round_stamp(project: str) -> tuple | None:
+    """The round record's bytes, mtime and inode, or None when there is none."""
+    path = os.path.join(project, *rounds.ROUND_REL.split("/"))
+    if not os.path.isfile(path):
+        return None
+    st = os.stat(path)
+    return _read_bytes(path), st.st_mtime_ns, st.st_ino
+
+
 class NoCommandWritesARecord(_env.EnvCase):
     """Invariant 8's second half: no command writes a record it was not asked to
     write. The one carve-out is the one-time migration of a legacy ledger, which
@@ -1922,6 +1987,7 @@ class NoCommandWritesARecord(_env.EnvCase):
         for argv, output in _NON_SHIM:
             with self.subTest(argv=argv):
                 before = _records(project)
+                round_before = _round_stamp(project)
                 if watched:
                     run = _watched(self, project, *argv)
                     proc = run.proc
@@ -1930,6 +1996,8 @@ class NoCommandWritesARecord(_env.EnvCase):
                 self._assert_worked(argv, proc, _codes(argv))
                 self.assertEqual(_touched_records(before, _records(project)), [],
                                  f"`nopekit {' '.join(argv)}` wrote a record")
+                self.assertEqual(_round_stamp(project), round_before,
+                                 f"`nopekit {' '.join(argv)}` wrote the round record")
                 self.assertEqual(store.is_legacy(project), legacy,
                                  f"`nopekit {' '.join(argv)}` migrated a project it was "
                                  f"only reading" if legacy else "the project went legacy")
@@ -1989,17 +2057,62 @@ class NoCommandWritesARecord(_env.EnvCase):
         """On a migrated project `check` writes no record and meets the property
         with no exception: the blocks are already there, so it writes none."""
         project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self.assertIsNotNone(_round_stamp(project), "no round record: the row would be vacuous")
         for argv in (("check",), ("check",), ("check", "--force", "--junit"),
                      ("check", "--only", "bracket.deflection"), ("check", "--json")):
             with self.subTest(argv=argv):
                 before = _records(project)
+                round_before = _round_stamp(project)
                 run = _watched(self, project, *argv)
                 self._assert_worked(argv, run.proc)
                 self.assertEqual(_touched_records(before, _records(project)), [],
                                  f"`nopekit {' '.join(argv)}` wrote a record")
+                self.assertEqual(_round_stamp(project), round_before,
+                                 f"`nopekit {' '.join(argv)}` wrote the round record")
                 self.assertEqual(_unexplained(self, run), [])
         self.assertTrue(any(_transcript.ENTRY_PATH.fullmatch(p) for p in _tree(project)),
                         "no check wrote a verdict entry: the property held vacuously")
+
+    # -- round (architecture phase 3a) ---------------------------------------- #
+    def test_round_writes_what_check_writes_and_its_round_record(self):
+        """`round` writes what `check` writes and, when what it holds moved, the
+        round record of the state after the run — once, those bytes exactly —
+        and no record. A second round, with nothing moved, writes no round
+        record at all."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        path = os.path.join(project, "claims", "C1.json")
+        data = json.loads(_read_bytes(path))
+        data["rationale"] = "edited by hand before the round"
+        _write(path, json.dumps(data, indent=3))
+        for n in (1, 2):
+            with self.subTest(round_run=n):
+                before = _records(project)
+                previous = (_round_stamp(project) or (None,))[0]
+                run = _watched(self, project, "round")
+                self._assert_worked(("round",), run.proc, (0,))
+                self.assertEqual(_touched_records(before, _records(project)), [],
+                                 "`nopekit round` wrote a record")
+                after = round_record_after(project, previous)
+                if n == 1:
+                    self.assertNotEqual(run.after.get(rounds.ROUND_REL),
+                                        run.before.get(rounds.ROUND_REL),
+                                        "the first round wrote no round record: vacuous")
+                else:
+                    self.assertFalse([e for e in run.events
+                                      if rounds.ROUND_REL in [p for p in e[1:] if p]],
+                                     "a round with nothing moved touched the round record")
+                self.assertEqual(_unexplained(self, run, round_record=after), [])
+
+    def test_round_with_a_site_writes_no_record(self):
+        """With a site, `round` also writes what `site build` writes — and still
+        no record (`site init` and `site build` are rows of `_NON_SHIM`)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self.assertEqual(_env.nopekit(["site", "init"], cwd=project).returncode, 0)
+        before = _records(project)
+        proc = _env.nopekit(["round"], cwd=project, identity=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("Site built", proc.stdout)
+        self.assertEqual(_touched_records(before, _records(project)), [])
 
     def test_check_on_a_legacy_project_writes_only_the_migration(self):
         """The first `check` migrates: the records it writes are exactly the plan's,
@@ -2039,6 +2152,34 @@ class NoCommandWritesARecord(_env.EnvCase):
                 self.assertEqual(_unexplained(self, second), [],
                                  "the second check wrote what git would track — or a "
                                  "block the first one already wrote")
+
+    def test_round_on_a_legacy_project_writes_only_the_migration(self):
+        """`round` migrates a legacy project as `check` does (invariant 8's
+        carve-out names it): the records it writes are exactly the plan's, byte
+        for byte, the legacy ledger is kept, and every other path is ignored
+        when written, a new entry, a block written once, or the round record of
+        the state after the run. What slipped through (review of phase 3a):
+        every round test ran on a migrated project."""
+        project = _legacy_bracket(os.path.join(self.tmp(), "legacy"))
+        plan, carve_out = _migration(project)
+        self.assertTrue(plan.files)
+        legacy = _read_bytes(os.path.join(project, *_LEGACY_REL.split("/")))
+        before = _records(project)
+        previous = (_round_stamp(project) or (None,))[0]
+        run = _watched(self, project, "round")
+        self._assert_worked(("round",), run.proc, (0,))
+        self.assertFalse(store.is_legacy(project), "round did not migrate")
+        after = _records(project)
+        self.assertEqual(set(_touched_records(before, after)),
+                         set(plan.files) | {_LEGACY_REL, _KEPT_REL},
+                         "round wrote a record beyond the migration's own")
+        for rel, data in plan.files.items():
+            self.assertEqual(after[rel][0], data, f"{rel} is not the plan's bytes")
+        self.assertEqual(after[_KEPT_REL][0], legacy, "the legacy ledger was not kept")
+        self.assertEqual(_unexplained(self, run, blocks=True, carve_out=carve_out,
+                                      round_record=round_record_after(project, previous)),
+                         [])
+        self.assertIsNotNone(_round_stamp(project), "round wrote no round record: vacuous")
 
     # -- the shims on a legacy project --------------------------------------- #
     def test_a_shim_on_a_legacy_project_writes_the_migration_and_its_record(self):
@@ -2099,6 +2240,27 @@ class NoCommandWritesARecord(_env.EnvCase):
         twice = first._replace(events=first.events + [["write", ".gitignore"]])
         self.assertTrue(any(p.startswith(".gitignore: written 2 times")
                             for p in _unexplained(self, twice, blocks=True, carve_out=carve_out)))
+
+        # Architecture phase 3a: the round record, written by a check, rewritten
+        # with the bytes it held, or written with bytes other than the state's.
+        rel = rounds.ROUND_REL
+        by_check = second._replace(events=second.events + [["write", rel]],
+                                   after=dict(second.after, **{rel: b"{}\n"}))
+        self.assertTrue(any(p.startswith(f"write {rel} ") for p in _unexplained(self, by_check)),
+                        "a check that wrote the round record passed")
+        held = second.after.get(rel, b"")
+        same = second._replace(events=second.events + [["write", rel]],
+                               before=dict(second.before, **{rel: held}),
+                               after=dict(second.after, **{rel: held}))
+        self.assertTrue(any(p.startswith(f"write {rel} ")
+                            for p in _unexplained(self, same, round_record=held)),
+                        "a round that rewrote the bytes it held passed")
+        other = same._replace(after=dict(same.after, **{rel: held + b" "}))
+        self.assertTrue(any(p.startswith(f"write {rel} ")
+                            for p in _unexplained(self, other, round_record=held)),
+                        "a round that wrote other bytes than the state's record passed")
+        self.assertEqual(_unexplained(self, other, round_record=held + b" "), [],
+                         "the licensed write itself was refused")
 
         before = _records(project)
         path = os.path.join(project, *_HAND_FORMATTED.split("/"))
