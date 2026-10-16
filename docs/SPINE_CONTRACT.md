@@ -49,6 +49,7 @@ is `cli.py`'s.
 | the trace: which derived values each choice moved at ±10% (architecture phase 3b) | `.nopekit/trace/<k16>.json`, one per traced design, keyed by its instructions, choices and the data its build read, never rewritten | tracked | `model trace` (`derivation.run`); `round` only starts it |
 | amber: each automated claim's evaluators on designs an assumption-sourced choice moved | `.nopekit/trace/<k16>.amber.<s16>.json`, one per evaluation, never rewritten | tracked | `model trace` |
 | a trace's progress, resumable; a background trace's log; its lock | `.nopekit/cache/trace/<k16>/`, `.nopekit/out/trace.log`, `.nopekit/trace.lock` | ignored | `model trace` |
+| a detached live server: its pid, address and URL; the lock it holds for its life; its log (the acceptance run after phase 3b) | `.nopekit/out/serve.json`, `.nopekit/out/serve.lock`, `.nopekit/out/serve.log` | ignored | the server `site serve --detach` starts, which removes its record as it stops; `site serve --stop` removes a stale one |
 
 The index and `last_check.json` are the whole project in two reads (D-06); neither
 is read for truth by any spine code, and the index never holds a status, a coverage
@@ -534,8 +535,8 @@ it mid-commit, leaving `index.lock`). `changed_paths` asks `diff` rather than
 `ls-files --modified`, which names a file whose mtime alone moved, and never
 `status --porcelain`, which prints paths relative to the repository's top level.
 It keeps the trailing `/` with which `ls-files --others` names an untracked nested
-repository, so `rounds.in_round_paths` refuses it: stripped, `generators/cadlib` read
-as a file and a round committed a gitlink (review of phase 6).
+repository, so `rounds.stage_plan` names it and never stages it: stripped,
+`generators/cadlib` read as a file and a round committed a gitlink (review of phase 6).
 
 ### `store.py`  (deps: models, util)
 Persistence: where a project lives on disk. **Never imports `modelio` or `verdicts`**
@@ -3089,11 +3090,12 @@ def round_trace_sentence(trace) -> str       # phase 3b: the background trace's 
 def round_moved(moved) -> str                # "the records, the verdict cache and the design"
 COMMIT_SUBJECT_MAX = 72                      # phase 6: a round commit's subject, git's convention
 def round_commit_sentence(commit) -> str     # phase 6: what `round --commit` did, then the
-                                             #   changed paths it named instead of staging
+                                             #   changed paths it named instead of staging: a
+                                             #   secret's name, over 50 MiB, not a file
 def round_prose_sentence(prose) -> str       # phase 6: board text stamped before the latest
                                              #   results, named; "" when none is behind
-def round_commit_message(number, shape, changes, staged, outside, too_large, earlier,
-                         paragraph, *, round_rel="") -> tuple[str, str]
+def round_commit_message(number, shape, changes, staged, not_files, too_large, secret,
+                         earlier, paragraph, *, round_rel="") -> tuple[str, str]
                                              # phase 6: "round N: <what changed>" (compacted,
                                              #   then cut, past 72) and its body; no trailer
 def round_hook_message(outcome) -> str       # phase 6: the Stop hook's systemMessage
@@ -3432,15 +3434,20 @@ def state(root, computed_now, content=None) -> RoundState   # content: what roun
                                                       #   write now; differing -> behind (RESOLUTION)
 def changes(previous, body, computed_now) -> Changes
 def write(root, body) -> Written                      # only when what it holds moved
-# architecture phase 6: the round's commit — which paths, and whose identity (pure)
-ROUND_DIRS = (*store.RECORD_DIRS, "model", "gates", "selftest", "generators", "site")
-ROUND_NOPEKIT = (".nopekit/project.json", ROUND_REL, ".nopekit/.gitignore",
-                 ".nopekit/verdicts/", ".nopekit/trace/", ".nopekit/packs/")
-ROUND_ROOT_FILES = (".gitignore", ".gitattributes", "README.md")
+# architecture phase 6: the round's commit — which paths, and whose identity (pure).
+# Every file git does not ignore inside the project's directory, since the acceptance
+# run after phase 3b (the closed list ROUND_DIRS, ROUND_NOPEKIT and ROUND_ROOT_FILES is
+# gone: the agent's own bom/bom.json was never committed)
 ROUND_MAX_BYTES = 50 * 1024 * 1024                    # a larger file is named, not staged
-class StagePlan(NamedTuple): staged; outside; too_large   # too_large: ((path, bytes), ...)
-def in_round_paths(rel) -> bool                       # one of the project's own paths
-def stage_plan(root, changed) -> StagePlan            # os.lstat for size; a deletion is staged
+ROUND_SECRET_NAMES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*",
+                      "id_dsa*", "id_ecdsa*", "id_ed25519*", "*credentials*", "*secret*")
+ROUND_NAMED_BY_NOPEKIT = (".nopekit/verdicts/", ".nopekit/trace/")   # never read for a name
+class StagePlan(NamedTuple): staged; not_files; too_large; secret   # too_large: ((path, bytes), ...)
+def secret_name(rel) -> str | None                    # the pattern a part of rel matches, case
+                                                      #   ignored; None under ROUND_NAMED_BY_NOPEKIT
+def stage_plan(root, changed) -> StagePlan            # os.lstat; a deletion is staged whatever
+                                                      #   its name; a directory, a secret's name and
+                                                      #   a file over the cap are named
 def person_of(ident) -> Person | None                 # "Name <email>" split at its last "<"
 def listed(people, ident) -> Person | None            # name equal stripped, email ignoring case
 def last_committed_round(raw) -> int | None           # HEAD's round.json bytes -> its round
@@ -3924,8 +3931,8 @@ def _round_label(root) -> int | None        # the round record's number alone, f
 def cmd_model_trace(args) -> int            # `nopekit model trace`
 # architecture phase 6: the round's commit and the Stop hook
 ROUND_LOCK_WAIT_S = 60.0                    # --hook only: how long it waits for the build lock
-class CommitOutcome(NamedTuple): made; oid; who; why; detail; staged; outside; too_large;
-                                 earlier; subject
+class CommitOutcome(NamedTuple): made; oid; who; why; detail; staged; not_files; too_large;
+                                 secret; earlier; subject
 class RoundOutcome(NamedTuple): not_run; done; content; check; site; view; composed; prose;
                                 commit; trace; summary; trace_state
 def _round_run(root, *, commit, wait_s, now) -> RoundOutcome   # cmd_round's body; never raises
@@ -3942,18 +3949,22 @@ it was — a round record a newer nopekit wrote, no repository, a merge, rebase,
 cherry-pick, revert or bisect in progress, a detached HEAD, no git identity, no
 `people`, an author `people` does not list (`rounds.listed`: name and email), a
 committer it does not list (`vcs.committer_ident`, review of phase 6) — then
-`vcs.changed_paths` split by `rounds.stage_plan` (a directory, such as an untracked
-nested repository, is named, never staged), `vcs.add` of the project's own paths,
-their intersection with `vcs.staged_paths` (an mtime-only change drops out), and
+`vcs.changed_paths` (the project's subtree, ignored files left out) split by
+`rounds.stage_plan` — every file it lists is staged but a directory (an untracked
+nested repository), a file over 50 MiB and a name that looks like a secret, each named
+instead (the acceptance run after phase 3b: the closed list before it left the agent's
+own `bom/bom.json` out of every round) — `vcs.add` of what it stages, their
+intersection with `vcs.staged_paths` (an mtime-only change drops out), and
 `vcs.commit` with `report.round_commit_message`. Nothing changed makes no commit, and
 nothing staged under a repository that ignores the project's file says so
 (`_round_ignored`, why `ignored`) instead of "nothing changed"; a
 commit git refuses leaves the files staged and says so; it never pushes. Its paragraph
 appends `report.round_commit_sentence` and `report.round_prose_sentence`; `--json` adds
-a `commit` object. A round whose check could not run, or whose claims fail, still
-commits: the commit is history, not a quality gate. **`round --hook`** reads the hook's
-JSON on stdin, finds the project from `-C`, its `cwd`, `$CLAUDE_PROJECT_DIR` or the
-process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
+a `commit` object (`staged`, `not_files`, `too_large`, `secret`, `earlier`, beside
+`made`, `oid`, `subject`, `who`, `why`, `detail`). A round whose check could not run,
+or whose claims fail, still commits: the commit is history, not a quality gate.
+**`round --hook`** reads the hook's JSON on stdin, finds the project from `-C`, its
+`cwd`, `$CLAUDE_PROJECT_DIR` or the process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
 Python stream and fd 1) and stderr sent nowhere, rebuilds the index itself
 (`args._index_done`, so `_after` writes nothing after it), and prints one JSON object:
 `{"systemMessage": report.round_hook_message(...)}`, or `{}` outside a project or when
@@ -4007,6 +4018,48 @@ gains warn-only `decisions` and `basis` rows (`_doctor_decision_rows`,
 `_doctor_basis_rows`); `inputs` shows each input's proposer and looked-up basis
 (`_input_bases`); `status`'s packs line names up to eight packs, then how many more
 (`_names`).
+
+**The detached live server** (`site serve --detach`, `--stop`; the acceptance run after
+phase 3b). `--detach` (`_serve_detach`) starts
+`python -m nopekit site serve --detached-server` as a process of its own —
+`start_new_session` (no controlling terminal, its own process group), started in
+nopekit's own directory, stdin `/dev/null`, stdout and stderr appended to
+`SERVE_LOG_REL`, no other descriptor — waits until it records its address (`SERVE_DETACH_WAIT_S`), prints `site.SERVE_READY_LINE` and
+exits 0; never a browser. What slipped through: the agent ran `site serve --watch` as a
+background task, which there lives at most two hours, and under `claude -p` a running one
+keeps the turn from ending. The server holds `SERVE_LOCK_REL` (`flock`, exclusive) for
+its life, writes `SERVE_STATE_REL` once bound (so `-p 0` records the port it got), logs
+only failed requests, stops on SIGTERM between requests (`server.shutdown` from a
+thread: a first build in flight finishes), stops by itself within `SERVE_LEASE_S` once
+its record no longer names it, its lock file is another's or the site is gone
+(`_serve_lease`), and removes its record as it stops. A reader (`_serve_state`:
+`site status`, `doctor`'s `site` row, a second `--detach`) probes the lock without
+taking it for more than an instant and never creates the file: `running` needs the lock held AND
+a live pid in the record that leads its own session (`_session_leader`), so a record
+whose server died — its pid since given to another process — reads `stale` (whatever
+machine it names: a container's host name changes at every start), and `--stop`
+(`_serve_stop`: SIGTERM, then SIGKILL after `SERVE_STOP_WAIT_S`) never signals it. A
+second `--detach` prints the running URL and starts nothing; off POSIX both flags refuse
+with `SERVE_DETACH_UNSUPPORTED`. Here and not in `site.py`: fdm-print's and cad-solid's
+gates import `nopekit.site`, so a code edit there re-keys their verdicts in every
+project.
+```python
+SERVE_DETACH_WAIT_S = 30.0; SERVE_STOP_WAIT_S = 15.0; SERVE_LEASE_S = 2.0
+SERVE_STATE_REL = ".nopekit/out/serve.json"; SERVE_LOCK_REL = ".nopekit/out/serve.lock"
+SERVE_LOG_REL = ".nopekit/out/serve.log"; SERVE_LOCK_WAIT_S = 1.0
+SERVE_DETACH_UNSUPPORTED: str                # the one sentence off POSIX
+class Served(NamedTuple): state; pid; url; watch; started; node   # none | running | starting |
+                                             #   stale | elsewhere | unsupported
+def _serve_state(root) -> Served             # read-only
+def _serve_lock_held(root) -> bool | None    # a shared, non-blocking flock probe
+def _session_leader(pid) -> bool             # os.getsid(pid) == pid; True when not told
+def _hold_serve_lock(root, *, wait_s=SERVE_LOCK_WAIT_S) -> int | None   # the server's own
+def _write_serve_state(root, *, pid, host, port, url, watch, started) -> None
+def _clear_serve_state(root, pid) -> bool    # only the record naming pid (None: any)
+def _serve_lease(root, pid, lock_fd) -> bool
+def _serve_detach(root, args) -> int
+def _serve_stop(root, args) -> int
+```
 
 **Records at the edge** (checkpoint 1.3, spec §3.15). A record is a file, and a
 command writes exactly the one record it was asked to write — never the whole
@@ -4917,7 +4970,8 @@ decision 21). `.nopekit/project.json` gains `people` (`models.Person`, read by
 and the reads `changed_paths`, `staged_paths`, `operation`) under a contract of its
 own; `rounds.py` decides which paths a round stages and whose identity may commit them
 (`ROUND_DIRS`, `ROUND_NOPEKIT`, `ROUND_ROOT_FILES`, `ROUND_MAX_BYTES`, `stage_plan`,
-`listed`); `round` gains `--commit` and `--hook` (`_round_run`, `_round_commit`,
+`listed`; the closed list went in the follow-up after the acceptance run, below);
+`round` gains `--commit` and `--hook` (`_round_run`, `_round_commit`,
 `_round_hook`, and the trace's seam `_round_start_trace`); `init` lists the person and
 starts a repository; `doctor` gains a `people` row; `packs skills` prints the live
 packs' PACK.md and skill files (`packs.skill_files`; `pack validate` refuses a
@@ -4967,6 +5021,24 @@ regenerated at the merge (round 5).
   assumption's springs) and `unseen`, the `unrecorded` source, a scalar station head
   and units an evaluator reported.
 
+## What the follow-up after the acceptance run moved
+
+A sandboxed agent used the plugin for a person's request (`docs/SPEC.md` §8, "Follow-up
+after the acceptance run"). No spine module moved, and `site.py`'s code did not either
+(fdm-print's and cad-solid's gates import it), so no verdict re-keys.
+
+- **`rounds.py`**: a round stages every file git does not ignore inside the project's
+  directory (`stage_plan`), naming instead a directory, a file over `ROUND_MAX_BYTES` and
+  a name in `ROUND_SECRET_NAMES` (`secret_name`); `ROUND_DIRS`, `ROUND_NOPEKIT`,
+  `ROUND_ROOT_FILES` and `in_round_paths` are gone, and `StagePlan` is `staged`,
+  `not_files`, `too_large`, `secret`. **`report.py`**: the paragraph's and the commit
+  body's words for each, and `commit_parts`' `files` for a directory nopekit does not
+  name. **`cli.py`**: `CommitOutcome` and `round --json`'s `commit` carry `not_files`
+  and `secret` where they carried `outside`.
+- **`cli.py`**: `site serve --detach` and `--stop` (`_serve_detach`, `_serve_stop`, the
+  server's lock, record, log and lease); `site status` gains a `live:` line and `--json`
+  a `server` object; `doctor`'s `site` row names a running server.
+
 ## Limits: what the spine cannot see, named
 
 - **`people` guards against surprise, not against the agent (architecture phase 6).**
@@ -4986,9 +5058,23 @@ regenerated at the merge (round 5).
   the round reads "did not finish"; the Stop hook has no terminal to ask from.
 - **A project directory its outer repository ignores reads "nothing to commit"**: git
   lists no change there, and a round cannot tell that from a round that moved nothing.
-- **`changed_paths` sees what git sees.** A file git ignores is never staged and never
-  named; a project that does not ignore its outputs names them as "not staged" on
-  every round that commits.
+- **`changed_paths` sees what git sees, and the project's ignore files decide.** A file
+  git ignores is never staged and never named; one it does not ignore is committed at
+  the next turn's end — an environment (`.venv/`, `node_modules/`), downloads or scratch
+  the agent left unignored among them (`init`'s blocks name none of them; the skill tells
+  the agent to ignore them). The cap and the names are the only other guards.
+- **A secret is known by its name, never by its content.** A credential in a file named
+  otherwise (`config.yaml`, a CSV) is committed like any file; a design file whose name
+  matches (`secret-sauce.md`, a Keynote `.key`) is named, never staged, and the person
+  commits it by hand.
+- **A file listed and gone before the round stages it fails the whole `git add`**
+  (git refuses a pathspec that matches nothing, and the round reads "did not stage"): a
+  process outside nopekit writing temporary files in the project at a turn's end is the
+  one source, since every nopekit writer takes the build lock the round holds.
+- **The detached server's witness is `flock`.** On a network filesystem whose `flock`
+  is emulated or absent the probe cannot tell, and a server on another machine reads
+  `elsewhere` from its record alone. `--stop` signals the server's pid alone, so a
+  `site build` its watch had started finishes as an orphan.
 
 - **The trace sees one point at ±10% (architecture phase 3b).** A nonlinear model is
   seen locally only: a `max()` hides a dependence there (the bracket's

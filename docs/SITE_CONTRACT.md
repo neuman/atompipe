@@ -95,6 +95,9 @@ nopekit site build         # refresh the renderer, run viewgens, resolve the ver
                             # write data/ + assets/; --live marks build.json live
 nopekit site serve [-p]    # python3 -m http.server, no dependencies
 nopekit site serve --watch # ... and rebuild on a change; the page reloads its data
+nopekit site serve --watch --detach   # ... as a process of its own; returns at once
+nopekit site serve --stop  # stop the server --detach started
+nopekit site status        # what is built, how stale, and whether a live server runs
 nopekit site stamp <board> # write as_of into site/content/<board>.md (or --all)
 nopekit site badge         # the Made-with-nopekit block at the bottom of README.md
 nopekit site vendor        # pull three.js local so the site works offline
@@ -1170,6 +1173,28 @@ a failed build writes `ok: false` with the error and the previous `id`. The page
 polls `build.json` every 2 s while it reads `live: true`, and reloads its data when
 `id` moves. **Published**: Pages serves `site/` as committed, or CI builds it; a 404
 or `live: false` stops the polling, so the page needs only static files.
+
+**Detached** (the acceptance run after phase 3b). `nopekit site serve --watch --detach`
+starts the same server as a process of its own and exits 0 once it listens, printing
+the ready line (`serving site at http://…`, `site.SERVE_READY_RE`): a new session, so
+it has no controlling terminal and its own process group, stdin `/dev/null`, its
+output appended to `.nopekit/out/serve.log`, and no other descriptor of the shell that
+started it. It opens no browser. What slipped through: the agent started
+`site serve --watch` as a background task, and there a background task lives at most
+two hours, so the person's page died mid-session; under headless `claude -p` a
+background task that still runs keeps the turn from ending. The server records its
+pid, address and URL in
+`.nopekit/out/serve.json` and holds `.nopekit/out/serve.lock` (`flock`) for its life:
+the lock, never the pid alone, says it runs, so a record whose server died reads stale
+and `--stop` never signals a pid the OS gave to another process. A second `--detach`
+prints the running URL and starts nothing; `nopekit site serve --stop` stops it
+(SIGTERM, between requests); `nopekit site status` prints a `live:` line (and `--json`
+a `server` object) saying whether one runs and where, and `doctor`'s `site` row names a
+running one. It stops by itself within 2 s when its record no longer names it or
+`site/index.html` is gone. What it writes of its own is under the ignored
+`.nopekit/out/`; its rebuilds write what `site build --live` writes. POSIX only (Linux
+and macOS): on Windows `--detach` says so plainly; there, run `site serve --watch` in a
+terminal of its own.
 
 **Rounds** (architecture phase 6, SPEC 24). When the agent's turn ends, the plugin's
 Stop hook runs `nopekit round --hook`: it rebuilds the site when `site/index.html`

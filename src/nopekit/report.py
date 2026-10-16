@@ -1590,16 +1590,23 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
     # was re-run at a boundary.
     "round": MappingProxyType({
         "help": "end a round: a tier-0 check, the site rebuilt when site/ exists, and {path} "
-                "written when anything it records moved; with --commit, a commit of the "
-                "project's own paths as a listed person; never blocks",
+                "written when anything it records moved; with --commit, a commit of every "
+                "file in the project that git does not ignore, as a listed person; never "
+                "blocks",
         # Architecture phase 6 (SPEC 24 with §0.3): the round's commit, the Stop
         # hook's message, the commit message, and doctor's `people` row.
-        "commit_help": "then commit the project's own paths, only when git's identity is one "
-                       "of .nopekit/project.json's people; never pushes",
+        "commit_help": "then commit every file in the project's directory that git does not "
+                       "ignore (one over 50 MiB or named like a secret is named instead), only "
+                       "when git's identity is one of .nopekit/project.json's people; never "
+                       "pushes",
         "hook_help": "Claude Code's Stop hook: read the hook's JSON on stdin, run --commit, "
                      "print one JSON object; always exits 0",
         "committed": " Committed {oid} as {who}: {n} {files}.",
-        "nothing": " Nothing to commit: no file in the project's paths changed.",
+        "nothing": " Nothing to commit: no file in the project's directory changed.",
+        # The acceptance run after phase 3b: nothing staged, and something
+        # named below — "no file changed" beside "not staged: .env" would
+        # contradict itself.
+        "nothing_named": " Nothing to commit but what a round never stages.",
         "no_repository": " Not committed: the project is in no git repository (`git init` "
                          "starts one), or git is not on PATH.",
         "no_identity": " Not committed: git has no user.name and user.email configured here.",
@@ -1624,8 +1631,9 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
                             "changed.",
         "timeout": " Not committed: git commit did not finish in {s} s (a slow commit hook?); "
                    "the round's files are left staged.",
-        "outside": " Not staged, outside the project's paths: {paths}.",
+        "secret": " Not staged, named like a secret: {paths}.",
         "too_large": " Not staged, over 50 MiB: {paths}.",
+        "not_files": " Not staged, not a file: {paths}.",
         "prose_behind": " Board text written before the latest results: {subjects} — read it "
                         "against the page, rewrite it, then `nopekit site stamp <board>`.",
         "paths_more": ", and {k} more",
@@ -1641,13 +1649,15 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "commit_earlier_one": "Round {a} was not committed; this commit holds it too.",
         "commit_earlier_many": "Rounds {a} to {b} were not committed; this commit holds them "
                                "too.",
-        "commit_outside": "Not committed, outside the project's paths: {paths}.",
+        "commit_secret": "Not committed, named like a secret: {paths}.",
         "commit_too_large": "Not committed, over 50 MiB: {paths}.",
+        "commit_not_files": "Not committed, not a file: {paths}.",
         "commit_parts": MappingProxyType({
             "records": "records", "model": "the model", "evaluators": "evaluators",
             "generators": "generators", "verdicts": "verdicts", "site_text": "site text",
             "site": "the site", "trace": "the trace", "packs": "packs",
-            "project": "project files", "round": "the round record"}),
+            "project": "project files", "round": "the round record",
+            "files": "other files"}),
         "commit_changed": "{parts} changed",
         "people_ok": "{n} listed ({names}); git's identity here is listed, so rounds commit",
         "people_none": "none listed — rounds make no commit; the person adds themselves to "
@@ -3035,16 +3045,19 @@ def _sized(items: Sequence[Any]) -> list[str]:
 def round_commit_sentence(commit: Any) -> str:
     """The sentences `round --commit` adds to the paragraph: what the commit
     did (``commit.why``: ``committed``, ``nothing-changed``, or why not), then
-    the changed paths it named instead of staging. ``commit`` is
+    the changed paths it named instead of staging — a name that looks like a
+    secret, a file over the cap, what is not a file. ``commit`` is
     `cli.CommitOutcome`'s shape."""
     said = HUMAN["round"]
     why = getattr(commit, "why", "")
+    named = [(key, list(getattr(commit, key, ()) or ()))
+             for key in ("secret", "too_large", "not_files")]
     if why == "committed":
         n = len(commit.staged)
         text = said["committed"].format(oid=(commit.oid or "")[:7], who=commit.who,
                                         n=n, files=_plural(n, "file"))
     elif why == "nothing-changed":
-        text = said["nothing"]
+        text = said["nothing_named"] if any(paths for _key, paths in named) else said["nothing"]
     elif why == "no-repository":
         text = said["no_repository"]
     elif why == "no-identity":
@@ -3071,10 +3084,10 @@ def round_commit_sentence(commit: Any) -> str:
         text = said["timeout"].format(s=commit.detail)
     else:
         text = said["refused"].format(why=commit.detail or why)
-    if getattr(commit, "outside", ()):
-        text += said["outside"].format(paths=_paths_words(list(commit.outside)))
-    if getattr(commit, "too_large", ()):
-        text += said["too_large"].format(paths=_paths_words(_sized(commit.too_large)))
+    for key, paths in named:
+        if paths:
+            text += said[key].format(paths=_paths_words(_sized(paths) if key == "too_large"
+                                                        else paths))
     return text
 
 
@@ -3092,9 +3105,11 @@ def round_prose_sentence(prose: Iterable[Mapping[str, Any]]) -> str:
 
 
 #: Which `commit_parts` word a staged path falls under, by its first path part
-#: (two parts under `.nopekit/`), in the order the subject names them.
+#: (two parts under `.nopekit/`), in the order the subject names them. `files`
+#: is a directory nopekit does not name (the acceptance run after phase 3b: a
+#: round stages them now — `bom/`, `build/` — and they are not records).
 _PART_ORDER = ("records", "model", "evaluators", "generators", "verdicts", "trace", "packs",
-               "site_text", "site", "round", "project")
+               "site_text", "site", "round", "project", "files")
 
 
 def _commit_part(rel: str, round_rel: str = "") -> str:
@@ -3121,7 +3136,9 @@ def _commit_part(rel: str, round_rel: str = "") -> str:
         return "generators"
     if head == "site":
         return "site_text" if len(parts) > 2 and parts[1] == "content" else "site"
-    return "records"
+    if head in store.RECORD_DIRS:
+        return "records"
+    return "files"
 
 
 def _commit_group(rel: str) -> str:
@@ -3155,8 +3172,8 @@ def _wrap_message(text: str, width: int = COMMIT_SUBJECT_MAX) -> str:
 
 
 def round_commit_message(number: Any, shape: str, changes: Any, staged: Sequence[str],
-                         outside: Sequence[str], too_large: Sequence[Any],
-                         earlier: tuple | None, paragraph: str, *,
+                         not_files: Sequence[str], too_large: Sequence[Any],
+                         secret: Sequence[str], earlier: tuple | None, paragraph: str, *,
                          round_rel: str = "") -> tuple[str, str]:
     """``(subject, body)`` of a round's commit (SPEC 24): ``round N: <what
     changed>`` — the flips and new verdicts when the record was written, ``the
@@ -3164,7 +3181,8 @@ def round_commit_message(number: Any, shape: str, changes: Any, staged: Sequence
     changed (a standing round's later work is still that round, so its number
     is reused); compacted to counts, then cut, past `COMMIT_SUBJECT_MAX`. The
     body: the paragraph the person saw, the files grouped by directory, the
-    earlier rounds this commit also holds, and what it left out. No trailer
+    earlier rounds this commit also holds, and what it left out (a name that
+    looks like a secret, a file over the cap, what is not a file). No trailer
     and no attribution. ``round_rel`` is `rounds.ROUND_REL`, handed in: the
     round record's file name has one home, and only `cli` imports `rounds`."""
     said = HUMAN["round"]
@@ -3206,10 +3224,12 @@ def round_commit_message(number: Any, shape: str, changes: Any, staged: Sequence
         a, b = earlier
         paragraphs.append(said["commit_earlier_one"].format(a=a) if a == b
                           else said["commit_earlier_many"].format(a=a, b=b))
-    if outside:
-        paragraphs.append(said["commit_outside"].format(paths=", ".join(outside)))
+    if secret:
+        paragraphs.append(said["commit_secret"].format(paths=", ".join(secret)))
     if too_large:
         paragraphs.append(said["commit_too_large"].format(paths=", ".join(_sized(too_large))))
+    if not_files:
+        paragraphs.append(said["commit_not_files"].format(paths=", ".join(not_files)))
     body = "\n\n".join(_wrap_message(p) for p in paragraphs if p)
     return subject, body
 

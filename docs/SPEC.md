@@ -478,6 +478,24 @@ graph, the site, the live round) comes before the work that refines it (the trac
 candidates, packs in the world). Phase labels in parentheses are the ones commits
 and section 8 use.
 
+**Done when** (the author's stop rule, 2026-10-15): a fresh agent with no shared
+priors, in the bench's sandbox, using the plugin as a person would install it, (1)
+installs and starts cleanly; (2) given a person's short request, interviews them,
+writes requirements in their words, reaches first light and hands over a live site URL;
+(3) builds a page that tells the story; and (4) commits every round by itself.
+
+**The acceptance run** (2026-10-15, release 1925e98, the author's verbatim drone request,
+a persona playing the person, opus at high effort): (1) met: the plugin loaded both skills
+and ran from `${CLAUDE_PLUGIN_ROOT}`; (2) met: six interview questions before any design,
+ten requirements in the person's words, 23 claims with verdicts, a live URL; (3) met: the
+page named the thing, showed its 3D model, the verdict and a grounding map from the
+requirements to six boards, with prose whose unmatched numbers were marked; (4) met in
+part: three rounds committed themselves, but the round staged only nopekit's own
+directories, so the agent's `bom/` and `build/` never reached git. Fixed after the run
+(the round stages the project's whole directory less what git ignores, secret-looking
+names and files over 50 MiB), with `site serve --detach` for a live site that outlives a
+background task, and the skill's guidance for zones and plainly titled stations.
+
 `examples/bracket` stays the reference project at every phase, its committed cache
 regenerated whenever the spine moves.
 
@@ -1098,14 +1116,15 @@ above stand where these do not change them):
   baked into `state.json`** (`site._UNPUBLISHED_META`): the page is published, and the
   design had `meta` copied whole, which would have put every listed email on Pages.
 - **The staging list is closed** (`rounds.ROUND_DIRS`, `ROUND_NOPEKIT`,
-  `ROUND_ROOT_FILES`): the record directories, `model/`, `gates/`, `selftest/`,
-  `generators/`, `site/`, `.nopekit/project.json`, the round record, `.nopekit/.gitignore`,
-  `.nopekit/verdicts/`, `.nopekit/trace/`, `.nopekit/packs/`, and the root's
-  `.gitignore`, `.gitattributes` and `README.md`. `docs/` and `.vscode/` are out
-  (`launch.json` holds a machine path), so a new project's paragraph names
-  `.vscode/launch.json` as not staged on each round that commits. A file over 50 MiB
-  (`ROUND_MAX_BYTES`) is named, not staged; an untracked nested repository (`name/`) is
-  never staged.
+  `ROUND_ROOT_FILES`; superseded by the follow-up after the acceptance run, below,
+  where a round stages every file git does not ignore): the record directories, `model/`,
+  `gates/`, `selftest/`, `generators/`, `site/`, `.nopekit/project.json`, the round
+  record, `.nopekit/.gitignore`, `.nopekit/verdicts/`, `.nopekit/trace/`,
+  `.nopekit/packs/`, and the root's `.gitignore`, `.gitattributes` and `README.md`.
+  `docs/` and `.vscode/` are out (`launch.json` holds a machine path), so a new
+  project's paragraph names `.vscode/launch.json` as not staged on each round that
+  commits. A file over 50 MiB (`ROUND_MAX_BYTES`) is named, not staged; an untracked
+  nested repository (`name/`) is never staged.
 - **`vcs.changed_paths` asks `git diff`, `diff --cached` and `ls-files --others`**, each
   over `.`: the design's `ls-files --modified --deleted` names a file whose mtime alone
   moved, and a copied project would have listed every such file as "not staged".
@@ -1532,6 +1551,84 @@ joining them:
   unpaired run at load 0.8-2.7: 106.2 s wall, 76.2 s user, 692 tests (`tests/fast.py`).
   The second commit adds ~0.15 s (a counted fail recorded and baked, ~0.1 s warm, and
   the template's token row): 101.5 s wall, 73.8 s user, 694 tests at load 0.2-1.2.
+
+**Follow-up after the acceptance run** (a fresh sandboxed agent used the plugin for a
+person's request; three findings), decided while fixing them:
+
+- **A round stages every file git does not ignore inside the project's directory**
+  (superseding phase 6's closed list). What slipped through: the agent made its own
+  `bom/bom.json`, the parts list its sourcing evaluators read, and the meshes its
+  generator wrote under `build/`, and every round said "Not staged, outside the
+  project's paths: bom/bom.json, …", so the history held verdicts on a parts list it
+  never held. Still the subtree only (`vcs.changed_paths` asks git about `.`), still
+  `git commit --only` with the pathspec list, every refusal as before; the project's
+  ignore files decide what is a source (`init`'s marked blocks keep nopekit's outputs
+  out). Named instead of staged: a directory (an untracked nested repository), a file
+  over 50 MiB, and a name that looks like a secret (`rounds.ROUND_SECRET_NAMES`: `.env`,
+  `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, OpenSSH's four default key names,
+  `*credentials*`, `*secret*`, matched against each part of the path, case ignored,
+  never under `.nopekit/verdicts/` or `.nopekit/trace/`, whose names nopekit makes from
+  evaluator ids and digests: a gate called `cad.key` keeps its verdicts); a deletion is
+  staged whatever its name (it publishes no byte). `StagePlan` and `CommitOutcome` carry
+  `not_files` and `secret` where they carried `outside`, and so does `round --json`'s
+  `commit`; a subject calls a directory nopekit does not name "other files"; nothing
+  staged beside something named reads "Nothing to commit but what a round never stages",
+  never "no file changed". *Rejected:* widening the list (`bom/`, `build/`: the next
+  project's directory has another name); staging only what a record names (no record
+  names the parts list: an evaluator reads it); a content scan for secrets (every
+  changed byte read at every turn's end, and a key in a CSV still missed); `*token*` and
+  `*password*` (design words as often as secrets). Its known risk is in SPINE_CONTRACT's
+  limits: an environment left unignored (`.venv/`, `node_modules/`) is now committed;
+  `init`'s block names none, and the skill tells the agent to ignore scratch, downloads
+  and environments.
+- **`site serve --detach` and `--stop`**: the live site outlives the shell that started
+  it. What slipped through: the agent started `site serve --watch` as a background task,
+  which there lives at most two hours, and under headless `claude -p` a running
+  background task keeps the turn from ending. `--detach` starts the hidden
+  `site serve --detached-server` in a new session (`start_new_session`), stdin
+  `/dev/null`, its output appended to `.nopekit/out/serve.log`, from nopekit's own
+  directory (the background trace's rule), and exits 0 once the server has recorded its
+  pid, address and URL in `.nopekit/out/serve.json`; it prints the ready line and opens
+  no browser (one started from here would hold the caller's descriptors). The server
+  holds `.nopekit/out/serve.lock` (`flock`) for its life, and `running` needs the lock
+  and a live pid that leads its own session, so a stale record (from any host name: a
+  container's changes at every start) never makes `--stop` signal a pid the OS gave to
+  another process. A second `--detach` prints the running URL and starts nothing;
+  `--stop` sends SIGTERM (the server stops between requests; a first build in flight
+  finishes), then SIGKILL after 15 s; `site status` prints a `live:` line and `--json` a
+  `server` object; `doctor`'s `site` row names a running server. The server stops itself
+  within 2 s once its record no longer names it or `site/index.html` is gone (a deleted
+  test project, a `git clean -X`), and logs only failed requests (a live page polls
+  every 2 s). POSIX only; on Windows both flags say so in one sentence. The code is in
+  `cli.py`, not `site.py`: fdm-print's and cad-solid's gates import `nopekit.site` (its
+  `MOVER_SEPARATOR`), so a code edit there re-keys every one of their verdicts in every
+  project (the first draft put it there, and the acceptance project's copy re-ran six
+  evaluators for a live-server helper). *Rejected:* the pid alone as the witness (the OS
+  reuses it, after a reboot at the latest); an HTTP probe of the port (a busy server
+  reads dead, and any listener there reads alive); `nohup … &` in the skill
+  (shell-specific, and it keeps the caller's pipes unless every descriptor is
+  redirected); a double fork (`os.fork` in a process that may run threads).
+- **The skill's map guidance**, in section 3's paragraph on groups, within the line
+  budget: draw the map in `groups/<id>.json` records, then `site build` — a board per
+  thing the person cares about, holding its claims; a zone per part of the thing as the
+  person names it, never every choice in one; a station that gives a shared value its
+  plain title, which is what the map shows. What slipped through: the agent wrote boards
+  only, so every choice drew in one generated zone and every shared value under its raw
+  name. The examples are the bracket's (a whole board record, "Holds the pump", and
+  `"Allowed stress"` for `design_stress`), not the acceptance run's, so the shipped
+  skill carries no prior of that request. Paid for, to 258 of the 260 lines: the rules'
+  basis line (the loop's Basis bullet says it), the blank line between the last two
+  rules, the table's `claim physical` row (the person's block shows it), two reference
+  lines and a shorter URL paragraph.
+  `test_plugin.TheSkillTeachesTheFirstSession` holds the detached start, the map's
+  three kinds and what a round commits, each in its section.
+- **No spine module moved**, and `site.py`'s code did not either: the bracket's cache,
+  round record and trace stand. `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`
+  keeps its name, its invariant 8 row and its place in the fast tier, at its old cost
+  (~0.8 s: the secret names, the plan and the words need no git, and the wording a third
+  round had checked moved into the words row); `test_serve` runs real processes (~9 s)
+  and is the full suite's. One pair at load 0.9-1.3: 121.6 s wall against 123.5 s for
+  a6c5f22 (`tests/fast.py`).
 
 ## 9. Retired
 

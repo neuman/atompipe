@@ -3428,9 +3428,11 @@ runs/
 #: directory of that name anywhere in the project); a block of its own (two
 #: marked blocks in one file, and the second one's markers to keep apart).
 #: Architecture phase 6's review adds `/.vscode/launch.json`: `init` writes it
-#: (`site.ensure_launch`) with this machine's absolute `src` path, so a round
-#: never stages it (`rounds.ROUND_DIRS`), and unignored it was named "not
-#: staged" at the end of every round and `git status` never came clean. A
+#: (`site.ensure_launch`) with this machine's absolute `src` path; unignored, it
+#: was named "not staged" at the end of every round (the closed list left it out)
+#: and `git status` never came clean — and since the acceptance run after phase
+#: 3b, when a round stages every file git does not ignore, this line is what keeps
+#: that path out of every round's commit (`rounds.stage_plan`). A
 #: tracked one (the bracket's) is unaffected. *Rejected:* leaving it out of the
 #: round's not-staged list alone (`git status` still never clean); a
 #: self-ignoring `.vscode/.gitignore` (a second ignore file nobody looks for).

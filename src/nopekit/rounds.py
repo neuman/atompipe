@@ -31,6 +31,7 @@ user's packs are where it is not — SPINE_CONTRACT's limits).
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -393,36 +394,29 @@ def write(root: str, content: Mapping[str, Any]) -> Written:
 # --------------------------------------------------------------------------- #
 # the round's commit (architecture phase 6, SPEC 24 with §0.3)
 # --------------------------------------------------------------------------- #
-# Which paths are the project's own, and whose identity a round may commit as:
-# decided here, pure — no clock, no git. `cli` asks git (`vcs`) and hands the
-# answers in.
-
-#: The project's own directories: what `round --commit` stages, relative to the
-#: project root (SPEC 24). A closed list: anything else that changed is named in
-#: the round's paragraph, never staged. `site/` is staged as its ignore files
-#: allow (`site/data/build.json` never reaches git); `views` is already a record
-#: directory. *Rejected:* `docs/` (the person's own) and `.vscode/`
-#: (`launch.json` holds this machine's absolute `src` path, `site.ensure_launch`):
-#: a round that committed either would publish what the person never chose to.
-ROUND_DIRS: tuple[str, ...] = (*store.RECORD_DIRS, "model", "gates", "selftest",
-                               "generators", "site")
-
-#: The project's own paths under `.nopekit/`: exact files, and directories
-#: ending in `/`. The round record is named through `ROUND_REL` (its file name
-#: has one home). The index, `cache/`, `obs/` and `out/` are outputs the
-#: project's ignore file keeps out; one that is not ignored is still never
-#: staged, because it is not on this list.
-ROUND_NOPEKIT: tuple[str, ...] = (f"{store.NOPEKIT_DIR}/{store.PROJECT_NAME}", ROUND_REL,
-                                  f"{store.NOPEKIT_DIR}/.gitignore",
-                                  f"{store.NOPEKIT_DIR}/{store.VERDICTS_NAME}/",
-                                  f"{store.NOPEKIT_DIR}/trace/",
-                                  f"{store.NOPEKIT_DIR}/{store.PACKS_NAME}/")
-
-#: The project root's own files. `init` writes all three (the marked ignore and
-#: attribute blocks, the badge block at the bottom of the README): leaving them
-#: out would make every first commit miss the ignore files the project depends
-#: on, and `git status` would never be clean.
-ROUND_ROOT_FILES: tuple[str, ...] = (".gitignore", ".gitattributes", "README.md")
+# Which paths a round stages and whose identity may commit them: decided here,
+# pure — no clock, no git. `cli` asks git (`vcs`) and hands the answers in.
+#
+# A round stages every file inside the project's directory that git does not
+# ignore: `vcs.changed_paths` asks git about `.` alone, so the project's subtree
+# and nothing beside it, with git's own ignore rules deciding what is a source
+# (the project's ignore files: `init`'s marked blocks keep nopekit's outputs out
+# — the index, `.nopekit/cache/`, `obs/` and `out/`, the locks, `REPORT.md`, the
+# packages under `out/`, the launch entry — and `site/.gitignore` the page's
+# clock, `data/build.json`). Three kinds are named instead of staged: a directory
+# git listed (an untracked nested repository, a submodule), a file over
+# `ROUND_MAX_BYTES`, and a file whose name looks like a secret
+# (`ROUND_SECRET_NAMES`). What slipped through (the acceptance run after phase
+# 3b): the list was closed — the record directories, `model/`, `gates/`,
+# `selftest/`, `generators/`, `site/`, nopekit's own files under `.nopekit/` and
+# three root files — so the agent's own `bom/bom.json`, the parts list its
+# sourcing evaluators read, and the meshes its generator wrote under `build/`
+# were "not staged, outside the project's paths" at the end of every round, and
+# the history held verdicts on a parts list it never held. *Rejected:* widening
+# the list (`bom/`, `build/`: the next project's directory has another name, and
+# no list nopekit keeps knows a project's layout); staging only what a record
+# names (no record names the parts list: an evaluator reads it); `git add -A` over
+# the subtree (no size or name guard, and a nested repository becomes a gitlink).
 
 #: The largest file a round stages, in bytes; a larger one is named, not staged.
 #: Why 50 MiB: GitHub warns at 50 MB and refuses a push over 100 MB. *Rejected:*
@@ -431,78 +425,121 @@ ROUND_ROOT_FILES: tuple[str, ...] = (".gitignore", ".gitattributes", "README.md"
 #: fails long after the commit, and the person must rewrite history to undo it).
 ROUND_MAX_BYTES = 50 * 1024 * 1024
 
+#: Names a round never stages: `fnmatch` patterns matched against each part of
+#: a changed path (a directory's name too; never under `ROUND_NAMED_BY_NOPEKIT`),
+#: case ignored. A path that matches is named in the round's paragraph instead;
+#: the person commits it by hand when it is not what its name says
+#: (`.env.example` is named too). Each holds a
+#: credential by convention: `.env` and `.env.*` (dotenv files: API keys);
+#: `*.pem` and `*.key` (PEM certificates and private keys); `*.p12` and `*.pfx`
+#: (PKCS #12: a certificate with its private key); `id_rsa*`, `id_dsa*`,
+#: `id_ecdsa*` and `id_ed25519*` (OpenSSH's default key names, and their `.pub`);
+#: `*credentials*` (`credentials.json`, `.aws/credentials`); `*secret*`
+#: (`client_secret.json`, `secrets.yaml`). Names, not contents: a name is what the
+#: person sees in the paragraph and can act on, and a commit, local or not, keeps
+#: what it holds in the history for good. *Rejected:* a content scan (it reads
+#: every changed byte at every turn's end, and still misses a key in a CSV);
+#: `*token*` and `*password*` (each names design files as often as secrets — a
+#: token ring, a password screen's mock-up — and each false match is a file the
+#: person must commit by hand); no list (the round would commit the `.env` an
+#: agent writes to wire a proposer to an API, the turn it wrote it).
+ROUND_SECRET_NAMES: tuple[str, ...] = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx",
+                                       "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*",
+                                       "*credentials*", "*secret*")
+
+#: The subtrees `secret_name` never reads: nopekit names every path in them from
+#: an evaluator's id and digests, so nothing there is a file a person named, and
+#: an evaluator called `cad.key` must not keep its verdicts out of the history.
+ROUND_NAMED_BY_NOPEKIT: tuple[str, ...] = (f"{store.NOPEKIT_DIR}/{store.VERDICTS_NAME}/",
+                                           f"{store.NOPEKIT_DIR}/trace/")
+
 
 class StagePlan(NamedTuple):
-    """What a round stages of what changed: ``staged`` (the project's own paths,
-    deletions included), ``outside`` (every other changed path, named instead)
-    and ``too_large`` (``(path, bytes)`` over `ROUND_MAX_BYTES`). Each sorted."""
+    """What a round stages of what changed: ``staged`` (every changed file
+    inside the project's directory that git does not ignore, deletions
+    included), and what it names instead: ``not_files`` (a directory git
+    listed — an untracked nested repository, a submodule — or a path that
+    cannot be read), ``too_large`` (``(path, bytes)`` over `ROUND_MAX_BYTES`)
+    and ``secret`` (a file whose name looks like a secret, `secret_name`).
+    Each sorted."""
 
     staged: tuple
-    outside: tuple
+    not_files: tuple
     too_large: tuple
+    secret: tuple
 
 
-def in_round_paths(rel: str) -> bool:
-    """Whether ``rel`` (POSIX, relative to the project root) is one of the
-    project's own paths a round may stage. A directory entry (``name/``, an
-    untracked nested repository as git lists it) never is: staging it would add
-    a submodule pointer nobody chose."""
+def secret_name(rel: str) -> str | None:
+    """The first of `ROUND_SECRET_NAMES` that a part of ``rel`` (POSIX,
+    relative to the project root) matches, case ignored, or None — always None
+    under `ROUND_NAMED_BY_NOPEKIT`."""
+    path = str(rel or "").replace("\\", "/")
+    if path.startswith(ROUND_NAMED_BY_NOPEKIT):
+        return None
+    for part in path.split("/"):
+        name = part.casefold()
+        if not name:
+            continue
+        for pattern in ROUND_SECRET_NAMES:
+            if fnmatch.fnmatchcase(name, pattern):
+                return pattern
+    return None
+
+
+def _relative(rel: str) -> str | None:
+    """``rel`` as a POSIX path under the project root, or None when it is not
+    one: empty, absolute, holding a ``.`` or ``..`` part, or a directory entry
+    (``name/``: an untracked nested repository, as git lists it)."""
     path = str(rel or "").replace("\\", "/")
     while path.startswith("./"):
         path = path[2:]
     if not path or path.endswith("/") or path.startswith("/"):
-        return False
-    parts = path.split("/")
-    if any(part in ("", ".", "..") for part in parts):
-        return False
-    if path in ROUND_ROOT_FILES:
-        return True
-    if parts[0] in ROUND_DIRS and len(parts) > 1:
-        return True
-    for entry in ROUND_NOPEKIT:
-        if entry.endswith("/") and path.startswith(entry):
-            return True
-        if path == entry:
-            return True
-    return False
+        return None
+    if any(part in ("", ".", "..") for part in path.split("/")):
+        return None
+    return path
 
 
 def stage_plan(root: str, changed: Iterable[str]) -> StagePlan:
     """Split ``changed`` (paths relative to ``root``, as `vcs.changed_paths`
-    lists them) into what a round stages, what it names instead, and what is
-    too large. A path no longer on disk is a deletion and is staged when it is
-    the project's; a link is staged as a link (its own size); a directory is
-    named, never staged."""
-    staged, outside, too_large = set(), set(), set()
+    lists them: the project's subtree, ignored files left out) into what a round
+    stages and what it names instead. A path no longer on disk is a deletion and
+    is staged whatever its name (a deletion publishes no byte); a link is staged
+    as a link (its own size); a directory is named, never staged; then a name
+    that looks like a secret, then a file over the cap, is named."""
+    staged, not_files, too_large, secret = set(), set(), set(), set()
     for rel in changed:
         rel = str(rel)
-        if not in_round_paths(rel):
-            outside.add(rel)
+        path = _relative(rel)
+        if path is None:
+            not_files.add(rel)
             continue
         try:
-            info = os.lstat(os.path.join(root, *rel.split("/")))
-        except FileNotFoundError:
-            staged.add(rel)
+            info = os.lstat(os.path.join(root, *path.split("/")))
+        except (FileNotFoundError, NotADirectoryError):
+            staged.add(path)
             continue
         except OSError:
-            outside.add(rel)
+            not_files.add(path)
             continue
         if stat.S_ISDIR(info.st_mode):
             # A directory is never a path a round stages, slash or no slash:
             # `git add` of a nested repository (or of a submodule whose HEAD
             # moved) records a 160000 gitlink. What slipped through (review of
-            # architecture phase 6): `vcs.changed_paths` dropped the slash
-            # `in_round_paths` refuses, and `generators/cadlib`, an untracked
-            # clone, was committed as a submodule pointer nobody chose.
-            outside.add(rel if rel.endswith("/") else rel + "/")
+            # architecture phase 6): `vcs.changed_paths` dropped the slash the
+            # path check refuses, and `generators/cadlib`, an untracked clone,
+            # was committed as a submodule pointer nobody chose.
+            not_files.add(path + "/")
             continue
-        size = info.st_size
-        if size > ROUND_MAX_BYTES:
-            too_large.add((rel, int(size)))
-        else:
-            staged.add(rel)
-    return StagePlan(tuple(sorted(staged)), tuple(sorted(outside)),
-                     tuple(sorted(too_large)))
+        if secret_name(path):
+            secret.add(path)
+            continue
+        if info.st_size > ROUND_MAX_BYTES:
+            too_large.add((path, int(info.st_size)))
+            continue
+        staged.add(path)
+    return StagePlan(tuple(sorted(staged)), tuple(sorted(not_files)),
+                     tuple(sorted(too_large)), tuple(sorted(secret)))
 
 
 def person_of(ident: str | None) -> Person | None:
@@ -557,7 +594,9 @@ __all__ = [
     "path_of", "verdicts_digest", "computed_from", "body", "self_digest", "sealed", "render",
     "read",
     "state", "changes", "write",
-    # architecture phase 6: the round's commit
-    "ROUND_DIRS", "ROUND_NOPEKIT", "ROUND_ROOT_FILES", "ROUND_MAX_BYTES", "StagePlan",
-    "in_round_paths", "stage_plan", "person_of", "listed", "last_committed_round",
+    # architecture phase 6: the round's commit (every file git does not ignore
+    # inside the project's directory since the acceptance run after phase 3b)
+    "ROUND_MAX_BYTES", "ROUND_SECRET_NAMES", "ROUND_NAMED_BY_NOPEKIT", "StagePlan",
+    "secret_name", "stage_plan",
+    "person_of", "listed", "last_committed_round",
 ]

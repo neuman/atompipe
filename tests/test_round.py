@@ -1050,18 +1050,35 @@ class _InProcessGit(_env.EnvCase):
 
 
 def commit_problems(files: list[str], prefix: str, ignored: frozenset = frozenset()) -> list[str]:
-    """Every path in a round's commit (``files``, repo-relative) that is not one of
-    the project's own paths inside ``prefix`` (its directory, repo-relative, with
-    a trailing slash), or that git ignores."""
+    """Every path in a round's commit (``files``, repo-relative) that is outside
+    ``prefix`` (the project's directory, repo-relative, with a trailing slash),
+    whose name looks like a secret, or that git ignores (``ignored``, git's own
+    answer)."""
     out = []
     for path in files:
         if not path.startswith(prefix):
             out.append(f"{path}: outside the project's directory")
-        elif not rounds.in_round_paths(path[len(prefix):]):
-            out.append(f"{path}: not one of the project's own paths")
+        elif rounds.secret_name(path[len(prefix):]):
+            out.append(f"{path}: named like a secret")
         if path in ignored:
             out.append(f"{path}: ignored by git")
     return out
+
+
+def _write(root: str, rel: str, text: str) -> str:
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return path
+
+
+#: Files named like secrets, planted inside the project: a dotenv file and one of
+#: its variants, a private key, an SSH key, an OAuth client file and a cloud
+#: credentials file. Named here, not read from `rounds.ROUND_SECRET_NAMES`, so a
+#: pattern dropped there is a file committed here.
+PLANTED_SECRETS = (".env", ".env.local", "keys/deploy.pem", "id_ed25519",
+                   "config/client_secret.json", "aws/credentials")
 
 
 def _record_bytes(root: str) -> dict[str, bytes]:
@@ -1080,13 +1097,18 @@ def _record_bytes(root: str) -> dict[str, bytes]:
 
 
 class TheRoundCommitStagesOnlyTheProjectsPaths(_InProcessGit):
-    """Invariant 8: `round --commit` writes no record, and commits only the
-    project's own paths inside the project's directory — never a person's
-    unrelated work beside it, never what they staged themselves, never pushed.
-    Designed against in phase 6: a hook that ran `git add -A` would commit a
-    person's unrelated work as "round N"."""
+    """Invariant 8: `round --commit` writes no record, and commits every file
+    inside the project's directory that git does not ignore — less a directory,
+    a file over the cap and a name that looks like a secret, each named instead —
+    and never a person's unrelated work beside it, never what they staged
+    themselves, never pushed. Designed against in phase 6: a hook that ran
+    `git add -A` would commit a person's unrelated work as "round N". What
+    slipped through the acceptance run after phase 3b: the staging list was
+    closed, and the agent's own `bom/bom.json`, which its sourcing evaluators
+    read, was "not staged, outside the project's paths" at the end of every
+    round."""
 
-    def test_only_the_projects_paths_inside_its_directory(self):
+    def test_every_file_git_does_not_ignore_inside_its_directory(self):
         repo = self.repo()
         bare = self.tmp()
         self.git(bare, "init", "-q", "--bare")
@@ -1104,9 +1126,18 @@ class TheRoundCommitStagesOnlyTheProjectsPaths(_InProcessGit):
         self.git(repo, "add", "prestaged.txt")
         with open(os.path.join(repo, "stray.txt"), "w", encoding="utf-8") as fh:
             fh.write("untracked\n")
-        # Inside the project: a stray file, a claim edit, a deleted record.
-        with open(os.path.join(project, "notes.txt"), "w", encoding="utf-8") as fh:
-            fh.write("the person's notes\n")
+        # Inside the project: a claim edit, a deleted record, the agent's own
+        # files in directories nopekit never names (the acceptance run's parts
+        # list and a generator's mesh), a note, a scratch file the project's
+        # .gitignore ignores, and files named like secrets.
+        _write(project, "notes.txt", "the person's notes\n")
+        _write(project, "bom/bom.json", '{"lines": []}\n')
+        _write(project, "build/print/frame.stl", "solid frame\nendsolid frame\n")
+        with open(os.path.join(project, ".gitignore"), "a", encoding="utf-8") as fh:
+            fh.write("/scratch/\n")
+        _write(project, "scratch/run.log", "a scratch file\n")
+        for rel in PLANTED_SECRETS:
+            _write(project, rel, "KEY=not-for-git\n")
         _edit_json(os.path.join(project, "claims", "C7.json"), rationale="edited this round")
         os.remove(os.path.join(project, "decisions", "print-in-petg.json"))
         records = _record_bytes(project)
@@ -1116,30 +1147,59 @@ class TheRoundCommitStagesOnlyTheProjectsPaths(_InProcessGit):
         self.assertEqual(code, 0, err)
         self.assertNotEqual(self.head(repo), base, out)
         files = self.committed(repo)
-        self.assertEqual(commit_problems(files, "sub/proj/"), [], files)
-        self.assertIn("sub/proj/claims/C7.json", files)
-        self.assertIn("sub/proj/decisions/print-in-petg.json", files)
-        self.assertNotIn("sub/proj/notes.txt", files)
-        self.assertIn("Not staged, outside the project's paths: notes.txt.", out)
+        ignored = frozenset(self.git(repo, "check-ignore", "--no-index", *files,
+                                     ok=False).split())
+        self.assertEqual(commit_problems(files, "sub/proj/", ignored), [], files)
+        for rel in ("claims/C7.json", "decisions/print-in-petg.json", "notes.txt",
+                    "bom/bom.json", "build/print/frame.stl", ".gitignore"):
+            self.assertIn(f"sub/proj/{rel}", files)
+        self.assertNotIn("sub/proj/scratch/run.log", files)
+        for rel in PLANTED_SECRETS:
+            self.assertNotIn(f"sub/proj/{rel}", files)
+        self.assertIn(" Not staged, named like a secret: .env, .env.local, aws/credentials, "
+                      "and 3 more.", out)
+        self.assertNotIn("outside the project", out)
+        body = " ".join(self.git(repo, "log", "-1", "--format=%B").split())
+        self.assertIn("Not committed, named like a secret: " + ", ".join(sorted(PLANTED_SECRETS))
+                      + ".", body)
         self.assertIn(f"as {IDENT}", out)
         # The person's work is as they left it.
         self.assertEqual(self.cached(repo).split(), ["prestaged.txt"])
         status = self.git(repo, "status", "--porcelain", "--untracked-files=all")
         self.assertIn(" M top.txt", status)
         self.assertIn("?? stray.txt", status)
-        self.assertIn("?? sub/proj/notes.txt", status)
+        self.assertIn("?? sub/proj/.env", status)
         self.assertEqual(_record_bytes(project), records, "the round's commit wrote a record")
         self.assertEqual(self.git(repo, "ls-remote", "origin"), remote, "a round pushed")
-        # Nothing changed: no commit.
+        # Nothing else changed: no commit, and what it never stages is named
+        # without saying that nothing changed.
         head = self.head(repo)
         code, out, err = main(project, "round", "--commit")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.head(repo), head, out)
-        self.assertIn("Nothing to commit", out)
+        self.assertIn(" Nothing to commit but what a round never stages. Not staged, named "
+                      "like a secret: .env,", out)
+
+    def test_nothing_staged_never_reads_as_nothing_changed(self):
+        """The acceptance run after phase 3b: with every file a round stages, a
+        round that stages nothing beside a file it names must not say that no
+        file changed — in process, over `report.round_commit_sentence` alone."""
+        empty = cli._no_commit("nothing-changed")
+        self.assertEqual(report_mod.round_commit_sentence(empty),
+                         " Nothing to commit: no file in the project's directory changed.")
+        for plan, said in (
+                (rounds.StagePlan((), (), (), (".env",)),
+                 " Not staged, named like a secret: .env."),
+                (rounds.StagePlan((), (), (("scan.bin", 60 << 20),), ()),
+                 " Not staged, over 50 MiB: scan.bin (60 MiB)."),
+                (rounds.StagePlan((), ("lib/",), (), ()), " Not staged, not a file: lib/.")):
+            self.assertEqual(
+                report_mod.round_commit_sentence(cli._no_commit("nothing-changed", plan=plan)),
+                " Nothing to commit but what a round never stages." + said)
 
     def test_an_untracked_nested_repository_is_named_never_committed(self):
         """Review of phase 6: `vcs.changed_paths` stripped the `/` git lists an
-        untracked nested repository with, `in_round_paths` refuses only a name
+        untracked nested repository with, the path check refused only a name
         ending in `/`, and `generators/cadlib`, a clone, was committed as a
         160000 gitlink — a submodule pointer nobody chose."""
         repo = self.repo()
@@ -1156,12 +1216,13 @@ class TheRoundCommitStagesOnlyTheProjectsPaths(_InProcessGit):
         # Slash or no slash, a directory is named, never staged.
         for listed in ("generators/cadlib/", "generators/cadlib"):
             plan = rounds.stage_plan(project, [listed])
-            self.assertEqual((plan.staged, plan.outside), ((), ("generators/cadlib/",)), listed)
+            self.assertEqual((plan.staged, plan.not_files), ((), ("generators/cadlib/",)),
+                             listed)
         _edit_json(os.path.join(project, "claims", "C7.json"), rationale="a change to commit")
         code, out, err = main(project, "round", "--commit")
         self.assertEqual(code, 0, err)
         self.assertIn("Committed ", out)
-        self.assertIn("generators/cadlib/", out)
+        self.assertIn(" Not staged, not a file: generators/cadlib/.", out)
         files = self.committed(repo)
         self.assertEqual(commit_problems(files, "sub/proj/"), [], files)
         self.assertNotIn("sub/proj/generators/cadlib", files)
@@ -1170,29 +1231,58 @@ class TheRoundCommitStagesOnlyTheProjectsPaths(_InProcessGit):
 
     def test_the_checker_catches_what_it_forbids(self):
         self.assertEqual(commit_problems(["sub/proj/claims/C1.json",
-                                          "sub/proj/.nopekit/round.json"], "sub/proj/"), [])
+                                          "sub/proj/.nopekit/round.json",
+                                          "sub/proj/bom/bom.json", "sub/proj/notes.txt"],
+                                         "sub/proj/"), [])
         self.assertEqual(commit_problems(["top.txt"], "sub/proj/"),
                          ["top.txt: outside the project's directory"])
-        self.assertEqual(commit_problems(["sub/proj/notes.txt"], "sub/proj/"),
-                         ["sub/proj/notes.txt: not one of the project's own paths"])
-        self.assertEqual(commit_problems(["sub/proj/.nopekit/ledger.json"], "sub/proj/"),
-                         ["sub/proj/.nopekit/ledger.json: not one of the project's own paths"])
+        self.assertEqual(commit_problems(["sub/proj/.env"], "sub/proj/"),
+                         ["sub/proj/.env: named like a secret"])
         self.assertEqual(commit_problems(["sub/proj/site/data/build.json"], "sub/proj/",
                                          frozenset({"sub/proj/site/data/build.json"})),
                          ["sub/proj/site/data/build.json: ignored by git"])
 
-    def test_the_paths_are_a_closed_list(self):
-        for rel in ("claims/C1.json", "requirements/R1.json", "model/bracket.py",
-                    "gates/beam.py", "selftest/known_good.py", "generators/stl.py",
-                    "site/content/strength.md", "views/x.json", ".nopekit/project.json",
-                    rounds.ROUND_REL, ".nopekit/.gitignore", ".nopekit/verdicts/g/e.json",
-                    ".nopekit/trace/t.json", ".nopekit/packs/p/pack.json", ".gitignore",
-                    ".gitattributes", "README.md"):
-            self.assertTrue(rounds.in_round_paths(rel), rel)
-        for rel in ("notes.txt", "docs/plan.md", ".vscode/launch.json", ".nopekit/ledger.json",
-                    ".nopekit/cache/last_check.json", "claims", "nested/", "../x/claims/C1.json",
-                    "out/print/part.stl", "REPORT.md", ""):
-            self.assertFalse(rounds.in_round_paths(rel), rel)
+    def test_names_that_look_like_secrets(self):
+        """The list is small and pinned whole here, so a pattern dropped or
+        added is a red row, never a quiet change in what a turn's end commits."""
+        self.assertEqual(rounds.ROUND_SECRET_NAMES,
+                         (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*",
+                          "id_dsa*", "id_ecdsa*", "id_ed25519*", "*credentials*", "*secret*"))
+        for rel in (*PLANTED_SECRETS, "config/.ENV.production", "tls/server.key",
+                    "certs/bundle.p12", "certs/Bundle.PFX", "id_rsa", "id_rsa.pub",
+                    "ssh/id_dsa", "id_ecdsa.pub", "credentials.json", "Secrets.yaml",
+                    "secrets/api.txt", ".env/lib/site.py"):
+            self.assertIsNotNone(rounds.secret_name(rel), rel)
+        for rel in ("claims/C1.json", "bom/bom.json", "build/print/frame.stl", "README.md",
+                    ".gitignore", rounds.ROUND_REL, "model/keyboard.py", "inputs/env/notes.txt",
+                    "environment.yml", "keys.md", "pem_notes.txt", "ids.csv", "envelope.dxf",
+                    "site/content/strength.md", "",
+                    # nopekit names these from an evaluator's id: a gate called
+                    # `cad.key` keeps its verdicts in the history.
+                    ".nopekit/verdicts/cad.key/0a1b2c3d4e5f6a7b-0a1b2c3d.json",
+                    ".nopekit/trace/secret.json"):
+            self.assertIsNone(rounds.secret_name(rel), rel)
+        self.assertIsNotNone(rounds.secret_name(".nopekit/packs/p/.env"))
+
+    def test_the_plan_names_what_it_never_stages(self):
+        """`rounds.stage_plan` alone, on disk with no git: a deletion is staged
+        whatever its name (it publishes no byte); a directory, a path that leaves
+        the project, a secret's name and a file over the cap are named."""
+        root = self.tmp()
+        for rel, size in (("bom/bom.json", 2), ("build/frame.stl", 64), (".env", 5),
+                          ("keys/deploy.pem", 3), ("inputs/scan.bin", 2048)):
+            _write(root, rel, "x" * size)
+        os.makedirs(os.path.join(root, "generators", "cadlib"))
+        changed = ["bom/bom.json", "build/frame.stl", ".env", "keys/deploy.pem",
+                   "inputs/scan.bin", "generators/cadlib", "generators/lib/", "gone.txt",
+                   ".env.old", "../outside.txt", "/abs.txt"]
+        with mock.patch.object(rounds, "ROUND_MAX_BYTES", 1024):
+            plan = rounds.stage_plan(root, changed)
+        self.assertEqual(plan.staged, (".env.old", "bom/bom.json", "build/frame.stl", "gone.txt"))
+        self.assertEqual(plan.secret, (".env", "keys/deploy.pem"))
+        self.assertEqual(plan.too_large, (("inputs/scan.bin", 2048),))
+        self.assertEqual(plan.not_files, ("../outside.txt", "/abs.txt", "generators/cadlib/",
+                                          "generators/lib/"))
 
 
 class RoundsCommitOnlyAsAListedPerson(_InProcessGit):

@@ -161,18 +161,22 @@ below names:
    `report --write` writes `REPORT.md`, an output git ignores; `round` writes
    what `check` writes, what `site build` writes when `site/index.html` exists, and
    the round record; `round --commit` (the Stop hook's `round --hook`) writes no
-   record: it writes what `round` writes, then commits only the project's own paths
-   inside the project's directory (`rounds.in_round_paths`), naming every other
-   changed path instead of staging it (a directory, an untracked nested repository
-   among them, never), only when `people` lists both its author and its committer,
-   and never pushes (designed against in phase 6: a hook that ran `git add -A` would
-   commit a person's unrelated work as "round N"; in its review, a committer from
-   `GIT_COMMITTER_*` that `people` never named reached a round's commit, and an
-   untracked clone under `generators/` was committed as a gitlink); `init` starts a
-   git repository only where git says positively that the project sits in none (in
-   review, a "dubious ownership" refusal read as "none" and nested one inside an
-   existing repository); `model trace` (phase 3b) writes, under `.nopekit/trace/`, a
-   trace file per design it observed and an amber file per evaluation — each a new
+   record: it writes what `round` writes, then commits every changed file inside the
+   project's directory that git does not ignore, and nothing outside it, naming
+   instead of staging a directory (an untracked nested repository among them, never),
+   a file over 50 MiB and a file whose name looks like a secret
+   (`rounds.ROUND_SECRET_NAMES`), only when `people` lists both its author and its
+   committer, and never pushes (designed against in phase 6: a hook that ran
+   `git add -A` would commit a person's unrelated work as "round N"; in its review, a
+   committer from `GIT_COMMITTER_*` that `people` never named reached a round's commit,
+   and an untracked clone under `generators/` was committed as a gitlink; in the
+   acceptance run after phase 3b, the closed list of nopekit's own paths left the
+   agent's `bom/bom.json`, which its sourcing evaluators read, out of every round);
+   `init` starts a git repository only where git says positively that the project
+   sits in none (in review, a "dubious ownership" refusal read as "none" and nested
+   one inside an existing repository); `model trace` (phase 3b) writes, under
+   `.nopekit/trace/`, a trace file per design it observed and an amber file per
+   evaluation — each a new
    path, written only whole and never rewritten — and its scratch under the ignored
    `.nopekit/cache/trace/`; `round` starts it in the background and writes no trace
    file itself; `site stamp` writes only the `as_of` line of the `site/content/`
@@ -513,8 +517,9 @@ Each fact has one home; everything else that shows it is an output of that home.
   cost), `.nopekit/out/` (scratch and evidence), `REPORT.md` (the readiness report,
   `report --write`), `out/<milestone>/` (the package `export` wrote),
   `.nopekit/cache/trace/` (a trace's resumable scratch), `.nopekit/out/trace.log`
-  (a background trace's log) and `site/data/build.json` (the page's build time and
-  each result's age). The index
+  (a background trace's log), `.nopekit/out/serve.json`, `serve.lock` and `serve.log`
+  (a detached live server's address, the lock it holds for its life, and its log) and
+  `site/data/build.json` (the page's build time and each result's age). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
 - **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at

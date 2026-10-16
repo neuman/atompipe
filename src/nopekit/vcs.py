@@ -654,10 +654,10 @@ def changed_paths(root: str | os.PathLike[str]) -> list[str] | None:
         if names is None:
             return None
         # An untracked nested repository is listed as ``name/``, and that slash
-        # is kept: `rounds.in_round_paths` refuses a name ending in ``/``. What
-        # slipped through (review of architecture phase 6): `_normal` stripped
-        # it, so ``generators/cadlib/`` read as a file, was staged, and a round
-        # committed a 160000 gitlink — a submodule pointer nobody chose.
+        # is kept: `rounds.stage_plan` names a name ending in ``/``, never stages
+        # it. What slipped through (review of architecture phase 6): `_normal`
+        # stripped it, so ``generators/cadlib/`` read as a file, was staged, and a
+        # round committed a 160000 gitlink — a submodule pointer nobody chose.
         found.update(_normal(name) + ("/" if name.endswith("/") and _normal(name) else "")
                      for name in names)
     found.discard("")

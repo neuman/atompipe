@@ -27,7 +27,13 @@ template's strings once per process (test_style.template_strings). Measured once
 for its 692 tests. Its second commit (a recorded result coloured by its token) added
 ~0.15 s: test_site_truth's counted fail, recorded and baked in process (~0.1 s warm),
 and TheBrowserComputesNoTruth's token row; 101.5 s wall (73.8 s user) for 694 tests at
-load 0.2-1.2, unpaired. The review of
+load 0.2-1.2, unpaired. The follow-up after the acceptance run (a round stages every file
+git does not ignore) gave test_round.TheRoundCommitStagesOnlyTheProjectsPaths three
+in-process rows (the secret names, the plan, the words) and the acceptance's files in its
+commit row, and moved the wording a third round had checked into the words row: the class
+runs ~0.8 s, as at a6c5f22. One pair at load 0.9-1.3: 121.6 s wall (89.1 s user) for its
+696 tests against 123.5 s (91.4 s user) for a6c5f22's 694; test_serve's real processes
+are the gate's. The review of
 architecture phase 6 added ~1.2 s in the tier (invariant 8's identity and `init`
 clauses: three in-process identity rows, two `init` rows, and the nested repository
 in the staging class) and paid ~1.2 s by parsing each test file once in

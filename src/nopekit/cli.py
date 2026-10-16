@@ -92,6 +92,9 @@ from .util import (
     NopekitError,
     FileDigests,
     FileLock,
+    _HOST,
+    _pid_alive,
+    atomic_write_json,
     atomic_write_text,
     human_bytes,
     human_duration,
@@ -124,6 +127,22 @@ SERVE_HOST = "127.0.0.1"
 #: `python3 -m http.server`'s own default, because `site serve` IS that server
 #: and a different number would be a gratuitous thing to have to remember.
 SERVE_PORT = 8000
+
+#: How long `site serve --detach` waits for the server it started to record
+#: where it listens. The server binds before its first build, so this is a
+#: process start and an import — about a second; 30 s covers a loaded machine.
+#: *Rejected:* returning before the server listens (the URL printed could be one
+#: nothing ever serves: a port in use is found only by the bind).
+SERVE_DETACH_WAIT_S = 30.0
+
+#: How long `site serve --stop` waits after SIGTERM before SIGKILL. A server
+#: stops between requests, and one in its first build finishes the build first
+#: (a build killed half-way leaves its lock and a temporary file behind).
+SERVE_STOP_WAIT_S = 15.0
+
+#: How often a detached server checks that it still owns its place
+#: (`_serve_lease`); a lost lease stops it within this many seconds.
+SERVE_LEASE_S = 2.0
 
 #: The lock every write-side command takes, for the whole operation. Two
 #: `nopekit check` runs in one project would otherwise interleave their
@@ -2220,9 +2239,10 @@ class CommitOutcome(NamedTuple):
     ``committer-not-listed`` (``who`` is then the committer), ``in-progress``,
     ``detached``, ``newer-record``, ``unlisted``, ``add-failed``, ``refused``
     or ``timeout``; ``detail`` the operation, git's line or the timeout;
-    ``staged`` what the commit holds (or would have); ``outside`` and
-    ``too_large`` what it named instead; ``earlier`` ``(a, b)`` when rounds a to
-    b were never committed and this commit holds them."""
+    ``staged`` what the commit holds (or would have); ``not_files``,
+    ``too_large`` and ``secret`` what it named instead (`rounds.StagePlan`'s);
+    ``earlier`` ``(a, b)`` when rounds a to b were never committed and this
+    commit holds them."""
 
     made: bool
     oid: str | None
@@ -2230,16 +2250,18 @@ class CommitOutcome(NamedTuple):
     why: str
     detail: str
     staged: tuple
-    outside: tuple
+    not_files: tuple
     too_large: tuple
+    secret: tuple
     earlier: tuple | None
     subject: str
 
 
 def _no_commit(why: str, *, who: str | None = None, detail: str = "", staged: tuple = (),
-               outside: tuple = (), too_large: tuple = ()) -> CommitOutcome:
-    return CommitOutcome(False, None, who, why, detail, tuple(staged), tuple(outside),
-                         tuple(too_large), None, "")
+               plan: rounds.StagePlan | None = None) -> CommitOutcome:
+    named = plan or rounds.StagePlan((), (), (), ())
+    return CommitOutcome(False, None, who, why, detail, tuple(staged), named.not_files,
+                         named.too_large, named.secret, None, "")
 
 
 class RoundOutcome(NamedTuple):
@@ -2321,12 +2343,14 @@ def _round_ignored(root: str) -> bool:
 
 def _round_commit(root: str, ledger: Ledger, done: rounds.Written,
                   paragraph: str) -> CommitOutcome:
-    """Commit the round (SPEC 24 with §0.3): only the project's own paths
-    (`rounds.stage_plan`), only when `people` lists both its author and its
-    committer, never pushed.
-    Every refusal before the staging leaves the index as it was; a commit git
-    refuses leaves the round's files staged and says so. A round whose claims
-    fail commits all the same: the commit is history, not a quality gate."""
+    """Commit the round (SPEC 24 with §0.3): every changed file inside the
+    project's directory that git does not ignore, less what `rounds.stage_plan`
+    names instead (a directory, a file over the cap, a name that looks like a
+    secret), only when `people` lists both its author and its committer, never
+    pushed. Every refusal before the staging leaves the index as it was; a
+    commit git refuses leaves the round's files staged and says so. A round
+    whose claims fail commits all the same: the commit is history, not a
+    quality gate."""
     if done.refused == "newer":
         return _no_commit("newer-record")
     if not vcs.is_repo(root):
@@ -2358,21 +2382,18 @@ def _round_commit(root: str, ledger: Ledger, done: rounds.Written,
     plan = rounds.stage_plan(root, changed)
     if not plan.staged:
         if _round_ignored(root):
-            return _no_commit("ignored", who=who, outside=plan.outside,
-                              too_large=plan.too_large)
-        return _no_commit("nothing-changed", who=who, outside=plan.outside,
-                          too_large=plan.too_large)
+            return _no_commit("ignored", who=who, plan=plan)
+        return _no_commit("nothing-changed", who=who, plan=plan)
     added = vcs.add(root, plan.staged)
     if not added.ok:
         return _no_commit("add-failed", who=who, detail=added.why, staged=plan.staged,
-                          outside=plan.outside, too_large=plan.too_large)
+                          plan=plan)
     # A file whose mtime moved and whose bytes did not is staged as nothing and
     # drops out here, so "nothing changed" stays true of a round that moved
     # nothing.
     staged = tuple(sorted(set(vcs.staged_paths(root) or ()) & set(plan.staged)))
     if not staged:
-        return _no_commit("nothing-changed", who=who, outside=plan.outside,
-                          too_large=plan.too_large)
+        return _no_commit("nothing-changed", who=who, plan=plan)
     number = done.round
     earlier = None
     if number is not None:
@@ -2380,16 +2401,16 @@ def _round_commit(root: str, ledger: Ledger, done: rounds.Written,
         if number - last >= 2:
             earlier = (last + 1, number - 1)
     subject, body = report.round_commit_message(
-        number, _round_shape(done), done.changes, staged, plan.outside, plan.too_large,
-        earlier, paragraph, round_rel=rounds.ROUND_REL)
+        number, _round_shape(done), done.changes, staged, plan.not_files, plan.too_large,
+        plan.secret, earlier, paragraph, round_rel=rounds.ROUND_REL)
     made = vcs.commit(root, staged, subject, body)
     if not made.ok:
         why = "timeout" if made.why == "timeout" else "refused"
         detail = str(vcs.VCS_WRITE_TIMEOUT_S) if why == "timeout" else made.why
-        return CommitOutcome(False, None, who, why, detail, staged, plan.outside,
-                             plan.too_large, earlier, subject)
-    return CommitOutcome(True, made.oid, who, "committed", "", staged, plan.outside,
-                         plan.too_large, earlier, subject)
+        return CommitOutcome(False, None, who, why, detail, staged, plan.not_files,
+                             plan.too_large, plan.secret, earlier, subject)
+    return CommitOutcome(True, made.oid, who, "committed", "", staged, plan.not_files,
+                         plan.too_large, plan.secret, earlier, subject)
 
 
 def _round_run(root: str, *, commit: bool, wait_s: float, now: str) -> RoundOutcome:
@@ -2397,7 +2418,7 @@ def _round_run(root: str, *, commit: bool, wait_s: float, now: str) -> RoundOutc
     `check --tier 0` runs it (verdicts recorded, the one-time migration
     included), the site rebuilt when `site/` exists, and `.nopekit/round.json`
     written when anything it records moved — then, with ``commit``, the commit
-    of the project's own paths (`_round_commit`), still under the build lock so
+    of the project's files (`_round_commit`), still under the build lock so
     no writer lands between the staging and the commit; then the trace's seam
     (`_round_start_trace`, phase 3b), outside the lock.
 
@@ -2514,8 +2535,9 @@ def cmd_round(args: argparse.Namespace) -> int:
     crash) exits 1, and under `--hook` not even that. What `round` writes: what
     `check` writes, what `site build` writes when `site/` exists, the round
     record at most once and only when its bytes change, the index (`main`'s
-    `_after`), and with `--commit` one local commit of the project's own paths
-    — never a record, never a push. The trace it starts writes only what
+    `_after`), and with `--commit` one local commit of every file in the
+    project's directory that git does not ignore, less what it names instead —
+    never a record, never a push. The trace it starts writes only what
     `nopekit model trace` writes, in its own process."""
     if getattr(args, "hook", False):
         return _round_hook(args)
@@ -2565,8 +2587,9 @@ def cmd_round(args: argparse.Namespace) -> int:
 def _commit_json(commit: CommitOutcome) -> dict:
     return {"made": commit.made, "oid": commit.oid, "subject": commit.subject,
             "who": commit.who, "why": commit.why, "detail": commit.detail,
-            "staged": list(commit.staged), "outside": list(commit.outside),
+            "staged": list(commit.staged), "not_files": list(commit.not_files),
             "too_large": [{"path": p, "bytes": n} for p, n in commit.too_large],
+            "secret": list(commit.secret),
             "earlier": list(commit.earlier) if commit.earlier else None}
 
 
@@ -7225,6 +7248,200 @@ def cmd_site_build(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# the detached live server (the acceptance run after phase 3b)
+# --------------------------------------------------------------------------- #
+# `nopekit site serve --watch --detach` starts the server as a process of its
+# own: a new session (no controlling terminal, its own process group), stdin
+# from /dev/null and its output to `SERVE_LOG_REL`, so it holds nothing of the
+# shell that started it, and it outlives that shell. What slipped through (the
+# acceptance run after phase 3b): the agent started `site serve --watch` as a
+# background task, and a background task lives at most two hours there — the
+# person's live page died mid-session — while under headless `claude -p` a
+# running background task keeps the turn from ending at all. `_serve_detach`
+# starts it and `_serve_stop` stops it; the rest keeps its state: what runs and
+# where, read by `site status` and `doctor`, which write nothing. Here and not
+# in `site.py`: fdm-print's and cad-solid's gates import `nopekit.site` (its
+# `MOVER_SEPARATOR`), so a code edit there re-keys every one of their verdicts in
+# every project (`verdicts.code_digest`'s `spine_extras`), and a live server
+# moves no verdict.
+
+#: The detached server's record, under the project's ignored `.nopekit/out/`:
+#: its pid, address, URL, whether it watches, when it started and on which
+#: machine. Written by the server itself once its socket is bound (so ``-p 0``
+#: records the port it got), removed by the server as it stops.
+SERVE_STATE_REL = ".nopekit/out/serve.json"
+
+#: The lock the server holds for its whole life (`flock`, exclusive): the
+#: witness that it runs. The kernel drops it when the process ends, however it
+#: ends, so a pid in `SERVE_STATE_REL` counts only while this is held.
+#: *Rejected:* the pid alone (after a reboot, or hours later, the OS hands that
+#: pid to another process: `--stop` would signal a stranger, and a second
+#: `--detach` would print a URL nothing serves); an HTTP probe of the port (a
+#: server busy rebuilding reads dead, and anything listening there reads alive).
+SERVE_LOCK_REL = ".nopekit/out/serve.lock"
+
+#: The server's output: the ready line, every rebuild, every failed request.
+SERVE_LOG_REL = ".nopekit/out/serve.log"
+
+#: How long a starting server tries to take the lock: a reader's probe holds a
+#: shared lock for microseconds, and a start that met one must not read it as a
+#: server already running.
+SERVE_LOCK_WAIT_S = 1.0
+
+#: The sentence for a platform with no `flock` and no new session (Windows).
+SERVE_DETACH_UNSUPPORTED = ("`--detach` is not supported on Windows yet: run `nopekit site "
+                            "serve --watch` in a terminal of its own and leave it open")
+
+
+class Served(NamedTuple):
+    """What `_serve_state` found: ``state`` — ``none`` (no detached server),
+    ``running``, ``starting`` (the lock is held and the record names no live
+    pid yet), ``stale`` (a record whose process is gone), ``elsewhere`` (a
+    record from another machine) or ``unsupported`` (not POSIX); the record's
+    ``pid``, ``url``, ``watch``, ``started`` and ``node`` (the machine)."""
+
+    state: str
+    pid: int | None = None
+    url: str = ""
+    watch: bool = False
+    started: str = ""
+    node: str = ""
+
+
+def _serve_path(root: str, rel_path: str) -> str:
+    return os.path.join(root, *rel_path.split("/"))
+
+
+def _serve_record(root: str) -> dict:
+    try:
+        doc = read_json(_serve_path(root, SERVE_STATE_REL), None)
+    except (NopekitError, OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _serve_lock_held(root: str) -> bool | None:
+    """Whether a process holds the detached server's lock: a shared,
+    non-blocking `flock` probe of an existing lock file, released at once.
+    None when it cannot be known (not POSIX, or the file does not open).
+    Read-only: an absent lock file is ``False``, never created."""
+    if os.name != "posix":
+        return None
+    import fcntl
+    try:
+        fd = os.open(_serve_path(root, SERVE_LOCK_REL), os.O_RDONLY)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return None
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def _session_leader(pid: int) -> bool:
+    """Whether ``pid`` leads its own session, as the detached server always
+    does (`start_new_session`): one more witness that a live pid in the record
+    is the server and not a process the OS gave its number to. True when the
+    OS will not say (macOS may refuse another session's id): the lock decides."""
+    try:
+        return os.getsid(pid) == pid
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+
+def _serve_state(root: str) -> Served:
+    """The detached server for ``root``, read-only (`Served`): ``running``
+    only while the lock is held AND the record names a live pid on this
+    machine that leads its own session. A record whose lock is free is
+    ``stale`` whatever machine it names: a host renamed (a container's, at
+    every start) must not leave a record that reads alive for good."""
+    if os.name != "posix":
+        return Served("unsupported")
+    doc = _serve_record(root)
+    pid = doc.get("pid")
+    pid = pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None
+    found = dict(pid=pid, url=str(doc.get("url") or ""), watch=bool(doc.get("watch")),
+                 started=str(doc.get("started") or ""), node=str(doc.get("node") or ""))
+    if _serve_lock_held(root):
+        if found["node"] and found["node"] != _HOST:
+            return Served("elsewhere", **found)
+        alive = pid is not None and _pid_alive(pid) and _session_leader(pid)
+        return Served("running" if alive and found["url"] else "starting", **found)
+    if doc:
+        return Served("stale", **found)
+    return Served("none")
+
+
+def _hold_serve_lock(root: str, *, wait_s: float = SERVE_LOCK_WAIT_S) -> int | None:
+    """Take the detached server's lock for the life of this process: the
+    file descriptor that holds it (never inherited by a child: Python's are
+    not), or None when another process holds it past ``wait_s``."""
+    import fcntl
+    path = _serve_path(root, SERVE_LOCK_REL)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    deadline = time.monotonic() + max(0.0, float(wait_s))
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(0.02)
+
+
+def _write_serve_state(root: str, *, pid: int, host: str, port: int, url: str, watch: bool,
+                       started: str) -> None:
+    """Write the detached server's record (atomically): what `_serve_state`
+    reads."""
+    atomic_write_json(_serve_path(root, SERVE_STATE_REL),
+                      {"pid": int(pid), "host": host, "port": int(port), "url": url,
+                       "watch": bool(watch), "started": started, "node": _HOST,
+                       "log": SERVE_LOG_REL})
+
+
+def _clear_serve_state(root: str, pid: int | None) -> bool:
+    """Remove the record when it names ``pid`` (any record when ``pid`` is
+    None: a stale one); True when it did."""
+    if pid is not None and _serve_record(root).get("pid") != pid:
+        return False
+    try:
+        os.remove(_serve_path(root, SERVE_STATE_REL))
+    except OSError:
+        return False
+    return True
+
+
+def _serve_lease(root: str, pid: int, lock_fd: int) -> bool:
+    """Whether the running server ``pid`` still owns its place: the record
+    names it, its lock file is the one it holds (same inode: a deleted
+    `.nopekit/out/` and a new server's file are not), and the site is still
+    there. A server whose lease is gone stops itself (`_serve_lease_loop`):
+    what slipped through the first draft — a test's temporary project, deleted
+    with its server running, left a server serving nothing, and a `git clean
+    -X` would leave two servers for one project."""
+    if _serve_record(root).get("pid") != pid or not site.scaffolded(root):
+        return False
+    try:
+        return os.stat(_serve_path(root, SERVE_LOCK_REL)).st_ino == os.fstat(lock_fd).st_ino
+    except OSError:
+        return False
+
+
 def cmd_site_serve(args: argparse.Namespace) -> int:
     """Serve `site/` with the standard library and nothing else.
 
@@ -7244,15 +7461,30 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
 
     Binds loopback by default: the page carries an unreleased design, its
     rejected alternatives and its failing claims.
+
+    **`--detach`** (the acceptance run after phase 3b) starts this same server
+    as a process of its own and returns once it listens (`_serve_detach`);
+    **`--stop`** stops that process (`_serve_stop`). The detached process runs
+    this function with the hidden ``--detached-server``: it holds
+    `SERVE_LOCK_REL` for its life, records where it listens in
+    `SERVE_STATE_REL` once bound, logs only failed requests, stops on
+    SIGTERM between requests, stops by itself when its lease is gone
+    (`_serve_lease`), and removes its record as it stops.
     """
     # Deferred: `http.server` pulls in socketserver, email, html and mimetypes —
     # ~40 ms measured — and every `nopekit check` in an inner loop would pay it
     # to not start a server.
     import errno
     import http.server
+    import threading
     import webbrowser
 
     root = _root(args)
+    if getattr(args, "stop", False):
+        return _serve_stop(root, args)
+    if getattr(args, "detach", False):
+        return _serve_detach(root, args)
+    detached = bool(getattr(args, "detached_server", False))
     site_dir = os.path.join(root, site.SITE_DIR)
     if not site.scaffolded(root):
         raise NopekitError(
@@ -7261,6 +7493,20 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
     built = os.path.isfile(state_path)
     watch = bool(getattr(args, "watch", False))
     interval = max(0.2, float(getattr(args, "interval", 1.0) or 1.0))
+    lock_fd = None
+    if detached:
+        if os.name != "posix":
+            raise NopekitError(SERVE_DETACH_UNSUPPORTED)
+        lock_fd = _hold_serve_lock(root)
+        if lock_fd is None:
+            running = _serve_state(root)
+            raise NopekitError(
+                f"a live site server already runs for this project"
+                f"{' at ' + running.url if running.url else ''} — `nopekit site serve "
+                f"--stop` stops it")
+        # A record that does not name this process is a dead server's: gone
+        # before the bind, so no reader pairs this lock with that pid.
+        _clear_serve_state(root, None)
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         # A class attribute, not an instance one: SimpleHTTPRequestHandler reads
@@ -7282,6 +7528,15 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
             self.send_header("Cache-Control", "no-store, max-age=0")
             super().end_headers()
 
+        def log_request(self, code: Any = "-", size: Any = "-") -> None:
+            # Detached, only a failed request reaches the log: a live page polls
+            # data/build.json every 2 s, and a line per poll grows the log by
+            # megabytes a day that nobody reads.
+            if detached and str(getattr(code, "value", code)).isdigit() \
+                    and int(getattr(code, "value", code)) < 400:
+                return
+            super().log_request(code, size)
+
         def log_message(self, fmt: str, *a: Any) -> None:
             # stderr, so `--json` output and a piped stdout stay clean. Kept
             # rather than silenced: a 404 on an asset is the single most common
@@ -7289,74 +7544,311 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
             _warn(f"  {self.address_string()} {fmt % a}")
 
     try:
-        server = http.server.ThreadingHTTPServer((args.host, int(args.port)), Handler)
-    except OSError as exc:
-        if exc.errno == errno.EADDRINUSE:
-            raise NopekitError(
-                f"port {args.port} on {args.host} is already in use — something else is "
-                f"listening there (another `nopekit site serve`, or any other server). "
-                f"Use `-p <other port>`, or `-p 0` to let the OS pick a free one."
-            ) from exc
-        if exc.errno in (errno.EACCES, errno.EPERM):
-            raise NopekitError(
-                f"not allowed to bind {args.host}:{args.port} — ports below 1024 need "
-                f"root on most systems. Use `-p 8000` or any port above 1024."
-            ) from exc
-        raise NopekitError(
-            f"cannot serve on {args.host}:{args.port}: {exc.strerror or exc}") from exc
-
-    host, port = server.server_address[0], server.server_address[1]
-    # The bound port, not the requested one: `-p 0` means "any free port", and
-    # printing the 0 back would be a URL that goes nowhere.
-    url = f"http://{host}:{port}/"
-
-    if args.json:
-        _dump({"url": url, "host": host, "port": port, "root": root,
-               "serving": rel(site_dir, root), "built": built})
-    else:
-        _say(site.SERVE_READY_LINE.format(served=rel(site_dir, root), url=url))
-        if watch:
-            _say(f"watching {len(site.watch_snapshot(root))} path(s); a change rebuilds site/ "
-                 f"(no evaluator runs: `nopekit check` does that)")
-        elif not built:
-            _say(f"{_tag('warn')} {rel(state_path, root)} does not exist yet — the page "
-                 f"will load with no data. Run `nopekit site build`.")
-        _say("Ctrl-C to stop")
-    stop = None
-    if watch:
-        # SPEC 33: one build before serving, then a daemon thread that rebuilds
-        # on a change. The page polls data/build.json while it reads live.
-        import threading
-        before = site.watch_snapshot(root)
-        ok, error, _moved = _watch_rebuild(root, quiet=True)
-        if not ok:
-            _warn(f"{_tag('warn')} rebuild failed: {error}; the page keeps the last build")
-        stop = threading.Event()
-        threading.Thread(target=_watch_loop, args=(root, interval, stop, before), daemon=True,
-                         name="nopekit-site-watch").start()
-
-    if not args.no_browser:
-        # Safe to open now: the socket is bound and listening from the
-        # constructor, so a request that arrives before `serve_forever` queues
-        # rather than being refused.
         try:
-            webbrowser.open(url)
-        except Exception as exc:        # noqa: BLE001 - a headless box is not an error
-            _warn(f"  could not open a browser ({exc}); open {url} yourself")
+            server = http.server.ThreadingHTTPServer((args.host, int(args.port)), Handler)
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                raise NopekitError(
+                    f"port {args.port} on {args.host} is already in use — something else is "
+                    f"listening there (another `nopekit site serve`, or any other server). "
+                    f"Use `-p <other port>`, or `-p 0` to let the OS pick a free one."
+                ) from exc
+            if exc.errno in (errno.EACCES, errno.EPERM):
+                raise NopekitError(
+                    f"not allowed to bind {args.host}:{args.port} — ports below 1024 need "
+                    f"root on most systems. Use `-p 8000` or any port above 1024."
+                ) from exc
+            raise NopekitError(
+                f"cannot serve on {args.host}:{args.port}: {exc.strerror or exc}") from exc
 
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        # Exit 0: Ctrl-C is how a server is meant to be stopped, and a non-zero
-        # code here would fail every script that starts one and stops it.
-        if not args.json:
-            _say("")
-            _say("stopped")
-    finally:
-        if stop is not None:
+        host, port = server.server_address[0], server.server_address[1]
+        # The bound port, not the requested one: `-p 0` means "any free port", and
+        # printing the 0 back would be a URL that goes nowhere.
+        url = f"http://{host}:{port}/"
+        if detached:
+            _write_serve_state(root, pid=os.getpid(), host=str(host), port=int(port),
+                               url=url, watch=watch, started=utcnow_iso())
+
+        if args.json:
+            _dump({"url": url, "host": host, "port": port, "root": root,
+                   "serving": rel(site_dir, root), "built": built})
+        else:
+            _say(site.SERVE_READY_LINE.format(served=rel(site_dir, root), url=url))
+            if watch:
+                _say(f"watching {len(site.watch_snapshot(root))} path(s); a change rebuilds "
+                     f"site/ (no evaluator runs: `nopekit check` does that)")
+            elif not built:
+                _say(f"{_tag('warn')} {rel(state_path, root)} does not exist yet — the page "
+                     f"will load with no data. Run `nopekit site build`.")
+            _say("`nopekit site serve --stop` to stop" if detached else "Ctrl-C to stop")
+        stop = threading.Event()
+        if detached:
+            import signal
+
+            def _stop_serving(_signum: int, _frame: Any) -> None:
+                # Between requests, never mid-build: `shutdown` waits for the
+                # loop, so it is asked from a thread of its own.
+                threading.Thread(target=server.shutdown, daemon=True,
+                                 name="nopekit-site-stop").start()
+
+            signal.signal(signal.SIGTERM, _stop_serving)
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            threading.Thread(target=_serve_lease_loop, args=(root, server, lock_fd, stop),
+                             daemon=True, name="nopekit-site-lease").start()
+        if watch:
+            # SPEC 33: one build before serving, then a daemon thread that rebuilds
+            # on a change. The page polls data/build.json while it reads live.
+            before = site.watch_snapshot(root)
+            ok, error, _moved = _watch_rebuild(root, quiet=True)
+            if not ok:
+                _warn(f"{_tag('warn')} rebuild failed: {error}; the page keeps the last build")
+            threading.Thread(target=_watch_loop, args=(root, interval, stop, before),
+                             daemon=True, name="nopekit-site-watch").start()
+
+        if not args.no_browser and not detached:
+            # Safe to open now: the socket is bound and listening from the
+            # constructor, so a request that arrives before `serve_forever` queues
+            # rather than being refused.
+            try:
+                webbrowser.open(url)
+            except Exception as exc:        # noqa: BLE001 - a headless box is not an error
+                _warn(f"  could not open a browser ({exc}); open {url} yourself")
+
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            # Exit 0: Ctrl-C is how a server is meant to be stopped, and a non-zero
+            # code here would fail every script that starts one and stops it.
+            if not args.json:
+                _say("")
+                _say("stopped")
+        else:
+            if detached and not args.json:
+                _say("stopped")
+        finally:
             stop.set()
-        server.server_close()
+            server.server_close()
+    finally:
+        if lock_fd is not None:
+            _clear_serve_state(root, os.getpid())
+            os.close(lock_fd)
     return 0
+
+
+def _serve_lease_loop(root: str, server: Any, lock_fd: int, stop: Any) -> None:
+    """A detached server's lease (`_serve_lease`), checked every
+    `SERVE_LEASE_S`: when its record no longer names it, its lock file is not
+    the one it holds, or the site is gone, it says why and stops serving."""
+    pid = os.getpid()
+    while not stop.wait(SERVE_LEASE_S):
+        if not _serve_lease(root, pid, lock_fd):
+            _warn(f"stopping: {SERVE_STATE_REL} no longer names this server (pid {pid}), "
+                  f"or {site.SITE_DIR}/index.html is gone")
+            server.shutdown()
+            return
+
+
+def _serve_words(found: Served) -> str:
+    """How a detached server reads on one line: its pid, whether it watches,
+    and when it started."""
+    bits = [f"pid {found.pid}", "watching" if found.watch else "not watching"]
+    if found.started:
+        bits.append(f"since {found.started}")
+    return ", ".join(bits)
+
+
+def _serve_said(root: str, args: argparse.Namespace, found: Served, *,
+                already: bool) -> int:
+    """`--detach`'s answer: the ready line `site serve` prints (so the launch
+    pattern and a reader of it find the URL), then who serves it and how to
+    stop it."""
+    served = rel(os.path.join(root, site.SITE_DIR), root)
+    if args.json:
+        _dump({"url": found.url, "pid": found.pid, "watch": found.watch,
+               "started": found.started, "log": SERVE_LOG_REL, "already": already,
+               "root": root, "serving": served, "detached": True})
+        return 0
+    _say(site.SERVE_READY_LINE.format(served=served, url=found.url))
+    if already:
+        _say(f"already running ({_serve_words(found)}): nothing new was started — "
+             f"`nopekit site serve --stop` stops it, to start it with other options")
+    else:
+        _say(f"detached ({_serve_words(found)}); it outlives this shell, and its log is "
+             f"{SERVE_LOG_REL} — `nopekit site serve --stop` stops it")
+    return 0
+
+
+def _serve_log_tail(path: str, offset: int) -> str:
+    """The last line the server wrote to its log past ``offset``: why it did
+    not start, without the ``error: `` with which `main` prints a refusal (the
+    refusal quoting it says that already)."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(max(0, int(offset)))
+            lines = [line.strip() for line in fh.read().decode("utf-8", "replace").splitlines()
+                     if line.strip()]
+    except OSError:
+        return "it wrote nothing"
+    last = lines[-1] if lines else "it wrote nothing"
+    return last[len("error: "):] if last.startswith("error: ") else last
+
+
+def _serve_settled(root: str, wait_s: float) -> Served:
+    """`_serve_state`, waited on while it reads ``starting`` (a server
+    between its lock and its record) for up to ``wait_s`` seconds."""
+    deadline = time.monotonic() + max(0.0, wait_s)
+    found = _serve_state(root)
+    while found.state == "starting" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        found = _serve_state(root)
+    return found
+
+
+def _serve_detach(root: str, args: argparse.Namespace) -> int:
+    """`site serve --detach` (the acceptance run after phase 3b): start the
+    server as a process of its own and exit 0 once it listens, printing its
+    URL; when one already runs for the project, print its URL and start
+    nothing. The process: ``python -m nopekit site serve --detached-server``
+    in a new session (POSIX `setsid`: no controlling terminal, its own process
+    group, so neither a hang-up nor a signal to the starter's group reaches
+    it), started in nopekit's own directory (as the background trace is:
+    ``-m`` puts the starting directory first on ``sys.path``), its stdin
+    /dev/null and its stdout and stderr appended to `SERVE_LOG_REL` — no
+    descriptor of the starter's. What slipped through: a background task lives
+    at most two hours in the acceptance run's environment, and under headless
+    `claude -p` one that still runs keeps the turn from ending; a server that
+    kept the caller's stdout would keep the caller's pipe open as long. Never a
+    browser: a browser started from here would hold the caller's descriptors
+    for as long as it ran."""
+    if os.name != "posix":
+        raise NopekitError(SERVE_DETACH_UNSUPPORTED)
+    if not site.scaffolded(root):
+        raise NopekitError(
+            f"no {site.SITE_DIR}/index.html at {root} — `nopekit site init` first")
+    found = _serve_settled(root, SERVE_DETACH_WAIT_S)
+    if found.state == "running":
+        return _serve_said(root, args, found, already=True)
+    if found.state == "elsewhere":
+        raise NopekitError(f"{SERVE_STATE_REL} names a live site server on {found.node}, "
+                           f"another machine; stop it there")
+    if found.state == "starting":
+        raise NopekitError(f"a live site server holds {SERVE_LOCK_REL} and records no "
+                           f"address; see {SERVE_LOG_REL}")
+    if found.state == "stale":
+        _clear_serve_state(root, None)
+    log = _serve_path(root, SERVE_LOG_REL)
+    os.makedirs(os.path.dirname(log), exist_ok=True)
+    try:
+        offset = os.path.getsize(log)
+    except OSError:
+        offset = 0
+    package_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = package_parent + (os.pathsep + env["PYTHONPATH"]
+                                          if env.get("PYTHONPATH") else "")
+    argv = [sys.executable, "-m", "nopekit", "site", "serve", "-C", os.path.abspath(root),
+            "--host", str(args.host), "-p", str(int(args.port)),
+            "--interval", repr(max(0.2, float(getattr(args, "interval", 1.0) or 1.0))),
+            "--no-browser", "--detached-server"]
+    if getattr(args, "watch", False):
+        argv.append("--watch")
+    try:
+        with open(log, "ab") as out:
+            proc = subprocess.Popen(argv, cwd=package_parent, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                    close_fds=True, start_new_session=True)
+    except OSError as exc:
+        raise NopekitError(f"the live site could not be started: {exc}") from exc
+    deadline = time.monotonic() + SERVE_DETACH_WAIT_S
+    while True:
+        found = _serve_state(root)
+        if found.state == "running" and found.pid == proc.pid:
+            return _serve_said(root, args, found, already=False)
+        if proc.poll() is not None:
+            found = _serve_state(root)
+            if found.state == "running":            # another --detach got there first
+                return _serve_said(root, args, found, already=True)
+            raise NopekitError(f"the live site did not start: {_serve_log_tail(log, offset)} "
+                               f"(its log is {SERVE_LOG_REL})")
+        if time.monotonic() >= deadline:
+            import signal
+            with contextlib.suppress(OSError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            raise NopekitError(f"the live site did not say where it listens in "
+                               f"{SERVE_DETACH_WAIT_S:.0f} s, so it was stopped (its log is "
+                               f"{SERVE_LOG_REL})")
+        time.sleep(0.05)
+
+
+def _serve_stopped(root: str, wait_s: float) -> bool:
+    deadline = time.monotonic() + max(0.0, wait_s)
+    while _serve_lock_held(root):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _serve_stop(root: str, args: argparse.Namespace) -> int:
+    """`site serve --stop`: stop the detached server for the project — SIGTERM
+    to its pid (only while it holds its lock, so a stale pid the OS gave to
+    another process is never signalled), then SIGKILL after
+    `SERVE_STOP_WAIT_S` — and remove its record. Exit 0 when none runs too: a
+    stop asked twice is not an error."""
+    if os.name != "posix":
+        raise NopekitError(SERVE_DETACH_UNSUPPORTED)
+    import signal
+    found = _serve_settled(root, 5.0)
+    if found.state == "elsewhere":
+        raise NopekitError(f"{SERVE_STATE_REL} names a live site server on {found.node}, "
+                           f"another machine; stop it there")
+    if found.state != "running" or found.pid is None:
+        stale = found.state == "stale"
+        if stale:
+            _clear_serve_state(root, None)
+        if args.json:
+            _dump({"stopped": False, "state": found.state, "pid": found.pid, "url": found.url})
+        else:
+            _say("no detached site server runs for this project"
+                 + (f" (the record of pid {found.pid} was stale, and is removed)"
+                    if stale and found.pid else ""))
+        return 0
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(found.pid, signal.SIGTERM)
+    if not _serve_stopped(root, SERVE_STOP_WAIT_S):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(found.pid, signal.SIGKILL)
+        if not _serve_stopped(root, 5.0):
+            raise NopekitError(f"the live site server (pid {found.pid}) did not stop; it holds "
+                               f"{SERVE_LOCK_REL} still")
+    _clear_serve_state(root, found.pid)
+    if args.json:
+        _dump({"stopped": True, "state": "running", "pid": found.pid, "url": found.url})
+    else:
+        _say(f"stopped the live site at {found.url} (pid {found.pid})")
+    return 0
+
+
+def _serve_line(found: Served) -> str:
+    """`site status`'s line about the detached server."""
+    if found.state == "running":
+        return (f"live: serving at {found.url} ({_serve_words(found)}) — `nopekit site "
+                f"serve --stop` stops it")
+    if found.state == "starting":
+        return f"live: a detached server is starting (see {SERVE_LOG_REL})"
+    if found.state == "elsewhere":
+        return f"live: a detached server runs on {found.node}, another machine"
+    if found.state == "unsupported":
+        return "live: --detach is not supported on Windows yet"
+    stale = (f" (the record of pid {found.pid} is stale)" if found.state == "stale"
+             and found.pid else "")
+    return (f"live: no detached server runs{stale} — `nopekit site serve --watch --detach` "
+            f"starts one")
+
+
+def _serve_json(found: Served) -> dict:
+    return {"state": found.state, "pid": found.pid, "url": found.url, "watch": found.watch,
+            "started": found.started, "log": SERVE_LOG_REL}
 
 
 def cmd_site_stamp(args: argparse.Namespace) -> int:
@@ -7679,7 +8171,9 @@ def _fetch_vendor_file(url: str) -> bytes:
 
 
 def cmd_site_status(args: argparse.Namespace) -> int:
-    """What is built, how stale it is, and which locators point at nothing.
+    """What is built, how stale it is, which locators point at nothing, and
+    whether a detached live server runs and where (`_serve_state`, the
+    acceptance run after phase 3b).
 
     Reads `state.json` and the filesystem; it never runs a viewgen and never
     writes. It does load the viewgen modules, with `strict=False`, because the
@@ -7690,6 +8184,7 @@ def cmd_site_status(args: argparse.Namespace) -> int:
     root = _root(args)
     ledger = _load(root)
     info = _site_state(root)
+    served = _serve_state(root)
     view_registry, problems = _view_registry(root, ledger, strict=False)
 
     builtin = {row["id"] for row in info["views"]}
@@ -7702,7 +8197,8 @@ def cmd_site_status(args: argparse.Namespace) -> int:
 
     if args.json:
         _dump({**info, "root": root, "viewgens": viewgens, "problems": problems,
-               "has_dangling_locators": bool(info["locator_problems"])})
+               "has_dangling_locators": bool(info["locator_problems"]),
+               "server": _serve_json(served)})
         return 0
 
     if not info["present"]:
@@ -7710,6 +8206,7 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         return 0
     if info["error"]:
         _say(f"{_tag('FAIL')} {info['state']}: {info['error']}")
+        _say(_serve_line(served))
         return 0
     if not info["built"]:
         _say(f"{site.SITE_DIR}/ is scaffolded but never built — `nopekit site build`")
@@ -7734,6 +8231,7 @@ def cmd_site_status(args: argparse.Namespace) -> int:
     for edited in info.get("edited") or ():
         _say(f"{_tag('FAIL')} {edited}")
     _say(f"{'STALE' if info['stale'] else 'current'}: {info['stale_reason']}")
+    _say(_serve_line(served))
     shape = info.get("map") or {}
     if shape:
         _say(f"map: {shape.get('lines', 0)} lines, {shape.get('boards', 0)} boards, "
@@ -9444,6 +9942,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             if old_shell:
                 detail += (" — site/index.html predates the page outline: `nopekit site init "
                            "--force` after keeping a copy")
+            served = _serve_state(root)
+            if served.state == "running":
+                detail += f" — live at {served.url} (pid {served.pid})"
             _check(results, "site", status, detail)
         prose_rows = [row for row in site_info.get("prose") or ()]
         if prose_rows:
@@ -9895,6 +10396,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "trace, the groups or site/content change; the page reloads its data")
     p.add_argument("--interval", type=float, default=1.0,
                    help="seconds between polls with --watch (default 1.0, at least 0.2)")
+    # The acceptance run after phase 3b: a live site that outlives the shell
+    # (and the agent's turn) that started it.
+    life = p.add_mutually_exclusive_group()
+    life.add_argument("--detach", action="store_true",
+                      help="start the server as a process of its own (POSIX), print its URL "
+                           "and exit at once; it outlives the shell that started it, opens no "
+                           "browser, and logs to .nopekit/out/serve.log. When one runs "
+                           "already, print its URL and start nothing")
+    life.add_argument("--stop", action="store_true",
+                      help="stop the server --detach started for this project")
+    life.add_argument("--detached-server", action="store_true", help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_site_serve)
 
     p = site_sub.add_parser("stamp", parents=[common],

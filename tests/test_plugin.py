@@ -316,6 +316,26 @@ class TheSkillTeachesTheFirstSession(unittest.TestCase):
         # The lenses are reached through a command that prints them.
         self.assertNotIn("lenses: `nopekit packs show", skill)
 
+    def test_the_live_site_detaches_and_the_map_is_drawn(self):
+        """The acceptance run after phase 3b: the agent ran `site serve --watch` as a
+        background task (there one lives at most two hours, and under `claude -p` it
+        keeps the turn from ending), wrote boards only (every choice drew in one
+        generated zone, every shared value under its raw name), and kept its own
+        files in directories a round's closed list never staged."""
+        skill = _read("skills/nopekit/SKILL.md")
+        first_light = skill[skill.index("## 2. First light"):skill.index("## 3. Claims")]
+        self.assertIn("nopekit site serve --watch --detach", first_light)
+        self.assertIn("background task", first_light)
+        claims = skill[skill.index("## 3. Claims"):skill.index("## 4. The loop")]
+        for said in ("groups/<id>.json", '"kind": "board"', "`zone`", "`station`",
+                     "nopekit site build"):
+            self.assertIn(said, claims)
+        commits = skill[skill.index("## 5. Rounds"):skill.index("**Before your turn ends:**")]
+        for said in ("git does not ignore", "named like a", ".gitignore"):
+            self.assertIn(said, commits)
+        table = skill[skill.index("## Commands"):]
+        self.assertIn("nopekit site serve --watch --detach", table)
+
 
 if __name__ == "__main__":
     unittest.main()

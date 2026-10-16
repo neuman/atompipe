@@ -65,18 +65,18 @@ continue. Write the model (a dataclass `CONFIG` plus `build(config) -> dict`, re
 `"model_entry"` in `.nopekit/project.json`), `selftest/known_good.py`, and the two or
 three cheapest evaluators, then run `nopekit check`.
 
-Then start the live site, and keep it running in the background:
+Then start the live site as its own process (`--detach` returns at once; never run it as
+a background task, which stops within hours and keeps `claude -p` from ending your turn):
 
 ```sh
 nopekit site init
-nopekit site serve --watch
+nopekit site serve --watch --detach   # run again: prints the running URL; --stop stops it
 ```
 
 **Give the person the URL it prints (`serving site at http://…`) in the first few
-minutes**, with one sentence on what the page shows. It rebuilds whenever the records,
-the model or the verdict cache move; it is how the person sees your work without reading
-a transcript. Claims come next, beside the first verdicts: most cannot be stated
-precisely before a model exists.
+minutes**, with one sentence on what the page shows. It rebuilds as the project moves,
+and it is how the person sees your work without reading a transcript. Claims come next,
+beside the first verdicts: most cannot be stated precisely before a model exists.
 
 ## 3. Claims and boards
 
@@ -103,9 +103,11 @@ Give each claim the narrowest `tags`: an evaluator covers a claim by its id or a
 tag. Say the physical ones out loud early: *"No evaluator here can settle C5 — it needs
 a real hull in real water. It is pending build until you test it."*
 
-Group claims for the page in `groups/<id>.json`: `{"kind": "board", "title": "Holds the
-pump", "members": ["C1", "C2"]}`; a `zone` groups choices, a `station` a derived value
-several claims read. Each board gets text in `site/content/<board>.md`.
+Then draw the map in `groups/<id>.json`, one record each, and run `nopekit site build`.
+`{"kind": "board", "title": "Holds the pump", "members": ["C1", "C2"]}`: a board holds
+the claims of one thing the person cares about, its text in `site/content/<board>.md`; a
+`zone` the choices of one part as the person names it, never all in one; a `station`
+titles a shared value as the map shows it (`"Allowed stress"`, not `design_stress`).
 
 ## 4. The loop
 
@@ -149,10 +151,12 @@ A physical pass counts only on the article it was tested on; a fail keeps counti
 ## 5. Rounds
 
 When your turn ends, the plugin's Stop hook runs `nopekit round --hook`: a tier-0 check,
-the site rebuilt, the round record written, and a commit `round N: <what changed>` of the
-project's own paths, only when git's identity is one of `people`. It never pushes or
-blocks; the person sees one paragraph. Do not commit rounds yourself. `people` is the
-person's list: change it only when they ask, with the name and email they give.
+the site rebuilt, the round record written, and a commit `round N: <what changed>` of
+every file in the project that git does not ignore (one over 50 MiB or named like a
+secret, such as `.env`, is named instead), only when git's identity is one of `people`.
+It never pushes or blocks. Put scratch, downloads and environments in `.gitignore`. Do not
+commit rounds yourself; change `people` only when the person asks, to the name and email
+they give.
 
 **Before your turn ends:**
 
@@ -208,7 +212,6 @@ known-good one (`selftest/known_good.py`, written before your first evaluator); 
 `nopekit gate selftest` shows both, its claim reads Gap.
 
 **Every claim names its mechanism**: `by`, `how` in words, and the evaluators you expect.
-**Prefer established, then sourced, then model-only** evaluators and proposers.
 
 **Never hand-edit a generated file**: `site/data/`, `.nopekit/ledger.json`,
 `.nopekit/round.json`, `REPORT.md`. If an output is wrong, fix its source and regenerate.
@@ -218,7 +221,6 @@ known-good one (`selftest/known_good.py`, written before your first evaluator); 
 
 **Say ready only when `nopekit export <milestone> --dry-run` says `would write`.** Checked
 does not mean true: it means every evaluator passed on the current inputs.
-
 **Never simulate a physical claim.** No CFD run makes a printed seam watertight.
 
 ## Commands
@@ -234,7 +236,6 @@ nopekit propose                 # a pack's proposers; run one and file what it w
 nopekit inputs                  # the evidence, and --unextracted what nobody read yet
 nopekit extract <id> --what '...' --grounds <param>   # what was read out of an input
 nopekit claim list              # every claim and where its evidence bottoms out
-nopekit claim physical <id> pass --evidence <file>   # the PERSON's: a physical result
 nopekit gap --propose           # every claim whose mechanism has yet to run, and packs to run it
 nopekit gate list               # what will actually run; gate show <id> for one
 nopekit gate selftest           # each evaluator's controls: can it fail?
@@ -245,15 +246,13 @@ nopekit decide --title '...'    # a decision, with what LOST and why
 nopekit prefer <decision>       # the PERSON's: a preference against an alternative
 nopekit packs skills            # the live packs' PACK.md, lenses and skills: read them
 nopekit model [trace]           # the model as nopekit sees it; trace: what each choice moves
-nopekit site serve --watch      # the live site, rebuilt as the project moves
+nopekit site serve --watch --detach   # the live site, its own process; --stop stops it
 nopekit doctor                  # what is wrong, and what to do; writes nothing
 ```
 
 ## Reference
 
 - `${CLAUDE_PLUGIN_ROOT}/METHOD.md` — the ten rules. Read this.
-- `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md` — growing a new evaluator when a
-  claim has none.
+- `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md` — when a claim has no evaluator.
 - `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` — the pack contract.
-- `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md` — the site: boards, the text, locators,
-  `state.json`.
+- `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md` — the site: groups, text, `state.json`.

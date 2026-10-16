@@ -1683,9 +1683,10 @@ def _touched_records(before: dict, after: dict) -> list[str]:
 #: `.nopekit/model.json`, the site's scaffold and `data/`. `init` refuses on a
 #: project before it writes anything; it is here so "every command" means every
 #: command. `check --no-record` and `gate selftest --no-record` are the dry runs.
-#: Not here: `site serve` (a server that does not return) and `site vendor` (the
-#: network); P3.1's `ask --next` joins when it exists — a strengthening, never an
-#: edit of what is here (PLAN §4.6).
+#: Not here: `site serve` (a server that does not return; `--detach`, which starts
+#: one that outlives the command, and `--stop` are swept for records by
+#: test_serve) and `site vendor` (the network); P3.1's `ask --next` joins when it
+#: exists — a strengthening, never an edit of what is here (PLAN §4.6).
 _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("status",), False), (("status", "--json"), False),
     (("why", "thickness"), False), (("why", "C1"), False),

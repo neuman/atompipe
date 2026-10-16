@@ -52,11 +52,15 @@ say what you want built.
    you, from git's identity, as the person rounds commit as (`people` in
    `.nopekit/project.json`).
 4. It reaches first light — a model and the first evaluators' verdicts on your numbers —
-   and gives you the live site's URL (`nopekit site serve --watch`).
+   and gives you the live site's URL. The site runs as a process of its own
+   (`nopekit site serve --watch --detach`), so it stays up after the agent's turn ends
+   and rebuilds as the project moves; `nopekit site serve --stop` stops it.
 5. Each time its turn ends, the plugin's Stop hook runs `nopekit round --hook`: a quick
-   check, the site rebuilt, and a local commit `round N: <what changed>` of the
-   project's own files, as you. It never pushes, and it tells you in one short
-   paragraph what it did.
+   check, the site rebuilt, and a local commit `round N: <what changed>` of every file
+   in the project that git does not ignore, as you. A file over 50 MiB, or one named
+   like a secret (`.env`, `*.pem`, `id_rsa`), is named instead and never committed; keep
+   anything else out of the history with `.gitignore`. It never pushes, and it tells you
+   in one short paragraph what it did.
 
 Outside Claude Code, `nopekit round --commit` does the same by hand.
 
@@ -286,6 +290,7 @@ problem instead of reading about it.
 nopekit site init            # scaffold site/ — index.html is yours, never regenerated
 nopekit site build           # run the viewgens, write site/data/ and site/assets/
 nopekit site serve [--watch] # python3 -m http.server. No build step, no npm, ever.
+nopekit site serve --watch --detach   # the same, as a process of its own; --stop stops it
 nopekit site stamp <board>   # stamp the text beside a board with the results it read
 ```
 
@@ -326,7 +331,7 @@ nopekit ingest <files>        sketches, photos, CAD, datasheets, measurements
 nopekit extract <artifact>    what was read out of it, and what that grounds
 nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
 nopekit round [--commit]      end a round: a tier-0 check, the site, the round record; --commit
-                              commits the project's own paths as a listed person; never blocks
+                              commits what git does not ignore as a listed person; never blocks
 nopekit model trace           rebuild with each choice moved ±10%: what moves what, and amber
                               (`round` starts it in the background when the design has none)
 nopekit packs skills          the live packs' PACK.md and skill files, for the agent to read
