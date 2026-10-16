@@ -73,7 +73,7 @@ from nopekit import claims as claims_mod
 from nopekit import report as report_mod
 from nopekit.models import (
     BLOCKING_STATUSES, Acceptance, Claim, ClaimKind, ClaimStatus, Comparator, GateSpec, Ledger, NegativeControl,
-    PhysicalResult, ProjectMeta, Tier, Verdict,
+    PhysicalResult, ProjectMeta, Requirement, Tier, Verdict,
 )
 
 #: The five covering outcomes a claim's verdicts can carry, as the table names them.
@@ -848,6 +848,14 @@ class ReportSectionOrder(unittest.TestCase):
         for name, ledger in (("empty", empty), ("full", full)):
             with self.subTest(ledger=name):
                 self.assertEqual(self._headings(ledger), self.WANT)
+        # Architecture phase 1 (SPEC decision 12): with a requirement recorded,
+        # its section after Failing and before Reproduce; PROVEN stays first.
+        served = dataclasses.replace(
+            full, claims=[dataclasses.replace(c, requirements=["R1"]) if c.id == "C1" else c
+                          for c in claims],
+            requirements=[Requirement(id="R1", statement="it holds")])
+        self.assertEqual(self._headings(served),
+                         self.WANT[:-1] + ["## Requirements", "## Reproduce"])
 
     def test_section_proven_is_the_first_section(self):
         self.assertEqual(report_mod.SECTION_PROVEN, self.WANT[0])
@@ -1409,6 +1417,35 @@ def _outlived_project() -> dict:
     run = {"status": json.loads(status.stdout)}
     _OUTLIVED.append(run)
     return run
+
+
+
+class ThePacksLineNamesWhatItCounts(_env.EnvCase):
+    """(f of architecture phase 2) `status`'s packs line names every pack it
+    counts, up to eight, then how many more. What slipped through: it said "7
+    available" and named six, cut at a slice nobody announced."""
+
+    def _line(self, root: str, names: list[str], installed: list[str]) -> str:
+        import contextlib
+        import io
+        from nopekit import cli, packs
+        out = io.StringIO()
+        with mock.patch.object(packs, "available", lambda *_a, **_k: list(names)), \
+                mock.patch.object(packs, "installed", lambda *_a, **_k: list(installed)), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["-C", root, "status"])
+        return next(line for line in out.getvalue().splitlines()
+                    if line.startswith("packs:"))
+
+    def test_seven_and_twelve(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        seven = [f"p{i}" for i in range(1, 8)]
+        self.assertEqual(self._line(root, seven, []),
+                         "packs: none installed; 7 available (p1, p2, p3, p4, p5, p6, p7) — "
+                         "`nopekit packs add <name>`")
+        twelve = [f"p{i}" for i in range(1, 13)]
+        self.assertEqual(self._line(root, twelve, ["p1"]),
+                         "packs: p1 (12 available: p1, p2, p3, p4, p5, p6, p7, p8, and 4 more)")
 
 
 if __name__ == "__main__":

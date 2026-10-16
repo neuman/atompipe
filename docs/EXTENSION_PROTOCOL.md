@@ -11,14 +11,21 @@ get one**, and the discipline to make sure the one you got actually works.
 
 ## When this fires
 
-`nopekit gap` reports a **MEASURABLE** claim with no covering gate. That is a
-capability gap, and it is the system's growth mechanism, not a failure.
+`nopekit gap` lists every claim whose mechanism has yet to run — Gap, Pending
+build and Assumed, physical and assumption claims included. This protocol fires for
+one of them only: an **automated** claim (a MEASURABLE one whose mechanism no person
+settles) with no covering evaluator — with `--propose`, the one `gap` marks "this is
+the extension protocol's trigger". That is a capability gap, and it is the system's
+growth mechanism, not a failure.
 
-It does *not* fire for:
+It does *not* fire for the others `gap` lists, whose mechanism's `by` settles them:
 - **PHYSICAL** claims — no tool will ever settle "the printed seam is watertight".
-  Those stay in the report as UNVERIFIED until a human builds one and records a
-  result. Do not invent a simulation to launder them into green.
-- **ASSUMPTION** claims — those are already honest about being unevidenced.
+  Those stay in the report as Pending build until a human builds one and records a
+  result. Do not invent a simulation to launder them into green; a pack `gap`
+  proposes there checks a modelled part of the claim, never the claim.
+- **Expert-judgment** claims — a named person judges them.
+- **ASSUMPTION** claims — those are already honest about being unevidenced; an
+  owner carries them.
 
 ---
 
@@ -66,6 +73,14 @@ in order:
 
 Write down what you picked, what you rejected, and why — this is rule 3 of the
 method and it applies to tooling exactly as it applies to constants.
+
+Then declare the evaluator's **basis** (SPEC 38) — where its verdict's logic comes
+from — and use the highest one available: `established` when the verdict is the
+tool's own answer (its check, its solver's result), `sourced` when your code follows
+a cited outside source (a textbook formula, a standard, a datasheet: cite it in the
+pack's `references/`), `model-only` when you wrote the logic with no outside source.
+When you go lower than the tool would allow, say why beside the declaration. The basis
+is shown in `gate list` and the report; it changes no status and no qualification.
 
 ### 4. Install it — pinned — and smoke-test before any project data touches it
 

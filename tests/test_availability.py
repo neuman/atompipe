@@ -119,10 +119,11 @@ class ToolingDisjunction(unittest.TestCase):
         every existing GateSpec still works. It was the last field until P2.2
         appended ``needs`` after it (moved under R-6: the property is "nothing
         new is inserted before an old field", and ``needs`` is held to the
-        same), and P2.4 ``operating_context`` after that — the last field now,
-        each earlier one still in its place (R-6 again: one more pinned)."""
+        same), and P2.4 ``operating_context`` after that, and architecture phase 2
+        ``basis`` after that — the last field now, each earlier one still in its
+        place (R-6 again: one more pinned)."""
         names = [f.name for f in dataclasses.fields(GateSpec)]
-        self.assertEqual(names[-3:], ["requires_one_of", "needs", "operating_context"])
+        self.assertEqual(names[-4:], ["requires_one_of", "needs", "operating_context", "basis"])
         spec = GateSpec.from_dict({"id": "g.x", "requires_one_of": list(ENGINES)})
         self.assertEqual(spec.requires_one_of, ENGINES)
         self.assertEqual(GateSpec.from_dict(spec.to_dict()).requires_one_of, ENGINES)

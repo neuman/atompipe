@@ -96,13 +96,18 @@ import tempfile
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from . import claims as claim_logic
 from . import decisions as decision_logic
+from . import derivation as trace_logic
+from . import graph as graph_logic
 from . import modelio
+from . import page as page_logic
+from . import prose as prose_logic
 from . import report as report_logic
 from . import store
+from . import vcs
 from . import verdicts as verdict_logic
 from .gates import availability as _gate_availability
 from .models import Ledger, Locator, Verdict, View, ViewKind
@@ -112,6 +117,7 @@ from .util import (
     atomic_write_text,
     ensure_dir,
     sha256_text,
+    write_json_if_changed,
 )
 
 __all__ = [
@@ -136,10 +142,16 @@ __all__ = [
     "scaffold",
     "build",
     "state",
-    "judgement_digest",
-    "judgement_moved",
+    "resolution_digest",
+    "resolution_moved",
     "clean_assets",
     "vendor_urls",
+    # architecture phase 5: the front page, the clock file, the watcher
+    "PAGE_NAME", "MAP_NAME", "BUILD_NAME", "CONTENT_DIR", "EVIDENCE_DIR", "SHELLS",
+    "OUTLINE_MARKER", "OUTLINE_MARKER_RE", "AGED_SECONDS", "WATCH_DIRS",
+    "scaffolded", "outline_of", "ensure_site_ignore", "prose_pool", "baked_pool", "ages",
+    "write_build_json",
+    "watch_snapshot", "refresh_renderer",
 ]
 
 
@@ -165,8 +177,56 @@ VENDOR_DIR = "vendor"
 #: Per-view payloads too big to inline, under ``site/data/views/<id>.json``.
 VIEWS_DIR = posixpath.join(DATA_DIR, "views")
 
-#: The one file the page reads.
+#: The technical record's document (`technical.html` reads it whole).
 STATE_NAME = "state.json"
+
+#: The front page's two documents (architecture phase 5, SPEC 28-30): the
+#: outline around the map, and the map. Baked by `page`, tracked.
+PAGE_NAME = "page.json"
+MAP_NAME = "map.json"
+
+#: The clock (SPEC 32): the build time, each verdict's age and the live flag.
+#: Ignored by git through `site/.gitignore`, so a rebuild that judged nothing new
+#: changes no tracked byte; the page works without it.
+BUILD_NAME = "build.json"
+
+#: The agent's prose and figures (SPEC 30), under ``site/``: tracked, stamped by
+#: `nopekit site stamp`, and not a record.
+CONTENT_DIR = "content"
+
+#: Evidence the evaluators wrote, copied under ``site/`` so a published page can
+#: link it (`page.evidence_plan`).
+EVIDENCE_DIR = "assets/evidence"
+
+#: The shells: the project's own files, written by `site init` (and
+#: `technical.html` by `site build` when absent), never refreshed. PETGasus ships
+#: its own `technical.html`, a renamed older shell with its own title: a refresh
+#: would erase it. *Rejected:* refreshing `technical.html` as a renderer file.
+SHELLS = ("index.html", "technical.html")
+
+#: The outline marker the new shell carries (SPEC 28): `site build` warns when
+#: `index.html` lacks it, or carries an older outline. A meta tag, so a page
+#: written by hand can carry it too.
+OUTLINE_MARKER = '<meta name="nopekit-outline" content="1">'
+OUTLINE_MARKER_RE = r'<meta\s+name=["\']nopekit-outline["\']\s+content=["\'](\d+)["\']'
+
+#: A verdict this old is *aged* on the page (`build.json`'s ``aged``), and an
+#: oldest result past it beside one four times newer raises the mixed-age
+#: banner. Moved from the template's format.js (SPEC 32: the browser computes no
+#: status): a day, because a check run once a day is the slowest loop a designer
+#: keeps up with, and a result older than that is from another working session.
+#: *Rejected:* an hour (every lunch break would age the page); a week (a result
+#: from last Tuesday would read as fresh as this morning's).
+AGED_SECONDS = 24 * 3600
+
+#: What `nopekit site serve --watch` polls (SPEC 33): the records, the project
+#: file, the model and the project's evaluators, views and generators, the packs
+#: copied in, the verdict cache, the trace, and the page's own text and
+#: authored pins. `__pycache__` and `*.pyc` are left out.
+WATCH_DIRS: tuple[str, ...] = (*store.RECORD_DIRS, ".nopekit/project.json", "model", "gates",
+                               "selftest", "views", "generators", ".nopekit/packs",
+                               ".nopekit/verdicts", ".nopekit/trace", "site/content",
+                               "site/annotations.json", "site/explode.json")
 
 #: The scaffold source, shipped inside the package (see pyproject package-data).
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_template")
@@ -186,15 +246,26 @@ _ID_OK = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 )
 
+#: The lines `ensure_site_ignore` appends to an older `site/.gitignore`
+#: (architecture phase 5, SPEC 32): the clock file is an output that changes on
+#: every build, so a tracked copy would dirty `git status` after every build.
+_BUILD_IGNORE = (
+    "# `site build` writes the build time and each result's age here. It changes on\n"
+    "# every build, so git ignores it. The page works without it.\n"
+    "data/build.json\n"
+)
+
 #: Written by :func:`scaffold` when the site has no ``.gitignore`` of its own.
 #: ``data/`` and ``assets/`` are deliberately NOT ignored: they are the published
-#: site, and a repo that ignores them publishes an empty page. ``vendor/`` is.
+#: site, and a repo that ignores them publishes an empty page. ``vendor/`` is,
+#: and from phase 5 ``data/build.json``.
 _GITIGNORE = (
     "# `nopekit site vendor` writes three.js here. It is a third-party copy,\n"
     "# it is large, and the site loads the same version from a CDN without it —\n"
-    "# so it is not ours to commit. Delete this file if you want an offline,\n"
-    "# self-contained archive of the project in git.\n"
+    "# so it is not ours to commit. Delete the vendor/ line (and only that line)\n"
+    "# if you want an offline, self-contained archive of the project in git.\n"
     "vendor/\n"
+    "\n" + _BUILD_IGNORE
 )
 
 
@@ -306,7 +377,16 @@ class ViewContext:
         target = os.path.join(self._assets_root(), safe)
         ensure_dir(os.path.dirname(target))
         payload = data.encode("utf-8") if isinstance(data, str) else bytes(data)
-        _atomic_write_bytes(target, payload)
+        # Written only when the bytes differ (architecture phase 5, SPEC 32): a
+        # rebuild that drew the same picture changes no tracked byte and no
+        # mtime. The path is recorded either way, or the cleaner would delete it.
+        try:
+            with open(target, "rb") as fh:
+                same = fh.read() == payload
+        except OSError:
+            same = False
+        if not same:
+            _atomic_write_bytes(target, payload)
 
         site_relative = posixpath.join(ASSETS_DIR, safe)
         if site_relative not in self.written:
@@ -1455,19 +1535,254 @@ def scaffold(root: str, *, force: bool = False) -> list:
     written: list[str] = []
     for source, relative in _template_files():
         target = os.path.join(site, relative)
+        # `technical.html` is a shell too (architecture phase 5): written when
+        # absent, or with `force`; a project's own copy is never replaced.
+        if relative in SHELLS and relative != "index.html" and os.path.exists(target) \
+                and not force:
+            continue
         ensure_dir(os.path.dirname(target))
         shutil.copyfile(source, target)
         written.append(posixpath.join(SITE_DIR, relative))
 
-    for directory in (DATA_DIR, VIEWS_DIR, ASSETS_DIR):
+    for directory in (DATA_DIR, VIEWS_DIR, ASSETS_DIR, CONTENT_DIR):
         ensure_dir(os.path.join(site, directory.replace("/", os.sep)))
 
     gitignore = os.path.join(site, ".gitignore")
     if not os.path.exists(gitignore):
         atomic_write_text(gitignore, _GITIGNORE)
         written.append(posixpath.join(SITE_DIR, ".gitignore"))
+    elif ensure_site_ignore(root):
+        written.append(posixpath.join(SITE_DIR, ".gitignore"))
 
     return sorted(written)
+
+
+def scaffolded(root: str) -> bool:
+    """Whether ``root`` has a site: ``site/index.html`` is a file. The one
+    predicate `round`, `status`, `doctor`, `site build` and `site serve` ask
+    (architecture phase 5): a project that tracks only ``site/content/`` (the
+    bracket) has text for a page and no page, so it has no site."""
+    return os.path.isfile(os.path.join(root, SITE_DIR, "index.html"))
+
+
+def outline_of(root: str) -> int | None:
+    """The outline ``site/index.html`` carries (`OUTLINE_MARKER`), or None when
+    it carries none (a shell older than the outline, or the project's own)."""
+    import re
+    try:
+        with open(os.path.join(root, SITE_DIR, "index.html"), "r", encoding="utf-8",
+                  errors="replace") as fh:
+            found = re.search(OUTLINE_MARKER_RE, fh.read())
+    except OSError:
+        return None
+    return int(found.group(1)) if found else None
+
+
+def ensure_site_ignore(root: str) -> bool:
+    """Append the clock file's ignore lines to ``site/.gitignore`` when no line
+    equals ``data/build.json`` or ``/data/build.json``, creating the file with
+    only those lines when there is none; True when it wrote. Every other byte
+    stays as it was. What slipped through (review of phase 5): a missing
+    ``site/.gitignore`` (the scaffolded one said to delete it for an offline
+    archive) was left missing, so ``build.json``, which changes on every
+    build, dirtied ``git status`` after every rebuild."""
+    path = os.path.join(root, SITE_DIR, ".gitignore")
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        if not os.path.isdir(os.path.join(root, SITE_DIR)):
+            return False
+        atomic_write_text(path, _BUILD_IGNORE)
+        return True
+    if any(line.strip() in ("data/build.json", "/data/build.json")
+           for line in text.splitlines()):
+        return False
+    body = text if not text or text.endswith("\n") else text + "\n"
+    atomic_write_text(path, body + ("\n" if body.strip() else "") + _BUILD_IGNORE)
+    return True
+
+
+def _evidence_plan(root: str, view: Any, resolution: Any, registry: Any) -> list:
+    """`page.evidence_plan` with git's ignore rules: a path in the project that
+    git ignores and does not track is never published (`vcs.ignored`)."""
+    asked: dict[str, bool] = {}
+
+    def ignored(relpath: str) -> bool:
+        if relpath not in asked:
+            found = vcs.ignored(root, [relpath])
+            asked[relpath] = bool(found) and relpath in found
+        return asked[relpath]
+
+    return page_logic.evidence_plan(root, view, resolution, registry, ignored=ignored)
+
+
+def _kept_json(site: str, keep: Iterable[str]) -> list:
+    """The JSON documents among ``keep`` (paths under ``site/assets/``, as
+    `clean_assets` takes them), read; one that does not parse is left out."""
+    docs: list[Any] = []
+    seen: set[str] = set()
+    for entry in keep:
+        text = str(entry).replace("\\", "/").strip()
+        if not text.endswith(".json"):
+            continue
+        if not text.startswith(ASSETS_DIR + "/"):
+            text = posixpath.join(ASSETS_DIR, text)
+        text = posixpath.normpath(text)
+        if text in seen:
+            continue
+        seen.add(text)
+        try:
+            with open(os.path.join(site, *text.split("/")), "r", encoding="utf-8") as fh:
+                docs.append(json.load(fh))
+        except (OSError, ValueError):
+            continue
+    return docs
+
+
+def prose_pool(docs: Iterable[Any], assets: Iterable[Any] = ()) -> Any:
+    """The number pool prose is matched against (`prose.number_pool`): the
+    baked documents (``state.json`` with its view files, ``map.json``,
+    ``page.json`` without its prose) and the asset JSON the page keeps."""
+    return prose_logic.number_pool([*docs, *assets])
+
+
+def baked_pool(root: str, map_doc: Mapping[str, Any], page_doc: Mapping[str, Any]) -> Any:
+    """`prose_pool` over a built site as it is on disk, for a reader that
+    checks a baked page's number marks (`page.status_problems`): its
+    ``state.json``, its view files, ``map.json``, ``page.json`` with every
+    prose piece left out, and every JSON file under ``assets/`` (after a
+    build, exactly the ones it kept)."""
+    site = os.path.join(root, SITE_DIR)
+    docs: list[Any] = []
+    try:
+        with open(os.path.join(site, DATA_DIR, STATE_NAME), "r", encoding="utf-8") as fh:
+            docs.append(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    views_dir = os.path.join(site, VIEWS_DIR.replace("/", os.sep))
+    if os.path.isdir(views_dir):
+        for name in sorted(os.listdir(views_dir)):
+            if name.endswith(".json"):
+                try:
+                    with open(os.path.join(views_dir, name), "r", encoding="utf-8") as fh:
+                        docs.append(json.load(fh))
+                except (OSError, ValueError):
+                    continue
+    bare = json.loads(json.dumps(page_doc))
+    for section in bare.get("sections") or ():
+        section["prose"] = None
+    bare["intro"] = None
+    if isinstance(bare.get("next"), dict):
+        bare["next"]["prose"] = None
+    assets: list[str] = []
+    for directory, _dirs, names in os.walk(os.path.join(site, ASSETS_DIR)):
+        for name in sorted(names):
+            if name.endswith(".json"):
+                assets.append(os.path.relpath(os.path.join(directory, name), site)
+                              .replace(os.sep, "/"))
+    return prose_pool([*docs, map_doc, bare], _kept_json(site, assets))
+
+
+def ages(resolution: Any, now: str) -> dict:
+    """``{gate: {when, age_s, aged}}`` over the resolution's rows: ``when`` the
+    resolver's (the obs run that last hit or wrote the entry, else its commit
+    time), ``age_s`` `_age_seconds` (null when unknown, never 0), ``aged`` at
+    `AGED_SECONDS` or more. For `build.json` only: the clock never reaches a
+    tracked file."""
+    out: dict[str, dict] = {}
+    for gid in sorted((getattr(resolution, "rows", None) or {}), key=store._natural):
+        row = resolution.rows[gid]
+        when = str(getattr(row, "when", "") or "")
+        age = _age_seconds(now, when)
+        out[gid] = {"when": when, "age_s": age,
+                    "aged": bool(age is not None and age >= AGED_SECONDS)}
+    return out
+
+
+def _mixed_age(verdicts: Mapping[str, dict]) -> dict:
+    """The mixed-age banner's decision, baked (SPEC 32): shown when at least two
+    results have an age, the oldest is aged, and it is more than four times the
+    newest — the template's `mixedAgeBanner` rule, moved here."""
+    found = [(gid, row["age_s"]) for gid, row in verdicts.items()
+             if isinstance(row.get("age_s"), (int, float))]
+    if len(found) < 2:
+        return {"shown": False, "oldest_s": None, "newest_s": None, "gates": []}
+    oldest = max(age for _gid, age in found)
+    newest = min(age for _gid, age in found)
+    shown = oldest >= AGED_SECONDS and oldest > newest * 4
+    return {"shown": bool(shown), "oldest_s": oldest, "newest_s": newest,
+            "gates": [gid for gid, age in found if age >= AGED_SECONDS] if shown else []}
+
+
+def write_build_json(root: str, *, now: str, id: str, ok: bool = True, error: str = "",
+                     live: bool = False, verdicts: Mapping[str, dict] | None = None,
+                     mixed_age: Mapping[str, Any] | None = None,
+                     tracing: bool = False) -> str:
+    """Write ``site/data/build.json`` (ignored, SPEC 32-33): the build time, the
+    live flag the page polls by, an ``id`` over the tracked baked bytes (the
+    page reloads its data when it moves), ok and error, each verdict's age, and
+    ``tracing`` — a trace holds its lock now (architecture phase 3b), so the
+    live page can say its links are being measured. Returns its site path."""
+    verdicts = dict(verdicts or {})
+    doc = {"schema": 1, "built": now, "live": bool(live), "id": id, "ok": bool(ok),
+           "error": str(error or ""), "verdicts": verdicts,
+           "mixed_age": dict(mixed_age) if mixed_age is not None else _mixed_age(verdicts),
+           "tracing": bool(tracing)}
+    path = os.path.join(root, SITE_DIR, DATA_DIR, BUILD_NAME)
+    ensure_dir(os.path.dirname(path))
+    atomic_write_json(path, doc)
+    return posixpath.join(SITE_DIR, DATA_DIR, BUILD_NAME)
+
+
+def _baked_id(site: str) -> str:
+    """The seal over ``{relpath: sha256}`` of the tracked baked files: the
+    three documents and every ``data/views/*.json``."""
+    import hashlib
+    files: dict[str, str] = {}
+    data = os.path.join(site, DATA_DIR)
+    names = [STATE_NAME, MAP_NAME, PAGE_NAME]
+    views = os.path.join(site, VIEWS_DIR.replace("/", os.sep))
+    if os.path.isdir(views):
+        names += [posixpath.join("views", n) for n in sorted(os.listdir(views))
+                  if n.endswith(".json")]
+    for name in names:
+        path = os.path.join(data, *name.split("/"))
+        try:
+            with open(path, "rb") as fh:
+                files[name] = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            continue
+    return hashlib.sha256(("nopekit-build-v1\n" + json.dumps(files, sort_keys=True))
+                          .encode("utf-8")).hexdigest()[:16]
+
+
+def watch_snapshot(root: str) -> dict:
+    """``{relpath: (size, mtime_ns)}`` over `WATCH_DIRS` — what `site serve
+    --watch` compares between polls. ``__pycache__`` and ``*.pyc`` are left
+    out; a missing path is simply absent."""
+    out: dict[str, tuple] = {}
+    for rel in WATCH_DIRS:
+        path = os.path.join(root, *rel.split("/"))
+        if os.path.isfile(path):
+            st = os.stat(path)
+            out[rel] = (st.st_size, st.st_mtime_ns)
+            continue
+        if not os.path.isdir(path):
+            continue
+        for directory, dirnames, filenames in os.walk(path):
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            for name in filenames:
+                if name.endswith(".pyc"):
+                    continue
+                full = os.path.join(directory, name)
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                out[os.path.relpath(full, root).replace(os.sep, "/")] = (st.st_size,
+                                                                        st.st_mtime_ns)
+    return out
 
 
 def refresh_renderer(root: str) -> list:
@@ -1490,7 +1805,7 @@ def refresh_renderer(root: str) -> list:
     site = os.path.join(root, SITE_DIR)
     out: list[str] = []
     for source, relative in _template_files():
-        if relative == "index.html":
+        if relative in SHELLS:
             continue
         target = os.path.join(site, *relative.split("/"))
         with open(source, "rb") as fh:
@@ -1543,17 +1858,19 @@ def build(
     now: str = "",
     resolution: Any = None,
     params: Any = None,
+    graph: Any = None,
+    live: bool = False,
+    traced: Any = None,
 ) -> dict:
     """Run the viewgens, write ``site/data/`` and ``site/assets/``, return a summary.
 
     **This function does not run gates**, and the omission is the point. It
     renders ``resolution`` — the caller's ``verdicts.resolve`` of the verdict
-    cache — and stamps each verdict with its own age. A build that re-ran the
-    cheap gates on the way past would publish a page whose tier-0 numbers are
-    ten seconds old and whose tier-2 numbers are a week old, under a single
-    "built at" timestamp — and the reader has no way to tell them apart. If the
-    results are stale, the honest fix is to run ``nopekit check``, and the
-    page's job is to make the staleness impossible to miss, not to paper over it.
+    cache. A build that re-ran the cheap gates on the way past would publish a
+    page whose tier-0 numbers are ten seconds old and whose tier-2 numbers are
+    a week old, and the reader has no way to tell them apart. If the results
+    are stale, the fix is to run ``nopekit check``, and the page's job is to
+    make the staleness impossible to miss, not to paper over it.
 
     Handed no ``resolution``, it resolves for itself (:func:`state`), against
     the projection it builds the views from: ``projection``, or — when the
@@ -1561,38 +1878,47 @@ def build(
     model that does not load is not an error for the page; the resolver reads
     every verdict that read it as not current (S-21), and the build warns.
     ``params`` as for :func:`state`; handed none, they are the view of the model
-    the build already holds.
+    the build already holds. ``graph`` is the caller's `graph.build` over the
+    same resolution (`round` hands its own, so the map and the round record
+    share one graph); with none, `graph.of` builds it over the current
+    design's trace. ``traced`` is the caller's `derivation.TraceRead`; with
+    none, the build reads it (architecture phase 3b). ``live`` marks
+    ``data/build.json`` live, so a page served by `site serve --watch` polls it.
 
-    ``registry`` is the *gate* registry (claim coverage and the readiness
-    sentence are resolved against it — see :func:`state`); ``view_registry``
-    holds the viewgens. Both are parameters rather than module globals so a build
-    can be run against a scratch registry in a test, and so a site can be built
-    on a machine where the packs that produced the verdicts are not installed.
+    What it writes (architecture phase 5, SPEC 28-33), in this order: the
+    renderer (`refresh_renderer`, never a shell), ``technical.html`` when absent,
+    the clock's ignore line; the views and ``state.json`` (the technical
+    record, clock-free); ``map.json`` and ``page.json`` (`page`), refused
+    whole when `page.status_problems` finds a token the resolution does not
+    say (invariant 14); the evidence copies; ``build.json`` last. Every tracked
+    file is written only when its bytes differ, so a rebuild that judged
+    nothing new changes no tracked byte and no mtime.
+
+    ``registry`` is the *gate* registry; ``view_registry`` holds the viewgens.
+    Both are parameters so a build can run against a scratch registry in a test.
 
     Returns a summary dict: what was written, what was removed, every viewgen's
     outcome, and — never merely available but actually said — ``warnings``,
-    which is the list a CLI must print. Locator problems are in there, because
-    the alternative is a gate that believes it is drawing and a reader who never
-    learns otherwise.
-
-    The ledger is NOT written back. The site is an output and the ledger is the
-    source (method rule 1): generated views live in ``state.json``, and a build
-    that edited the project's state would make "rebuild the site" a change to the
-    project.
+    which is the list a CLI must print. The ledger is NOT written back: the site
+    is an output and the records are the source (method rule 1).
     """
     site = os.path.join(root, SITE_DIR)
-    if not os.path.isdir(site):
+    if not scaffolded(root):
         raise NopekitError(
-            f"no {SITE_DIR}/ directory at {os.path.abspath(root)} — run "
-            f"`nopekit site init` first. Writing the data with no page to read it "
-            f"would look like a successful build of a site that does not exist."
-        )
+            f"no {SITE_DIR}/index.html at {os.path.abspath(root)}: run `nopekit site init` "
+            f"first ({SITE_DIR}/{CONTENT_DIR}/ holds the page's text, not the page)")
     data_dir = os.path.join(site, DATA_DIR)
     views_dir = os.path.join(site, VIEWS_DIR.replace("/", os.sep))
     assets_dir = os.path.join(site, ASSETS_DIR)
     for directory in (data_dir, views_dir, assets_dir):
         ensure_dir(directory)
     refreshed = refresh_renderer(root)
+    for source, relative in _template_files():
+        if relative in SHELLS and relative != "index.html" \
+                and not os.path.exists(os.path.join(site, relative)):
+            shutil.copyfile(source, os.path.join(site, relative))
+            refreshed.append(posixpath.join(SITE_DIR, relative))
+    ignore_written = ensure_site_ignore(root)
 
     warnings: list[str] = []
     model_error = ""
@@ -1609,12 +1935,9 @@ def build(
     ctx = ViewContext(
         root=root,
         # A DEFENSIVE COPY, exactly as `cli._context` hands gates one. Viewgens
-        # are third-party code — a pack is an ordinary directory anyone can drop
-        # in — and handing over the live object would let a viewgen append a
-        # Verdict or clear a claim, which `state()` would then publish as the
-        # project's status a few lines later. Views legitimately need to READ the
-        # ledger (a table view IS the BOM; a chart annotates its own claim), so
-        # it stays available, just not as a writable handle.
+        # are third-party code, and handing over the live object would let a
+        # viewgen append a Verdict or clear a claim, which `state()` would then
+        # publish as the project's status a few lines later.
         ledger=Ledger.from_dict(ledger.to_dict()),
         model=model,
         params=flat,
@@ -1632,10 +1955,8 @@ def build(
     warnings.extend(conflicts_views)
 
     # `state` reads views off the ledger, so the generated ones are grafted onto
-    # an in-memory copy. The copy never reaches disk: see the docstring. A
-    # `replace`, not a dict round trip: a claim's results and attributions live
-    # in memory only (P2.5a, `FORBIDDEN_KEYS`), and a round trip dropped them —
-    # an owner recorded in their own shell read unattributed on the page alone.
+    # an in-memory copy. A `replace`, not a dict round trip: a claim's results
+    # and attributions live in memory only (P2.5a, `FORBIDDEN_KEYS`).
     for_state = dataclasses.replace(ledger, views=list(merged))
     if resolution is None:
         # Resolved against the LEDGER the caller handed in, not `for_state`:
@@ -1644,16 +1965,84 @@ def build(
                               model_error=model_error, now=now)
     if params is None:
         params = _param_views(ledger, model, model_error, resolution, registry)
-    payload = state(root, for_state, registry, now=now, resolution=resolution,
-                    params=params)
+    view = verdict_logic.view(for_state, resolution)
+    composed = _composed(view, registry, resolution)
+    # -- the trace and amber (architecture phase 3b), before `state.json`,
+    # which carries them inside its resolution digest ----------------------- #
+    tokens = graph_logic.tokens(view, resolution, registry, composed=composed)
+    if traced is None:
+        try:
+            traced = trace_logic.trace_for(root, model, projection,
+                                           trace_logic.anchors_for(root, resolution))
+        except (NopekitError, OSError, ValueError, TypeError):
+            traced = trace_logic.TraceRead("unrecorded", None, None, (), ())
+    built = graph if graph is not None else graph_logic.of(
+        root, view, resolution, registry, projection=projection, model=model, views=params,
+        bases={}, trace=traced.trace)
+    amber = trace_logic.amber_now(root, view, registry, built, tokens.claims, traced)
+    payload = state(root, for_state, registry, resolution=resolution, params=params,
+                    judged=(view, composed),
+                    trace=trace_logic.state_payload(traced, built, amber))
     stale = bool(payload["meta"]["stale"])
     stale_reason = str(payload["meta"]["stale_reason"])
 
+    # -- the front page (page.py): the map, the outline, the floor ---------- #
+    lay = page_logic.layout(view, built, projection=projection, params=params,
+                            registry=registry, resolution=resolution)
+    warnings.extend(lay.warnings)
+    records = str(payload["meta"].get("records_digest") or "")
+    judged = str(payload["meta"].get("resolution_digest") or "")
+    plan = _evidence_plan(root, view, resolution, registry)
+    for item in plan:
+        if item.reason:
+            warnings.append(f"evidence {item.path} of {item.gate} is not on the page: "
+                            f"{item.reason}")
+    map_doc = page_logic.bake_map(view, lay, built, tokens, composed, projection=projection,
+                                  params=params, registry=registry, payload=payload,
+                                  name=str(view.meta.name or ""), records_digest=records,
+                                  resolution_digest=judged, amber=amber, trace=traced)
+    page_doc = page_logic.bake_page(root, view, lay, built, tokens, composed,
+                                    registry=registry, payload=payload, plan=plan,
+                                    records_digest=records, resolution_digest=judged,
+                                    amber=amber)
+    problems_found = page_logic.status_problems(
+        map_doc, page_doc, view, composed, tokens, amber=amber,
+        feeds=page_logic.live_feeds(lay, built, tokens))
+    if problems_found:
+        raise NopekitError(
+            f"the page would say more than the resolution, so nothing under "
+            f"{SITE_DIR}/{DATA_DIR}/ was written: {problems_found[0]}. This is a defect in "
+            f"nopekit; report it.")
+
     written: list[str] = []
+    # Evidence first: a copy the page links must be on disk before the page is.
+    copied = kept = 0
+    keep_evidence: list[str] = []
+    for item in plan:
+        if item.action == "copy" and item.source and item.dest:
+            target = os.path.join(site, *item.dest.split("/"))
+            with open(item.source, "rb") as fh:
+                payload_bytes = fh.read()
+            try:
+                with open(target, "rb") as fh:
+                    same = fh.read() == payload_bytes
+            except OSError:
+                same = False
+            if not same:
+                _atomic_write_bytes(target, payload_bytes)
+                written.append(posixpath.join(SITE_DIR, item.dest))
+            copied += 1
+            keep_evidence.append(item.dest)
+        elif item.action == "keep" and item.dest:
+            kept += 1
+            keep_evidence.append(item.dest)
+    not_shown = sum(1 for item in plan if item.action == "none")
+
     # Split the payloads too big to inline BEFORE writing state.json, so the file
     # the page fetches stays the size of a project summary rather than the size
     # of its largest table.
     kept_view_files: list[str] = []
+    inline_views: list[Any] = []
     for row in payload["views"]:
         view_id = str(row.get("id") or "")
         inline = row.get("data") or {}
@@ -1662,36 +2051,65 @@ def build(
         try:
             _require_view_id(view_id)
         except NopekitError as exc:
-            # A ledger-declared view can carry any id at all; a registered one
-            # cannot. Report and keep it inline rather than writing a file whose
-            # name we do not trust.
             warnings.append(f"view {view_id!r} kept inline: {exc}")
             continue
         if _rough_size(inline) <= VIEW_INLINE_MAX:
             continue
         relative = posixpath.join(VIEWS_DIR, f"{view_id}.json")
-        atomic_write_json(os.path.join(site, relative.replace("/", os.sep)), inline)
+        if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)), inline):
+            written.append(posixpath.join(SITE_DIR, relative))
+        inline_views.append(inline)
         row["data"] = {}
         row["data_url"] = relative
-        written.append(posixpath.join(SITE_DIR, relative))
         kept_view_files.append(f"{view_id}.json")
-
-    state_relative = posixpath.join(DATA_DIR, STATE_NAME)
-    atomic_write_json(os.path.join(site, state_relative.replace("/", os.sep)), payload)
-    written.append(posixpath.join(SITE_DIR, state_relative))
 
     # Keep every asset a view still points at, not merely the ones written this
     # run: a viewgen that skipped because its exporter is missing did not rewrite
     # its GLB, and deleting the previous one would turn a missing dependency into
-    # a missing picture with no explanation.
-    keep = list(ctx.written)
+    # a missing picture with no explanation. And every evidence copy the plan
+    # links.
+    keep = list(ctx.written) + keep_evidence
     for row in payload["views"]:
         src = str(row.get("src") or "")
         if src.startswith(ASSETS_DIR + "/"):
             keep.append(src)
-    # Both cleaners speak site-relative paths (the spelling `write_asset`
-    # returns and `View.src` carries); the summary is root-relative throughout,
-    # so the prefix is added once, here, rather than by each of them.
+
+    # The prose last among the bakes: its numbers are matched against every
+    # number the other documents hold (SPEC 30), never against itself, and
+    # only against assets this build keeps: a file the cleaner removes below
+    # never vouches for a number. What slipped through (review of phase 5): the
+    # pool read every JSON under assets/ before the cleaner ran, so an old
+    # evidence copy matched a number once, and the next build, with nothing
+    # new judged, marked it and rewrote page.json.
+    pool = prose_pool([payload, *inline_views, map_doc, page_doc],
+                      _kept_json(site, keep))
+    prose_rows = page_logic.bake_prose(root, page_doc, lay, tokens, pool)
+    for row in prose_rows:
+        where = row["file"]
+        if row["subject"] is None:
+            warnings.extend(row["problems"])
+            continue
+        if row["stamp"] == "stale":
+            warnings.append(f"{where}: written before the latest results; read it again, then "
+                            f"`nopekit site stamp {row['subject']}`")
+        elif row["stamp"] == "unstamped":
+            warnings.append(f"{where}: not stamped; read it again, then "
+                            f"`nopekit site stamp {row['subject']}`")
+        for number in row["unmatched"][:8]:
+            warnings.append(f"{where}: {number} matches no number the site bakes; the page "
+                            f"marks it")
+        if len(row["unmatched"]) > 8:
+            warnings.append(f"{where}: and {len(row['unmatched']) - 8} more")
+        for problem in row["register"] + row["problems"]:
+            warnings.append(f"{where}: {problem}")
+
+    map_doc["self"] = page_logic.seal(map_doc)
+    page_doc["self"] = page_logic.seal(page_doc)
+    for name, doc in ((STATE_NAME, payload), (MAP_NAME, map_doc), (PAGE_NAME, page_doc)):
+        relative = posixpath.join(DATA_DIR, name)
+        if write_json_if_changed(os.path.join(data_dir, name), doc):
+            written.append(posixpath.join(SITE_DIR, relative))
+
     removed = [posixpath.join(SITE_DIR, p) for p in
                clean_assets(root, keep) + _clean_view_files(views_dir, kept_view_files)]
 
@@ -1701,10 +2119,26 @@ def build(
                         f"{'/' + problem['target'] if problem['target'] else ''}: "
                         f"{problem['problem']}")
 
+    marker = outline_of(root)
+    if marker is None or marker < page_logic.OUTLINE:
+        warnings.append(
+            f"{SITE_DIR}/index.html predates the page outline (no nopekit-outline marker): "
+            f"data/{PAGE_NAME} and data/{MAP_NAME} are written, and no page shows them. Keep "
+            f"a copy of your index.html, then run `nopekit site init --force`; "
+            f"technical.html keeps today's panels.")
+
+    verdict_ages = ages(resolution, now)
+    build_json = write_build_json(root, now=now, id=_baked_id(site), ok=True, live=live,
+                                  verdicts=verdict_ages,
+                                  tracing=trace_logic.live_holder(root) is not None)
+    stamps = [r["stamp"] for r in prose_rows if r["subject"] is not None]
     return {
         "root": root,
         "site": SITE_DIR,
-        "state": posixpath.join(SITE_DIR, state_relative),
+        "state": posixpath.join(SITE_DIR, DATA_DIR, STATE_NAME),
+        "page": posixpath.join(SITE_DIR, DATA_DIR, PAGE_NAME),
+        "map_file": posixpath.join(SITE_DIR, DATA_DIR, MAP_NAME),
+        "build_json": build_json,
         "built": now,
         "stale": stale,
         "stale_reason": stale_reason,
@@ -1712,8 +2146,10 @@ def build(
                    "pack": v.get("pack", ""), "data_url": v.get("data_url", "")}
                   for v in payload["views"]],
         "viewgens": notes,
-        "wrote": sorted(written + refreshed
-                        + [posixpath.join(SITE_DIR, p) for p in ctx.written]),
+        "wrote": sorted(set(written + refreshed
+                            + ([posixpath.join(SITE_DIR, ".gitignore")] if ignore_written
+                               else [])
+                            + [posixpath.join(SITE_DIR, p) for p in ctx.written])),
         "refreshed": refreshed,
         "removed": sorted(removed),
         "locator_problems": problems,
@@ -1724,6 +2160,19 @@ def build(
             "locator_problems": len(problems),
             "assets": len(ctx.written),
         },
+        "map": {"lines": len(lay.lines), "boards": len(lay.boards), "zones": len(lay.zones),
+                "stations": len(lay.stations), "traced": built.trace is not None,
+                "layers": len(lay.layers), "feeds": len(lay.feeds),
+                "round": getattr(built, "trace_round", None),
+                "crossings": dict(lay.crossings)},
+        "prose": [{"file": r["file"], "subject": r["subject"], "stamp": r["stamp"],
+                   "unmatched": r["unmatched"], "register": r["register"],
+                   "problems": r["problems"]} for r in prose_rows],
+        "prose_counts": {"current": stamps.count("current"), "stale": stamps.count("stale"),
+                         "unstamped": stamps.count("unstamped"),
+                         "unmatched": sum(len(r["unmatched"]) for r in prose_rows)},
+        "outline": {"marker": marker, "current": page_logic.OUTLINE},
+        "evidence": {"copied": copied, "kept": kept, "missing": not_shown},
         "warnings": warnings,
     }
 
@@ -1847,6 +2296,14 @@ def clean_assets(root: str, keep: Iterable[str]) -> list:
 # --------------------------------------------------------------------------- #
 # the state the page reads
 # --------------------------------------------------------------------------- #
+
+#: `ProjectMeta` fields `state.json`'s `meta` never carries (architecture phase
+#: 6): `people` lists the names and email addresses a round may commit as, and a
+#: page deployed to Pages would publish them to anyone. *Rejected:* baking them
+#: (nothing on the page reads them; git's own history already names each
+#: commit's author to whoever can read the repository).
+_UNPUBLISHED_META = frozenset({"people"})
+
 def state(
     root: str,
     ledger: Ledger,
@@ -1856,6 +2313,8 @@ def state(
     stale: bool | None = None,
     resolution: Any = None,
     params: Any = None,
+    judged: tuple | None = None,
+    trace: Mapping[str, Any] | None = None,
 ) -> dict:
     """Everything the page shows, in one inspectable JSON-safe dict.
 
@@ -1890,10 +2349,10 @@ def state(
     STALE, every row not current. ``None`` and ``False`` are no override at all
     — a caller cannot declare the cache current; only the resolver says what is.
 
-    ``now`` is the caller's ISO timestamp (contract rule 3 — nothing here reads
-    the clock). Without it, ``age_s`` is ``null`` everywhere rather than zero: an
-    age of zero renders as "just now", which is the precise lie a staleness
-    display exists to prevent.
+    ``now`` is kept for callers and ignored (architecture phase 5, SPEC 32): the
+    document is clock-free, and the build time and each verdict's age go to
+    ``data/build.json`` (`ages`, `write_build_json`). ``judged`` is the
+    caller's ``(view, composed)``, so a build composes once.
 
     ``params`` — the caller's :func:`nopekit.modelio.param_view` (the CLI's,
     which also names what a broken model's text states). With none, the view of
@@ -1916,10 +2375,14 @@ def state(
     # The page's ledger IS the resolution laid over the records: every judgement
     # below — statuses, coverage, PARTIAL, the headline, locator problems — reads
     # these verdicts, so none of them can disagree with the verdict rows.
-    view = verdict_logic.view(ledger, resolution)
-
-    composed = claim_logic.compositions(view, registry=registry, stale=everything,
-                                        stale_gates=stale_gates)
+    if judged is not None:
+        view, composed = judged
+    else:
+        view = verdict_logic.view(ledger, resolution)
+        composed = _composed(view, registry, resolution, everything)
+    assets = page_logic.evidence_assets(_evidence_plan(root, view, resolution, registry))
+    board_of = {cid: board.id for board in page_logic.boards_of(view)
+                for cid in board.members}
     resolved = {cid: c.status for cid, c in composed.items()}
     summary = claim_logic.summarise(view, registry, stale=everything,
                                     stale_gates=stale_gates)
@@ -1927,10 +2390,19 @@ def state(
     stale_reasons = {gid: (resolution.rows[gid].stale_reason if gid in resolution.rows
                            else "") for gid in stale_gates}
 
+    from . import packs as pack_logic             # a reader's module: not at import
+    found_proposers = (pack_logic.proposers(root)
+                       if any(a.proposer for a in view.inputs) else {})
+    input_bases = {a.id: pack_logic.proposer_basis(found_proposers, a.proposer)
+                   for a in view.inputs if a.proposer}
     verdict_rows: list[dict] = []
+    bases = report_logic._bases(registry)
     for verdict in view.verdicts:
         how = resolution.rows.get(verdict.gate)
         row = verdict.to_dict()
+        # SPEC 38: where the evaluator's verdict logic comes from — the
+        # registry's token, `undeclared` with no spec; shown, never a status.
+        row["basis"] = bases.get(verdict.gate, "undeclared")
         if how is not None and how.cached and how.entry is not None:
             # A cached row shows its entry as recorded: the tier and pack the
             # gate RAN under. The resolver re-stamps a stale verdict with the
@@ -1954,12 +2426,11 @@ def state(
         row["fresh"] = bool(how is not None and how.fresh) and not everything
         reason = how.stale_reason if how is not None else ""
         row["stale_reason"] = reason or (_MARKED_STALE if everything else "")
-        # The age is the resolver's `when` — the obs run that last hit or wrote
-        # the entry, else the entry's commit time, else "" — and "" is a null
-        # age, never 0.
-        when = how.when if how is not None else ""
-        row["when"] = when
-        row["age_s"] = _age_seconds(now, when)
+        # No clock here (architecture phase 5, SPEC 32): a verdict's `when` and
+        # age go to `data/build.json` (`ages`), which git ignores, so a rebuild
+        # that judged nothing new changes no tracked byte. What slipped through
+        # before: every build rewrote `state.json` with new ages, so a check that
+        # moved nothing still dirtied `git status` with the published page.
         # `ok` is the only predicate that means "it ran, it did not crash, and it
         # said yes". The page must never key a green tick off `passed`: a skipped
         # gate carries passed=False today, but a pack that sets passed=True next
@@ -2009,7 +2480,18 @@ def state(
             # on the wrong part is worse than none) and the page has to be able
             # to say so instead of looking like the overlay is broken.
             row["unanchored"] = True
+        # The evidence as the page links it (`page.evidence_plan`): the published
+        # copy's href, aligned with `evidence`, or "" where it is not on the page.
+        row["evidence_assets"] = list(assets.get(verdict.gate) or
+                                      ["" for _ in verdict.evidence or ()])
         verdict_rows.append(row)
+    # Reading order, baked (SPEC 32): errored, fail, unqualified, outside its
+    # context, skipped, pass, then the natural gate id — what the template's
+    # VERDICT_ORDER and anchored-verdict ranking computed in the browser.
+    for i, row in enumerate(sorted(verdict_rows, key=lambda r: (
+            _ROW_RANK.get(str(r.get("status")), len(_ROW_RANK)),
+            store._natural(str(r.get("gate")))))):
+        row["order"] = i
 
     claim_rows: list[dict] = []
     needs = {spec.id: list(getattr(spec, "needs", None) or ())
@@ -2026,6 +2508,14 @@ def state(
         # those, never on `passed` (critique 3 of the P2.5a design).
         row = report_logic.claim_json(claim, composed=found, exports=view.exports)
         row["status"] = str(status)
+        # A recorded result's outcome as a word key (architecture phase 5,
+        # template side): the page shows "pass" or "fail" from `outcome` and its
+        # tone from `counts`, and reads no `passed` flag (SPEC 32: the template
+        # scan refuses a `.passed` read, which a verdict row's flag and a
+        # result's field share).
+        if isinstance(row.get("physical_result"), dict):
+            row["physical_result"]["outcome"] = (
+                "pass" if row["physical_result"].get("passed") is True else "fail")
         # The words beside the kept enum (P2.1-D12): `key`, `word`, `cause`,
         # `reason`, `errored` — all `report.HUMAN`'s, so the page owns none.
         row.update(report_logic.status_view(found, view, claim,
@@ -2060,15 +2550,23 @@ def state(
         # headline verdict's own limit, so Failing C3 read `0.195 MPa / 15 MPa`
         # against a claim of `<= 0.1 MPa` — S-35's slip, on the page.
         row["limit_text"] = report_logic.limit_words(claim.acceptance)
+        # The board the claim sits on (SPEC 17): the record's, or `other`.
+        row["board"] = board_of.get(claim.id, page_logic.OTHER)
         claim_rows.append(row)
 
-    views = [v.to_dict() for v in view.views]
+    # The one producer's statuses, with D18's disagreeing claims named
+    # (`report.requirement_statuses`): the same `cover` as `row["disagree"]`.
+    served = report_logic.requirement_statuses(view, composed, cover)
+    views = [_chart_margins(v.to_dict()) for v in view.views]
     problems = locator_problems(view.views, view.verdicts)
 
     payload = {
         "meta": {
-            **view.meta.to_dict(),
-            "built": now,
+            # Every ProjectMeta field but `people` (architecture phase 6): the
+            # page is published as committed, and the names and addresses a
+            # round may commit as are the project's, not the page's to publish.
+            **{key: value for key, value in view.meta.to_dict().items()
+               if key not in _UNPUBLISHED_META},
             "stale": everything or bool(stale_gates),
             "stale_reason": (_MARKED_STALE if everything
                              else _stale_reason(resolution, stale_gates)),
@@ -2078,7 +2576,7 @@ def state(
             # records now. What it replaced compared mtimes with `ledger.json`,
             # which from 1.3 is a generated index every command rewrites — a page
             # of unchanged records read stale after any `status` (cli:H16). The
-            # records are half of what the page renders; `judgement_digest`, set
+            # records are half of what the page renders; `resolution_digest`, set
             # below, is the other half.
             "records_digest": store.records_digest(root),
             # Stated on the artifact itself, because someone will find this file
@@ -2128,32 +2626,119 @@ def state(
         # title (`report.page_phrases`).
         "phrases": report_logic.page_phrases(),
         "claims": claim_rows,
+        # SPEC decision 12: each requirement, its status from the one producer
+        # over the compositions above, worded by `report.requirement_json`. The
+        # page draws none until the map (phase 5); `resolution_digest` covers
+        # them, so a moved requirement status marks the page behind.
+        "requirements": [report_logic.requirement_json(r, served[r.id])
+                         for r in view.requirements],
         "verdicts": verdict_rows,
         "views": views,
         "locator_problems": problems,
         "params": [_param_row(param, view) for param in params],
-        "inputs": [{**artifact.to_dict(), "extracted": artifact.extracted}
+        # SPEC 38: an input's basis is its proposer's, looked up (`""` with no
+        # proposer, `undeclared` when no discoverable pack declares it).
+        "inputs": [{**artifact.to_dict(), "extracted": artifact.extracted,
+                    "basis": input_bases.get(artifact.id, "")}
                    for artifact in view.inputs],
         "gaps": [need.to_dict() for need in report_logic._needs(view, registry)],
         "decisions": [decision.to_dict() for decision in view.decisions],
+        # SPEC 14: every rejected alternative as tokens — its type, its return
+        # condition's state now, its preference's standing — `summarise`'s.
+        "rejections": summary["rejections"],
         # The rebuild prediction (P2.5a-D16): `claims.rebuild`, the one producer.
         "rebuild": [found.to_dict() for found in claim_logic.rebuild(view)],
     }
     # What this page judged, so `cli._site_state` can ask whether a rebuild now
-    # would judge the same (`judgement_digest`). Set last, over the finished
+    # would judge the same (`resolution_digest`). Set last, over the finished
     # document, and by this function, so the build's digest and the reader's are
     # one computation over one producer's output and cannot drift apart.
-    payload["meta"]["judgement_digest"] = judgement_digest(payload)
+    # Architecture phase 3b: the trace's state and amber
+    # (`derivation.state_payload`), inside the resolution digest so an amber
+    # change makes the page stale; null and empty when the caller has none.
+    payload["trace"] = dict((trace or {}).get("trace") or {}) or None
+    payload["amber"] = dict((trace or {}).get("amber") or {})
+    payload["meta"]["resolution_digest"] = resolution_digest(payload)
     return payload
+
+
+#: The rank `state` orders verdict rows by (SPEC 32): a crash first, louder
+#: than a fail (invariant 2), then a fail, an unqualified evaluator, a pass
+#: outside its context, a skip, a pass.
+_ROW_RANK = {"errored": 0, "fail": 1, "unqualified": 2, "outside-context": 3, "skipped": 4,
+             "pass": 5}
+
+
+def _composed(view: Any, registry: Any, resolution: Any, everything: bool = False) -> dict:
+    """The compositions `state` and the front page share — one
+    `claims.compositions` call per build."""
+    return claim_logic.compositions(view, registry=registry, stale=everything,
+                                    stale_gates=frozenset(resolution.stale_gates))
+
+
+def _chart_margins(row: dict) -> dict:
+    """A chart view's current points with ``margin_text`` (SPEC 32): the
+    distance from each to the view's own limit, in the site's words — what the
+    template's ``marginText`` subtracted in the browser. Other views as they
+    are."""
+    if str(row.get("kind") or "") != "chart":
+        return row
+    data = row.get("data")
+    if not isinstance(data, dict):
+        return row
+    meta = row.get("meta") or {}
+    raw_limits = data.get("limit", data.get("limits", meta.get("limit")))
+    limits = raw_limits if isinstance(raw_limits, list) else (
+        [] if raw_limits is None else [raw_limits])
+    limit = None
+    for item in limits:
+        if isinstance(item, dict):
+            value, axis = item.get("value", item.get("limit")), item.get("axis")
+            comparator = str(item.get("comparator") or "<=")
+        else:
+            value, axis, comparator = item, "y", "<="
+        if axis != "x" and _finite(value):
+            limit = (float(value), comparator)
+            break
+    key = next((k for k in ("current", "marker", "now") if k in data), None)
+    if limit is None or key is None:
+        return row
+    y_axis = data.get("y") if isinstance(data.get("y"), dict) else {}
+    units = str(y_axis.get("units") or meta.get("y_units") or "")
+    said = report_logic.HUMAN["site"]["chart_margin"]
+
+    def one(item: Any) -> Any:
+        point = dict(item) if isinstance(item, dict) else {"value": item}
+        y = point.get("y", point.get("value"))
+        if not _finite(y):
+            return item
+        delta = float(y) - limit[0]
+        inside = delta < 0 if limit[1].startswith("<") else delta > 0
+        text = f"{page_logic._num(abs(delta))}{' ' + units if units else ''}"
+        point["margin_text"] = said["inside" if inside else "past"].format(delta=text)
+        return point
+
+    current = data[key]
+    data = dict(data)
+    data[key] = [one(c) for c in current] if isinstance(current, list) else one(current)
+    return {**row, "data": data}
+
+
+def _finite(value: Any) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value == value and value not in (float("inf"), float("-inf")))
 
 
 # --------------------------------------------------------------------------- #
 # what a page judged
 # --------------------------------------------------------------------------- #
-#: What ``judgement_digest`` leaves out of a ``state`` document: the clock — the
-#: build's ``built`` stamp, and each verdict row's ``when`` (the obs run that
-#: last hit or wrote its entry) and ``age_s`` — the two digests, and the views
-#: with their ``locator_problems``. Everything else is judged, including keys a
+#: What ``resolution_digest`` leaves out of a ``state`` document: the two
+#: digests, each verdict row's ``evidence_assets``, and the views with their
+#: ``locator_problems``. (Until phase 5 it also left out the clock — the
+#: build's ``built`` stamp and each row's ``when`` and ``age_s`` — which the
+#: document no longer holds: they are in ``data/build.json``. Phase 3a's
+#: ``judgement_digest`` is this function, renamed: "judgement" now names
+#: nothing on the page, and the glossary's *judgment* is an expert's.) Everything else is judged, including keys a
 #: later ``state`` adds: a new clock-like key makes pages read stale after every
 #: check, which someone sees the same day; an unwatched judgement is the defect
 #: this digest exists for (review, ``repro_site``). *Rejected:* an allow-list of
@@ -2164,8 +2749,10 @@ def state(
 #: drawn by viewgens that a reader asking "is the page current?" never runs: a
 #: model edit that moves no verdict leaves the judgement current and the drawing
 #: old, and ``site build`` redraws it. Not a claim — no verdict rests on a view.
-_UNJUDGED_META = frozenset({"built", "records_digest", "judgement_digest"})
-_UNJUDGED_ROW = frozenset({"when", "age_s"})
+_UNJUDGED_META = frozenset({"records_digest", "resolution_digest"})
+#: `evidence_assets` says where a copy is on the page, which moves with what is
+#: on disk, never with the judgement.
+_UNJUDGED_ROW = frozenset({"evidence_assets"})
 _UNJUDGED_KEYS = frozenset({"views", "locator_problems"})
 
 
@@ -2181,7 +2768,7 @@ def _tally(composed: Any) -> list[dict]:
     return report_logic.count_bits(composed)
 
 
-def judgement_digest(payload: Any) -> str:
+def resolution_digest(payload: Any) -> str:
     """sha256 over what a ``state`` document judged: its claim statuses and
     PARTIAL markers, the readiness sentence and counts, every verdict row with
     how the resolver reached it (``cached``, ``fresh``, ``stale_reason``), the
@@ -2212,10 +2799,10 @@ def judgement_digest(payload: Any) -> str:
     # current?" into a crash of `status`, the command run when something is wrong.
     text = json.dumps(judged, sort_keys=True, ensure_ascii=False, allow_nan=True,
                       separators=(",", ":"))
-    return sha256_text("nopekit-judgement-v1\n" + text)
+    return sha256_text("nopekit-resolution-v1\n" + text)
 
 
-def judgement_moved(shown: Any, now: Any) -> list[str]:
+def resolution_moved(shown: Any, now: Any) -> list[str]:
     """What a page shows that a rebuild would not, as short facts: each claim
     whose status moved (``C1 pass -> fail``, ``C9 (none) -> pending`` for one
     the page lacks), else each verdict row whose outcome or measurement moved

@@ -50,7 +50,9 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
+import tempfile
 import textwrap
 import time
 import unittest
@@ -61,7 +63,7 @@ import _env
 import _projects
 import _transcript
 from nopekit import claims as claims_mod
-from nopekit import modelio, models, store, util
+from nopekit import cli, derivation, modelio, models, rounds, store, util
 from nopekit.models import (
     Acceptance,
     Claim,
@@ -78,7 +80,15 @@ from nopekit.models import (
 )
 from nopekit.util import NopekitError
 
-PHASE_1 = os.path.join(_env.REPO, "docs", "plan", "phase-1.md")
+#: Phase 1's canonical `claims/C1.json`, as its plan wrote it (docs/plan/phase-1.md,
+#: retired at a00d0e5 when docs/SPEC.md replaced the plan). What slipped through the
+#: retirement: this test read the plan file itself, so deleting the plan turned the
+#: full suite red at the commit that deleted it. The bytes now live here, where the
+#: test that holds them can see them.
+PHASE_1_C1 = """{"statement": "Tip sags no more than 0.5 mm at rated load", "kind": "measurable",
+ "acceptance": {"quantity": "tip deflection", "comparator": "<=", "limit": 0.5, "units": "mm"},
+ "rationale": "past ~0.5 mm the droop is visible against a level shelf edge; this is a product decision, not a physics one",
+ "tags": ["stiffness"]}"""
 
 #: The bytes of the one evidence file the rich legacy ledger ingested.
 NAPKIN = b"\x89PNG not really a png\n"
@@ -465,16 +475,8 @@ class StrictReader(_env.EnvCase):
 # the writer
 # --------------------------------------------------------------------------- #
 def _phase_1_c1() -> str:
-    """phase-1.md's `claims/C1.json` example, as the plan writes it."""
-    with open(PHASE_1, encoding="utf-8") as fh:
-        lines = fh.read().splitlines()
-    start = lines.index("// claims/C1.json") + 1
-    body: list[str] = []
-    for line in lines[start:]:
-        if line.startswith("```"):
-            break
-        body.append(line)
-    return "\n".join(body)
+    """Phase 1's `claims/C1.json` example (``PHASE_1_C1``)."""
+    return PHASE_1_C1
 
 
 class RecordWriter(_env.EnvCase):
@@ -729,7 +731,7 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
         self.assertEqual(list(index), [
             "generated", "schema", "records_digest", "meta", "claims", "params", "decisions",
             "needs", "inputs", "results", "attributions", "views", "milestones", "exports",
-            "unregistered_inputs", "problems"])
+            "requirements", "preferences", "groups", "unregistered_inputs", "problems"])
         # P2.5b: a milestone's export entries are records as stored — their
         # `counted` is what the export saw, sealed, not a status now.
         self.assertEqual(index["generated"], store.INDEX_BANNER)
@@ -764,16 +766,66 @@ class IndexNeverDisagreesWithRecords(_env.EnvCase):
     # was edited by hand since the last command — the index is the one file an
     # agent reads first, and a hand edit is how records change (D-06). Each
     # command runs in a fresh process on the enriched bracket (`_migrated_bracket`).
+    def test_round_leaves_the_index_agreeing(self):
+        """(architecture phase 3a) `round` after a hand edit leaves the index
+        agreeing with the records, as every writing command does."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        _env.nopekit(["status"], cwd=project)
+        _hand_edit(project, 0)
+        self.assertNotEqual(store.agree(project), [])
+        proc = _env.nopekit(["round"], cwd=project, identity=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(store.agree(project), [])
+
     def test_every_command_leaves_the_index_agreeing(self):
         """Before each command a record is edited by hand, so the index is behind;
         after it, the index exists and agrees with the records. `doctor`, `init`
         and the dry runs repair nothing by design — a doctor that rebuilt the index
         would hide the disagreement it is there to name — so they run on an index
         that agrees, and must leave it agreeing and unwritten."""
-        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
-        index = os.path.join(project, ".nopekit", "ledger.json")
         commands = ([argv for argv, _output in _NON_SHIM] + [("check",), ("check", "--force")]
                     + [argv for argv, _named in _shims(self.tmp())])
+        self._leaves_the_index_agreeing(commands)
+
+    def test_the_site_text_commands_leave_the_index_agreeing(self):
+        """The same, over `site stamp --all` and `site badge` (architecture
+        phase 5's rows, `_NON_SHIM_SITE_TEXT`)."""
+        self._leaves_the_index_agreeing([argv for argv, _output in _NON_SHIM_SITE_TEXT])
+
+    def test_packs_skills_and_the_rounds_commit_leave_the_index_agreeing(self):
+        """The same, over `packs skills` and `round --commit` (architecture
+        phase 6's rows)."""
+        self._leaves_the_index_agreeing([argv for argv, _output in _NON_SHIM_PACK_SKILLS]
+                                        + [("round", "--commit")])
+
+    def test_the_stop_hook_leaves_the_index_agreeing(self):
+        """The Stop hook sets `_index_done`, so `main`'s rebuild is skipped and
+        the hook's own `_touch_index` is the only one: what slipped through the
+        phase, no row ran it, and deleting that line left every test green
+        while the hook — at every turn's end — left the index behind a hand
+        edit. Its stdout stays one JSON object."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        _env.nopekit(["status"], cwd=project)
+        # A model that does not load: the round's check is refused, so the
+        # check's own rebuild (`_check_run`'s) never runs and only the hook's
+        # can bring the index level. Then a model that loads, as usual.
+        model = os.path.join(project, "model", "bracket.py")
+        source = _read_bytes(model)
+        for n, broken in enumerate((True, False)):
+            with self.subTest(model_loads=not broken):
+                _write(model, b"this is not python(\n" if broken else source)
+                _hand_edit(project, n)
+                self.assertNotEqual(store.agree(project), [])
+                proc = _env.nopekit(["round", "--hook"], cwd=project, identity=True,
+                                    input=json.dumps({"cwd": project}))
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(len(proc.stdout.splitlines()), 1, proc.stdout)
+                self.assertIsInstance(json.loads(proc.stdout), dict)
+                self.assertEqual(store.agree(project), [])
+
+    def _leaves_the_index_agreeing(self, commands: list) -> None:
+        project = _migrated_bracket(os.path.join(self.tmp(), "bracket"))
+        index = os.path.join(project, ".nopekit", "ledger.json")
         for n, argv in enumerate(commands):
             with self.subTest(argv=argv):
                 repairs = argv[0] not in ("doctor", "init") and "--no-record" not in argv
@@ -875,8 +927,10 @@ class LegacyLedgerMigrates(_env.EnvCase):
 
         self.assertEqual([d.id for d in ledger.decisions], ["thicker-arm", "older"],
                          "decisions read newest first")
-        self.assertEqual(ledger.decisions[0].rejected,
+        self.assertEqual([models.Rejected(r.value, r.why, r.evidence)
+                          for r in ledger.decisions[0].rejected],
                          [Rejected(value="4.0 mm", why="sagged", evidence="runs/0002")])
+        self.assertEqual(ledger.decisions[0].rejected[0].type, "", "a legacy loser reads untyped")
         self.assertEqual(ledger.decisions[0].body, "### Why\n\nIt sagged.")
         self.assertEqual(ledger.views[0].data, {"series": [[1, 2]]})
         self.assertEqual(ledger.meta, ProjectMeta.from_dict(legacy["meta"]))
@@ -1224,6 +1278,69 @@ class LegacyLedgerMigrates(_env.EnvCase):
 # --------------------------------------------------------------------------- #
 # the store's own writers on the new layout
 # --------------------------------------------------------------------------- #
+class PeopleAreRead(_env.EnvCase):
+    """Architecture phase 6 (SPEC §0.3): `.nopekit/project.json`'s `people`, each
+    `{name, email}` as git prints them — read strictly, absent as `[]`, and
+    written last, so a project.json an earlier phase wrote keeps its key order."""
+
+    def _project(self) -> tuple[str, str, dict]:
+        root = self.tmp()
+        store.init(root, ProjectMeta(name="people", created="2026-10-15T00:00:00Z"))
+        path = os.path.join(root, ".nopekit", "project.json")
+        return root, path, json.loads(_read_bytes(path))
+
+    def test_absent_reads_empty_and_a_round_trip_writes_it_last(self):
+        root, path, good = self._project()
+        good.pop("people")
+        _write(path, json.dumps(good))
+        self.assertEqual(store.read_project(root).people, [])
+        meta = store.read_project(root)
+        meta.people = [models.Person(name="Robin Okafor", email="robin@example.invalid")]
+        store.write_project(root, meta)
+        written = json.loads(_read_bytes(path))
+        self.assertEqual(list(written)[-1], "people")
+        self.assertEqual(written["people"], [{"name": "Robin Okafor",
+                                              "email": "robin@example.invalid"}])
+        self.assertEqual(store.read_project(root), meta)
+
+    def test_each_refusal_names_the_file_and_the_fix(self):
+        root, path, good = self._project()
+        rows = (
+            ("a string", "Robin <r@x>", "must be a list of objects"),
+            ("an entry not an object", ["Robin <r@x>"], "people[0] must be an object"),
+            ("a typo", [{"name": "Robin", "emial": "r@x"}],
+             'unknown key "emial" at people[0].emial (did you mean "email"?)'),
+            ("no email", [{"name": "Robin"}], 'people[0] has no "email"'),
+            ("no name", [{"email": "r@x"}], 'people[0] has no "name"'),
+            ("an empty name", [{"name": " ", "email": "r@x"}], "people[0].name must be"),
+            ("a name with an address", [{"name": "Robin <r@x>", "email": "r@x"}],
+             "people[0].name must be"),
+            ("a number for a name", [{"name": 7, "email": "r@x"}], "people[0].name must be"),
+            ("an email with a space", [{"name": "Robin", "email": "r @x"}],
+             "people[0].email must be"),
+            ("an email in brackets", [{"name": "Robin", "email": "<r@x>"}],
+             "people[0].email must be"),
+            ("the same email twice", [{"name": "Robin", "email": "r@x"},
+                                      {"name": "R. Okafor", "email": "R@X"}],
+             "people[1] repeats R@X (people[0])"),
+        )
+        for label, value, needle in rows:
+            with self.subTest(label):
+                data = dict(good, people=value)
+                _write(path, json.dumps(data))
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_project(root)
+                self._names(str(caught.exception), "project.json", needle)
+
+    def test_the_pure_check_reads_what_the_reader_would(self):
+        self.assertIsNone(store.people_problem(None, "p"))
+        self.assertIsNone(store.people_problem([], "p"))
+        self.assertIsNone(store.people_problem([{"name": "A", "email": "a@x"}], "p"))
+        self.assertIn('"people" must be a list', store.people_problem("A <a@x>", "p"))
+
+    _names = StrictReader._names
+
+
 class InitIsTheNewLayout(_env.EnvCase):
     def test_init_writes_the_layout_and_never_a_ledger(self):
         root = self.tmp()
@@ -1424,7 +1541,59 @@ def _migrated_bracket(dest: str) -> str:
     _write(os.path.join(project, "exports", "print-v1.json"),
            json.dumps({"exports": [_sealed_export(_EXPORT, "print-v1", "")]}, indent=2,
                       ensure_ascii=False) + "\n")
+    # Architecture phase 1 (SPEC decisions 12, 13): a requirement, and C1 holding a
+    # mechanism and a pointer to it — by hand, so a command that normalised a
+    # mechanism (or wrote the older keys back) is caught too.
+    _write(os.path.join(project, "requirements", "R1.json"),
+           json.dumps({"statement": "It holds the pump without a sag anyone can see",
+                       "source": "interview"}, indent=2) + "\n")
+    path = os.path.join(project, "claims", "C1.json")
+    data = json.loads(_read_bytes(path))
+    data["mechanism"] = {"evaluators": ["bracket.deflection"], "by": "closed_form",
+                         "how": "the tip deflection, closed form"}
+    data["requirements"] = ["R1"]
+    _write(path, json.dumps(data, indent=3))
+    # Architecture phase 2 (SPEC 14): a typed rejection written by hand, and a
+    # preference sealed by this file's own copy of the seal form — so a command
+    # that rewrote a decision's typed rejection, or the sealed file, is caught.
+    path = os.path.join(project, "decisions", "thickness-stays-7-mm.json")
+    data = json.loads(_read_bytes(path))
+    data["rejected"].append({"value": "an aluminium arm", "why": "Dana prints her own parts",
+                             "by": "Dana", "type": "preferred_against",
+                             "returns_if": {"value": 0.05, "claim": "C1", "comparator": "<",
+                                            "quantity": "margin"}})
+    _write(path, json.dumps(data, indent=3))
+    _write(os.path.join(project, "preferences", "thickness-stays-7-mm.json"),
+           json.dumps({"preferences": [_sealed_preference(_PREFERENCE, "thickness-stays-7-mm",
+                                                          "")]}, indent=2) + "\n")
+    # Architecture phase 3a: the bracket's committed round record, so a command
+    # that rewrote it — every command but `round` — is caught (it reads behind
+    # here, which is the point: nothing but `round` may bring it current).
+    _write(os.path.join(project, *rounds.ROUND_REL.split("/")),
+           _read_bytes(os.path.join(_projects.BRACKET, *rounds.ROUND_REL.split("/"))))
+    # Architecture phase 5 (SPEC 17): a board, written by hand with its keys in
+    # another order, so a command that rewrote a group is caught.
+    _write(os.path.join(project, "groups", "strength.json"),
+           json.dumps({"members": ["C1", "C2"], "title": "Holds the pump", "order": 1,
+                       "kind": "board"}, indent=3) + "\n")
     return project
+
+
+#: One preference, as `prefer` records it (SPEC 14) — written by hand and sealed
+#: by `_sealed_preference`, its digest not the live rejection's (a fixture of
+#: the code under test changes shape with it).
+_PREFERENCE = {"decision": "thickness-stays-7-mm", "value": "an aluminium arm", "name": "Dana",
+               "rejection_digest": "e" * 64, "who": "Dana <dana@example.invalid>",
+               "when": "2026-10-14T10:00:00Z", "channel": "interactive"}
+
+
+def _sealed_preference(entry: dict, stem: str, prev: str) -> dict:
+    """``entry`` sealed and chained as a preference entry: the seal over the
+    entry with the seal's schema, the record kind, the decision and the list."""
+    body = {k: v for k, v in entry.items() if k not in ("prev", "digest")}
+    body["prev"] = prev
+    form = {"schema": 1, "kind": "preferences", "file": stem, "list": "preferences", **body}
+    return {**body, "digest": util.seal(form)}
 
 
 #: One export of `print-v1`, as `export` records it (P2.5b-D9) — written by hand
@@ -1514,12 +1683,18 @@ def _touched_records(before: dict, after: dict) -> list[str]:
 #: `.nopekit/model.json`, the site's scaffold and `data/`. `init` refuses on a
 #: project before it writes anything; it is here so "every command" means every
 #: command. `check --no-record` and `gate selftest --no-record` are the dry runs.
-#: Not here: `site serve` (a server that does not return) and `site vendor` (the
-#: network); P3.1's `ask --next` joins when it exists — a strengthening, never an
-#: edit of what is here (PLAN §4.6).
+#: Not here: `site serve` (a server that does not return; `--detach`, which starts
+#: one that outlives the command, and `--stop` are swept for records by
+#: test_serve) and `site vendor` (the network); P3.1's `ask --next` joins when it
+#: exists — a strengthening, never an edit of what is here (PLAN §4.6).
 _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("status",), False), (("status", "--json"), False),
     (("why", "thickness"), False), (("why", "C1"), False),
+    # Architecture phase 2: a decision's `why`. (`propose`'s listing reads
+    # pack.json files only; what `propose` writes is held by
+    # `test_the_phase_2_writers_write_their_one_record` and
+    # test_proposers.ProposeWritesOnlyItsInputs — the fast tier's pay-back.)
+    (("why", "thickness-stays-7-mm"), False),
     (("why", "arm_length", "--json"), False),
     (("gap",), False), (("gap", "--json"), False), (("gap", "--propose"), False),
     (("report",), False), (("report", "--json"), False),
@@ -1546,6 +1721,26 @@ _NON_SHIM: tuple[tuple[tuple[str, ...], bool], ...] = (
     (("export",), False), (("export", "--json"), False),
     (("export", "print-v1", "--dry-run"), False),
     (("report", "--milestone", "print-v1"), False),
+)
+
+#: Architecture phase 5's rows of the same sweeps: `site stamp` writes only the
+#: `as_of` line of the prose it names (none here), `site badge` only the
+#: README's block. Swept by their own tests in each class
+#: (`test_the_site_text_commands_*`), which the fast tier leaves to the gate
+#: (the review of phase 5's pay-back, ~1.8 s): what each writes is held, one
+#: line and one block, by test_site_truth's and test_groups' rows of their own.
+_NON_SHIM_SITE_TEXT: tuple[tuple[tuple[str, ...], bool], ...] = (
+    (("site", "stamp", "--all"), True), (("site", "badge"), True),
+)
+
+#: Architecture phase 6's reader, `packs skills` (it prints PACK.md, lenses and
+#: skill files, and writes nothing), swept by tests of its own in each class, as
+#: phase 5's rows are; the round's `--commit` and `--hook`, which write what
+#: `round` writes, have rows of their own beside `round`'s. What slipped through
+#: the phase: the command shipped with no row, so a `packs skills` that wrote
+#: under the project would have left every "every command" sweep green.
+_NON_SHIM_PACK_SKILLS: tuple[tuple[tuple[str, ...], bool], ...] = (
+    (("packs", "skills"), False), (("packs", "skills", "--json"), False),
 )
 
 #: The exit codes each command may end with while doing its work: 1 is a
@@ -1770,8 +1965,53 @@ def _ignored(test: _env.EnvCase, rules: dict[str, bytes],
     return {p for p in proc.stdout.splitlines() if p}
 
 
+def round_record_after(project: str, previous: bytes | None) -> bytes:
+    """The round record of ``project`` as it stands — the record `round` writes
+    after its run: computed in process (`cli._round_inputs`), at the round one
+    past ``previous``'s (1 when there is none or it does not read)."""
+    ledger, registry = cli._load(project), None
+    registry, _ = cli._registry(project, ledger)
+    model, projection, error = cli._projection_safe(project, ledger)
+    view, resolution = cli._resolved(project, ledger, registry, projection, error,
+                                     now=_WHEN, model=model)
+    body, _now = cli._round_inputs(project, ledger, registry, model, projection, view,
+                                   resolution, model_error=error)
+    number = 1
+    if previous is not None:
+        try:
+            number = int(json.loads(previous)["round"]) + 1
+        except (ValueError, KeyError, TypeError):
+            number = 1
+    return rounds.render(rounds.sealed(body, number))
+
+
+#: The one problem a write of the round record outside its licence reads as.
+_ROUND_WRITE = ("write {path} (event {i}): the round record, written by a command other "
+                "than round, or with the bytes it already held, or not the round record of "
+                "the state after the run")
+
+
+#: A trace file or an amber file (architecture phase 3b), by name.
+_TRACE_FILE = re.compile(r"^\.nopekit/trace/[0-9a-f]{16}(?:\.amber\.[0-9a-f]{16})?\.json$")
+
+
+def _trace_licensed(run: _Run, path: str) -> bool:
+    """`model trace`'s licence: a path of `_TRACE_FILE`'s shape, absent before
+    the run, whose file after it reads ``ok`` (its seal verifies, its name is its
+    key's) — a new, whole trace or amber file, never a rewrite."""
+    if not _TRACE_FILE.fullmatch(path) or path in run.before or path not in run.after:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.join(tmp, path.rsplit("/", 1)[-1])
+        with open(target, "wb") as fh:
+            fh.write(run.after[path])
+        reader = derivation.read_amber if ".amber." in path else derivation.read_trace
+        return reader(target)[0] == "ok"
+
+
 def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
-                 carve_out: frozenset = frozenset()) -> list[str]:
+                 carve_out: frozenset = frozenset(),
+                 round_record: bytes | None = None, trace_files: bool = False) -> list[str]:
     """Every touch in ``run`` the property does not explain. A path a run writes
     must be
 
@@ -1781,7 +2021,15 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
     * with ``blocks``, a git rule file that now carries the marked block — the
       ensure step, which writes each such file once; or
     * one of ``carve_out``'s ``(op, path)`` touches: the one-time legacy
-      migration's own files, and a shim's own record.
+      migration's own files, and a shim's own record; or
+    * with ``round_record`` (architecture phase 3a: `round`'s run only), ONE
+      write of `.nopekit/round.json` whose bytes moved and are exactly
+      ``round_record`` — the round record of the state after the run, computed
+      by the test. Never a path allowance: any other write of it is named;
+    * with ``trace_files`` (architecture phase 3b: `model trace`'s run only), a
+      write of an absent `.nopekit/trace/<16 hex>[.amber.<16 hex>].json` whose
+      file after the run reads ``ok`` (`_trace_licensed`) — a new, sealed file,
+      never a rewrite.
 
     A rule file written twice in one run is unexplained whatever it holds."""
     touches = _touches(run)
@@ -1789,6 +2037,15 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
     for i, _op, path in touches:
         first.setdefault(path, i)
     problems: list[str] = []
+    rel = rounds.ROUND_REL
+    if round_record is not None:
+        mine = [(i, op) for i, op, path in touches if path == rel]
+        licensed = (len(mine) == 1 and mine[0][1] == "write"
+                    and run.before.get(rel) != run.after.get(rel)
+                    and run.after.get(rel) == round_record)
+        if not licensed:
+            problems += [_ROUND_WRITE.format(path=rel, i=i) for i, _op in mine]
+        touches = [t for t in touches if t[2] != rel]
     pending: dict[str, tuple[dict[str, bytes], dict[str, bool], list[tuple[int, str, str]]]] = {}
     written: dict[str, int] = {}
     for i, op, path in touches:
@@ -1796,6 +2053,8 @@ def _unexplained(test: _env.EnvCase, run: _Run, *, blocks: bool = False,
         if name in _GIT_RULE_FILES:
             written[path] = written.get(path, 0) + 1
         if (op, path) in carve_out:
+            continue
+        if trace_files and op == "write" and _trace_licensed(run, path):
             continue
         if (blocks and op == "write" and name in _GIT_RULE_FILES
                 and _BLOCK_BEGIN in run.after.get(path, b"")
@@ -1834,6 +2093,15 @@ def _migration(project: str) -> tuple[store.MigrationPlan, frozenset]:
                            | {("remove", _LEGACY_REL), ("write", _KEPT_REL)})
 
 
+def _round_stamp(project: str) -> tuple | None:
+    """The round record's bytes, mtime and inode, or None when there is none."""
+    path = os.path.join(project, *rounds.ROUND_REL.split("/"))
+    if not os.path.isfile(path):
+        return None
+    st = os.stat(path)
+    return _read_bytes(path), st.st_mtime_ns, st.st_ino
+
+
 class NoCommandWritesARecord(_env.EnvCase):
     """Invariant 8's second half: no command writes a record it was not asked to
     write. The one carve-out is the one-time migration of a legacy ledger, which
@@ -1869,10 +2137,12 @@ class NoCommandWritesARecord(_env.EnvCase):
                       f"nothing about what it writes:\n{proc.stdout}\n{proc.stderr}")
         self.assertNotIn("Traceback", proc.stderr)
 
-    def _no_record_written(self, project: str, *, legacy: bool, watched: bool) -> None:
-        for argv, output in _NON_SHIM:
+    def _no_record_written(self, project: str, *, legacy: bool, watched: bool,
+                           rows: tuple = _NON_SHIM) -> None:
+        for argv, output in rows:
             with self.subTest(argv=argv):
                 before = _records(project)
+                round_before = _round_stamp(project)
                 if watched:
                     run = _watched(self, project, *argv)
                     proc = run.proc
@@ -1881,6 +2151,8 @@ class NoCommandWritesARecord(_env.EnvCase):
                 self._assert_worked(argv, proc, _codes(argv))
                 self.assertEqual(_touched_records(before, _records(project)), [],
                                  f"`nopekit {' '.join(argv)}` wrote a record")
+                self.assertEqual(_round_stamp(project), round_before,
+                                 f"`nopekit {' '.join(argv)}` wrote the round record")
                 self.assertEqual(store.is_legacy(project), legacy,
                                  f"`nopekit {' '.join(argv)}` migrated a project it was "
                                  f"only reading" if legacy else "the project went legacy")
@@ -1897,29 +2169,188 @@ class NoCommandWritesARecord(_env.EnvCase):
                         f"could not be seen: {sorted(set(store.RECORD_DIRS) - kinds)}")
         self._no_record_written(project, legacy=False, watched=True)
 
+    def test_the_site_text_commands_write_no_record(self):
+        """`site stamp --all` and `site badge` on a migrated project, watched as
+        every other command is (architecture phase 5's rows)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self._no_record_written(project, legacy=False, watched=True, rows=_NON_SHIM_SITE_TEXT)
+
+    def test_packs_skills_writes_no_record(self):
+        """`packs skills` on a migrated project, watched as every other command
+        is (architecture phase 6's rows)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self._no_record_written(project, legacy=False, watched=True,
+                                rows=_NON_SHIM_PACK_SKILLS)
+
+    def test_the_rounds_commit_writes_what_round_writes(self):
+        """`round --commit` and the Stop hook's `round --hook`, watched in a
+        repository whose identity `people` lists, so each commits: no record,
+        the round record at most once, and nothing git would track beyond what
+        `round` writes (invariant 8, architecture phase 6)."""
+        repo = self.tmp()
+        project = _migrated_bracket(os.path.join(repo, "proj"))
+        path = os.path.join(project, ".nopekit", "project.json")
+        data = json.loads(_read_bytes(path))
+        data["people"] = [{"name": _env.IDENTITY["GIT_AUTHOR_NAME"],
+                           "email": _env.IDENTITY["GIT_AUTHOR_EMAIL"]}]
+        _write(path, json.dumps(data, indent=2) + "\n")
+        for argv in (["-c", "init.defaultBranch=main", "init", "-q"], ["add", "-A"],
+                     ["commit", "-q", "-m", "base"]):
+            self.assertEqual(_env.git(argv, cwd=repo, identity=True).returncode, 0, argv)
+        for n, argv in enumerate((("round", "--commit"), ("round", "--hook"))):
+            with self.subTest(argv=argv):
+                claim = os.path.join(project, "claims", "C1.json")
+                data = json.loads(_read_bytes(claim))
+                data["rationale"] = f"edited by hand before round {n}"
+                _write(claim, json.dumps(data, indent=3))
+                head = _env.git(["rev-parse", "HEAD"], cwd=repo).stdout
+                before = _records(project)
+                previous = (_round_stamp(project) or (None,))[0]
+                run = _watched(self, project, *argv)
+                self._assert_worked(argv, run.proc, (0,))
+                self.assertIn("Committed ", run.proc.stdout)
+                self.assertNotEqual(_env.git(["rev-parse", "HEAD"], cwd=repo).stdout, head,
+                                    "no commit: the row would be vacuous")
+                self.assertEqual(_touched_records(before, _records(project)), [],
+                                 f"`nopekit {' '.join(argv)}` wrote a record")
+                after = round_record_after(project, previous)
+                self.assertEqual(_unexplained(self, run, round_record=after), [])
+
+    def test_the_phase_2_writers_write_their_one_record(self):
+        """(architecture phase 2) `prefer` from a pipe writes nothing; `decide`
+        with typed rejections, `propose` and `ingest --proposer` each write the
+        one record (and the bytes) they were asked to, and nothing else."""
+        import _decisions
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        base, _name = _decisions.fixture_pack(self.tmp())
+        env = {"NOPEKIT_PACK_PATH": base}
+        evidence = _write(os.path.join(self.tmp(), "quote.txt"), "an anchor quote\n")
+
+        def run(*argv):
+            before = _records(project)
+            proc = _env.nopekit(list(argv), cwd=project, identity=True, env=env)
+            return proc, _touched_records(before, _records(project))
+
+        proc, touched = run("prefer", "thickness-stays-7-mm")
+        self.assertEqual((proc.returncode, touched), (2, []), proc.stderr)
+        proc, touched = run("decide", "--title", "Keep PETG", "--summary", "s",
+                            "--rejected", "PLA|creeps", "--type", "infeasible",
+                            "--returns-text", "indoors")
+        self.assertEqual(touched, ["decisions/keep-petg.json"], proc.stderr)
+        proc, touched = run("propose", _decisions.PROPOSER_ID)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len([t for t in touched if t.startswith("inputs/")
+                              and t.count("/") == 1]), 2, touched)
+        self.assertFalse([t for t in touched if not t.startswith("inputs/")], touched)
+        proc, touched = run("ingest", evidence, "--proposer", _decisions.PROPOSER_ID, "--json")
+        (artifact,) = json.loads(proc.stdout)["ingested"]
+        self.assertEqual(sorted(touched), sorted([f"inputs/{artifact['id']}.json",
+                                                  artifact["path"]]))
+
     def test_no_command_writes_a_record_on_a_legacy_project(self):
         """A legacy `ledger.json` IS the records: every command but `check` and the
         shims reads it — migrated in memory — and leaves it, and everything around
         it, as it was."""
         project = _legacy_bracket(os.path.join(self.tmp(), "legacy"))
-        self._no_record_written(project, legacy=True, watched=False)
+        self._no_record_written(project, legacy=True, watched=False,
+                                rows=_NON_SHIM + _NON_SHIM_SITE_TEXT + _NON_SHIM_PACK_SKILLS)
 
     # -- check -------------------------------------------------------------- #
     def test_check_writes_only_ignored_paths_and_new_entries(self):
         """On a migrated project `check` writes no record and meets the property
         with no exception: the blocks are already there, so it writes none."""
         project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self.assertIsNotNone(_round_stamp(project), "no round record: the row would be vacuous")
         for argv in (("check",), ("check",), ("check", "--force", "--junit"),
                      ("check", "--only", "bracket.deflection"), ("check", "--json")):
             with self.subTest(argv=argv):
                 before = _records(project)
+                round_before = _round_stamp(project)
                 run = _watched(self, project, *argv)
                 self._assert_worked(argv, run.proc)
                 self.assertEqual(_touched_records(before, _records(project)), [],
                                  f"`nopekit {' '.join(argv)}` wrote a record")
+                self.assertEqual(_round_stamp(project), round_before,
+                                 f"`nopekit {' '.join(argv)}` wrote the round record")
                 self.assertEqual(_unexplained(self, run), [])
         self.assertTrue(any(_transcript.ENTRY_PATH.fullmatch(p) for p in _tree(project)),
                         "no check wrote a verdict entry: the property held vacuously")
+
+    # -- model trace (architecture phase 3b) ---------------------------------- #
+    def test_model_trace_writes_only_new_whole_trace_files(self):
+        """`model trace` writes no record and no round record: only new, sealed
+        trace and amber files, and what git ignores (its scratch, its lock); a
+        second run writes neither."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        for argv, wrote in ((("model", "trace", "--workers", "2"), True),
+                            (("model", "trace", "--workers", "2"), False)):
+            with self.subTest(argv=argv, wrote=wrote):
+                before = _records(project)
+                round_before = _round_stamp(project)
+                run = _watched(self, project, *argv)
+                self._assert_worked(argv, run.proc, (0,))
+                self.assertEqual(_touched_records(before, _records(project)), [])
+                self.assertEqual(_round_stamp(project), round_before)
+                traced = [p for _i, op, p in _touches(run) if _TRACE_FILE.fullmatch(p)]
+                self.assertEqual(bool(traced), wrote, traced)
+                self.assertEqual(_unexplained(self, run, trace_files=True), [])
+                self.assertEqual(bool(_unexplained(self, run)), wrote,
+                                 "without the licence a trace write is named")
+
+    def test_a_rewritten_or_unsealed_trace_file_is_named(self):
+        """The licence's planted violators: a trace file that existed before the
+        run, and one whose seal does not verify."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        path = ".nopekit/trace/0123456789abcdef.json"
+        events = [["write", path]]
+        for before, after in (({path: b"{}"}, {path: b"{}\n"}), ({}, {path: b'{"self": "x"}'})):
+            with self.subTest(before=before):
+                run = _Run(None, {**_tree(project), **before}, {**_tree(project), **after},
+                           events)
+                self.assertEqual(_unexplained(self, run, trace_files=True),
+                                 [f"write {path} (event 0): not ignored when it was written, "
+                                  f"and not a new verdict entry"])
+
+    # -- round (architecture phase 3a) ---------------------------------------- #
+    def test_round_writes_what_check_writes_and_its_round_record(self):
+        """`round` writes what `check` writes and, when what it holds moved, the
+        round record of the state after the run — once, those bytes exactly —
+        and no record. A second round, with nothing moved, writes no round
+        record at all."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        path = os.path.join(project, "claims", "C1.json")
+        data = json.loads(_read_bytes(path))
+        data["rationale"] = "edited by hand before the round"
+        _write(path, json.dumps(data, indent=3))
+        for n in (1, 2):
+            with self.subTest(round_run=n):
+                before = _records(project)
+                previous = (_round_stamp(project) or (None,))[0]
+                run = _watched(self, project, "round")
+                self._assert_worked(("round",), run.proc, (0,))
+                self.assertEqual(_touched_records(before, _records(project)), [],
+                                 "`nopekit round` wrote a record")
+                after = round_record_after(project, previous)
+                if n == 1:
+                    self.assertNotEqual(run.after.get(rounds.ROUND_REL),
+                                        run.before.get(rounds.ROUND_REL),
+                                        "the first round wrote no round record: vacuous")
+                else:
+                    self.assertFalse([e for e in run.events
+                                      if rounds.ROUND_REL in [p for p in e[1:] if p]],
+                                     "a round with nothing moved touched the round record")
+                self.assertEqual(_unexplained(self, run, round_record=after), [])
+
+    def test_round_with_a_site_writes_no_record(self):
+        """With a site, `round` also writes what `site build` writes — and still
+        no record (`site init` and `site build` are rows of `_NON_SHIM`)."""
+        project = _migrated_bracket(os.path.join(self.tmp(), "migrated"))
+        self.assertEqual(_env.nopekit(["site", "init"], cwd=project).returncode, 0)
+        before = _records(project)
+        proc = _env.nopekit(["round"], cwd=project, identity=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("Site built", proc.stdout)
+        self.assertEqual(_touched_records(before, _records(project)), [])
 
     def test_check_on_a_legacy_project_writes_only_the_migration(self):
         """The first `check` migrates: the records it writes are exactly the plan's,
@@ -1959,6 +2390,34 @@ class NoCommandWritesARecord(_env.EnvCase):
                 self.assertEqual(_unexplained(self, second), [],
                                  "the second check wrote what git would track — or a "
                                  "block the first one already wrote")
+
+    def test_round_on_a_legacy_project_writes_only_the_migration(self):
+        """`round` migrates a legacy project as `check` does (invariant 8's
+        carve-out names it): the records it writes are exactly the plan's, byte
+        for byte, the legacy ledger is kept, and every other path is ignored
+        when written, a new entry, a block written once, or the round record of
+        the state after the run. What slipped through (review of phase 3a):
+        every round test ran on a migrated project."""
+        project = _legacy_bracket(os.path.join(self.tmp(), "legacy"))
+        plan, carve_out = _migration(project)
+        self.assertTrue(plan.files)
+        legacy = _read_bytes(os.path.join(project, *_LEGACY_REL.split("/")))
+        before = _records(project)
+        previous = (_round_stamp(project) or (None,))[0]
+        run = _watched(self, project, "round")
+        self._assert_worked(("round",), run.proc, (0,))
+        self.assertFalse(store.is_legacy(project), "round did not migrate")
+        after = _records(project)
+        self.assertEqual(set(_touched_records(before, after)),
+                         set(plan.files) | {_LEGACY_REL, _KEPT_REL},
+                         "round wrote a record beyond the migration's own")
+        for rel, data in plan.files.items():
+            self.assertEqual(after[rel][0], data, f"{rel} is not the plan's bytes")
+        self.assertEqual(after[_KEPT_REL][0], legacy, "the legacy ledger was not kept")
+        self.assertEqual(_unexplained(self, run, blocks=True, carve_out=carve_out,
+                                      round_record=round_record_after(project, previous)),
+                         [])
+        self.assertIsNotNone(_round_stamp(project), "round wrote no round record: vacuous")
 
     # -- the shims on a legacy project --------------------------------------- #
     def test_a_shim_on_a_legacy_project_writes_the_migration_and_its_record(self):
@@ -2019,6 +2478,27 @@ class NoCommandWritesARecord(_env.EnvCase):
         twice = first._replace(events=first.events + [["write", ".gitignore"]])
         self.assertTrue(any(p.startswith(".gitignore: written 2 times")
                             for p in _unexplained(self, twice, blocks=True, carve_out=carve_out)))
+
+        # Architecture phase 3a: the round record, written by a check, rewritten
+        # with the bytes it held, or written with bytes other than the state's.
+        rel = rounds.ROUND_REL
+        by_check = second._replace(events=second.events + [["write", rel]],
+                                   after=dict(second.after, **{rel: b"{}\n"}))
+        self.assertTrue(any(p.startswith(f"write {rel} ") for p in _unexplained(self, by_check)),
+                        "a check that wrote the round record passed")
+        held = second.after.get(rel, b"")
+        same = second._replace(events=second.events + [["write", rel]],
+                               before=dict(second.before, **{rel: held}),
+                               after=dict(second.after, **{rel: held}))
+        self.assertTrue(any(p.startswith(f"write {rel} ")
+                            for p in _unexplained(self, same, round_record=held)),
+                        "a round that rewrote the bytes it held passed")
+        other = same._replace(after=dict(same.after, **{rel: held + b" "}))
+        self.assertTrue(any(p.startswith(f"write {rel} ")
+                            for p in _unexplained(self, other, round_record=held)),
+                        "a round that wrote other bytes than the state's record passed")
+        self.assertEqual(_unexplained(self, other, round_record=held + b" "), [],
+                         "the licensed write itself was refused")
 
         before = _records(project)
         path = os.path.join(project, *_HAND_FORMATTED.split("/"))
@@ -2833,6 +3313,325 @@ class ReportIsAnIgnoredOutput(_env.EnvCase):
                 contextlib.redirect_stdout(io.StringIO()):
             cli_mod.main(["report", "--write", "-C", root])
         self.assertIn("?? REPORT.md", self.porcelain(root))
+
+
+#: What the index and doctor say for `requirements/R1.json` beside
+#: `claims/R1.json` (store.build_index and cli._doctor_requirement_rows).
+COLLISION = ("requirements/R1.json: R1 is also a claim id (claims/R1.json) — rename one; "
+             "why R1 would be a guess")
+
+
+def collision_problems(root: str) -> list[str]:
+    """Every channel that does not name a requirement id that is also a claim
+    id in ``root`` (which holds R1 as both): the index's problems, doctor's
+    `requirements` row (a FAIL), and `why R1`, which must be the claim's.
+    In process: the index and doctor's row as `doctor` builds them."""
+    from nopekit import cli, decisions
+    out: list[str] = []
+    if COLLISION not in store.build_index(root)["problems"]:
+        out.append("index: no collision problem")
+    results: list[dict] = []
+    cli._doctor_requirement_rows(results, store.load(root))
+    if ("FAIL", COLLISION) not in [(r["status"], r["detail"]) for r in results
+                                   if r["check"] == "requirements"]:
+        out.append(f"doctor: {results}")
+    head = decisions.why(store.load(root), "R1").splitlines()[0]
+    if not head.startswith("claim  R1  "):
+        out.append(f"why: R1 reads {head!r}")
+    return out
+
+
+class RequirementsAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 1: SPEC decision 12) `requirements/<id>.json`
+    is a record — the person's words — read strictly; a claim's pointers to
+    requirements are read, never refused when one has no file; the index lists
+    the requirements and names a dangling pointer; `agree` sees a hand edit; a
+    legacy project keeps its requirements through the migration."""
+
+    def write(self, stem: str, record: Any, kind: str = "requirements") -> str:
+        root = self.tmp()
+        path = os.path.join(root, kind, stem)
+        _write(path, json.dumps(record, indent=2) if not isinstance(record, str) else record)
+        return path
+
+    def test_the_strict_reader(self):
+        found = store.read_record(self.write("R1.json", {"statement": "It holds the pump",
+                                                         "source": "interview"}),
+                                  "requirements")
+        self.assertEqual((found.id, found.statement, found.source),
+                         ("R1", "It holds the pump", "interview"))
+        refused = {
+            "a stem that is no requirement id": ("Req1.json", {"statement": "s"},
+                                                 "R and a number"),
+            "a leading zero": ("R01.json", {"statement": "s"}, "R and a number"),
+            "no words": ("R1.json", {"source": "interview"}, "the person's words"),
+            "blank words": ("R1.json", {"statement": "  "}, "the person's words"),
+            "words that are not text": ("R1.json", {"statement": 3}, "the person's words"),
+            "a source that is not text": ("R1.json", {"statement": "s", "source": 1},
+                                          '"source" must be text'),
+            "a stored status": ("R1.json", {"statement": "s", "status": "pass"},
+                                "claims.requirement_statuses"),
+            "a claims list": ("R1.json", {"statement": "s", "claims": ["C1"]},
+                              '"requirements" in claims/<id>.json'),
+            "an unknown key, with its suggestion": ("R1.json", {"statment": "s"},
+                                                    'did you mean "statement"'),
+        }
+        for name, (stem, record, needle) in refused.items():
+            with self.subTest(name):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write(stem, record), "requirements")
+                self.assertIn(needle, str(caught.exception))
+                self.assertIn("requirements/", str(caught.exception))
+        with self.assertRaises(NopekitError) as caught:
+            store.read_record(self.write("R2.json", {"statment": "s"}), "requirements")
+        self.assertIn("move it into inputs/specs/", str(caught.exception))
+
+    def test_a_claims_pointers(self):
+        found = store.read_record(self.write("C1.json", {"statement": "s",
+                                                         "requirements": ["R1", "R9"]},
+                                             kind="claims"), "claims")
+        self.assertEqual(found.requirements, ["R1", "R9"], "a missing target still reads")
+        for record, needle in (({"statement": "s", "requirements": "R1"}, "must be a list"),
+                               ({"statement": "s", "requirements": ["C1"]},
+                                '"requirements"[0] "C1" is not a requirement id'),
+                               ({"statement": "s", "requirements": ["R1", "R1"]},
+                                "names R1 twice")):
+            with self.subTest(needle):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write("C1.json", record, kind="claims"), "claims")
+                self.assertIn(needle, str(caught.exception))
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        index = store.build_index(root)
+        self.assertEqual([row["id"] for row in index["requirements"]], ["R1", "R2", "R3", "R4"])
+        self.assertEqual(index["problems"], [])
+        _write(os.path.join(root, "requirements", "C1.json"), '{"statement": "s"}\n')
+        with self.assertRaises(NopekitError):
+            store.build_index(root)
+        os.remove(os.path.join(root, "requirements", "C1.json"))
+        os.remove(os.path.join(root, "requirements", "R2.json"))
+        self.assertIn("claims/C7.json: requirements names 'R2', which has no "
+                      "requirements/R2.json", store.build_index(root)["problems"])
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        path = os.path.join(root, "requirements", "R1.json")
+        _write(path, json.dumps({"statement": "It holds", "source": "interview"}))
+        self.assertTrue(any(p.startswith("requirements.R1.statement")
+                            for p in store.agree(root)), store.agree(root))
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+
+    def test_a_legacy_project_keeps_its_requirements(self):
+        project = _bracket(self)
+        path = _write(os.path.join(project, "requirements", "R1.json"),
+                      '{"statement": "It holds the pump"}\n')
+        before = _read_bytes(path)
+        plan = store.migrate_legacy(project, apply=False, when="")
+        self.assertNotIn("requirements/R1.json", plan.files)
+        store.migrate_legacy(project, apply=True, when="2026-09-28T00:00:00Z")
+        self.assertEqual(_read_bytes(path), before)
+        self.assertEqual([r.id for r in store.load(project).requirements], ["R1"])
+
+    def test_a_requirement_id_that_is_a_claim_id_is_named(self):
+        """(review of phase 1) `requirements/R1.json` beside `claims/R1.json`:
+        the index names it, doctor's `requirements` row FAILs on it, and `why
+        R1` is the claim's (exact claim id before exact requirement id) — and
+        a planted index and doctor that leave the collision out are caught."""
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        record = json.loads(_read_bytes(os.path.join(root, "claims", "C4.json")))
+        record.pop("requirements", None)
+        _write(os.path.join(root, "claims", "R1.json"), json.dumps(record, indent=2))
+        self.assertEqual(collision_problems(root), [])
+        real = store.build_index
+
+        def quiet_index(root_):
+            index = real(root_)
+            return dict(index, problems=[p for p in index["problems"]
+                                         if "also a claim id" not in p])
+
+        from nopekit import cli
+        with mock.patch.object(store, "build_index", quiet_index), \
+                mock.patch.object(cli, "_doctor_requirement_rows",
+                                  lambda results, ledger: None):
+            found = collision_problems(root)
+        self.assertEqual([p.split(":", 1)[0] for p in found], ["index", "doctor"])
+
+    def test_doctor_fails_on_a_dangling_pointer(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        os.remove(os.path.join(root, "requirements", "R2.json"))
+        proc = _env.nopekit(["doctor", "--json"], cwd=root)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        rows = [r for r in json.loads(proc.stdout)["checks"] if r["check"] == "requirements"]
+        self.assertEqual([(r["status"], r["detail"]) for r in rows],
+                         [("FAIL", "claims/C7.json names requirement R2, which has no "
+                                   "requirements/R2.json")])
+
+
+class GroupsAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 5: SPEC 17) `groups/<id>.json` is a
+    record — a board, a zone or a station — read strictly; a member that names
+    no record is read and named by the index, never refused; `agree` sees a hand
+    edit; a legacy project keeps its groups through the migration; a gate never
+    reads them."""
+
+    def write(self, stem: str, record: Any) -> str:
+        root = self.tmp()
+        path = os.path.join(root, "groups", stem)
+        _write(path, json.dumps(record, indent=2) if not isinstance(record, str) else record)
+        return path
+
+    def test_its_place(self):
+        from nopekit import models
+        self.assertEqual(store.RECORD_DIRS[-1], "groups")
+        self.assertEqual(list(models.RECORD_KINDS)[-1], "groups")
+        self.assertIn("groups", store._BEYOND_LEGACY)
+        self.assertIn("groups/", store.INDEX_BANNER)
+
+    def test_the_strict_reader(self):
+        found = store.read_record(self.write("strength.json", {
+            "kind": "board", "title": "Holds the pump", "line": "It holds.",
+            "members": ["C1", "C2"], "order": 2}), "groups")
+        self.assertEqual((found.id, found.kind, found.title, found.members, found.order),
+                         ("strength", "board", "Holds the pump", ["C1", "C2"], 2))
+        board = {"kind": "board", "title": "t", "members": ["C1"]}
+        refused = {
+            "an upper-case stem": ("Strength.json", board, "lower-case letters"),
+            "a reserved stem": ("other.json", board, '"other" is reserved'),
+            "an intro stem": ("intro.json", board, "site/content/intro.md"),
+            "no kind": ("a.json", {"title": "t"}, '"kind" must be "board", "zone" or'),
+            "a wrong kind": ("a.json", {**board, "kind": "lane"}, '"kind" must be'),
+            "no title": ("a.json", {"kind": "board"}, '"title" must be text'),
+            "a line that is not text": ("a.json", {**board, "line": 3}, '"line" must be text'),
+            "members not a list": ("a.json", {**board, "members": "C1"}, '"members" must be'),
+            "a member with a space": ("a.json", {"kind": "zone", "title": "t",
+                                                 "members": ["arm length"]},
+                                      '"members" must be'),
+            "a board member that is no id": ("a.json", {**board, "members": ["C 1"]},
+                                             '"members" must be'),
+            "a repeated member": ("a.json", {**board, "members": ["C1", "C1"]},
+                                  "names 'C1' twice"),
+            "an order that is not whole": ("a.json", {**board, "order": 1.5},
+                                           '"order" must be a whole number'),
+            "a bool order": ("a.json", {**board, "order": True}, '"order" must be'),
+            "a stored status": ("a.json", {**board, "status": "pass"}, "derived on every build"),
+            "a position": ("a.json", {**board, "x": 10}, "never a position"),
+            "an unknown key, with its suggestion": ("a.json", {**board, "titel": "t"},
+                                                    'did you mean "title"'),
+        }
+        for name, (stem, record, needle) in refused.items():
+            with self.subTest(name):
+                with self.assertRaises(NopekitError) as caught:
+                    store.read_record(self.write(stem, record), "groups")
+                self.assertIn(needle, str(caught.exception))
+                self.assertIn("groups/", str(caught.exception))
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        index = store.build_index(root)
+        self.assertEqual([row["id"] for row in index["groups"]],
+                         ["allowable", "arm", "bolts", "load", "outdoors", "printer", "prints",
+                          "pump", "section", "strength"])
+        self.assertEqual(index["problems"], [])
+        _write(os.path.join(root, "groups", "second.json"),
+               json.dumps({"kind": "board", "title": "t", "members": ["C1", "C9"]}))
+        _write(os.path.join(root, "groups", "twice.json"),
+               json.dumps({"kind": "zone", "title": "t", "members": ["load_n"]}))
+        _write(os.path.join(root, "groups", "both.json"),
+               json.dumps({"kind": "station", "title": "t", "members": ["width"]}))
+        problems = store.build_index(root)["problems"]
+        self.assertIn("groups/second.json: members names 'C9', which has no claims/C9.json",
+                      problems)
+        self.assertIn("claims/C1.json: C1 sits on 2 boards (groups/second.json, "
+                      "groups/strength.json): a claim sits on at most one board; the map puts "
+                      "it on second", problems)
+        self.assertIn("groups/twice.json: 'load_n' is also in groups/load.json: a value sits in "
+                      "at most one zone", problems)
+        self.assertIn("groups/arm.json and groups/both.json: 'width' is in a zone and on a "
+                      "station: a zone holds choices, a station derived values", problems)
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        _write(os.path.join(root, "groups", "pump.json"),
+               json.dumps({"kind": "board", "title": "Quiet", "members": ["C7"], "order": 3}))
+        self.assertTrue(any(p.startswith("groups") for p in store.agree(root)),
+                        store.agree(root))
+
+    def test_a_legacy_project_keeps_its_groups(self):
+        project = _bracket(self)
+        path = _write(os.path.join(project, "groups", "strength.json"),
+                      '{"kind": "board", "title": "Holds", "members": ["C1"]}\n')
+        before = _read_bytes(path)
+        plan = store.migrate_legacy(project, apply=False, when="")
+        self.assertNotIn("groups/strength.json", plan.files)
+        store.migrate_legacy(project, apply=True, when="2026-09-28T00:00:00Z")
+        self.assertEqual(_read_bytes(path), before)
+        self.assertEqual([g.id for g in store.load(project).groups], ["strength"])
+
+    def test_a_gate_never_reads_them(self):
+        from nopekit import verdicts
+        ledger = store.load(_projects.bracket_copy(os.path.join(self.tmp(), "b"),
+                                                   migrated=True))
+        self.assertTrue(ledger.groups)
+        self.assertIn("groups", verdicts._LEDGER_HIDDEN)
+        self.assertEqual(verdicts.LedgerView(ledger).groups, [])
+
+
+class PreferencesAreRecords(_env.EnvCase):
+    """(invariant 8, architecture phase 2: SPEC 14) `preferences/<decision>.json`
+    is a record kind — last, beyond the legacy ledger — the index lists each
+    file's entries as stored and names a file no decision holds, a return
+    condition on no claim and a rejection's input that is no record; `agree`
+    sees a new entry; a whole-ledger `save` never writes the kind."""
+
+    def test_its_place(self):
+        """Last when phase 2 added it; phase 5's `groups/` comes after it."""
+        from nopekit import models
+        self.assertEqual(store.RECORD_DIRS[-2:], ("preferences", "groups"))
+        self.assertEqual(list(models.RECORD_KINDS)[-2:], ["preferences", "groups"])
+        self.assertIn("preferences", store._BEYOND_LEGACY)
+        self.assertIn("preferences/", store.INDEX_BANNER)
+
+    def test_the_index_lists_them_and_names_the_problems(self):
+        import _decisions
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        self.assertEqual(store.build_index(root)["preferences"], {})
+        entry = store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                                    _decisions.entry_for(root))
+        self.assertTrue(any("preferences" in p for p in store.agree(root))
+                        or not os.path.exists(store.ledger_path(root)), store.agree(root))
+        store.write_index(root)
+        self.assertEqual(store.agree(root), [])
+        self.assertEqual(store.build_index(root)["preferences"], {"print-in-petg": [entry]})
+        store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                            dict(_decisions.entry_for(root), when="2026-10-15T00:00:00Z"))
+        self.assertTrue(any(p.startswith("preferences") for p in store.agree(root)),
+                        store.agree(root))
+        store.append_sealed(root, "preferences", "gone", "preferences",
+                            dict(_decisions.entry_for(root), decision="gone"))
+        _decisions.edit_rejection(root, 2, returns_if={"claim": "C42", "quantity": "margin",
+                                                       "comparator": "<", "value": 0.1},
+                                  input="no-such-input")
+        problems = store.build_index(root)["problems"]
+        for said in ("preferences/gone.json: no decisions/gone.json holds that decision",
+                     "decisions/print-in-petg.json: rejected[2].returns_if names 'C42', which "
+                     "has no claims/C42.json",
+                     "decisions/print-in-petg.json: rejected[2].input names 'no-such-input', "
+                     "which has no inputs/no-such-input.json"):
+            self.assertIn(said, problems)
+
+    def test_save_never_writes_them(self):
+        import _decisions
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        store.append_sealed(root, "preferences", "print-in-petg", "preferences",
+                            _decisions.entry_for(root))
+        path = os.path.join(root, "preferences", "print-in-petg.json")
+        before = _read_bytes(path)
+        ledger = store.load(root)
+        self.assertEqual(len(ledger.decisions[0].preferences), 1)
+        store.save(root, ledger)
+        self.assertEqual(_read_bytes(path), before)
+        written = json.loads(_read_bytes(os.path.join(root, "decisions", "print-in-petg.json")))
+        self.assertNotIn("preferences", written)
 
 
 class MilestonesAreRecords(_env.EnvCase):

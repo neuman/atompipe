@@ -1,0 +1,9 @@
+{
+  "kind": "zone",
+  "title": "Arm shape",
+  "members": [
+    "arm_length",
+    "width",
+    "thickness"
+  ]
+}

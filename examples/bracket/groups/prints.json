@@ -1,0 +1,9 @@
+{
+  "kind": "board",
+  "title": "Prints on a 220 mm bed",
+  "line": "The part prints in PETG on the printer that the person has.",
+  "members": [
+    "C4"
+  ],
+  "order": 2
+}

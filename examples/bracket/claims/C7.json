@@ -10,5 +10,12 @@
   "rationale": "the pump runs at 50 Hz; a first mode near it turns a shelf into an amplifier",
   "tags": [
     "vibration"
+  ],
+  "mechanism": {
+    "by": "closed_form",
+    "how": "A closed-form estimate of the arm's first natural frequency with the shelf and the pump at its tip, against the pump's 50 Hz with margin"
+  },
+  "requirements": [
+    "R2"
   ]
 }

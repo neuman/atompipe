@@ -1990,5 +1990,91 @@ class TestsTheBundledCopy(unittest.TestCase):
                          os.path.realpath(PACKS_DIR))
 
 
+class PackSkillsArePrinted(_env.EnvCase):
+    """Architecture phase 6 (SPEC 37): a pack's skills are read, not installed —
+    `nopekit packs skills` prints each live pack's PACK.md and then its
+    `skills/<name>/SKILL.md` files, never a pack that is only discoverable, and
+    `pack validate` refuses a `skills/<name>/` that holds no SKILL.md."""
+
+    def _pack(self, root: str, name: str, skills: dict[str, str | None]) -> str:
+        pack = os.path.join(root, ".nopekit", "packs", name)
+        os.makedirs(pack)
+        with open(os.path.join(pack, "pack.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": name, "description": f"the {name} domain"}, fh)
+        with open(os.path.join(pack, "PACK.md"), "w", encoding="utf-8") as fh:
+            fh.write(f"# {name}\nwhat {name} cannot settle\n")
+        for skill, text in skills.items():
+            os.makedirs(os.path.join(pack, "skills", skill))
+            if text is not None:
+                with open(os.path.join(pack, "skills", skill, "SKILL.md"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(text)
+        return pack
+
+    def _project(self, live: list[str]) -> str:
+        root = os.path.join(self.tmp(), "p")
+        proc = _env.nopekit(["init", "--name", "p", "--no-git", "-C", root], cwd=self.tmp())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        path = os.path.join(root, ".nopekit", "project.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["packs"] = live
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        return root
+
+    def test_the_live_packs_skills(self):
+        root = self._project(["demo"])
+        demo = self._pack(root, "demo", {"b-reading": "read the log\n",
+                                         "a-setup": "set up a case\n"})
+        # Review of phase 6: no command printed a pack's lenses, and the skill
+        # sent the agent to `packs show`, which prints PACK.md alone.
+        with open(os.path.join(demo, "lenses.md"), "w", encoding="utf-8") as fh:
+            fh.write("# lenses\nlook at the load path\n")
+        self._pack(root, "other", {"x": "not live\n"})
+        proc = _env.nopekit(["packs", "skills"], cwd=root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = proc.stdout
+        self.assertIn("== demo/PACK.md", out)
+        self.assertIn("== demo/lenses.md", out)
+        self.assertLess(out.index("what demo cannot settle"), out.index("look at the load path"))
+        self.assertLess(out.index("look at the load path"),
+                        out.index("== demo/skills/a-setup/SKILL.md"))
+        self.assertLess(out.index("what demo cannot settle"),
+                        out.index("== demo/skills/a-setup/SKILL.md"))
+        self.assertLess(out.index("set up a case"), out.index("read the log"))
+        self.assertNotIn("other", out)
+        proc = _env.nopekit(["packs", "skills", "--pack", "other"], cwd=root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("== other/skills/x/SKILL.md", proc.stdout)
+        self.assertNotIn("demo", proc.stdout)
+        doc = json.loads(_env.nopekit(["packs", "skills", "--json"], cwd=root).stdout)
+        (row,) = doc["packs"]
+        self.assertEqual(set(row), {"name", "dir", "pack_md", "lenses", "skills"})
+        self.assertEqual(row["lenses"]["text"], "# lenses\nlook at the load path\n")
+        self.assertEqual([s["name"] for s in row["skills"]], ["a-setup", "b-reading"])
+        self.assertEqual(row["skills"][0]["text"], "set up a case\n")
+        self.assertEqual(doc["missing"], [])
+
+    def test_no_live_pack_and_a_missing_one(self):
+        root = self._project([])
+        proc = _env.nopekit(["packs", "skills"], cwd=root)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(proc.stdout.startswith("no live packs in this project"), proc.stdout)
+        root = self._project(["gone"])
+        proc = _env.nopekit(["packs", "skills"], cwd=root)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("gone is in meta.packs but was not found on any search path", proc.stdout)
+
+    def test_validate_refuses_a_skill_directory_without_its_file(self):
+        root = self.tmp()
+        pack = self._pack(root, "demo", {"a": "fine\n", "b": None})
+        problems = packs_mod.validate(pack)
+        self.assertIn("skills/b/ holds no SKILL.md", " ".join(problems))
+        self.assertNotIn("skills/a/", " ".join(problems))
+        self.assertEqual(packs_mod.skill_files(pack),
+                         [("a", os.path.join(pack, "skills", "a", "SKILL.md"))])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

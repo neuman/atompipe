@@ -715,6 +715,7 @@ def solution_valid(ctx: GateContext) -> Verdict:
 # =========================================================================== #
 @gate(
     id="modelica.result_claim",
+    basis="established",
     title="A variable reduced out of the result meets its claim's acceptance",
     claims=["result-extraction", "simulation-result", "modelica"],
     tier=Tier.INSTANT,
@@ -1141,6 +1142,7 @@ def _run_or_skip(ctx: GateContext, gid: str, lines, name: str, timeout: float,
 
 @gate(
     id="modelica.checks",
+    basis="established",
     title="checkModel reports a balanced system: equations == unknowns",
     claims=["equation-balance", "model-structure", "equation-model"],
     tier=Tier.SOLVE,
@@ -1229,6 +1231,7 @@ def checks(ctx: GateContext) -> Verdict:
 
 @gate(
     id="modelica.compiles",
+    basis="established",
     title="buildModel produces an executable with no errors",
     claims=["model-compiles", "model-structure", "equation-model"],
     tier=Tier.SOLVE,
@@ -1328,6 +1331,7 @@ def compiles(ctx: GateContext) -> Verdict:
 
 @gate(
     id="modelica.simulates",
+    basis="established",
     title="simulate() runs to stopTime, fires no assert, and writes a result",
     claims=["simulation-runs", "simulation-result", "equation-model"],
     tier=Tier.SOLVE,

@@ -8,11 +8,11 @@ description: Build a new nopekit pack — a reusable validation capability for a
 A pack is how a validation capability stops being a one-off. You built a gate for
 your project; a pack is that gate made reusable, self-testing and contributable.
 
-Read `docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
+Read `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
 
 ## Before you start
 
-**Have you followed `docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
+**Have you followed `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
 protocol, not step 1. If you have not yet named the physical quantity precisely,
 tried the analytic answer, chosen the tool deliberately and run a negative control,
 you are packaging something you do not trust yet.
@@ -26,7 +26,7 @@ would recognise? If not, split.
 ### 1. Lay out the directory
 
 No command creates a pack: it is an ordinary directory. Make the layout in
-`docs/PACK_FORMAT.md` — `pack.json`, `PACK.md`, `gates/`, `selftest/`, `references/` —
+`${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` — `pack.json`, `PACK.md`, `gates/`, `selftest/`, `references/` —
 under `.nopekit/packs/<name>/` in the project that needs it (or `packs/<name>/` in
 the nopekit repository). `pack validate` and `gate selftest --pack` find it there by
 name before it is published anywhere; `nopekit packs add <name>` opts the project
@@ -47,6 +47,22 @@ Set `origin` honestly. Extracted from a real project that shipped? Built by the
 protocol against a validation case? Ported from a paper? The next reader calibrates
 their trust on that line.
 
+Set `basis` honestly too — where each evaluator's verdict logic comes from: `"basis":
+"sourced"` in `pack.json` for the pack, and `@gate(..., basis="model-only")` for one
+that differs. `established` when the verdict is an existing non-AI tool's own answer
+(trimesh's `is_volume`, omc's `checkModel`); `sourced` when the logic follows a cited
+outside source (a textbook formula, a standard, a datasheet — cite it in
+`references/`); `model-only` when you wrote the logic with no outside source, even
+when it calls a tool's primitives. Use the highest you honestly can, and say why when
+lower. A bundled pack must declare one for every evaluator (`pack validate`). It is
+shown, never a status. Never `grounded`.
+
+A tool that proposes options or evidence — a parts search, a slicer's estimate — is a
+**proposer**, not an evaluator: declare it in `pack.json`'s `provides_proposers`
+(`{"id", "basis", "description", "run"}`, its script under `proposers/`). It writes
+its files into `$NOPEKIT_PROPOSAL_DIR`; `nopekit propose <id>` files each as an input.
+It needs no control, because a proposal settles nothing.
+
 ### 3. Write the cheapest gate first
 
 **Ship at least one tier-0 gate, and write it before the expensive one.** Analytic,
@@ -58,6 +74,10 @@ under "what this pack cannot settle" — but look hard first. Almost every physi
 claim has an order-of-magnitude answer sitting in a textbook.
 
 ### 3b. Write the gate for the context it actually gets
+
+Amber (`nopekit model trace`) runs your gate on designs rebuilt in a temp copy of the
+project, through the check run's own rules, writing nothing: read everything through
+`ctx` (`ctx.root` is the copy), never a path you computed from the project.
 
 A gate never sees the sweep's context. It gets a traced view of its own, and every
 read it makes — a parameter, a claim, a file, a question about a path — is recorded,
@@ -212,7 +232,7 @@ unqualified (`channels differ`). The line says which facts held:
 cad.watertight : known-good pass · known-bad fail → qualified
 ```
 
-A pack loaded from outside the bundled `packs/` — under `.nopekit/packs/` while you
+A pack loaded from outside the bundled `${CLAUDE_PLUGIN_ROOT}/packs/` — under `.nopekit/packs/` while you
 write it, or `~/.nopekit/packs` — reads its controls through `ctx.extra` at its peril
 (`known-good and known-bad via ctx.extra`: a check run never hands `extra`), is handed
 no `ctx.model` on any run, and a verdict that read a ledger value its baseline never
@@ -266,10 +286,24 @@ Three things to get right:
   naming a view or a node that does not exist. That is the check that catches the
   rename you did on one side of the interface and not the other.
 
+Viewgens run in `order`, and the first `model3d` view by order is the front page's
+representation (else the first image or diagram view): give the view that shows the
+whole design the lowest `order`. Write byte-stable assets — no clock, no random id, no
+unordered dict in a GLB or an SVG — because the site is committed and a rebuild that
+judged nothing new must change no tracked byte.
+
 A pack with no view still works; the site degrades all the way down to claims,
 verdicts and provenance. But if your domain has geometry and you skip this, every
 failure it finds stays a sentence about coordinates. Contract:
-`docs/SITE_CONTRACT.md`.
+`${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md`.
+
+**Your pack on the site.** A pack's part of the site is its views (`provides_views`,
+the viewgens above) and the evidence its evaluators write: a file a verdict names as
+evidence is copied into the board posters (`site/assets/evidence/<gate>/…`), under the
+claim it settles. Write evidence a reader can open — a plot, a cross-section, a log
+with the number on its first line — into the gate's out directory. There is no other
+site partial format: the page's words, statuses and layout are the build's, never a
+pack's.
 
 ### 4c. Get the tag vocabulary right
 
@@ -342,12 +376,23 @@ sentence that saves the next person a week.
 ### 7. Write `lenses.md`
 
 The angles an adversarial reviewer should attack this domain from, before anything is
-built. Specific and uncomfortable beats general and polite. Compare:
+built; `nopekit packs skills` prints it after PACK.md for the agent working in a project
+where your pack is live. Specific and uncomfortable beats general and polite. Compare:
 
 - *weak:* "consider manufacturability"
 - *strong:* "this part is a cantilever loaded at its tip — what is the free span,
   measured from the actual weld and not from the wish? And is the root block real
   material or a fillet you drew?"
+
+### 7b. Teach the agent: `skills/`
+
+What an agent needs to work in your domain beyond PACK.md — how to set up the solver's
+case, how to read its log, which settings to try first — goes in
+`skills/<name>/SKILL.md`, one skill per task the domain needs (`skills/meshing/`,
+`skills/reading-results/`). They are read, never installed as Claude Code skills:
+`nopekit packs skills` prints each live pack's PACK.md and then its skill files, and
+the nopekit skill tells the agent to read them before it works in a pack's domain.
+`pack validate` refuses a `skills/<name>/` directory with no SKILL.md in it.
 
 ### 8. `sourcing.md`, if the domain has real-world procurement
 

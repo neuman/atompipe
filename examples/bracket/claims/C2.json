@@ -9,5 +9,16 @@
   },
   "tags": [
     "strength"
+  ],
+  "mechanism": {
+    "by": "closed_form",
+    "how": "Root bending stress at the rated load, the moment at the wall over the section modulus, against half of PETG's conservative yield",
+    "evaluators": [
+      "bracket.bending_stress",
+      "bracket.model_validity"
+    ]
+  },
+  "requirements": [
+    "R1"
   ]
 }

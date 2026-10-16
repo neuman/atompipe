@@ -3,7 +3,7 @@
 nopekit takes a design from a sketch to a validated physical thing. Its chain is
 
 ```
-claims  ->  gates  ->  packs  ->  readiness report
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
 ```
 
 Read [`METHOD.md`](METHOD.md) first — ten rules, and everything in `src/` exists to
@@ -35,6 +35,19 @@ commands; `examples/bracket/README.md` ("The committed cache") has them in full.
 rewrote the bracket's tracked ledger and added a run file, so `git status` was never
 clean and nobody read it.)
 
+The bracket also commits its round record, `.nopekit/round.json`. A change that
+moves what it holds — the cache regeneration above, the composition (`claims.py`),
+`graph.py`, `rounds.py`, `report.requirement_statuses` or `_disagreement`, or one of
+the bracket's records — ends with `PYTHONPATH=../../src python3 -m nopekit round` in
+`examples/bracket`, in the same change; `tests/test_bracket_cache.py`
+(`TheCommittedRoundRecordIsCurrent`) goes red until it does and names the command.
+And it commits its trace, `.nopekit/trace/` (architecture phase 3b): a change to the
+bracket's model, to how the trace observes (`derivation.HARNESS`), to a gate that
+covers C2 or C3, or to their acceptance condition runs `nopekit model trace` and then
+`nopekit round`, in that order, in the foreground (`round` alone only starts the trace
+in the background; a gate or acceptance edit leaves the trace current and its amber
+file not) (`TheCommittedTraceIsCurrent`).
+
 ## Invariants — do not break these
 
 The entire value of this project is that its report refuses to claim anything it has
@@ -57,7 +70,8 @@ every class that holds each invariant):
 3. **The registry refuses a gate with no negative control.** A validator that cannot
    be shown to fail is a logger. This is not negotiable — an agent that writes
    plausible code writes plausible validators, and those launder assumption into
-   proof.
+   proof. A proposer is never registered: a proposal settles nothing, so it needs no
+   control, and a pack declares it apart (`provides_proposers`).
 4. **The report never lists a claim as Checked — in its checked section
    (`report.SECTION_PROVEN`), a status row or a JUnit pass — while any of its gates
    is unrun, skipped, errored or unqualified, or while a value one of its evaluators
@@ -78,7 +92,9 @@ every class that holds each invariant):
    a pass on its current article — and an expert-judgment claim only on its
    authority's own judgment of the claim as it reads now; one the resolver calls
    Checked without either is listed loud, as status and evidence disagreeing (P2.5a;
-   `tests/test_physical.py`).
+   `tests/test_physical.py`). A mechanism's evaluator list is a cross-check, never
+   coverage: a name there adds no evaluator to a claim and moves no status (SPEC
+   decision 13; S-37).
 
 Two more, learned the hard way and enforced in `tests/test_packs.py`:
 
@@ -100,14 +116,26 @@ below names:
    what its gate actually read — parameters, files, claim records, the acceptance
    conditions it read, its own code, the spine. When any of those moves, its pass
    reads Stale until the gate runs again — and a limit edit re-keys exactly the gates
-   that read that claim's acceptance condition, and a statement edit none. A physical
+   that read that claim's acceptance condition, and a statement edit none; a mechanism
+   or requirement-pointer edit re-keys only the gates that read that claim or the claims
+   whole, and a requirement edit only those that read the requirements. A physical
    pass is bound to its article — the design it was recorded on: when that design
    moves it reads Stale, naming the article to rebuild — a check run cannot restore
    it (P2.5a). An article `export` built is what its generator read, and every value
    its package hands the builder: it moves only when something its generator read
    moves, and the rebuild prediction names exactly those articles (P2.5b) — a file it
    linked into its package is a read, and one there that no write the trace saw put
-   makes the article the whole design (review of P2.5b).
+   makes the article the whole design (review of P2.5b). The round record is never
+   shown as current once the records, the verdict cache or the design it was computed
+   from moved, or once what it holds is not what `round` would write now (an
+   evaluator's code, its controls or a pack moved the resolution): `status` and
+   `doctor` say it is behind, naming what moved (architecture phase 3a). A trace is
+   keyed by the digests of the instructions, of every choice's value and of the data
+   files its base build read, with its method's version, and a derivation edge is
+   drawn only from the trace whose key is the current design's — its data files
+   holding the same bytes on disk — never from one for another (phase 3b; in its
+   review, a model whose `build()` read `model/e.json` kept its old trace and amber
+   after the file changed).
    (Observed before this: one hash of the whole model decided every gate, and a model
    that failed to import compared equal, so three claims read Checked for a design that
    could not be built.)
@@ -115,18 +143,52 @@ below names:
 8. **The index never disagrees with the records, and no command writes a record
    it was not asked to write.** The records are files — `claims/`, `params/`,
    `decisions/`, `needs/`, `inputs/`, `results/`, `views/`, `milestones/`,
-   `exports/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
+   `exports/`, `requirements/`, `preferences/`, `groups/` and `.nopekit/project.json` — and `.nopekit/ledger.json` is an index generated
    from them, rebuilt after every command (`doctor`, `init` and `--no-record` runs
    write none of it), so a hand edit made since the last command reaches it;
    nothing reads it for truth. `check` writes no record: every path it writes is
    ignored by git at the moment it is written, or is a new verdict entry. Each kept
    writer (`ingest`, `extract`, `decide`, `packs add`, `claim physical`) writes the
-   one record it was asked for; `export` (P2.5b) writes its export record
+   one record it was asked for; `prefer` writes one sealed entry in
+   `preferences/<decision>.json`; `propose` writes, as `ingest` does, the input
+   record and its bytes for each file its proposer wrote, and every other path it
+   writes (`.nopekit/out/propose/`) is ignored when written — a proposer that wrote
+   anywhere else in the project is refused, each path named, and nothing is
+   ingested; `export` (P2.5b) writes its export record
    (`exports/<milestone>.json`), the new verdict and control entries its re-run
    files, as `check --force` files them, and the marked ignore blocks — every other
-   path it writes (`out/<milestone>/`, its package) is ignored when written; and
-   `report --write` writes `REPORT.md`, an output git ignores. The one carve-out is the one-time legacy migration,
-   which only `check` and those writers perform; every other command reads a legacy
+   path it writes (`out/<milestone>/`, its package) is ignored when written;
+   `report --write` writes `REPORT.md`, an output git ignores; `round` writes
+   what `check` writes, what `site build` writes when `site/index.html` exists, and
+   the round record; `round --commit` (the Stop hook's `round --hook`) writes no
+   record: it writes what `round` writes, then commits every changed file inside the
+   project's directory that git does not ignore, and nothing outside it, naming
+   instead of staging a directory (an untracked nested repository among them, never),
+   a file over 50 MiB and a file whose name looks like a secret
+   (`rounds.ROUND_SECRET_NAMES`), only when `people` lists both its author and its
+   committer, and never pushes (designed against in phase 6: a hook that ran
+   `git add -A` would commit a person's unrelated work as "round N"; in its review, a
+   committer from `GIT_COMMITTER_*` that `people` never named reached a round's commit,
+   and an untracked clone under `generators/` was committed as a gitlink; in the
+   acceptance run after phase 3b, the closed list of nopekit's own paths left the
+   agent's `bom/bom.json`, which its sourcing evaluators read, out of every round);
+   `init` starts a git repository only where git says positively that the project
+   sits in none (in review, a "dubious ownership" refusal read as "none" and nested
+   one inside an existing repository); `model trace` (phase 3b) writes, under
+   `.nopekit/trace/`, a trace file per design it observed and an amber file per
+   evaluation — each a new
+   path, written only whole and never rewritten — and its scratch under the ignored
+   `.nopekit/cache/trace/`; `round` starts it in the background and writes no trace
+   file itself; `site stamp` writes only the `as_of` line of the `site/content/`
+   files it names, which are not records; and `site badge` and `init` write only the
+   README block. `.nopekit/round.json`, the round record, is a tracked output and not a
+   record: only `round` writes it (and, from phase 4, `merge`), at most once a run,
+   only when what it holds moved, and as the round record of the state after the
+   run; `check` and every other command never write it, and nothing reads it for
+   truth — a reader that finds its self-digest broken says it was edited by hand,
+   whatever schema it claims, and one that finds it moved past says it is behind
+   (invariant 7). The one carve-out is the one-time legacy migration,
+   which only `check`, `round` and those writers perform; every other command reads a legacy
    ledger in memory and writes nothing. (Observed before this: `check`, a sweep, saved the whole ledger on
    every run, so a claim a human edited between two commands was put back from the
    sweep's memory, and `gap`, which reads like a query, filed every gap it found as
@@ -148,7 +210,7 @@ below names:
    the claims, quantity, comparator and units, and which limits are stated, stay held.
    That is evidence at the limits the runs visit, not at every limit: a gate that lies
    only where no run looks is named in SPINE_CONTRACT's limits. Where its code lives
-   decides which it is, never a `PACK_DIR` it sets itself. And it counts only on inputs inside
+   decides which it is, never a `PACK_DIR` it sets itself or a basis it declares. And it counts only on inputs inside
    the operating context it declares: outside, a pass does not count — the claim reads
    Gap, or Assumed under an owned fallback — and a fail still does; its known-good
    control must lie inside that context, and a mutation counts wherever it lands. `check` runs whatever of that is not on
@@ -215,7 +277,9 @@ earned. Enforced in `tests/test_signing.py`, `tests/test_physical.py` and
     `--article` is bound to an exported article, and its pass counts only while
     `exports/` holds that export. An
     owner, and an expert-judgment claim's authority, count only as that person
-    recorded them, as themselves: the claim is Gap until then, and an expert
+    recorded them, as themselves (the seal keeps its P2.5a form — `terminal` is
+    `mechanism.by`, `note` is `mechanism.how` — so a claim file moved to the mechanism
+    form stays bound): the claim is Gap until then, and an expert
     judgment Assumed under its authority's name until they judge it — and Gap again
     when the claim is edited after. A fail
     on a claim an automated evaluator had passed — qualified and current — is a
@@ -242,7 +306,13 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
 12. **No reader says more than the composition, and the boundary that spends
     re-executes.** No renderer shows a claim more resolved than `claims.compose`
     composes it, nor says *ready* more generously than `claims.unresolved` — the one
-    predicate the readiness sentence, `export`, the JSON summaries and the page read.
+    predicate the readiness sentence, `export`, the JSON summaries, the page and the
+    round record read —
+    nor a requirement more resolved than the worst claim that serves it
+    (`claims.requirement_statuses`, the one producer), and *ready* never reads a
+    requirement; nor evaluates a return condition on a claim the composition does not
+    read Checked — it reads *cannot be evaluated: <id> is <status>* — and `check`
+    prints each condition that holds without moving its exit code.
     A milestone (`milestones/<name>.json`) names the claims its spend requires; it is
     ready only when every one reads Checked — Assumed, Pending build and a Stale that
     waits on a person included in what is not. Every reader but `export` says *ready*
@@ -265,16 +335,74 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     cache is forgeable in the inner loop — a hand-placed entry was served Checked
     until something re-ran it, and nothing at a spend did; and, in review of P2.5b,
     `report --milestone` said the boundary's *ready* over a forged cache and `status`
-    listed no milestone at all.)
+    listed no milestone at all.) Amber — a Checked claim that a ±10% move of an
+    unconfirmed assumption's choice flips — is said beside Checked and moves no status,
+    exit code, readiness, JUnit outcome or export (phase 3b).
 
-One more came with checkpoint P2.3, numbered as PLAN §4.0.1 numbers it (13 and 14 land
-with their mechanisms: preferences in P4, the site in P5). Enforced in
-`tests/test_mutation.py`, over every mutation entry point in `src/`:
+One more came with architecture phase 2, when a decision's losers gained types and a
+person's preference a channel — a new place to pass the agent's choice off as a
+person's. Enforced in `tests/test_preferences.py`:
 
-15. **A mutation pass writes nothing, changes nothing it was handed, and never says more
-    than it ran.** It runs in process on a copy of the known-good control: nothing is
+13. **A preference counts only through the person's channel.** A `preferred_against`
+    rejection names its person in `by` — a nominee, like a claim's owner — and counts
+    only when that person records it with `nopekit prefer <decision>`, typed in their
+    own shell, confirming the decision's id: refused from an agent session or a pipe,
+    who read from the git identity, which must be the person `by` names, and when
+    from the clock (`--who` and `--when` are refused). Each preference is one sealed,
+    chained entry in `preferences/<decision>.json`, appended by the writer that seals
+    `results/` and `exports/`; a broken seal refuses the file, naming what a restore
+    discards. It counts only while the rejection still names that person and says
+    what it said when they recorded it — its value, its why, its return condition and
+    the decision's title; until then, and again after such an edit, every reader says
+    *preferred against, not recorded by <name>*. A preference moves no status and no
+    exit code. (What it closes before it could slip through: `decide --rejected
+    VALUE|WHY` recorded no who, so a preference the agent typed into a decision would
+    have read as the person's — invariant 11's owner laundering, through another
+    file. What the seal does not stop is `results/`'s limit, in
+    `docs/SPINE_CONTRACT.md`.)
+
+One more came with architecture phase 5, when the site gained a map and the agent's
+prose: the one place the site persuades. Enforced in `tests/test_site_truth.py`:
+
+14. **The site never says more than the resolution, and stamped prose is flagged when
+    behind.** Every status, word, count, order, margin and *ready* that `site build` bakes
+    into `site/data/` comes from `claims.compose` through `graph.tokens`,
+    `claims.unresolved` and `claims.margin`, on the resolution every reader uses: a
+    claim's token on the map, on its board and in next steps is its composition's, a
+    board's is the worst of its claims', a milestone's steps are `claims.unresolved`'s.
+    The build refuses to write a page whose token, word or mark for a claim, a
+    requirement, a board, a milestone or the project differs, or whose words put a value
+    inside a limit its claim's condition rejects (`page.status_problems`), and the browser
+    computes no status, margin, readiness, reading order, age or sensitivity: no page
+    script reads a verdict's flags or a recorded result's `counts`, does arithmetic on a
+    limit, takes a worst-of or sorts by a status; a recorded result's tone comes from its
+    baked token. A baked file edited by hand reads *edited by hand* in `site status`,
+    `status` and `doctor`, a resealed page that shows behind text as current included. The
+    agent's text in `site/content/` reads current only while its `as_of` stamp equals the
+    digest of the tokens of its board's claims and of every claim it names now; otherwise
+    the page says it was written before the latest results, unstamped text included; and
+    every number in it that no number the page keeps matches at its precision, in its
+    unit, is marked. (What slipped through: the reference page decided its go/no-go in the
+    browser from a hand-kept claim list, so a claim added to a board never reached it; the
+    template ranked anchored verdicts by their `passed` flag beside the resolver's word,
+    sorted verdict rows by a status table of its own and subtracted a chart's limit from
+    its value; and nothing kept prose from saying a claim passes after it failed; and, in
+    review of phase 5, a Failing claim read "99% inside the limit" (the evaluator's margin
+    beside the claim's limit), a stamp missed a claim its text named from another board,
+    "3 mm" matched a count of claims, and an evidence copy the same build deleted vouched
+    for a number.)
+
+One more came with checkpoint P2.3, numbered 15 before 14 landed (14 was reserved for
+the site, which landed in architecture phase 5). Enforced in `tests/test_mutation.py`,
+over every mutation entry point in `src/`:
+
+15. **A mutation pass, a trace build and an amber run write nothing in the project,
+    change nothing they were handed, and never say more than they ran.** A mutation
+    pass runs in process on a copy of the known-good control: nothing is
     written under the project or a pack directory, and the known-good design is as it
-    was afterwards. A mutation counts only when it is conclusive — its key was read and
+    was afterwards. A trace build and an amber run happen in a subprocess on a copy
+    outside the project, watched on every thread; one that writes inside the project
+    leaves no trace file and no row a later run could use, and is named. A mutation counts only when it is conclusive — its key was read and
     the run passed or failed — and one that skipped or errored is printed as
     inconclusive, never as a fail; with none conclusive the line says `mutation 0
     conclusive`. (What slipped through the harness before the code existed: a plan
@@ -282,6 +410,26 @@ with their mechanisms: preferences in P4, the site in P5). Enforced in
     `mutation 0 conclusive` over every evaluator; a runner that drew up its plan after
     seeing which mutations passed printed `mutation 1/1 fail` over an evaluator one of
     two had passed.)
+
+One more came with architecture phase 3b, when the map gained a middle. Enforced in
+`tests/test_derivation.py`:
+
+16. **The trace says what it saw, and no more.** A choice it did not move (a yes/no, a
+    word, a structure, a zero, a field not settable) and a value no move changed are
+    said as not moved or not seen to move — never as independent; an order between
+    values is said as inferred from the trace; a trace is written only whole, every
+    numeric choice moved both ways, and a build that timed out, died, wrote into the
+    project, or raised differently when run alone leaves none, now or at a later run;
+    a move is said at its size (an integer's may be more than 10%); amber is shown only
+    while the trace is the current design's and the evaluators' code and the
+    acceptance conditions it ran under are the current ones — its runs too, never a
+    row run under others — and otherwise says it is not current. (What slipped
+    through: before the trace, the map drew each line from the values its evaluators
+    read, so 94 of PETGasus's 110 choices reached no claim and drew as if nothing
+    depended on them; and a pass at 0.8% margin on three unconfirmed assumptions read
+    as green as one at 80%. In the review of phase 3b: a refused build's scratch row
+    was written into the next run's trace, an untraced map called six zones unused,
+    and `why` said "nothing at ±10%" of a choice whose builds raised.)
 
 **Which test holds each.** `tests/test_meta.py`'s `INVARIANT_CLASSES` maps every number
 above to the classes that try to break it, and this table is that map, row for row:
@@ -295,17 +443,20 @@ named.)
 |---|---|
 | 1 | `test_invariants.SkipIsNotPass`, `test_invariants.CheckedMeansEveryEvaluatorPassed` |
 | 2 | `test_invariants.ErrorIsNotPass`, `test_louder.ErrorIsLouder`, `test_invariants.UnqualifiedIsTheSpinesWord`, `test_prerequisites.AnErroredPrerequisiteStaysLouder` |
-| 3 | `test_invariants.RegistryRefusesLoggers` |
-| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults` |
+| 3 | `test_invariants.RegistryRefusesLoggers`, `test_proposers.AProposerIsNeverAnEvaluator` |
+| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
-| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained` |
-| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey` |
+| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo`, `test_derivation.TheTraceIsKeyedToItsDesign` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository`, `test_derivation.TheTraceIsWrittenOnce` |
+| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
-| 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated` |
-| 15 | `test_mutation.MutationIsSealed` |
+| 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus` |
+| 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
+| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved` |
+| 15 | `test_mutation.MutationIsSealed`, `test_derivation.TheTraceBuildsInACopy`, `test_derivation.AnAmberRunWritesNothing` |
+| 16 | `test_derivation.UntracedIsNeverIndependent`, `test_derivation.APartialTraceIsNeverWritten`, `test_derivation.AmberOnlyWhileCurrent` |
 
 ## House rules
 
@@ -318,9 +469,10 @@ named.)
   fresh context window re-litigates every settled number.
 - **The site renders the records and the verdict cache; it never computes truth.**
   Nothing under `site/` re-derives a measurement or decides whether a claim passes —
-  if a number on the page is wrong, a record or the cache is wrong. And no build
-  step: plain HTML, CSS and ES modules, for the same reason the spine has no
-  dependencies.
+  if a number on the page is wrong, a record or the cache is wrong. The browser
+  computes no status, margin, readiness or sensitivity: every number, status, word
+  and order is in a baked file. And no build step: plain HTML, CSS and ES modules,
+  for the same reason the spine has no dependencies.
 - **Comments say what slipped through.** Where a rule exists because something got
   past a check, name it. The modules are dense with this on purpose.
 - **No reference to the parent project.** nopekit carries its method and none of its
@@ -332,27 +484,53 @@ named.)
 Each fact has one home; everything else that shows it is an output of that home.
 
 - **Records** — tracked, one file per record, edited by hand or by the agent and read
-  strictly (an unknown key is refused, with a suggestion): `claims/<id>.json`,
+  strictly (an unknown key is refused, with a suggestion): `requirements/<id>.json`
+  (the person's words; claims point at them with `requirements`), `claims/<id>.json`,
   `params/`, `decisions/`, `needs/`, `inputs/<id>.json`, `results/<claim-id>.json`,
   `views/*.json`, `milestones/<name>.json` (a spend and the claims it requires),
   `exports/<name>.json` (that spend's exports, sealed and chained, appended only by
-  `export`), and `.nopekit/project.json` (meta, `model_entry`, the live `packs`).
+  `export`), `preferences/<decision-id>.json` (a decision's recorded preferences,
+  sealed and chained, appended only by `prefer`: never edit one by hand),
+  `groups/<id>.json` (a board of claims, a zone of choices or a station of shared
+  values: how the page groups the map, with no status and no position), and
+  `.nopekit/project.json` (meta, `model_entry`, the live `packs`, the `people` a round
+  may commit as).
   `results/<claim-id>.json` holds a claim's physical results and its owner's or
   authority's attributions, sealed and chained, appended only by `claim physical`
   (P2.5a): never edit one by hand — a broken seal refuses the file.
+- **The site's text** — `site/content/` is the agent's prose and figures: tracked,
+  stamped by `site stamp`, and not a record. The page flags a piece whose stamp its
+  claims' statuses have moved past.
 - **The model** — `model/*.py` owns every parameter's value, units and rationale, and
   in `PARAMS` what lost to it; a param record holds only the provenance the model
-  cannot (`source`, `grounded_by`, `tags`).
+  cannot (`source`, `grounded_by`, `tags`). An assumption claim's id in
+  `grounded_by` says the value IS that assumption (the graph's `sources` edge).
 - **The verdict cache** — tracked, `.nopekit/verdicts/<gate id>/`: one file per
   rho (the hash of everything the gate read) and one per control outcome at a
   version, never rewritten. Git plus this cache is the history; there is no run history.
+- **The trace** — tracked, `.nopekit/trace/`: one file per traced design, keyed by its
+  instructions, choices and the data its build read, and one amber file per evaluation; written only by
+  `model trace`, never rewritten; nothing reads it for a status.
 - **Outputs, ignored** — `.nopekit/ledger.json` (the index of every record, rebuilt
   after each command), `.nopekit/cache/last_check.json` (statuses, counts and the
   parameter view as the last full `check` saw them), `.nopekit/obs/` (what each run
   cost), `.nopekit/out/` (scratch and evidence), `REPORT.md` (the readiness report,
-  `report --write`) and `out/<milestone>/` (the package `export` wrote). The index
+  `report --write`), `out/<milestone>/` (the package `export` wrote),
+  `.nopekit/cache/trace/` (a trace's resumable scratch), `.nopekit/out/trace.log`
+  (a background trace's log), `.nopekit/out/serve.json`, `serve.lock` and `serve.log`
+  (a detached live server's address, the lock it holds for its life, and its log) and
+  `site/data/build.json` (the page's build time and each result's age). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
+- **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at
+  the end of a round as tokens (every claim's and requirement's status key, the
+  counts, readiness, each evaluator's outcome) and the typed graph, with the digests
+  of the records, the verdict cache and the design it was computed from, a round
+  number and its own digest. Written only by `nopekit round` (and, from phase 4,
+  `merge`), never by `check`; nothing reads it for truth — `status` and `doctor`
+  say only whether it is current, behind or edited by hand. And `site/data/` and
+  `site/assets/`, baked by `site build` (clock-free, written only when their bytes
+  differ), where a project publishes its page.
 
 `docs/SPINE_CONTRACT.md` ("Where facts live", then `store.py`'s section) has the
 layout in full, with each writer.
@@ -365,10 +543,16 @@ layout in full, with each writer.
 | `src/nopekit/store.py` | the records: one file per record, the strict reader, the writer, the generated index, the one-time legacy migration |
 | `src/nopekit/milestones.py` | the boundary that spends: a milestone's closure, the export's refusals and judgment, disagreements, the test card, the package |
 | `src/nopekit/verdicts.py` | the per-gate verdict cache: what a gate read (`ParamTrace`, `LedgerView`, the audit hook), portable digests and the spine digest, rho, cache and control entries, freshness, admission at the gate's current version, the one resolver every reader uses, the sweep `check` runs, and `last_check.json` |
-| `src/nopekit/vcs.py` | the only git edge: argv form, a clean environment, a timeout, never raises |
-| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`. Plain HTML/CSS/ES modules, no build step |
-| `packs/` | domain packs. Ordinary directories: no build step, no registration |
+| `src/nopekit/vcs.py` | the only git edge: a read half (argv form, a clean environment, a timeout, never raises) and a writing half (`init_repo`, `add`, `commit`) under its own contract |
+| `src/nopekit/derivation.py` | the trace: each choice moved ±10% in copies, what moved, the order it infers, amber, the background start (non-spine, clock-free) |
+| `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map draws |
+| `src/nopekit/page.py` | the front page's baked data (SPEC 28-33): the map's layout from the graph and the groups, `map.json` and `page.json`, the floor, next steps, the evidence plan, the stamps, and invariant 14's checker |
+| `src/nopekit/prose.py` | the agent's text on the site: front matter and the stamp, the markdown subset, the number scan, and the style scans (SPEC 30, 34, 35) |
+| `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
+| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (the outline: the representation, the verdict, the map, a section per board, next steps) and `technical.html` (today's panels), both the project's own; `content/` the agent's prose, stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
+| `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
+| `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |
@@ -381,7 +565,7 @@ layout in full, with each writer.
 | `docs/PACK_FORMAT.md` | the pack contract |
 | `docs/SITE_CONTRACT.md` | the site: view kinds, locators, `state.json` |
 | `docs/SPINE_CONTRACT.md` | internal: where facts live, each module's public surface, and the limits — what the spine cannot see |
-| `docs/PLAN.md` | the paper mapped onto the repo: gap-map rows (marked `closed` as their proofs land), invariants, sequencing rules; `docs/plan/` holds each phase's detail |
+| `docs/SPEC.md` | the architecture as decided on 2026-10-14: terms, what stays, each decision with its reason, the layout, the site, the sequence of work. The only plan. Ids like `D-14`, `S-60`, `P2.5b` in code comments refer to the retired plan, readable at commit `a00d0e5` |
 
 ## Adding a pack
 

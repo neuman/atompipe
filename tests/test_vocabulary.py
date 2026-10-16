@@ -289,6 +289,19 @@ _BRACKET_RUNS = (("check", ["check", "--junit"]), ("status", ["status"]),
                  ("status.json", ["status", "--json"]), ("report", ["report"]),
                  ("claim.list", ["claim", "list"]), ("claim.show", ["claim", "show", "C6"]),
                  ("why.C6", ["why", "C6"]), ("why.C7", ["why", "C7"]),
+                 # Architecture phase 1: `gap` lists claims by status, with their
+                 # mechanisms, so its lines are a channel too; and `why R1`.
+                 ("gap", ["gap"]), ("why.R1", ["why", "R1"]),
+                 # Architecture phase 2: a decision's `why` (each loser's type and
+                 # return condition), `prefer` refusing a pipe (the person's channel
+                 # speaks too), and `propose`'s listing.
+                 ("why.decision", ["why", "print-in-petg"]),
+                 ("prefer", ["prefer", "print-in-petg"]), ("propose", ["propose"]),
+                 # Architecture phase 3a: what reads and sources a value, a derived
+                 # value's block, and what a claim rests on (`round` has a world of
+                 # its own, `round_world`, so its paragraph holds a flip).
+                 ("why.load_n", ["why", "load_n"]), ("why.C1", ["why", "C1"]),
+                 ("why.deflection", ["why", "deflection"]),
                  ("site.init", ["site", "init"]), ("site.build", ["site", "build"]),
                  # P2.5b (critique 11 of its design): the milestone list, the
                  # boundary's dry run and the milestone's report are channels too.
@@ -303,6 +316,28 @@ def bracket_world() -> World:
                                       migrated=True)
         _run_world("bracket", root, _BRACKET_RUNS, _FILES)
     return _WORLDS["bracket"]
+
+
+def round_world() -> World:
+    """The bracket after C1's limit moved, and the `round` that names the flip
+    (architecture phase 3a): its one paragraph is a channel — flip words,
+    requirement words, the count line and *ready* as last evaluated."""
+    if "round" not in _WORLDS:
+        root = _projects.bracket_copy(os.path.join(_tmp("nopekit-vocab-round-"), "bracket"),
+                                      migrated=True)
+        path = os.path.join(root, "claims", "C1.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["acceptance"] = dict(data["acceptance"], limit=0.8)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        _run_world("round", root, (("round", ["round"]),))
+    return _WORLDS["round"]
+
+
+#: `why`'s graph lines (architecture phase 3a), scanned beside its gate lines.
+_WHY_GRAPH = ("read by:", "sourced from:", "rests on", "resolves:", "resolved by:",
+              "derived from:", "value ")
 
 
 def empty_world() -> World:
@@ -374,11 +409,12 @@ def scan(channel: str, lines: list[str], banned: set[str], masks: list[str],
 
 
 def readme_status_lines() -> list[str]:
-    """README's "Why you should believe the output", line by line: where it
-    defines the statuses for a reader."""
+    """README's status table ("Run checks and read the results"), line by line:
+    where it defines the statuses for a reader. (It was "Why you should believe
+    the output" until README's rewrite on 2026-10-16.)"""
     with open(os.path.join(_env.REPO, "README.md"), encoding="utf-8") as fh:
         text = fh.read()
-    section = text.split("## Why you should believe the output", 1)[1].split("\n## ", 1)[0]
+    section = text.split("### 4. Run checks and read the results", 1)[1].split("\n### ", 1)[0]
     return [ln for ln in section.splitlines() if ln.strip()]
 
 
@@ -449,9 +485,12 @@ def vocabulary_problems(worlds: dict[str, World], banned: set[str], masks: list[
                 out += scan(f"{name}.{key}", _markdown_lines(text), banned, masks, reasons)
         for key in [k for k in world.out if k.startswith("why")]:
             gates = [ln for ln in world.out[key].stdout.splitlines() if "(none —" in ln
-                     or ln.strip().startswith("[")]
+                     or ln.strip().startswith("[") or ln.strip().startswith(_WHY_GRAPH)]
             if gates:
                 out += scan(f"{name}.{key}", gates, banned, masks)
+        if "round" in world.out:
+            out += scan(f"{name}.round", _lines(world.out["round"].stdout),
+                        set(banned) | set(wider), masks, reasons)
         if "junit" in world.files:
             out += scan(f"{name}.junit", _junit_messages(world.files["junit"]), banned, masks,
                         reasons)
@@ -496,7 +535,7 @@ class StatusLinesSpeakTheTable(unittest.TestCase):
     def worlds(cls) -> dict[str, World]:
         return {"louder": _louder(), "refused": _refused(), "bracket": bracket_world(),
                 "empty": empty_world(), "unevaluated": unevaluated_world(),
-                "invalidated": _invalidated()}
+                "invalidated": _invalidated(), "round": round_world()}
 
     def _lists(self):
         text = _glossary()
@@ -531,6 +570,27 @@ class StatusLinesSpeakTheTable(unittest.TestCase):
                     {"p": World("", {"export.dry": _Proc(text)}, {})}, banned, masks, reasons,
                     wider)
                 self.assertTrue(found, planted)
+
+    def test_round_and_the_graph_lines_are_scanned(self):
+        """Architecture phase 3a: `round`'s paragraph — with a flip in it — and
+        `why`'s graph lines reach the scan, and a Never-say planted in either is
+        caught. What slipped through (review of phase 3a): neither was a run of
+        any world."""
+        banned, masks, reasons = self._lists()
+        wider = never_says(_glossary(), 4) | never_says(_glossary(), 5)
+        said = round_world().out["round"].stdout
+        self.assertIn("C1 failing -> checked", said)
+        world = bracket_world()
+        self.assertIn("read by: bracket.deflection", world.out["why.load_n"].stdout)
+        self.assertIn("rests on: C6", world.out["why.C1"].stdout)
+        word = sorted(banned)[0]
+        for key, text in (("round", said + f"C2 checked -> {word}\n"),
+                          ("why.load_n", world.out["why.load_n"].stdout
+                           + f"  read by: a {word} evaluator\n")):
+            with self.subTest(key):
+                found = vocabulary_problems({"p": World("", {key: _Proc(text)}, {})},
+                                            banned, masks, reasons, wider)
+                self.assertTrue(found, key)
 
     def test_every_sentence_branch_is_reached(self):
         """The worlds reach each readiness branch: not ready, never evaluated,
@@ -856,8 +916,13 @@ class StatusWordsComeFromOneTable(unittest.TestCase):
 
 
 def _page_sources() -> dict[str, str]:
+    """The page scripts that print words: the technical record's (`app.js`,
+    `format.js`, `panels.js`) and, from architecture phase 5, the front
+    page's (`page.js` and the map, drawer, sections and live modules), keyed by
+    base name."""
     out = {}
-    for name in ("app.js", "lib/format.js", "lib/panels.js"):
+    for name in ("app.js", "lib/format.js", "lib/panels.js", "page.js", "lib/map.js",
+                 "lib/drawer.js", "lib/sections.js", "lib/live.js"):
         with open(os.path.join(site_mod.TEMPLATE_DIR, *name.split("/")),
                   encoding="utf-8") as fh:
             out[os.path.basename(name)] = fh.read()
@@ -974,7 +1039,8 @@ def _variant(name: str, *, drop: tuple = (), not_required: tuple = (),
         path = os.path.join(root, "claims", "C5.json")
         with open(path, encoding="utf-8") as fh:
             record = json.load(fh)
-        record["note"] = "outdoor rack, two winters, look for crazing at the root"
+        # Its mechanism's `how` (architecture phase 1): C5's file holds one.
+        record["mechanism"] = {"how": "outdoor rack, two winters, look for crazing at the root"}
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(record, fh, indent=2)
         os.makedirs(os.path.join(root, "photos"), exist_ok=True)
@@ -1693,15 +1759,25 @@ class PhysicalWordsComeFromOneTable(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 #: The two forms of the clause that says what is checked on an article.
 _ON_ARTICLE = re.compile(r"Checked on an article: \d+ \(|No claim is checked on any article\.")
+#: The same two in the site's register (follow-up after phase 3b): a built part
+#: where the CLI says an article.
+_SITE_ON_ARTICLE = re.compile(
+    r"Checked on a built part: \d+ \(|No claim is checked on any built part\.")
+#: A part to build again, each register's way: the needle every row's clause
+#: carries, and the clause for one article's first 12 hex.
+_REBUILD = {"cli": ("Rebuild article ", "Rebuild article {a12} "),
+            "site": (" is from an earlier design.", "Part {a12} is from an earlier design.")}
 _LIMITS = "Checked does not mean true: "
 
 
-def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any) -> list[str]:
+def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any,
+                      register: str = "cli") -> list[str]:
     """The hardware clause (W13) in one rendering of the readiness sentence:
     exactly one on-article clause; `Pending build: …` iff a claim reads Pending
-    build; one `Rebuild article <a12>` per rebuild row."""
+    build; one `Rebuild article <a12>` per rebuild row — in the site's register
+    (``register="site"``), the same clauses said of a built part."""
     out = []
-    found = _ON_ARTICLE.findall(sentence)
+    found = (_SITE_ON_ARTICLE if register == "site" else _ON_ARTICLE).findall(sentence)
     if len(found) != 1:
         out.append(f"{name}: {len(found)} on-article clauses: {sentence[-160:]}")
     pending = any(c.status is ClaimStatus.UNVERIFIED for c in composed.values())
@@ -1709,11 +1785,11 @@ def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any) -> l
         out.append(f"{name}: Pending build {'missing' if pending else 'said'}: "
                    f"{sentence[-160:]}")
     rows = claims_mod.rebuild(ledger)
-    if sentence.count("Rebuild article ") != len(rows):
-        out.append(f"{name}: {sentence.count('Rebuild article ')} rebuild clauses for "
-                   f"{len(rows)} rows")
+    needle, one = _REBUILD[register]
+    if sentence.count(needle) != len(rows):
+        out.append(f"{name}: {sentence.count(needle)} rebuild clauses for {len(rows)} rows")
     for row in rows:
-        if f"Rebuild article {row.article[:12]} " not in sentence:
+        if one.format(a12=row.article[:12]) not in sentence:
             out.append(f"{name}: no rebuild clause for {row.article[:12]}")
     return out
 
@@ -1752,6 +1828,9 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
             for markdown in (False, True):
                 renderings[f"sentence{'.md' if markdown else ''}"] = report_mod._verdict_sentence(
                     ledger, composed, None, stale=False, markdown=markdown)
+            # Architecture phase 5: the page's register, the same branches.
+            renderings["sentence.site"] = report_mod._verdict_sentence(
+                ledger, composed, None, stale=False, markdown=False, register="site")
             md = report_mod.render_markdown(ledger, None, stale_gates=stale)
             renderings["REPORT.md"] = _sentence_of(md)
             if md.count(_LIMITS) != 1:
@@ -1759,6 +1838,9 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
             for milestone in getattr(ledger, "milestones", None) or ():
                 renderings[f"sentence[{milestone.id}]"] = report_mod._verdict_sentence(
                     ledger, composed, None, stale=False, markdown=False, milestone=milestone)
+                renderings[f"sentence.site[{milestone.id}]"] = report_mod._verdict_sentence(
+                    ledger, composed, None, stale=False, markdown=False, milestone=milestone,
+                    register="site")
                 mmd = report_mod.render_markdown(ledger, None, stale_gates=stale,
                                                  milestone=milestone)
                 renderings[f"REPORT.md[{milestone.id}]"] = _sentence_of(mmd)
@@ -1766,7 +1848,8 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
                     out.append(f"{name}: REPORT.md[{milestone.id}] carries "
                                f"{mmd.count(_LIMITS)} limits paragraphs")
             for key, sentence in renderings.items():
-                out += hardware_problems(f"{name} {key}", sentence, ledger, composed)
+                out += hardware_problems(f"{name} {key}", sentence, ledger, composed,
+                                         register="site" if ".site" in key else "cli")
                 for hit in never_say_hits(sentence, banned, masks):
                     out.append(f"{name} {key}: says {hit!r}")
         return out
@@ -1791,15 +1874,120 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
         self.assertEqual(kinds, {"rebuild", "article", "none", "pending"})
 
     def test_a_ready_branch_without_the_clause_is_caught(self):
-        """Planted: the ready branch drops the clause."""
+        """Planted: the ready branch drops the clause, in either register."""
         real = report_mod._verdict_sentence
 
         def dropped(*args, **kwargs):
             said = real(*args, **kwargs)
             if re.search(r"\bis ready\b", said):
-                said = _ON_ARTICLE.sub("", said)
+                said = _SITE_ON_ARTICLE.sub("", _ON_ARTICLE.sub("", said))
             return said
 
         with mock.patch.object(report_mod, "_verdict_sentence", dropped):
             found = self.problems()
         self.assertTrue([p for p in found if "on-article clauses" in p], found[:5])
+        self.assertTrue([p for p in found if "sentence.site" in p and "on-article clauses" in p],
+                        found[:5])
+
+    def test_the_site_says_it_of_a_built_part(self):
+        """(follow-up after phase 3b) The page's rendering carries the clause
+        in the site's words (`test_every_branch` reads every one), and the
+        CLI's clause planted on the page reads as no clause at all."""
+        for name, (rows, _ready, _line) in ReadyIsThePredicate.CASES.items():
+            ledger, composed = ReadyIsThePredicate()._composed(*rows)
+            said = {register: report_mod._verdict_sentence(
+                ledger, composed, None, stale=False, markdown=False, register=register)
+                for register in ("cli", "site")}
+            with self.subTest(name):
+                self.assertEqual(hardware_problems(name, said["site"], ledger, composed,
+                                                   register="site"), [])
+                self.assertTrue(hardware_problems(name, said["cli"], ledger, composed,
+                                                  register="site"))
+                self.assertNotRegex(said["site"], r"(?i)\barticles?\b")
+
+
+# --------------------------------------------------------------------------- #
+# architecture phase 1: the glossary's new rows, and the current design
+# --------------------------------------------------------------------------- #
+def _row(text: str, section: int, term: str) -> list[str] | None:
+    return next((row for row in _rows(_section(text, section))
+                 if re.sub(r"\*\*", "", row[0]).strip() == term), None)
+
+
+def phase_one_glossary_problems(text: str) -> list[str]:
+    """What phase 1 owes GLOSSARY (SPEC §0.9, decisions 12, 13, 38, 17, 18):
+    §1's requirement, mechanism, proposer and basis; §4's round record and
+    board, whose Never-says are italic only (§4's plain ones are scanned over
+    every rendering); *proposer* off the generator's Never-say and *requirement*
+    off the claim's; a candidate that is an alternative design."""
+    out: list[str] = []
+    for section, term in ((1, "requirement"), (1, "mechanism"), (1, "proposer"),
+                          (1, "basis"), (4, "round record"), (4, "board")):
+        row = _row(text, section, term)
+        if row is None:
+            out.append(f"§{section} has no {term} row")
+        elif section == 4 and any(item.strip() and not item.strip().startswith("*")
+                                  for item in row[-1].split(" · ")):
+            out.append(f"§4's {term} has a Never-say the scanner would read: {row[-1]}")
+    generator, claim, candidate = (_row(text, 1, t) for t in ("generator", "claim",
+                                                              "candidate"))
+    if generator is None or "proposer" in generator[-1]:
+        out.append("proposer is still a Never-say of generator")
+    if claim is None or "requirement" in claim[-1]:
+        out.append("requirement is still a Never-say of claim")
+    if candidate is None or "alternative design" not in candidate[2]:
+        out.append("a candidate is not an alternative design")
+    return out
+
+
+class TheGlossaryNamesPhaseOnesTerms(unittest.TestCase):
+    """Architecture phase 1's vocabulary is GLOSSARY's: people see *evaluator*;
+    *proposer*, *requirement*, *mechanism*, *basis*, *round record* and *board*
+    are terms; a *candidate* is an alternative design with a disposition."""
+
+    def test_the_rows_are_there(self):
+        self.assertEqual(phase_one_glossary_problems(_glossary()), [])
+
+    def test_a_planted_glossary_is_caught(self):
+        text = _glossary()
+        planted = {
+            "proposer back on the generator": text.replace(
+                "| — (the agent, the user) | *the AI* |",
+                "| — (the agent, the user) | proposer · *the AI* |"),
+            "no board": re.sub(r"(?m)^\| \*\*board\*\* \|.*\n", "", text),
+            "a scanned Never-say on the round record": text.replace(
+                "| *judgement* (an expert's judgment is §1's) · *snapshot* |",
+                "| judgement · *snapshot* |"),
+        }
+        for label, mutant in planted.items():
+            with self.subTest(label):
+                self.assertNotEqual(mutant, text, label)
+                self.assertTrue(phase_one_glossary_problems(mutant), label)
+
+
+#: The current design called a candidate (GLOSSARY §1: a candidate is an
+#: alternative design with a disposition, SPEC decision 15).
+_CURRENT_CANDIDATE = re.compile(r"(?i)\b(?:the|current) candidate\b")
+
+
+def candidate_problems(human: Any) -> list[str]:
+    return [s for s in _strings(human) if _CURRENT_CANDIDATE.search(s)]
+
+
+class NoChannelCallsTheCurrentDesignACandidate(unittest.TestCase):
+    """No string `report.HUMAN` holds calls the design in the checkout a
+    candidate: Failing's hint and a control handed the live design say *the
+    current design*. What slipped through before phase 1: both said *the
+    current candidate* / *reads the candidate*, which from decision 15 names
+    an alternative that won or lost."""
+
+    def test_human_says_the_current_design(self):
+        self.assertEqual(candidate_problems(report_mod.HUMAN), [])
+        self.assertIn("the current design", report_mod.HUMAN["status"][ClaimStatus.FAIL].hint)
+
+    def test_a_planted_hint_is_caught(self):
+        failing = report_mod.HUMAN["status"][ClaimStatus.FAIL]
+        planted = MappingProxyType(dict(report_mod.HUMAN, status=MappingProxyType(dict(
+            report_mod.HUMAN["status"], **{ClaimStatus.FAIL: failing._replace(
+                hint="an evaluator failed the current candidate")}))))
+        self.assertTrue(candidate_problems(planted))

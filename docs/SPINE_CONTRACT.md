@@ -27,7 +27,7 @@ is `cli.py`'s.
 | Fact | Home | Git | Written by |
 |---|---|---|---|
 | a claim, a decision, an enriched need, an input's record, a param's provenance, a declared view | `claims/`, `decisions/`, `needs/`, `inputs/<id>.json`, `params/`, `views/*.json` — one file per record | tracked | a human or the agent, editing the file; the shims `ingest`, `extract`, `decide` |
-| project meta, the model entry, the live packs | `.nopekit/project.json` | tracked | the same; `init`; `packs add` |
+| project meta, the model entry, the live packs, the people a round may commit as (phase 6) | `.nopekit/project.json` | tracked | the same; `init` (`people` from git's identity, when the strict reader reads it back); `packs add` |
 | a physical result, and an owner's or an authority's attribution (P2.5a) | `results/<claim-id>.json`, append-only, every entry sealed and chained | tracked | `claim physical`, typed in a person's own shell — never by hand |
 | a parameter's value, units, rationale and what lost to it | the model (`model/*.py`: `Config`, its docstrings, `PARAMS`) | tracked | the model's author |
 | a gate's verdict, and its control's | `.nopekit/verdicts/<gate id>/`, one file per rho, never rewritten | tracked | `check`, `gate selftest` |
@@ -38,9 +38,18 @@ is `cli.py`'s.
 | time savers: file digests, re-verified fixtures | `.nopekit/cache/digests.json`, `controls.json` | ignored | `check`; losing either costs a re-hash or a fixture run, never a verdict |
 | gate scratch and evidence | `.nopekit/out/` (a control's: `out/controls/<gate id>/`) | ignored | gates |
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
+| a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
+| a person's preference against a rejected alternative (architecture phase 2) | `preferences/<decision-id>.json`, append-only, sealed and chained | tracked | `prefer <decision>`, typed in the person's own shell — never by hand |
+| a rejected alternative's type, its person, its return condition, its input (architecture phase 2) | `decisions/<id>.json`'s `rejected` | tracked | the agent, or `decide`'s flags |
+| which proposer produced an input (architecture phase 2) | `inputs/<id>.json`'s `proposer` — its basis is looked up from the proposer, never stated | tracked | `propose`, `ingest --proposer` |
 | the readiness report (P2.5b; was `docs/readiness.md`) | `REPORT.md` at the root | ignored | `report --write` |
 | a milestone's package: what the spend gets (P2.5b) | `out/<milestone>/` at the root | ignored | `export <milestone>` |
+| the round record: the resolution at the end of a round, as tokens, with the typed graph and the digests it was computed from (architecture phase 3a) | `.nopekit/round.json` — an output, never read for truth | tracked | `round` (`rounds.write`); from phase 4 `merge`; never `check` |
+| the trace: which derived values each choice moved at ±10% (architecture phase 3b) | `.nopekit/trace/<k16>.json`, one per traced design, keyed by its instructions, choices and the data its build read, never rewritten | tracked | `model trace` (`derivation.run`); `round` only starts it |
+| amber: each automated claim's evaluators on designs an assumption-sourced choice moved | `.nopekit/trace/<k16>.amber.<s16>.json`, one per evaluation, never rewritten | tracked | `model trace` |
+| a trace's progress, resumable; a background trace's log; its lock | `.nopekit/cache/trace/<k16>/`, `.nopekit/out/trace.log`, `.nopekit/trace.lock` | ignored | `model trace` |
+| a detached live server: its pid, address and URL; the lock it holds for its life; its log (the acceptance run after phase 3b) | `.nopekit/out/serve.json`, `.nopekit/out/serve.lock`, `.nopekit/out/serve.log` | ignored | the server `site serve --detach` starts, which removes its record as it stops; `site serve --stop` removes a stale one |
 
 The index and `last_check.json` are the whole project in two reads (D-06); neither
 is read for truth by any spine code, and the index never holds a status, a coverage
@@ -100,6 +109,13 @@ EXT_KIND_HINTS: dict[str, ArtifactKind]       # ".stl" -> CAD; `nopekit ingest`'
 class NeedStatus(StrEnum): OPEN | PROPOSED | DEFERRED | INSTALLING | SATISFIED | ABANDONED
 class Comparator(StrEnum): LE | LT | GE | GT | EQ | NE | BETWEEN
     def holds(self, measured, limit, limit_hi=None) -> bool
+BASES = ("established", "sourced", "model-only")   # phase 2 (SPEC 38): where an evaluator's
+                                              # or a proposer's verdict logic comes from
+BASIS_UNDECLARED = "undeclared"               # the token and the word with none declared
+REJECTION_TYPES = ("infeasible", "dominated", "preferred_against", "unevaluated")  # SPEC 14
+REJECTION_UNTYPED = "untyped"                 # a rejection written before phase 2
+RETURN_QUANTITIES = ("margin", "value", "limit")   # what a return condition reads
+RETURN_COMPARATORS = ("<", "<=", ">", ">=")   # no ==/!= (never holds on a measured float)
 class Record:                                 # mixin: the symmetric dict round trip
     def to_dict(self) -> dict
     @classmethod
@@ -112,10 +128,20 @@ fails when a record kind gains a field that is not in its own block — a field 
 `id` or `note` appears somewhere in every document, so "somewhere" proves nothing.
 ```python
 class Rejected(Record):         # an alternative that LOST: the highest-value field there is
-    value: str; why: str; evidence: str = ""
+    value: str; why: str; evidence: str = ""        # PARAMS and params/ keep this, text only
+class ReturnCondition(Record):  # phase 2 (SPEC §0.2): what would bring a loser back
+    claim: str = ""; quantity: str = ""; comparator: str = ""; value: float | None = None
+    text: str = ""                  # {"text"} alone: shown, never evaluated
+    def form(self) -> dict          # the members not at their default: digest, JSON, display
+class Rejection(Rejected):      # phase 2 (SPEC 14): a decision's rejected alternative
+    type: str = ""                  # REJECTION_TYPES; "" a legacy entry, read untyped
+    by: str = ""                    # preferred_against only: a NOMINEE, like Claim.owner
+    returns_if: ReturnCondition | None = None
+    input: str = ""                 # an input id, when an input is its source
 class Param(Record):            # one model parameter with its full provenance
     name: str; value: Any; units: str = ""; rationale: str = ""
-    rejected: list[Rejected]; source: str = ""; grounded_by: list[str]   # InputArtifact ids
+    rejected: list[Rejected]; source: str = ""; grounded_by: list[str]   # InputArtifact ids, or
+                                 # an assumption claim's id (phase 3a: the value IS it)
     gates: list[str]; derived_from: list[str]; changed_in: str = ""; tags: list[str]
     is_derived -> bool                                                   # property
 class Acceptance(Record):       # the machine-checkable threshold behind a claim
@@ -157,13 +183,22 @@ class Claim(Record):            # something that must be true for the design to 
     id: str; statement: str; kind: ClaimKind = MEASURABLE; acceptance: Acceptance
     rationale: str = ""; source: str = ""; grounded_by: list[str]; gates: list[str]
     tags: list[str]; critical: bool = True; physical_result: PhysicalResult | None = None
-    note: str = ""; owner: str = ""   # P2.1: a NOMINEE for an assumption, never an attribution
+    note: str = ""                    # on disk mechanism.how (phase 1); "note" the older key
+    owner: str = ""                   # P2.1: a NOMINEE for an assumption, never an attribution
     fallback: str = ""                # P2.4: why it may be carried outside an operating
                                       #   context; counts only through an attribution
-    terminal: str = ""                # P2.5a: declared Terminal, "" = by kind; strict reader
+    terminal: str = ""                # P2.5a: declared Terminal, "" = by kind; strict reader;
+                                      #   on disk mechanism.by (phase 1), "terminal" the older key
     authority: str = ""               # P2.5a: an expert judgment's NOMINEE (terminal human)
     expected_latency: dict            # P2.5b: {value > 0, units in LATENCY_UNITS} or {}; a
                                       #   measurement-terminal claim's alone (strict reader)
+    evaluators: list[str]             # phase 1: on disk mechanism.evaluators only — a
+                                      #   cross-check, never coverage (S-37); not sealed
+    requirements: list[str]           # phase 1: the requirement ids it serves; not sealed
+    resolves: list[str]               # phase 3a: a PHYSICAL claim's — the assumption ids its
+                                      #   test replaces (SPEC 19); a display edge, moves no
+                                      #   status, not sealed; refused on another kind, on
+                                      #   itself, on a non-id or a repeat
     results: tuple = ()               # in memory: every entry of results/<id>.json, oldest first
     attributions: tuple = ()          # in memory: interactive AttributionRecords, newest first
     standing: Standing | None = None  # in memory: set by verdicts.view only
@@ -180,6 +215,8 @@ class InputArtifact(Record):    # a piece of evidence the user supplied
     id: str; path: str = ""; url: str = ""; kind: ArtifactKind = OTHER
     description: str = ""; sha256: str = ""; bytes: int = 0; added: str = ""
     extractions: list[Extraction]; licence: str = ""; note: str = ""
+    proposer: str = ""              # phase 2 (SPEC 22): the proposer that produced it, on a
+                                    #   NEW record only; its basis is looked up, never stated
     extracted -> bool                                                    # property
 class Locator(Record):          # WHERE a verdict applies (docs/SITE_CONTRACT.md)
     view: str; target: str = ""; kind: str = "part"; label: str = ""; severity: str = ""
@@ -188,9 +225,17 @@ class View(Record):             # one thing the site renders and verdicts addres
     id: str; kind: ViewKind = IMAGE; title: str = ""; src: str = ""; description: str = ""
     gates: list[str]; data: dict; meta: dict; pack: str = ""; order: int = 100
 class Decision(Record):         # one decision-log entry; names what LOST
-    id: str; title: str = ""; when: str = ""; summary: str = ""; rejected: list[Rejected]
+    id: str; title: str = ""; when: str = ""; summary: str = ""
+    rejected: list[Rejection]       # phase 2: typed; to_dict writes the new keys only when set
     params_changed: list[str]; claims_changed: list[str]; evidence: list[str]
     body: str = ""                                                       # long-form markdown
+    preferences: tuple = ()         # in memory: interactive PreferenceRecords, newest first
+class PreferenceRecord(Record): # phase 2 (invariant 13): one entry of preferences/<id>.json
+    decision: str                   # the file's stem (phase 4 adds candidate)
+    value: str = ""; name: str = "" # the alternative, and the nominee "by" named, as read
+    rejection_digest: str = ""      # claims.rejection_digest: the rejection as read
+    who: str = ""; when: str = ""; channel: str = ""   # git's identity, the clock, the channel
+    prev: str = ""; digest: str = ""   # the chain and the seal (store.append_sealed)
 class Milestone(Record):        # P2.5b: milestones/<name>.json — a named spend; the stem IS the id
     id: str; description: str = ""; requires: list[str]   # the claim ids it needs Checked
     generator: str = ""             # "<path>.py:<function>": what export builds the article with
@@ -205,19 +250,39 @@ class ExportRecord(Record):     # P2.5b: one entry of exports/<milestone>.json's
     package: dict                   # {hash, files: {rel: sha256}, manifest: sha256}
     proceed: Any = None             # None, or {claims: [{id, status, cause}], why} (D8)
     prev: str = ""; digest: str = ""   # the chain and the seal (store.append_sealed)
+class Requirement(Record):      # phase 1: requirements/<id>.json — the person's words
+    id: str                         # its stem, store.REQUIREMENT_ID (R1, R2, …)
+    statement: str = ""             # the words, verbatim; required, non-blank
+    source: str = ""                # "interview", or an input id
+GROUP_KINDS = ("board", "zone", "station")   # phase 5 (SPEC 17)
+class Group(Record):            # phase 5: groups/<id>.json — a board, a zone or a station
+    id: str                         # its stem, store.GROUP_ID; names site/content/<id>.md
+    kind: str = ""                  # GROUP_KINDS; required
+    title: str = ""                 # the words the page shows; required
+    line: str = ""                  # one short sentence under the title
+    members: list[str]              # claim ids (board), choices (zone), derived values
+                                    #   (station), in the order the page draws them
+    order: int = 0                  # groups of one kind sort by (order, id)
 class PackManifest(Record):     # pack.json, tier 1 (docs/PACK_FORMAT.md)
     name: str; version: str = "0.1.0"; description: str = ""; settles: list[str]
     claim_classes: list[str]; provides_gates: list[str]; provides_views: list[str]
     provides_generators: list[str]; key_scope: str = ""; requires_tools: list[str]
     requires_python: list[str]; max_tier: Tier = INSTANT; lenses: list[str]
     authors: list[str]; licence: str = "Apache-2.0"; homepage: str = ""; origin: str = ""
+    basis: str = ""                 # phase 2: its evaluators' default basis (PACK_BASIS)
+    provides_proposers: list        # phase 2: [{id, basis, description, run}], raw (packs)
 class KeyCollision(Record):     # one projection key two installed packs read differently
     key: str; packs: list[str]; meanings: dict[str, str]; scoped: dict[str, str]
     primary: dict[str, str]; live: bool = False
     def fix(self) -> str                                 # the one sentence that resolves it
+class Person(Record):           # phase 6 (SPEC §0.3): one person a round may commit as
+    name: str = ""; email: str = ""   # as `git config user.name` / `user.email` print them
 class ProjectMeta(Record):
     name: str = ""; summary: str = ""; created: str = ""; revision: str = "v0.1"
     model_entry: str = ""; packs: list[str]; spine_version: str = ""
+    people: list[Person]         # phase 6: LAST; absent reads []; never baked into the
+                                 #   page (site._UNPUBLISHED_META); read whole by a gate with
+                                 #   `meta`, which no bundled or bracket gate reads
 class Ledger(Record):           # the whole project, in memory (store.load assembles it)
     meta: ProjectMeta; claims: list[Claim]; params: list[Param]
     inputs: list[InputArtifact]; needs: list[Need]; decisions: list[Decision]
@@ -227,8 +292,11 @@ class Ledger(Record):           # the whole project, in memory (store.load assem
                                  # file holds, as a claim (to_dict drops it; view composes it)
     milestones: list[Milestone]  # P2.5b
     exports: list[ExportRecord]  # P2.5b: every milestone's, file by file, oldest first
+    requirements: list[Requirement]  # phase 1: natural id order; read whole by a gate, traced
+    groups: list[Group]          # phase 5: natural id order; hidden from every gate
+                                 #   (verdicts._LEDGER_HIDDEN): a regroup re-keys nothing
     def claim(cid) | param(name) | artifact(aid) | need(nid) | verdict(gate_id)
-        | milestone(name) -> record | None
+        | milestone(name) | requirement(rid) | group(gid) -> record | None
     def verdicts_for(cid) -> list[Verdict];  def upsert_verdict(verdict) -> None
 ```
 **Records as files** (checkpoint 1.3). Three constants tell `store` how a record
@@ -238,16 +306,24 @@ types, not about the disk:
 RECORD_KINDS: dict[str, type]    # record dir -> kind: claims Claim, params Param,
                                  # decisions Decision, needs Need, inputs InputArtifact,
                                  # results PhysicalResult, views View, milestones Milestone,
-                                 # exports ExportRecord (store.RECORD_DIRS' order)
+                                 # exports ExportRecord, requirements Requirement,
+                                 # preferences PreferenceRecord (store.RECORD_DIRS' order)
 FORBIDDEN_KEYS: dict[str, dict[str, str]]   # class name -> {key: the home that owns it};
                                  # "*" applies at every depth of every kind
 ALWAYS_WRITTEN: frozenset[tuple[str, str]]  # {("Claim", "kind"), ("Acceptance", "comparator")}
+CLAIM_MECHANISM: tuple[tuple[str, str], ...]  # phase 1: (("by", "terminal"), ("how", "note"),
+                                 # ("evaluators", "evaluators")) — the file's "mechanism"
+                                 # member -> the flat in-memory field that holds it
 ```
 `FORBIDDEN_KEYS` is what a record FILE may never carry, each with its owner named in the
 refusal: `Claim.gates` (derived from gate coverage), `Claim.physical_result` (its home is
 `results/<id>.json`), `Param.value` and `Param.derived_from` (the model — `{model}` is
 filled with `meta.model_entry`), `Param.gates` and `Param.changed_in` (derived),
-`InputArtifact.bytes` (computed from the file), and `"*"`: `independence` anywhere —
+`InputArtifact.bytes` (computed from the file), `Requirement.status` (derived on every
+read, `claims.requirement_statuses`) and `Requirement.claims` (a claim names the
+requirements it serves), `Claim.rests_on` (computed by the graph from what its
+evaluators read, `graph.build`), `Param.read_by` and `Param.sourced_from` (the observed
+view, `graph.observe` — phase 3a), and `"*"`: `independence` anywhere —
 derived from origin, never a field the proposer fills in. The **dataclass fields stay**:
 `claims.resolve_status` still reads `Claim.gates` in memory, `Ledger.verdicts` is still
 filled by readers, and `Ledger.to_dict()` still emits `verdicts` (tests:H4); only the
@@ -338,6 +414,8 @@ def utcnow_iso() -> str                      # "2026-09-11T14:46:00Z"
 def ensure_dir(path) -> str                  # mkdir -p; returns the path as a str
 def atomic_write_text(path, text) -> None    # write temp + os.replace; never truncate on crash
 def atomic_write_json(path, obj) -> None     # sorted keys, indent=2, trailing newline; NaN refused
+def write_json_if_changed(path, obj) -> bool # phase 5: atomic_write_json's bytes, only when
+                                             #   they differ (a tracked baked file)
 def read_json(path, default=None) -> Any
 def sha256_text(text: str) -> str
 def canonical_json(value) -> str             # P2.5a: THE canonical form: sorted, compact, no NaN
@@ -389,11 +467,31 @@ VCS_TIMEOUT_S = 10
 def is_repo(path) -> bool
 def git_head(root) -> str | None                     # HEAD's sha; None outside git
 def ls_files(root, relpaths, *, others=True) -> list[str] | None   # -z; relative to root
+def ignored(root, relpaths) -> list[str] | None      # phase 5: untracked files git ignores
 def ident(root) -> str | None                        # author identity, timestamp dropped
+def committer_ident(root) -> str | None              # phase 6 review: the committer's
+def in_repository(path) -> tuple[bool | None, str]   # phase 6 review: True; False only on
+                                                     #   git's "not a git repository" with no
+                                                     #   .git above; None, why: no answer
 def show(root, relpath, rev="HEAD") -> bytes | None  # P2.5a: the bytes a commit holds at relpath
 def history(root, relpath, limit) -> list[str]      # P2.5a review: commits that changed it, newest first
 def model_dirty(root, relpaths) -> bool | None       # P2.5a: any of them differs from HEAD
 def commit_times(root, relpaths) -> dict[str, str]   # path -> its last commit's time
+# the writing half (architecture phase 6): round --commit, init's repository
+VCS_WRITE_TIMEOUT_S = 120
+class Wrote(NamedTuple): ok; oid; why    # why: "" | "no-git" | "timeout" |
+                                         #   "inside a repository" | "git did not answer:
+                                         #   <why>" | "refused: <git's line>"
+def init_repo(root) -> Wrote                     # git init -q; only on in_repository's False
+def changed_paths(root) -> list[str] | None      # read: diff, diff --cached, ls-files --others
+                                                 #   --exclude-standard, each over "." only;
+                                                 #   an untracked nested repository keeps "/"
+def staged_paths(root) -> list[str] | None       # read: diff --cached --relative -- .
+def operation(root) -> str | None                # read: "" | merge | rebase | cherry-pick |
+                                                 #   revert | bisect | detached; None outside git
+def add(root, relpaths) -> Wrote                 # --literal-pathspecs add --all, paths on stdin
+def commit(root, relpaths, subject, body) -> Wrote   # -c user.useConfigOnly=true commit --only,
+                                                 #   paths on stdin; oid = HEAD after
 ```
 Argv form with `-C root`, never a shell string. The environment strips `GIT_DIR`,
 `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
@@ -406,12 +504,39 @@ list, and a test holds it against the installed git's. It does not strip every `
 the user's `GIT_CONFIG_GLOBAL` and `GIT_AUTHOR_NAME` must still reach git. It sets
 `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0` and `LC_ALL=C`. `ls_files` with
 `others` is `--cached --others --exclude-standard`: tracked plus untracked-not-ignored.
-`ident` is `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT`. **Every function
+`ident` is `git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT`, `committer_ident` the
+same for `GIT_COMMITTER_IDENT`. `in_repository` is the one read that tells "no" from "no
+answer": `is_repo` reads every failure as `False`, and `init` that trusted it started a
+nested repository inside one git refused to read ("dubious ownership") or did not
+answer in time (review of phase 6). **Every function
 returns `None` (or `{}`) on any failure and never raises**: a project outside git, a
 missing `git`, a timeout. `VCS_TIMEOUT_S` is 10 because `git ls-files` on a cold, large
 repository takes seconds; *rejected:* unbounded (a hung credential helper hangs
 `check`) and 1–2 s (network filesystems). A `--dir` copy with no `.git` is the
 common case (verify.sh), so every caller has a non-git path.
+
+**The writing half** (architecture phase 6) keeps the read half's rules — argv form,
+`-C root`, the same environment — and adds its own contract. Every `add` and `commit`
+takes explicit literal paths relative to `root`, on stdin
+(`--pathspec-from-file=- --pathspec-file-nul`, under `--literal-pathspecs`): never
+`-A` over the repository, never a directory pathspec. `commit` is `--only`, so what the
+person staged outside the list stays staged and uncommitted. It never pushes (push,
+merge and tag come with phase 4, under this same section), never writes config (the
+only `-c` is `user.useConfigOnly=true` on the commit, so git never invents an identity),
+and never bypasses a hook (no `--no-verify`, no `core.hooksPath`: a refusing hook is an
+answer, quoted in `why`). `GIT_EDITOR=:` so no hook opens an editor. A call that
+outlives `VCS_WRITE_TIMEOUT_S` is sent SIGTERM, then SIGKILL after 5 s: git removes its
+`index.lock` on SIGTERM. It never raises; `why` is the one place git's prose comes
+back — its first stderr line, shown to a person, never parsed. `VCS_WRITE_TIMEOUT_S` is
+120 because the Stop hook's budget is 300 s and an ordinary commit hook takes tens of
+seconds; *rejected:* 10 s (the read timeout: an ordinary pre-commit hook exceeds it)
+and 290 s (a hung gpg pinentry would spend the hook's budget, and Claude Code would kill
+it mid-commit, leaving `index.lock`). `changed_paths` asks `diff` rather than
+`ls-files --modified`, which names a file whose mtime alone moved, and never
+`status --porcelain`, which prints paths relative to the repository's top level.
+It keeps the trailing `/` with which `ls-files --others` names an untracked nested
+repository, so `rounds.stage_plan` names it and never stages it: stripped,
+`generators/cadlib` read as a file and a round committed a gitlink (review of phase 6).
 
 ### `store.py`  (deps: models, util)
 Persistence: where a project lives on disk. **Never imports `modelio` or `verdicts`**
@@ -423,7 +548,9 @@ PROJECT_NAME = "project.json"         # .nopekit/project.json — meta, and the 
 LEGACY_LEDGER_NAME = "ledger.legacy.json"   # what a migrated ledger.json is renamed to
 PROJECT_SCHEMA = 2                    # project.json's schema; a newer one is refused
 RECORD_DIRS = ("claims", "params", "decisions", "needs", "inputs", "results", "views",
-               "milestones", "exports")   # the last two P2.5b's: never on a legacy project
+               "milestones", "exports",   # P2.5b's: never on a legacy project
+               "requirements",            # phase 1 (SPEC decision 12)
+               "preferences")             # phase 2 (SPEC 14, invariant 13), last
 VERDICTS_NAME = "verdicts"; CACHE_NAME = "cache"; OBS_NAME = "obs"   # under .nopekit/
 INDEX_BANNER: str                     # the index's "generated" value: edit the records, never this
 LEGACY_GITIGNORE_TEMPLATES: tuple[str, str]  # init's .nopekit/.gitignore at 1e09113, and at 1.2
@@ -442,6 +569,9 @@ def project_paths(root) -> dict[str, str]              # every well-known path, 
 
 def read_project(root) -> ProjectMeta                   # .nopekit/project.json, strict
 def write_project(root, meta) -> str | None             # the path, or None when unchanged
+def people_problem(people, label) -> str | None         # phase 6: project.json's `people`,
+                                                        #   each {name, email} as git prints them,
+                                                        #   one per email ignoring case
 def read_record(path, kind, *, model_entry="") -> Record | ResultsFile           # STRICT
 RESULTS_LISTS = ("results", "attributions")   # P2.5a: a results file's two sealed lists
 SEAL_SCHEMA = 1; ROLES = ("owner", "authority")
@@ -449,9 +579,20 @@ CONTRADICTS_KEYS = ("gate", "code", "rho", "value", "units", "inside")
 class ResultsFile(list):        # P2.5a: list[PhysicalResult], plus .attributions and .raw
 def append_signed(root, claim_id, list_name, entry: dict) -> dict  # a results entry: append_sealed's
 def append_sealed(root, kind, stem, list_name, entry: dict) -> dict  # P2.5b: THE writer of a sealed
-                                       #   entry — results/<id>.json's lists, exports/<m>.json's
+                                       #   entry — results/<id>.json's lists, exports/<m>.json's,
+                                       #   and (phase 2) preferences/<decision>.json's
 class ExportsFile(list):        # P2.5b: list[ExportRecord], plus .raw (the file as stored)
+class PreferencesFile(list):    # phase 2: list[PreferenceRecord], plus .raw (the file as stored)
+SEALED_KINDS = ("exports", "preferences")   # one sealed list per file; write_record refuses them
+REJECTION_KEYS = ("type", "by", "returns_if", "input")   # phase 2: a decision's, refused on a
+                                #   param record's loser (its losers stay text)
+PROPOSER_ID: re.Pattern         # phase 2: a dotted proposer id, an input's "proposer"
+def rejection_problem(item, stem="<decision id>") -> str   # phase 2: why a decision's rejection
+                                #   breaks SPEC 14's rules, as the tail after rejected[i], or ""
+def return_condition_problem(cond) -> str   # phase 2: why a returns_if is no condition, or ""
 MILESTONE_NAME: re.Pattern      # P2.5b: ^[a-z0-9][a-z0-9._-]{0,63}$ — a milestone file's stem
+REQUIREMENT_ID: re.Pattern      # phase 1: ^R[1-9][0-9]*$ — a requirement file's stem, and every
+                                #   id a claim's "requirements" names
 def generator_parts(ref) -> tuple[str, str]   # "<path>.py:<function>" -> (path, function); refuses
 ARTICLE_KEYS = ("source", "hash", "built_from", "traced", "milestone", "when", "revision",
                 "dirty")        # an article dict's closed keys, a result's and an export's
@@ -465,6 +606,27 @@ def write_index(root) -> bool           # True when .nopekit/ledger.json changed
 def agree(root) -> list[str]            # every way the index disagrees with the records
 def records_digest(root, *, exclude=()) -> str   # sha256 over the record files and project.json;
                                         # exclude: record dirs left out (export's manifest: "exports")
+def pointer_problems(ledger) -> list[str]   # phase 3a: the graph's record pointers it cannot
+                                        # follow — a param's grounded_by naming a non-assumption
+                                        # claim or an id both an input and a claim, a resolves
+                                        # naming no claim or a non-assumption; the index's and
+                                        # doctor's graph row's one producer
+def grounded_by_problem(where, name, aid, input_ids, claim_kinds) -> str | None
+                                        # one grounded_by id: an input, or an assumption the
+                                        # value IS; else why not (doctor reads PARAMS' through it)
+GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")   # phase 5: a group's stem
+RESERVED_GROUP_IDS: dict[str, str]      # intro, next, other: the page's own names
+def groups_in_order(groups, kind) -> list   # (order, natural id): the one order of a kind
+def group_problems(ledger) -> list[str] # phase 5: a board member no claim holds, a claim on
+                                        # two boards, a name in two zones or two stations, or
+                                        # in a zone and on a station; the index's and doctor's
+README_BADGE_BEGIN = "<!-- nopekit:begin badge -->"; README_BADGE_END = "<!-- nopekit:end badge -->"
+README_BADGE_BLOCK: str                 # SPEC 36: the Made-with-nopekit block
+def ensure_readme_badge(root, name="", summary="") -> bool   # the block at the bottom of
+                                        # README.md (created when absent); idempotent; a
+                                        # block is whole marker lines, the last one; the
+                                        # file's line ending is kept
+def readme_has_badge(text) -> bool      # the same matcher, for doctor's `readme` row
 class MigrationPlan(NamedTuple):
     ledger: Ledger; files: dict[str, bytes]; notice: str
 def migrate_legacy(root, *, apply: bool, when: str,
@@ -497,9 +659,11 @@ hand, so moving the layout is one edit here instead of a grep across the spine.
 **The layout** (checkpoint 1.3; relative to the project root):
 ```
 .nopekit/project.json     TRACKED  {"schema": 2, name, summary, created, revision,
-                                     model_entry, packs, spine_version} — written LAST
+                                     model_entry, packs, spine_version, people}
+                                     — written LAST; people: [{"name", "email"}]
 .nopekit/.gitignore       TRACKED  the marked deny-list block (below)
-.gitignore, .gitattributes TRACKED  marked blocks: bytecode; LF, binary kinds -text
+.gitignore, .gitattributes TRACKED  marked blocks: bytecode, REPORT.md, out/, the
+                                   editor's .vscode/launch.json; LF, binary kinds -text
 .nopekit/ledger.json      IGNORED  the generated index — an output, never read for truth
 .nopekit/verdicts/**      TRACKED  cache and control entries (verdicts.py)
 claims/<id>.json           TRACKED  one Claim; the stem IS the id; no "gates"
@@ -518,7 +682,10 @@ out/<name>/                IGNORED  a milestone's package (`export`)
 `init` writes the empty record directories, the input buckets and `inputs/README.md`
 (only when missing), `docs/`, `model/`, the three blocks, and `project.json` **last** —
 **never a `ledger.json`**: a new project born in the legacy layout would need a migration
-on its first command. The record reader and the index read only `views/*.json`; the
+on its first command. Then (architecture phase 6) it starts a git repository
+(`vcs.init_repo`) only on git's positive answer that none holds the project
+(`vcs.in_repository`; `--no-git` starts none), and says when an enclosing repository
+ignores the project. The record reader and the index read only `views/*.json`; the
 viewgen loader only `views/*.py`. Every top-level `inputs/*.json` IS a record; evidence
 bytes live in the bucket subdirectories.
 
@@ -549,7 +716,36 @@ top-level `inputs/*.json` is most likely stray evidence, and the message names
 items say `passed` as a bool, and a claim's `critical`, when present, is a bool too
 (review of P2.1: `"critical": null` read as not required by truthiness, so a failing
 claim left every required list and `check` said ready). `load` also refuses two record files whose stems differ
-only in case. *Rejected:* quarantining a file that does not read as an index `problem` —
+only in case.
+
+**A claim's mechanism** (architecture phase 1, SPEC decision 13). A claim file says
+how it settles in one object, `"mechanism": {"by", "how", "evaluators"}`, and the
+reader unfolds it (`_unfold_mechanism`) into the flat fields every reader reads —
+`terminal`, `note`, `evaluators` (`models.CLAIM_MECHANISM`) — before `_check_keys`
+runs (which takes `suggest=("mechanism",)`, so `mechansim` is told `did you mean
+"mechanism"`). Each rule binds only when its key is present (R-10): a top-level
+`"evaluators"` is refused (it lives in the mechanism, a cross-check, never coverage —
+S-37); a mechanism that is not an object, or holds a member it does not know, is
+refused with a suggestion; one member said under both names — `"terminal"` beside
+`mechanism.by`, `"note"` beside `mechanism.how` — is refused even when the two agree
+(the dropped one would be erased by the next write, S-40), while different members in
+different spellings read; `how` is text; `evaluators` is a list of distinct,
+unpadded ids; `"mechanism": {}` reads as absent. `by` then goes through
+`_check_terminal(..., spelled="mechanism.by")`, held to `TERMINALS_BY_KIND` exactly as
+`terminal` is, each refusal naming the spelling the file used. The writer folds them
+back (`_fold_mechanism`, from `_encode`): `"mechanism"` at `note`'s slot, members in
+`by`/`how`/`evaluators` order, only those not at their default — a claim with no
+mechanism writes exactly the bytes it wrote before. `Record.to_dict` stays flat (it
+feeds `verdicts._record_form`, `report.claim_json` and the `LedgerView`'s copies).
+
+**Requirements** (architecture phase 1, SPEC decision 12). `requirements/<id>.json`
+holds `statement` (the person's words, non-blank text) and `source` (text: "interview",
+or an input id); its stem is a `REQUIREMENT_ID` (`_check_requirement`), and a refusal
+of a top-level `requirements/*.json` adds `_REQUIREMENTS_HINT` (a document of the
+project's own goes in `inputs/specs/`, through `ingest`). A claim's `"requirements"` is
+a list of distinct requirement ids (`_check_id_list`); one naming a requirement no file
+holds is read, never refused (the milestone precedent), and named by the index and by
+`doctor`. *Rejected:* quarantining a file that does not read as an index `problem` —
 a typo'd real record would vanish (S-40's shape). `Record.from_dict` stays lenient.
 
 **`load`** reads the records (each kind in natural id order — C2 before C10 —,
@@ -586,14 +782,17 @@ legacy `ledger.json` with `verdicts: []` and no sweep record, and does not migra
 **The index** is `build_index(root)`, a pure function of the record files and the bytes
 of the inputs they name — no clock, model, registry or listing order. Keys, in order:
 `generated` (`INDEX_BANNER`), `schema`, `records_digest`, `meta`, `claims`, `params`,
-`decisions`, `needs`, `inputs`, `results`, `views`, `unregistered_inputs`, `problems`.
-Each record row is its file's content plus its id. Each input row adds `sha256` (the
+`decisions`, `needs`, `inputs`, `results`, `attributions`, `views`, `milestones`,
+`exports`, `requirements` (phase 1), `unregistered_inputs`, `problems`.
+Each record row is its file's content plus its id, as the writer spells it (a claim
+read from the older `terminal` and `note` keys shows them as `mechanism`). Each input row adds `sha256` (the
 digest of the bytes NOW, through `util.FileDigests` and the untracked
 `.nopekit/cache/digests.json`, read, never written), `pinned` (the record's sha256),
 `drift` and `exists` (`null` for an input with no path). `unregistered_inputs` lists
 evidence bytes under `inputs/` — not a top-level `*.json`, not `inputs/README.md`, not a
 dot-file — that no record's `path` names. `problems`: missing bytes, drift, dangling
-`grounded_by`/`claim_ids`/`claims_changed` links, results for a claim with no file. It
+`grounded_by`/`claim_ids`/`claims_changed` links, results for a claim with no file, a
+claim naming a requirement no file holds, a requirement id that is also a claim's. It
 **never** holds a status, coverage or a verdict — those sit in `last_check.json`, and an
 index that carried them could disagree with them. What slipped through without the
 computed digest (S-45): evidence was hashed at ingest and never again, so tampered bytes
@@ -891,7 +1090,11 @@ class ParamView:                 # one parameter as a reader shows it
     #   origin ("model/bracket.py PARAMS" or "params/<name>.json");
     # source, grounded_by, tags — from the record; model_error — why there is no value;
     # home — where the value lives ("" when the model holds none); record — its file or "";
-    # gates — derived from read sets when param_view was handed them, () otherwise
+    # gates — derived from read sets when param_view was handed them, () otherwise;
+    # read_by, sourced_from — phase 3a, filled by graph.observe only: the registered
+    #   evaluators whose SERVED entry read it, and the node ids that source it
+    #   (input:<id>, claim:<id> for an assumption). gates follows the last executed run
+    #   (obs/), read_by the entry the resolution stands on: the two can differ
 def param_view(ledger, model, *, model_error="", read_sets=None) -> list[ParamView]
 def param_readers(name, read_sets) -> list[str]  # gates whose last executed reads name it
     # (first two keys of a path; deeper keys do not count) — the one copy of the rule:
@@ -1054,7 +1257,14 @@ empty — a gate reading other gates' verdicts would put verdicts inside rho.
 `claim(cid)` records `"claim:<cid>"` with the digest of that claim, its in-memory
 `gates` and `physical_result` stripped (coverage and a bench result are not what a
 gate read), or `ABSENT`. Reading `claims`, `params`, `inputs`, `needs`, `decisions`,
-`views` or `meta` records the whole list. openmodelica reads a claim's limit through
+`views`, `meta`, `milestones` or — architecture phase 1 — `requirements` records the
+whole list (`_LEDGER_WHOLE`: untraced, an edit to a requirement would leave the verdict
+of a gate that read it Fresh). A field a gate's read of a record leaves out while it
+holds its default (`_ABSENT_WHEN_EMPTY`) gains `evaluators` and `requirements` (empty
+lists), so a claim that names neither digests as before phase 1, and a mechanism or a
+pointer edit re-keys only the gates that read that claim (`ctx.ledger.claim(id)`, keyed
+`claim:<id>`) or the claims whole — `how` is the record's `note`, always in the digest.
+openmodelica reads a claim's limit through
 `ctx.ledger` (S-23), which is why this is an input at all. **`ModelProxy`**: any real
 use of `ctx.model` sets `model_used` (rho then carries the whole projection and the
 model's code); copying the context or truth-testing the model does not. `None` stays
@@ -1586,6 +1796,10 @@ def apply_prerequisites(resolution, registry) -> Resolution   # rung 7: the rule
 # P2.5a: the article a physical result is bound to, the judge, the one view
 def article_of(root, projection, model, *, anchors=None, digests=None,
                resolution=None) -> dict          # {} when the model does not load
+def design_of(root, projection, model, *, anchors, resolution=None,
+              digests=None) -> dict | None       # phase 3a: article_of's built_from — {params,
+                                                 #   model, files} — extracted; None when the
+                                                 #   model does not load; no git call
 def judge_results(ledger, here) -> dict[str, Standing]   # resolve's rung 8, never cached
 class Contradiction(NamedTuple): gate; code; claim; article; when; who; channel; value;
                                  measured; units; removed   # removed: review of P2.5a
@@ -2080,8 +2294,14 @@ def goalpost_runs(spec, fn, good_ctx, good_verdict, *, trace=None) -> tuple[Goal
                                                         #   AFTER the walk, every site on the trace
 def load_fixture(ref: str, root: str) -> Any            # "mod:fn" or "path/to/file.py"
 def load_project_gates(root, registry) -> list[str]     # <root>/gates/*.py; the ids they register
-def describe(spec) -> str                               # one dense line for `nopekit gate list`
-def registry_summary(registry) -> dict                  # JSON-safe: what can run here, and what cannot
+def describe(spec) -> str                               # one dense line for `nopekit gate list`;
+                                                        #   "basis <word>" right after the bracket
+def registry_summary(registry) -> dict                  # JSON-safe: what can run here, and what cannot;
+                                                        #   phase 2: by_basis, undeclared_basis
+def basis_of(spec) -> str                               # phase 2 (SPEC 38): its basis, or "undeclared"
+# gate(..., basis="") — the last keyword: established | sourced | model-only; empty takes
+#   the module's PACK_BASIS (pack.json's "basis"); register refuses a malformed one only
+#   when declared, and tells "grounded" its word. Never in rho, never a status.
 ```
 `gate(registry=None)` decorates into `active_registry()`, which is `REGISTRY` unless a
 `use_registry(...)` block says otherwise. That block is the seam a loader needs (both
@@ -2303,6 +2523,8 @@ KEY_ORDER: tuple[str, ...]                                   # the eight tokens,
 OUTCOME_ORDER: tuple[str, ...]                               # fail, error, prerequisite-errored, prerequisite, skipped, unqualified, outside-context, unrun, pass
 def severity(composed) -> int                                # its place in SEVERITY_ORDER
 def outcome_rank(verdict) -> int                             # its place in OUTCOME_ORDER; None = unrun
+def outcome_key(verdict) -> str                              # phase 3a: its OUTCOME_ORDER token; "unrun"
+                                                             #   for None — the round record's
 def covers(spec, claim) -> bool                              # claim id OR any claim tag in spec.claims
 def covering_verdicts(claim, verdicts) -> list[Verdict]      # the same id-or-tag rule, on verdicts
 def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None) -> Composed
@@ -2351,7 +2573,74 @@ def latency(claim, exports) -> Latency        # a measurement's: from the newest
                                               #   article not after the newest result a person
                                               #   typed on it; else declared; an automated
                                               #   claim's is none (its evaluator's run's)
+# Architecture phase 1: the mechanism (SPEC decision 13) and requirements (decision 12)
+class MechanismProblem(NamedTuple): claim; evaluator; kind; filed = ()  # kind: unregistered | uncovered
+def mechanism_problems(ledger, registry) -> list[MechanismProblem]   # a cross-check: moves no status;
+                                              #   registry None -> []
+MECHANISM_YET_TO_RUN: frozenset[ClaimStatus]  # Gap, Pending build, Assumed
+def yet_to_run(ledger, composed) -> list[Claim]   # every claim whose mechanism has yet to run
+def need_how(ledger, need) -> str             # the how of every claim a Need names, joined
+def proposal_query(claim, gaps, ledger=None) -> tuple[Need, str]   # gap --propose's search: the
+                                              #   claim's Need with need_how (one search per
+                                              #   record), or a transient one never written
+                                              #   with the claim's how
+class RequirementStatus(NamedTuple): id; status; errored; claims; worst; disagree = ()
+                                              # key -> str (property); disagree is
+                                              #   report.requirement_statuses' to fill
+def requirement_statuses(ledger, composed) -> dict[str, RequirementStatus]   # THE producer:
+                                              #   the worst serving claim by severity; Gap with none
+def worst_of(ids, composed) -> tuple[ClaimStatus, bool, tuple]   # phase 5: the fold a
+                                              #   requirement and a board both ask; Gap with none
+# Architecture phase 2 (SPEC 14, §0.2): what lost, and what would bring it back
+RETURN_STATES = ("holds", "does-not-hold", "cannot-evaluate", "not-machine-checkable", "none")
+class ReturnState(NamedTuple): state; why = ""; claim = ""; status = ""; observed = None
+                               gate = ""; detail = ""   # why: no-claim | status | no-value |
+                                              #   no-margin | no-limit | band; tokens only
+def claim_value(claim, composed, verdicts) -> Verdict | None   # the verdict the composition
+                                              #   reports: the compared covering pass with the
+                                              #   least margin; None unless Checked by evaluators
+def return_state(condition, ledger, composed) -> ReturnState   # THE evaluation, pure; only
+                                              #   on a claim reading Checked (phase 4 reuses it)
+PREFERENCE_SCHEMA = 1
+def rejection_digest(decision, rejection) -> str   # sealed: decision id and title, the
+                                              #   rejection's value, why and returns_if
+class PreferenceState(NamedTuple): state; name; who = ""; when = ""   # recorded | not-recorded
+def preference_state(decision, rejection) -> PreferenceState | None   # None unless
+                                              #   preferred_against; never by alone (inv. 13)
+class RejectionRow(NamedTuple): decision; index; value; type; by; input; condition; returns
+                                preference    # def to_dict(self) -> dict: tokens only
+def rejection_rows(ledger, composed) -> list[RejectionRow]   # every decision's every loser
+def may_return(rows) -> list[RejectionRow]    # returns.state == "holds": check's lines
 ```
+**What lost, and what would bring it back (architecture phase 2).** `return_state` is
+the one evaluation of a return condition, for `check`'s *may return* lines, `why`, the
+JSON summaries (`summarise()["rejections"]`) and `state.json` — and phase 4's
+candidates. It reads the composition the caller judged and nothing else: a condition on
+a claim that is not Checked reads `cannot-evaluate`/`status` (a Checked composition is
+current by construction: Stale precedes Checked on the ladder); `margin` is the binding
+verdict's own (`margin`, now over a shared `_margin_of`, unchanged), `value` its
+measured value, `limit` the claim's acceptance limit (a band cannot be evaluated). A
+claim Checked on an article gives its counted result's measured value when its units
+are the acceptance's; a judged claim gives none. `preference_state` re-checks the
+channel and the identity, as `_attributed` does for owners, and binds a preference to
+`rejection_digest`: an edit to the title, or to the rejection's value, why or condition,
+un-records it; reverting records it again.
+
+**A claim's mechanism and its requirements (architecture phase 1).** The evaluators
+a claim's mechanism names are a cross-check, never coverage: `mechanism_problems` is
+the one place that compares them with the registry, for `check`'s and `doctor`'s
+warnings, and nothing it returns reaches `compose`, `compositions`, `effective_gates`
+or `coverage` (S-37: a claim file that held coverage was rewritten by `check` on every
+run). `yet_to_run` reads the composition a caller already holds — `gap`'s list — and
+`find_gaps` keeps its Need half. `requirement_statuses` is the one producer of a
+requirement's status: the worst composition among the claims that name it, in
+`SEVERITY_ORDER` (a crash's Skipped above a plain one), Checked only when every one is,
+Gap with none and no cause of its own; status, `why`, the report, `summarise`, the JSON
+rows and `state.json` ask it and never fold. *Ready* never reads it: `unresolved` is
+unchanged. `claim_digest` keeps its P2.5a form: `terminal` is `mechanism.by`, `note` is
+`mechanism.how`, and `evaluators` and `requirements` are not sealed, so a claim file
+moved to the mechanism form stays bound.
+
 **Ready is one predicate (P2.5b-D1, invariant 12).** `unresolved` is the one place that
 decides *ready*: every reader — `check`'s line, `status`, the report's sentence,
 JUnit's properties, `summarise`'s `milestones`, `state.json` and `export` — asks it,
@@ -2510,6 +2799,11 @@ def inputs_hash(ledger) -> str                       # over sorted (id, sha256);
 def unextracted(ledger) -> list[InputArtifact]       # evidence nobody read = decoration
 def grounding(ledger, *, include_declared=True) -> dict[str, list[str]]
                                                      # param/claim id -> artifact ids, DERIVED
+def value_grounding(ledger, views) -> dict[str, list[str]]
+                                                     # phase 3a (was cli._grounding): grounding,
+                                                     # then each ParamView's PARAMS grounded_by —
+                                                     # the ONE map why, inputs and the graph read;
+                                                     # an id may be an assumption claim's
 def requests_by_kind(ledger, *, project_kind="", limit=6) -> list[tuple[str, str]]  # (kind, prompt)
 def suggest_requests(ledger, *, project_kind="") -> list[str]
     # the ASK list, filtered to what is MISSING. This is what makes intake actively
@@ -2558,6 +2852,8 @@ def load_all_gates(names, registry, root=None) -> list[GateSpec]
 def pack_doc(name, root=None) -> str                       # PACK.md  (tier 2)
 def reference_doc(name, ref, root=None) -> str             # references/<ref>.md (tier 3)
 def references(name, root=None) -> list[str]               # tier-3 names, none loaded
+SKILLS_DIR = "skills"; SKILL_NAME = "SKILL.md"             # phase 6 (SPEC 37): read, never installed
+def skill_files(pack_dir) -> list[tuple[str, str]]         # (name, path) of skills/<name>/SKILL.md
 def validate(pack_dir, *, tier=Tier.BUILD, notes=None) -> list[str]   # problems; empty = ok
 def baseline_context(pack_dir, *, out_dir) -> GateContext  # the ONE sealed baseline context
 def demonstrate(pack_dir, *, tier=Tier.BUILD, out_dir=None) -> Demonstration
@@ -2574,8 +2870,10 @@ class SealFinding:                           # one unsealed control (invariant 5
     gate: str                                # the gate whose control read the host
     fixture: str                             # its NegativeControl.fixture
     host_paths: tuple[str, ...]              # the host-param paths read, sorted, dotted; "(all params)" = the top level
-def match(need: Need, manifests) -> list[PackManifest]      # gap -> candidate packs, by `settles`
-def score(need: Need, manifest) -> float                   # 0 = no signal; what `match` ranks by
+def match(need: Need, manifests, *, how="") -> list[PackManifest]  # gap -> candidate packs, by `settles`
+def score(need: Need, manifest, *, how="") -> float        # 0 = no signal; what `match` ranks by;
+                                                           #   how: the claim's mechanism words (phase 1),
+                                                           #   half the quantity's weight; "" = as before
 def installed(root, *, ledger=None) -> list[str]           # the project's opted-in packs, in order:
                                                              # project.json's `packs`, via store.load
                                                              # with check's model_prose (a legacy project)
@@ -2583,7 +2881,25 @@ def available(root=None) -> list[str]                      # every pack name dis
 def key_scope(manifest) -> str                             # "fdm-print" -> "fdm" (from its gate ids)
 def key_vocabulary(name, root=None) -> dict[str, dict]     # every projection key the pack reads
 def key_collisions(names, root=None, *, projection_keys=()) -> list[KeyCollision]
+# Architecture phase 2 (SPEC 22, 25, 38): proposers — tools that propose, never settle
+PROPOSERS_DIR = "proposers"
+PROPOSER_KEYS = ("id", "basis", "description", "run")   # one provides_proposers entry
+class Proposer(NamedTuple): id; basis; description; run; pack; pack_dir   # run absolute
+def proposers(root=None) -> dict[str, Proposer]     # every discoverable pack's, first in
+                                                    #   search order wins; no `packs add` needed
+def find_proposer(root, pid) -> Proposer            # or NopekitError: no pack declares it
+def proposer_basis(found, pid) -> str               # "" with none, its basis, or "undeclared"
+def proposer_problems(pack_dir, manifest, gate_ids) -> list[str]   # validate's: never imports
 ```
+A proposer is a script run as `python <run> [args]` by `nopekit propose`, with the
+project as its working directory and `$NOPEKIT_PROPOSAL_DIR` a fresh directory under
+`.nopekit/out/propose/`; it is never imported by the spine, never registered as an
+evaluator, and needs no control (invariant 3: a proposal settles nothing).
+`read_manifest` refuses a `basis` that is not one of `BASES` (the `max_tier`
+precedent), `_load_dir` sets it on each gate module as `PACK_BASIS` beside `PACK` and
+`PACK_DIR` — part of `load_source_module`'s cache key, never of the code digest — and
+`validate` requires every evaluator of a bundled pack to resolve to a basis (a note
+elsewhere) and runs `proposer_problems`.
 `key_collisions` is what makes two packs wanting one word DETECTABLE rather than
 discoverable: it diffs the installed packs' vocabularies (from each
 `selftest/baseline.json`'s keys, `_notes` and `_aliases`) and reports any key two
@@ -2661,9 +2977,18 @@ def add(ledger, *, title, summary, when, rejected=(), params_changed=(),
 def render_log(ledger) -> str                # markdown, NEWEST FIRST
 def write_log(root, ledger) -> str           # docs/decisions.md — `report --write`'s output
 def why(ledger, name: str, *, view=None, coverage=None, read_sets=None,
-        verdicts=None) -> str                # one param or claim: value, rationale,
-                                             # rejected alternatives, gates, grounding,
-                                             # and the decisions that moved it
+        verdicts=None, composed=None, rows=None, bases=None, graph=None,
+        entry="") -> str
+                                             # one param, claim, requirement or decision:
+                                             # value, rationale, rejected alternatives,
+                                             # gates, grounding, and the decisions that moved it;
+                                             # with `graph` (a `graph.Graph`, phase 3a) also
+                                             # "read by:", "sourced from:", "rests on:" (and,
+                                             # untraced, that only direct reads were followed),
+                                             # "resolves:", "resolved by:", and a derived value
+                                             # an evaluator read, by name (`entry` names the
+                                             # model file its block cites); without it none of
+                                             # those, and a derived name is "no such name"
 def changed_in(ledger, name: str) -> str     # the decision that last moved a param: derived
 ```
 From checkpoint 1.3 (U27) `add` no longer sets `Param.changed_in` — a copy in the param
@@ -2673,6 +2998,26 @@ optional and every default keeps the old rendering: with a `modelio.ParamView` a
 it prints the model's value and where it lives (`param thickness = 7.0 mm
 (model/bracket.py Config.thickness)`) and each rejection with its origin; a model that
 does not load prints `model does not load: …` and no number.
+From architecture phase 1 `why` resolves a requirement id after an exact param and
+claim (then the three case-insensitively): `_why_requirement` prints its words, its
+source, its status from `claims.requirement_statuses` over the caller's `composed`
+(`claims.compositions(ledger)` without one), each serving claim in severity order with
+its reason, and the decisions that name it. A claim's block gains `serves: R1, R3`
+and a MECHANISM section (`report.mechanism_line`, and the evaluators it expects); the
+`how` text moved there from WHY. It prints no registry warning: those are `check`'s and
+`doctor`'s.
+From architecture phase 2 `why` resolves a decision id after an exact requirement (and
+case-insensitively after the folded requirements): `_why_decision` prints the decision
+and each rejected alternative with a facts line — its type (a preference said recorded
+or not by whom), its return condition's state now, its input
+(`report.rejection_facts`) — from `rows` (the caller's `claims.rejection_rows`, on the
+view it judged; composed from `claims.compositions(ledger)` without them). A param's and
+a claim's REJECTED rows gain the same line under a decision's rejection, never under a
+PARAMS or param-record row; a typed decision row replaces its untyped copy when they
+dedupe. `bases` maps an input id to its proposer's basis (`proposed by <id> (basis <basis>)`
+under GROUNDED BY). `add` takes rejections as dicts with `type`, `by`, `returns_if` and
+`input`, held to `store.rejection_problem`; `render_log` adds each loser's type and
+condition as written, never a live state.
 `why` is the context-window win: an agent pulls one parameter's full history
 instead of reading a 1,672-line decision log.
 
@@ -2684,7 +3029,8 @@ HUMAN: Mapping[str, Any]   # THE table (PLAN D-16): "status" {ClaimStatus: Statu
                            # "recorded" {named, unattributed}, "need" {NeedStatus: word},
                            # "outcome" {outcome: word}, "outcome_hint" {outcome: line},
                            # "outcome_tag" (models._RENDER_TAG itself), "heading", "refusal",
-                           # "prerequisite" {failed, not-established, not-registered} (P2.2)
+                           # "prerequisite" {failed, not-established, not-registered} (P2.2),
+                           # "mechanism" and "requirement" (architecture phase 1)
 STATUS_TAG: Mapping[ClaimStatus, str]        # HUMAN's tags, a view: PASS -> "ok   ", ...
 SECTION_PROVEN = "## What is PROVEN"         # the checked section's heading (text: A-11)
 JUNIT_DEFAULT = ".nopekit/out/junit.xml"    # `--junit` with no path; ignored scratch, never tracked
@@ -2704,6 +3050,12 @@ def prerequisite_phrase(verdict) -> str      # "prerequisite failed: <root>" | "
 def readiness(ledger, composed, milestone=None) -> dict   # claims.unresolved's rows, + missing
 def milestone_line(ledger, composed, milestone) -> str     # "<m>: k of n required claims checked · …"
 def limits_line(ledger) -> str               # what Checked does not mean, said where ready is (P2.5b)
+def site_rebuild_text(found) -> str          # a part to build again, in the site's words: the
+                                             #   page's readiness clause and next steps' row
+RESULT_TOKENS = ("pass", "fail", "not-counted")  # a recorded result's token: what a page
+                                             #   colours it by (format.js `outcomeLook`)
+def result_facts(claim, entry, *, register="cli") -> dict  # {counts, token, why, recorded,
+                                             #   heading}; "site" adds `word`, the drawer's
 def latency_words(claim, exports) -> str     # "measured 26 h on article <a12> (expected 1 day)" |
                                              #   "expected 1 day (declared)" | that none is declared
 def not_ready_line(ledger, composed) -> str  # `check`'s line when nothing blocks it
@@ -2722,7 +3074,65 @@ def render_junit(ledger, verdicts, registry, *, tier, ready, exit_code, when,
 def render_selftest_junit(results, *, exit_code, when, baselines=None) -> str
     # `gate selftest --junit`: suite controls, plus baselines in pack mode
 def junit_safe(text) -> str                  # XML-1.0-illegal code points -> visible "\xNN" / "\uNNNN"
+# Architecture phase 1: the mechanism (SPEC decision 13) and requirements (decision 12)
+def mechanism_body(claim) -> str             # "<by's display word> — <how>", or where to say it
+def mechanism_line(claim) -> str             # mechanism_body, labelled "mechanism: " (gap's line)
+def mechanism_problem_words(problem) -> str  # one claims.MechanismProblem, in words: no status moves
+def status_word(status, *, errored=False) -> str   # word, with ", errored" for a crash's Skipped
+status_token_word = _status_token_word       # phase 3a: a STATUS_KEY token (or "errored") in words
+def round_paragraph(shape, number, changes, *, view, composed, check, site, wrote, schema,
+                    path, trace=None) -> str # phase 3a: `round`'s one paragraph — what changed,
+                                             #   the count line, ready as last evaluated, the
+                                             #   check, the site; HUMAN["round"]'s words
+def round_trace_sentence(trace) -> str       # phase 3b: the background trace's sentence (" ..."),
+                                             #   or ""; round_paragraph's tail, and appended by
+                                             #   cli after phase 6's commit sentence
+def round_moved(moved) -> str                # "the records, the verdict cache and the design"
+COMMIT_SUBJECT_MAX = 72                      # phase 6: a round commit's subject, git's convention
+def round_commit_sentence(commit) -> str     # phase 6: what `round --commit` did, then the
+                                             #   changed paths it named instead of staging: a
+                                             #   secret's name, over 50 MiB, not a file
+def round_prose_sentence(prose) -> str       # phase 6: board text stamped before the latest
+                                             #   results, named; "" when none is behind
+def round_commit_message(number, shape, changes, staged, not_files, too_large, secret,
+                         earlier, paragraph, *, round_rel="") -> tuple[str, str]
+                                             # phase 6: "round N: <what changed>" (compacted,
+                                             #   then cut, past 72) and its body; no trailer
+def round_hook_message(outcome) -> str       # phase 6: the Stop hook's systemMessage
+def round_hook_crash(exc) -> str             # phase 6: its message for a crash
+def requirement_statuses(ledger, composed, cover) -> dict[str, RequirementStatus]
+                                             # claims.requirement_statuses, each row's disagree
+                                             #   filled: serving claims _disagreement names (D18)
+def requirement_line(ledger, composed, cover=None) -> str | None   # status's one line, or None;
+                                             #   past eight, worst first and "+N more (k unresolved)"
+def requirement_json(requirement, found) -> dict       # the one JSON row: status --json, report --json,
+                                             #   state.json — {id, statement, source, status, key, word,
+                                             #   errored, claims, worst, disagree}
+# Architecture phase 2 (SPEC 14): a rejection's words, from claims.rejection_rows' tokens
+def condition_text(cond) -> str              # "C3 margin < 0.1", or the text
+def return_words(row, ledger=None) -> str    # the condition's state now: "holds: …, now 0.987
+                                             #   (bracket.bearing)", "cannot be evaluated: C1 is failing"
+def rejection_words(row, ledger=None) -> tuple[str, str]   # (type phrase, condition phrase)
+def rejection_facts(row, ledger=None) -> str # why's facts line: "{type} · {condition}[ · source: input …]"
+def may_return_line(row, ledger=None) -> str # check's line for a condition that holds
+def rejection_suffix(rejection) -> str       # decide's row and the log's: static, never a live state
 ```
+**Requirements and mechanisms in the renderers (architecture phase 1).** Every status a
+requirement shows is `claims.requirement_statuses`', worded here: `status` prints one
+untagged line after the claim rows and the rebuild lines (`requirement_line`, so no
+claim-row parser reads R1 as a claim, and only when requirements are recorded); the
+report's `## Requirements` (`_section_requirements`) comes after the Failing section and
+before Reproduce, so `SECTION_PROVEN` stays first, and is empty when none is recorded;
+there is no JUnit suite. Every one of those, `why` and the JSON rows reads
+`requirement_statuses` here, never the bare producer: a requirement over a claim the
+resolver calls Checked while its evidence disagrees (D18) names that claim — `R1
+checked (status and evidence disagree: C2)` — never a bare "checked" one line under
+the claim row that lists it as a contradiction (review of phase 1). Past eight
+requirements the line keeps the worst first (`claims.SEVERITY_ORDER`, a disagreement
+first) and says how many of the rest are unresolved. `claim_json` gains `mechanism` (`{by, how, evaluators}` as
+declared, all three keys always present) and drops the flat `evaluators`. `reason` is
+unchanged: the `how` shows in `gap`, `why`, the report's gap section (a `Mechanism:`
+sub-bullet under each claim) and JSON, never in a Gap's reason.
 **`HUMAN` is the one table** every human word for a status, a cause's lead and an
 outcome comes from (PLAN D-16; GLOSSARY §7), equal to GLOSSARY §3 (Table 1's seven
 words plus Open: Checked, Failing, Stale, Assumed, Pending build, Gap, Skipped, Open)
@@ -2743,7 +3153,7 @@ never the traceback; a skip `skipped: <gate> : <reason>`; a refusal `unqualified
 `no owner recorded`; `owner X is named in claims/<id>.json and has not recorded it —
 no command can record it yet`; `no reason recorded`; `unrun: <gates>`; `invalidated:
 <gate> : <what moved>`; `needs an article` (`; no test written down` with neither
-acceptance nor note); `assumed by <owner>: <rationale>`; `a pass recorded by <who>, not
+acceptance nor `mechanism.how`); `assumed by <owner>: <rationale>`; `a pass recorded by <who>, not
 bound to an article` (`recorded, unattributed` with no one named, `recorded_by`).
 `cli._blocking_reason` and `report._terminal_reason` wrap it (S-68: two copies once
 told two stories). **Every value a record supplies — an owner, a result's `who` and
@@ -2893,14 +3303,187 @@ phase-1.md 1.1):
   passed by the CLI from Phase 1.2. The CLI edge — unlink the target first, one exit
   code, write atomically at the single exit, the `.xml` suffix rule — is `cli.py`'s.
 
-### `site.py`  (deps: models, util, store, claims, decisions, report, modelio, gates, verdicts)
-The project site's spine half: viewgens, and the one JSON document the page reads.
-The page's half is plain HTML, CSS and ES modules in `site_template/`, copied by
-`scaffold`; the data contract between the two is `docs/SITE_CONTRACT.md`.
+### `graph.py`  (deps: models, util, store, artifacts, claims, gates, verdicts; report only inside `tokens`)
+The typed falsification graph (SPEC decision 19, architecture phase 3a): one graph
+from the records, the registry, the resolution and the verdict entries it served —
+their read sets, never `obs/`. Not in `verdicts.SPINE_MODULES`: an edit here keys no
+verdict. No clock, no git, no file writes, no words. The site's map (the next phase)
+calls `build` and `tokens` — or `of` — directly, and joins the two by id.
+```python
+SCHEMA = 2                                            # phase 3b: `after`, trace an object
+NODE_KINDS = ("requirement", "claim", "evaluator", "value", "instruction", "input",
+              "milestone", "decision")                 # the order nodes sort in
+EDGE_TYPES = ("serves", "settles", "reads", "derives", "after", "sources", "rests_on",
+              "resolves", "contradicts", "needs", "requires", "decides")   # the order edges sort in
+VALUE_ROLES = ("choice", "derived", "absent")
+class Node(NamedTuple): id; kind; attrs               # id "<kind>:<key>"; attrs JSON scalars,
+                                                      #   one schema per kind (below)
+class Edge(NamedTuple): type; source; target
+class Trace(Protocol): key; round; derives; after     # derivation.TraceFile: (choice, derived)
+                                                      #   and (earlier, later) pairs; round
+                                                      #   and after read with getattr
+class Graph:                                          # frozen: nodes, edges, trace, instructions,
+                                                      #   trace_round
+    def node(self, nid) -> Node | None
+    def out(self, nid, type=None) -> tuple[str, ...]  # targets, edge order
+    def into(self, nid, type=None) -> tuple[str, ...] # sources, edge order
+    def values(self, role=None) -> tuple[Node, ...]
+    def read_by(self, name) -> tuple[str, ...]        # evaluator ids, natural order
+    def sourced_from(self, name) -> tuple[str, ...]   # node ids, node order
+    def rests_on(self, cid) -> tuple[str, ...]        # assumption claim ids
+    def via(self, cid, aid) -> tuple[tuple[str, str, str], ...]   # (evaluator, read, sourced)
+    def moves(self, choice) -> tuple[str, ...]        # the derives targets
+    def moved_by(self, name) -> tuple[str, ...]       # the derives sources
+    def to_dict(self) -> dict                         # {schema, trace: null | {key, round},
+                                                      #   instructions,
+                                                      #   nodes: {id: attrs}, edges: {type: {src: [dst]}}}
+class Tokens(NamedTuple): claims; requirements; evaluators; milestones; readiness; counts; disagree
+def node_id(kind, key) -> str
+def value_names(path, choices, derived=()) -> tuple[str, ...]   # THE path rule:
+                                                      #   ["config", k] -> k, ["config"] -> every
+                                                      #   choice, [k] -> k, [] (the whole of
+                                                      #   ctx.params) -> every choice and derived
+def derived_names(projection) -> tuple[str, ...]      # the projection's derived keys, less an
+                                                      #   echoed `config`
+def served_reads(resolution, registry) -> dict[str, tuple[tuple, ...]]   # registered gates'
+                                                      #   Row.entry param paths
+def value_sources(ledger, views) -> dict[str, tuple[str, ...]]   # name -> input:/claim: ids,
+                                                      #   from artifacts.value_grounding
+def observe(views, *, ledger, resolution, registry, choices=(), derived=()) -> list[ParamView]
+                                                      # each view's read_by and sourced_from
+def build(view, resolution, registry, *, projection, design, views=(), bases=None,
+          trace=None) -> Graph
+def tokens(view, resolution, registry, *, composed=None) -> Tokens
+def of(root, view, resolution, registry, *, projection, model, views=(), bases=None,
+       trace=None) -> Graph                           # build, design = verdicts.design_of
+def upward(graph, value) -> list[str]                 # phase 5: a value node id and every
+                                                      #   value it derives from
+def upstream(graph, nid) -> list[str]                 # phase 3b: `after` ancestors, nearest first
+def direct_derives(graph) -> set[tuple[str, str]]     # (choice, value) no earlier value explains
+def depths(graph) -> dict[str, int]                   # longest `after` path to each value
+def ties_of(graph) -> list[tuple[str, ...]]           # values the same choices move
+```
+**Nodes.** A requirement, a milestone and a decision carry no attrs; a claim
+`{claim_kind, by, critical, removed}` (every `view.claims`, a `Ledger.removed`
+fail-holder included); an evaluator `{pack, basis, tier, registered}` (every registered
+spec, then any gate a `needs` or a `contradicts` names that is not registered, with
+`null` pack, basis and tier); a value `{role, digest[, value]}` — every choice, and
+every other name an edge or a parameter view names (a derived value nothing reads,
+sources, decides or derives is no node), its `value` written only for a finite int,
+float or bool; an instruction `{digest}` per file of the model's code closure as an
+article digests it (`model/bracket.py`, `<root>/` stripped); an input `{proposer,
+basis}`.
+
+**Edges, each from one source.** `serves` (`Claim.requirements`), `settles`
+(`claims.effective_gates`: coverage, never the mechanism's list), `reads` (the served
+entry's param paths through `value_names`; a never-run evaluator has none), `derives`
+(the trace's; `{}` and `trace: null` without one), `sources` (an input id as
+`input:<id>`, an assumption's as `claim:<id>`), `after` (phase 3b: the order the
+trace infers between derived values, `derivation.after_order` — for drawing and `why`
+only, never an edge of meaning), `rests_on` (computed: a claim rests
+on assumption A when an evaluator that settles it read a value A sources, closed
+upward over `derives`), `resolves` (`Claim.resolves`, physical to assumption only),
+`contradicts` (`Resolution.track`), `needs` (`GateSpec.needs`), `requires`
+(`Milestone.requires`), `decides` (`params_changed`, `claims_changed`). An edge is made
+only when both ends are nodes: a pointer to a missing or wrong-kind record makes none,
+and `store.pointer_problems` names it. **No edge changes a status:** `claims.compose`
+never reads this module (`test_graph.AnEdgeChangesNoStatus`). **Tokens** are each from
+its one producer — `claims.STATUS_KEY` of `compositions` (or `errored`),
+`report.requirement_statuses`, `claims.unresolved`, `claims.summarise`'s counts,
+`report._disagreement` — over the view `status` judges, never a sweep's overlay. An
+evaluator's `outcome` is `claims.outcome_key`'s, in `OUTCOME_ORDER`'s words: a crash is
+`error` there (and `prerequisite-errored` behind a crashed prerequisite), where a
+claim's and a requirement's token says `errored` — one vocabulary per kind of node.
+
+### `rounds.py`  (deps: models, util, store)
+The round record, `.nopekit/round.json` (SPEC decision 18, architecture phase 3a): an
+output, tracked, never read for truth. Imported only by `cli`
+(`test_round.NothingReadsTheRoundRecordForTruth`). No clock, no git: from phase 6 it
+also decides which paths a round commits and whose identity may commit them, and `cli`
+asks git (`vcs`) and hands the answers in.
+```python
+ROUND_REL = ".nopekit/round.json"; ROUND_NAME = "round.json"; SCHEMA = 1
+HEADER: str                                           # the one sentence it holds
+MOVED = ("records", "verdicts", "design", "trace")    # what it is computed from
+TRACE = "trace"                                       # phase 3b: derivation.trace_digest
+AMBER_KEYS = ("flips", "holds", "unclear", "not_current", "untraced")
+RESOLUTION = "resolution"                             # what `state` names when none of MOVED
+                                                      #   moved and what it records differs
+KEYS = ("generated", "schema", "round", "computed_from", "readiness", "milestones",
+        "counts", "claims", "requirements", "disagree", "amber", "evaluators", "graph",
+        "self")
+class Previous(NamedTuple): state; doc; round; schema; why   # absent | ok | edited |
+                                                      #   unreadable | newer
+class RoundState(NamedTuple): state; round; moved; schema; why   # absent | current | behind |
+                                                      #   edited | unreadable | newer
+class Flip(NamedTuple): id; before; after
+class Changes(NamedTuple): compared; replaced; claims; requirements; verdicts; instructions;
+                           readiness; moved; unrecorded=False   # instructions compared only
+                                                      #   when both records hold the model's code
+class Written(NamedTuple): written; round; previous; changes; refused
+def path_of(root) -> str
+def verdicts_digest(root) -> str                      # every file under .nopekit/verdicts/
+def computed_from(root, design, trace_digest="") -> dict   # {records, verdicts, design, trace}
+def body(computed, tokens, graph, amber=None) -> dict # the content, round and self unset;
+                                                      #   amber {state: [claim ids]}
+def self_digest(doc) -> str                           # util.seal of doc minus "self"
+def sealed(content, round_) -> dict                   # KEYS order, round set, self set
+def render(doc) -> bytes                              # indent 2, UTF-8 as itself, one newline
+def read(root) -> Previous                            # strict JSON; never raises on content
+def state(root, computed_now, content=None) -> RoundState   # content: what round would
+                                                      #   write now; differing -> behind (RESOLUTION)
+def changes(previous, body, computed_now) -> Changes
+def write(root, body) -> Written                      # only when what it holds moved
+# architecture phase 6: the round's commit — which paths, and whose identity (pure).
+# Every file git does not ignore inside the project's directory, since the acceptance
+# run after phase 3b (the closed list ROUND_DIRS, ROUND_NOPEKIT and ROUND_ROOT_FILES is
+# gone: the agent's own bom/bom.json was never committed)
+ROUND_MAX_BYTES = 50 * 1024 * 1024                    # a larger file is named, not staged
+ROUND_SECRET_NAMES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*",
+                      "id_dsa*", "id_ecdsa*", "id_ed25519*", "*credentials*", "*secret*")
+ROUND_NAMED_BY_NOPEKIT = (".nopekit/verdicts/", ".nopekit/trace/")   # never read for a name
+class StagePlan(NamedTuple): staged; not_files; too_large; secret   # too_large: ((path, bytes), ...)
+def secret_name(rel) -> str | None                    # the pattern a part of rel matches, case
+                                                      #   ignored; None under ROUND_NAMED_BY_NOPEKIT
+def stage_plan(root, changed) -> StagePlan            # os.lstat; a deletion is staged whatever
+                                                      #   its name; a directory, a secret's name and
+                                                      #   a file over the cap are named
+def person_of(ident) -> Person | None                 # "Name <email>" split at its last "<"
+def listed(people, ident) -> Person | None            # name equal stripped, email ignoring case
+def last_committed_round(raw) -> int | None           # HEAD's round.json bytes -> its round
+```
+**The seal comes first.** A record whose self-digest does not hold reads `edited`
+whatever its `schema` says — the seal rule is the format's at every schema — so a hand
+edit that bumps `schema` is rewritten by the next round; only a sealed record with a
+greater schema reads `newer`. **Behind** names the records, the verdict cache or the
+design when one of their digests moved, else the resolution when what the record holds
+differs from what `round` would write now (`cli._round_state` hands `state` that body):
+an evaluator's code, its controls, a pack or a tool moved it. **The write rule.**
+Nothing over a newer schema (a newer nopekit's record is never downgraded); nothing when the record on disk reads `ok` and holds the same on every key
+but `generated`, `schema`, `round` and `self`; otherwise round = the previous round + 1
+(an edited record's included), else 1, and bytes only where they differ. **The design
+digest** is `util.seal(verdicts.design_of(...))` — the current article's `built_from` —
+so a model or data-file edit that files no verdict still reads behind; there is no spine
+or version digest, so an upgrade is not "behind the records".
+
+### `site.py`  (deps: models, util, store, claims, decisions, graph, page, prose, report, modelio, gates, verdicts)
+The project site's spine half: viewgens, the technical record's document
+(`state.json`), and the orchestration of a build — the front page's two documents are
+`page`'s, the prose `prose`'s. The page's half is plain HTML, CSS and ES modules in
+`site_template/`, copied by `scaffold`; the data contract between the two is
+`docs/SITE_CONTRACT.md`.
 ```python
 SITE_DIR = "site"; DATA_DIR = "data"; ASSETS_DIR = "assets"; VENDOR_DIR = "vendor"
 VIEWS_DIR = "data/views"                     # per-view payloads too big to inline
-STATE_NAME = "state.json"                    # site/data/state.json: everything the page shows
+STATE_NAME = "state.json"                    # site/data/state.json: the technical record
+PAGE_NAME = "page.json"; MAP_NAME = "map.json"   # the front page's documents (phase 5)
+BUILD_NAME = "build.json"                    # the clock: ignored, never tracked (SPEC 32)
+CONTENT_DIR = "content"                      # site/content/: the agent's prose and figures
+EVIDENCE_DIR = "assets/evidence"             # evidence copied from .nopekit/out/
+SHELLS = ("index.html", "technical.html")    # the project's own: never refreshed
+OUTLINE_MARKER = '<meta name="nopekit-outline" content="1">'; OUTLINE_MARKER_RE: str
+AGED_SECONDS = 86400                         # a result this old is aged (build.json)
+WATCH_DIRS: tuple[str, ...]                  # what `site serve --watch` polls
 @dataclass
 class ViewContext:                           # a viewgen's one argument, mirroring GateContext
     root; ledger; model; params; assets_dir; log; extra; written   # written: assets recorded
@@ -2921,13 +3504,25 @@ def run_viewgen(spec, fn, ctx) -> tuple[View | None, str]  # never raises; None 
 def run_all_viewgens(registry, ctx, *, only=None) -> tuple[list, list]   # (views, notes)
 def derive_explode(bounds, *, overrides=None) -> dict      # a FIRST DRAFT explode manifest
 def locator_problems(views, verdicts) -> list[dict]         # every locator that cannot be drawn
-def scaffold(root, *, force=False) -> list                  # copy the template; index.html only with force
+def scaffold(root, *, force=False) -> list                  # copy the template; the shells only
+                                                            #   when absent, or with force
+def refresh_renderer(root) -> list                          # every template file but SHELLS
+def scaffolded(root) -> bool                                # site/index.html is a file
+def outline_of(root) -> int | None                          # index.html's OUTLINE_MARKER
+def ensure_site_ignore(root) -> bool                        # data/build.json in site/.gitignore,
+                                                            #   created with it alone when absent
+def prose_pool(docs, assets=()) -> Pool                      # what prose numbers are matched to
+def baked_pool(root, map_doc, page_doc) -> Pool              # the same, over a built site on disk
 def build(root, ledger, registry, view_registry, *, model=None, projection=None, now="",
-          resolution=None, params=None) -> dict
+          resolution=None, params=None, graph=None, live=False) -> dict
 def state(root, ledger, registry, *, now="", stale=None, resolution=None,
-          params=None) -> dict   # state.json
-def judgement_digest(payload) -> str                        # sha256 of what a state document judged
-def judgement_moved(shown, now) -> list[str]                # "C1 pass -> fail": what a rebuild would change
+          params=None, judged=None) -> dict   # state.json: clock-free (now is ignored)
+def resolution_digest(payload) -> str                       # sha256 of what a state document judged
+def resolution_moved(shown, now) -> list[str]               # "C1 pass -> fail": what a rebuild would change
+def ages(resolution, now) -> dict                           # {gate: {when, age_s, aged}}
+def write_build_json(root, *, now, id, ok=True, error="", live=False, verdicts=None,
+                     mixed_age=None) -> str                 # site/data/build.json, ignored
+def watch_snapshot(root) -> dict                            # {relpath: (size, mtime_ns)} over WATCH_DIRS
 def clean_assets(root, keep) -> list                        # delete unreferenced site/assets/ files
 def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`
 ```
@@ -2939,21 +3534,34 @@ to pass a resolution would serve every cached PASS as current and skip admission
 (invariant 7 by omission). `stale=True` stays an all-stale override. It stamps each
 verdict with its own age — obs `when`, else the entry's commit time, else `null`; a
 build that re-ran the cheap gates on the way past would publish ten-second-old tier-0
-numbers beside week-old tier-2 numbers under one "built at" stamp. `state` borrows every judgement —
+numbers beside week-old tier-2 numbers under one "built at" stamp. From architecture
+phase 5 that age is in `data/build.json` (`ages`), ignored by git, and `state.json`
+holds no clock, so a rebuild that judged nothing new changes no tracked byte; every
+tracked file is written only when its bytes differ (`util.write_json_if_changed`,
+`ViewContext.write_asset`, the evidence copies). `build` bakes `map.json` and `page.json`
+(`page`), refuses — writing nothing under `site/data/` — when `page.status_problems`
+finds a token the resolution does not say, copies the evidence `page.evidence_plan`
+plans, fills the prose (`page.bake_prose`) against a pool of every baked number, seals
+both documents and writes `build.json` last. `state` borrows every judgement —
 statuses from `claims`, the readiness sentence and the PARTIAL logic from `report` —
 because a second implementation would give the page and the readiness document two
 opinions about one ledger (the site renders the ledger; it never computes truth).
-`now` is the caller's timestamp: without it every `age_s` is `null`, never 0, since
-an age of zero renders as "just now". `meta.records_digest` is `store.records_digest(root)`
+From architecture phase 1 the document gains `requirements` — each row
+`report.requirement_json` over `claims.requirement_statuses`, the one producer — and
+each claim row a `mechanism` and its `requirements` (through `report.claim_json`);
+`judgement_digest` covers them, so a moved requirement status marks the page behind.
+The page draws no requirement until the map (phase 5).
+`meta.records_digest` is `store.records_digest(root)`
 at build time — which records the page was built from; the CLI's site staleness compares
-it with the records now (see `cli.py`), never an mtime. `meta.judgement_digest` is
-`judgement_digest` of the finished document, set last by `state` itself: a sha256 over
-everything but the clock (`built`, each row's `when` and `age_s`), the two digests,
-`views` and `locator_problems` — a deny-list, so a key a later `state` adds is judged by
-default. It is the other half of what the page was built from: the resolver's judgement
+it with the records now (see `cli.py`), never an mtime. `meta.resolution_digest` is
+`resolution_digest` of the finished document, set last by `state` itself: a sha256 over
+everything but the two digests, each row's `evidence_assets`, `views` and
+`locator_problems` — a deny-list, so a key a later `state` adds is judged by default
+(phase 3a's `judgement_digest`, renamed in phase 5: "judgement" names nothing on the
+page, and the glossary's *judgment* is an expert's). It is the other half of what the page was built from: the resolver's judgement
 of the verdict cache against the live model, which no record holds (review,
 `repro_site`: a `check` that FAILed C1 moved no record, and the page's C1 PASS read
-current). `judgement_moved(shown, now)` names what a rebuild would change — claims whose
+current). `resolution_moved(shown, now)` names what a rebuild would change — claims whose
 status moved, else verdict rows whose outcome or measurement did, else parameters whose
 value (`thickness 7 mm -> 8 mm`) or, the value standing, another field (`thickness
 rationale`) did — for the reason line; it reads both documents and judges neither.
@@ -2967,6 +3575,130 @@ A locator is never dropped for being undrawable: it stays on its verdict, and
 `locator_problems` publishes the problem beside it in `state.json`, because a gate
 that believes it is drawing and is not looks exactly like a gate that found nothing. `clean_assets` deletes only what
 it can prove is unreferenced, which is why every asset arrives through `write_asset`.
+
+### `page.py`  (deps: models, util, store, claims, report, graph, prose)
+The front page's baked data (architecture phase 5, SPEC 28-33): `map.json` and
+`page.json`. Not a spine module (an edit here keys no verdict); clock-free; it reads
+`site/content/` and the presence and size of evidence files, and never imports `site`.
+Every status, word, count, margin and *ready* it bakes is from its one producer:
+`graph.tokens`, `claims.worst_of`, `claims.unresolved`, `claims.margin`.
+```python
+OUTLINE = 1; SCHEMA = 1
+MAP_SCHEMA = 2                               # map.json's own (phase 3b)
+LANES = ("requirements", "zones", "stations", "boards")
+MAP_EDGE_TYPES: tuple[str, ...]              # graph.EDGE_TYPES less requires, decides,
+                                             #   derives, after (the feeds carry those)
+SOURCE_OF_KIND: Mapping[str, str]            # an input's kind -> datasheet | estimate
+SOURCES = ("chosen", "datasheet", "estimate", "assumption")
+OTHER = "other"                              # the generated board and zone
+IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
+EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
+EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next")
+WORD_KEYS: frozenset; RECORD_KEYS: frozenset # every string key of page.json and map.json:
+                                             #   scanned for the register, or exempt
+class Board(NamedTuple): id; title; line; generated; members
+class Zone(NamedTuple): id; title; line; generated; members
+class Station(NamedTuple): id; title; line; generated; members   # id "@<name>" when generated
+class Layout(NamedTuple): boards; zones; stations; board_of; zone_of; station_of; lines;
+                          unread; warnings; feeds; layers; station_layer; station_column;
+                          station_depth; traced; ties; zone_rank; station_rank;
+                          requirement_rank; idle; crossings; trace_key
+class Evidence(NamedTuple): gate; entry; path; name; source; dest; href; missing; action;
+                            reason   # why it is not on the page: the build's warning, never baked
+def token_of(composed) -> str                # STATUS_KEY, or errored
+def boards_of(view) -> tuple                 # board records, then the generated `other`
+def layout(view, built, *, projection, params=(), registry=None, resolution=None) -> Layout
+def value_text(measured, units, limit_text, margin) -> str   # "0.6997 mm against a limit of
+                                             #   0.5 mm, 40% past the limit"
+def words_block() -> dict                    # page.json's words
+def evidence_plan(root, view, resolution, registry=None, *, ignored=None) -> list
+                                             # [Evidence]; plans only; `ignored(relpath)`
+                                             #   is git's ignore rule (site build's)
+def evidence_assets(plan) -> dict            # {gate: [href or "", ...]} for state.json
+def settle(claim, composed, *, milestone=None, cover=(), tiers=None) -> dict  # {text, commands}
+def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of prose is
+                                             #   stamped against: a board's claims, and
+                                             #   "@<id>" for each named claim off the board
+def named_in(blocks) -> list                 # the claim ids a piece of prose names
+def prose_named(body, claim_ids) -> list     # named_in over a file's body
+def prose_files(root) -> list                # [(subject, path)] under site/content/
+def subjects(boards) -> list                 # board ids, then intro, next
+def stamp_state(as_of, current) -> str       # current | stale | unstamped
+def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, current_as_of}]
+def content_digest(root) -> str              # a seal over site/content/
+def seal(doc) -> str                         # map.json's and page.json's `self`
+def representation(views) -> dict            # the first model3d, else image or diagram
+def source_of(built, name, kinds) -> str     # a value's source category (SOURCES)
+def trace_block(lay, built, amber, trace) -> dict   # map.json's `trace`
+def amber_word(state) -> str                 # amber's site word
+def live_feeds(lay, built, toks) -> list     # the feeds as bake_map bakes them
+def bake_map(view, lay, built, toks, composed, *, projection, params=(), registry=None,
+             payload=None, name="", records_digest="", resolution_digest="", amber=None,
+             trace=None) -> dict
+def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
+              plan=(), records_digest="", resolution_digest="", amber=None) -> dict
+def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
+def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
+                    pool=None, amber=None, feeds=None) -> list[str]   # invariant 14: tokens,
+                                             #   words, marks, ready, amber, feeds,
+                                             #   a compared value's words, prose stamps;
+                                             #   with prose_as_of and pool, each as_of
+                                             #   and each number's match
+```
+**Order is baked, geometry is rendered**: nodes carry a lane, an `order`, a `row` and a
+`column` (greedy interval packing over the rows their lines span), never a position, and
+a status flip moves none of them. `status_problems` is invariant 14's one checker: the
+build refuses a page it names, and `cli._site_state` reads an on-disk page with it — a
+token the resolution does not say, while both documents' `resolution_digest` equal
+now's, reads *edited by hand* (a resealed forgery). A line's values are its settling
+evaluators' named reads (`graph.served_reads`), direct. **Map schema 2** (phase 3b):
+requirements and zones are no longer stops; every zone record is drawn with its count,
+its sources and its unconfirmed assumptions (`estimate`); a feed joins a zone to a
+station when one of its choices moves one of the station's members directly
+(`graph.direct_derives`); a line stops at the stations holding what it reads (`read`)
+and those the trace puts before them (`upstream`), in layer, column and station order;
+a station's depth is the upper median of the `graph.depths` of the members its lines
+read (of every moved member when none is read), its layer the dense rank, a station
+nothing moved last; zones, requirements and the stations of a layer carry a `rank`, one
+barycentre pass against the claims' rows. Untraced, the layer is phase 5's column. A
+claim whose amber flips carries the `amber` mark beside its token.
+
+### `prose.py`  (deps: none)
+The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure
+functions over strings and JSON values, importable by `site stamp` and the style tests
+without the page machinery. No clock, no file reads.
+```python
+SENTENCE_MAX_WORDS = 25                      # ASD-STE100 rule 4.1
+UNIT_WORDS: frozenset; BANNED_WORDS = ("delve", "robust", "seamless", "crucial", "honest")
+IDENTIFIER_SUFFIXES: frozenset               # 3D, 1st: letters that make a number an id
+POOL_EXCLUDED_KEYS: frozenset                # numbers that are structure, never a result
+POOL_COUNT_KEYS: frozenset; POOL_FRACTION_KEYS: frozenset   # counts and fractions
+COUNT = "#count"; FRACTION = "#fraction"; UNSTATED = ""     # the pool's tags beside units
+class FrontMatter(NamedTuple): as_of; keys; body; problems
+class Pool(NamedTuple): values; tagged       # every baked number's absolute value, sorted,
+                                             #   and by tag (a unit, COUNT, FRACTION, UNSTATED)
+    def near(self, x, tolerance, tag=None) -> bool
+def parse_front_matter(text) -> FrontMatter
+def stamp_text(text, as_of) -> str           # writes only the as_of line
+def stamp_digest(subject, tokens) -> str     # 16 hex: sha256 over nopekit-stamp-v1
+def parse_markdown(body, *, exists=..., claims=()) -> tuple[list[dict], list[str]]
+def number_pool(docs) -> Pool
+def scan_numbers(blocks, pool) -> tuple[list[dict], list[str]]   # number runs, unmatched
+def matches(text, decimals, percent, pool, unit="") -> bool   # a unit must agree
+def unit_key(unit) -> str                    # a unit as the pool compares it
+def all_runs(blocks) -> list[dict]; def number_runs(blocks) -> list[dict]
+def run_matches(run, pool) -> bool           # a baked number run, by the scan's rule
+def runs_text(runs, *, code=False) -> str; def blocks_text(blocks) -> list[str]
+def register_problems(text) -> list[str]     # em-dash, not X but Y, question, banned word,
+                                             #   contraction
+def long_sentences(text, limit=SENTENCE_MAX_WORDS) -> list[str]
+```
+The markdown subset is parsed here into typed blocks and runs; the browser receives no
+HTML from prose. A number matches a pooled value within half a unit of its last written
+decimal, sign-insensitive; a unit must agree with the value's (or the value states
+none), a count matches only a bare number, and `%` a fraction times 100; letters
+joined to a number are its unit unless they are an `IDENTIFIER_SUFFIXES` suffix. A
+stamp guards age, never correctness.
 
 ### `milestones.py`  (deps: models, util, store, claims, report, verdicts)
 The boundary that spends (P2.5b): what `export <milestone>` judges, and the package
@@ -3023,6 +3755,94 @@ directory and swapped in whole; a file in `out/<m>/` that no export recorded is 
 person's (`foreign`), and one whose bytes moved since its export is `edited` — either
 refuses, named. Two exports of one state write byte-identical packages.
 
+### `derivation.py`  (deps: models, util, store, modelio, verdicts, gates, claims, graph; cli only inside the worker; report only for words)
+The trace (SPEC 39, architecture phase 3b): each numeric `Config` field moved -10% and
++10% in a fresh copy of the project, each build in a subprocess
+(`python -m nopekit.derivation <job>`) that imports the model from its copy, under an
+audit hook that names a write into the project. Not a spine module (it keys no
+verdict); clock-free (`time.perf_counter` for durations only, never in a file).
+```python
+SCHEMA = 1; HARNESS = 2; STEP = 0.1; MOVE_FLOOR = 1e-9; SIGNIFICANT = 4; AFTER_FLOOR = 2
+FAINT = 1e-3                                  # a smaller move does not count toward the order
+BUILD_TIMEOUT_FLOOR = 900.0; TIMEOUT_FACTOR = 10.0; SNAPSHOT_MAX_BYTES = 1 << 30
+THREAD_ENV: Mapping[str, str]                 # one BLAS/OpenMP thread per build
+BACKGROUND_ENV = "NOPEKIT_TRACE_BACKGROUND"   # "0": round starts no trace
+TRACE_DIR = "trace"; SCRATCH_REL; LOCK_REL; LOG_REL
+SKIP = ("yes-no", "word", "none", "structure", "zero", "not-finite", "fixed")
+FLIP_TOKENS = ("failing", "gap"); AMBER_STATES = ("untraced", "not-current", "flips",
+                                                  "unclear", "holds")
+HEADER; AMBER_HEADER; TRACE_KEYS; AMBER_KEYS
+class Nudge(NamedTuple): name; value; steps; skipped    # .change: each step's factor less one
+class Order(NamedTuple): after; ties; singles
+class TraceFile: key; round; entry; path; keyed_on; skipped; observed; unmoved; unsteady;
+                 derives; after; ties; singles; raised; moved   # implements graph.Trace
+    def movers(self, name) -> frozenset
+    def moves(self, choice) -> dict
+class AmberFile(NamedTuple): path; trace; round; choices; claims
+class TraceRead(NamedTuple): state; key; trace; problems; ambers   # current | none |
+                                              #   unrecorded | no-model
+class Launched(NamedTuple): code; timed_out; tail
+class Ran(NamedTuple): state; key; round; written; observed; total; skipped; unmoved;
+                       unsteady; raised; incomplete; amber; builds; problems; order; timeout
+class Amber(NamedTuple): state; flips; unclear; via; why; rerun; changes
+    def step(self, choice, direction, *, minus="-") -> str   # "-10%", or an integer's size
+def default_workers() -> int                  # min(8, cpus - 1)
+def nudges(name, value, *, settable=True, real=False) -> Nudge   # real: a float field
+def plan_of(config) -> list[Nudge]            # real from each field's annotation
+def step_word(direction, change=None, *, minus="-") -> str
+def apply(model, name, step) -> LoadedModel   # dataclasses.replace; CONFIG rebound
+def instructions_of(root, model, anchors) -> dict | None   # _model_code + *.py under model/
+                                              #   that a snapshot copies
+def choice_digests(config, anchors) -> dict   # every field, skipped ones too
+def keyed_on(instructions, choices, data=None) -> dict
+def key_of(keyed) -> str                      # seal({harness, step, instructions, choices, data})
+def current_keyed(root, model, anchors) -> dict | None   # data {}: a reader cannot know it
+def current_key(root, model, projection, anchors) -> str | None   # where the scratch lives
+def data_current(root, data) -> bool          # a trace's data files hold the same bytes
+def anchors_for(root, resolution=None) -> Anchors
+def observe_values(projection, anchors) -> dict   # {derived: [digest, scalar]}; files,
+                                              #   meshes and arrays by their bytes
+def move_of(base, new); def moves_between(base, new) -> dict; def magnitude(move) -> float
+def render(doc) -> bytes                      # indent 1, scalar lists on one line
+def self_digest(doc) -> str
+def after_order(movers, strong=None) -> Order # strict subset of strong movers, two-mover
+                                              #   floor, Hasse
+def trace_dir(root); def trace_path(root, key); def amber_paths(root, key)
+def read_trace(path) -> (state, TraceFile | None, line)   # absent | unreadable | edited |
+                                              #   newer | mismatch | ok
+def read_amber(path) -> (state, AmberFile | None, line)
+def trace_for(root, model, projection, anchors) -> TraceRead   # only the current design's:
+                                              #   its inputs, and its data on disk
+def trace_digest(root, key) -> str            # the round record's computed_from.trace
+def other_designs(root, key) -> (files, bytes)
+def worker_main(argv) -> int; def worker_env(environ=None) -> dict
+def subprocess_launch(job, job_path, timeout) -> Launched; def in_process(job, job_path, timeout)
+def lock_path(root); def live_holder(root) -> int | None
+def scratch_dir(root, key); def scratch_state(root, key) -> dict
+def snapshot_size(root) -> (bytes, [(bytes, dir)])
+def amber_current(ambers, subjects, amber_choices) -> bool
+def amber_subjects(root, ledger, registry) -> dict   # {cid: {acceptance, evaluators}}
+def run(root, *, plan, entry, amber_choices={}, choices=None, workers=None, timeout=None,
+        round_=None, now="", quiet_if_running=False, background=False, on_line=None,
+        launch=None, project_lock=None, pack_dirs=()) -> Ran
+def unconfirmed(built, tokens, aid) -> bool
+def amber_states(read, *, built, tokens, subjects) -> dict[str, Amber]
+def amber_now(root, view, registry, built, tokens, read) -> dict[str, Amber]
+def state_payload(read, built, amber) -> dict # state.json's trace and amber
+def needed(read, states) -> str               # "trace" | "amber" | ""
+def amber_words(amber) -> str
+def start_background(root, *, round_, key, popen=None) -> (state, detail)
+```
+**The key** is computed after a build, wherever it is computed, and covers every
+`Config` field's value and the data files the base build read; a trace whose key is
+not the current design's is never served (`trace_for`). **A trace file is written only whole** — every numeric choice moved both
+ways — under the project lock and only when its path is absent; a timeout, a dead
+worker, a raise that differs when run alone or a write into the project leaves none,
+and the scratch keeps what finished. **Amber** runs `verdicts.sweep(record=False)` and
+`claims.compositions` in the copy — the check run's rules, never a second composition —
+and is read back per claim against the current acceptance and evaluator digests; it
+moves no status (`claims.py` never imports this module).
+
 ### `cli.py`  (deps: everything)
 `argparse`, subcommands, `main(argv=None) -> int`, and `build_parser()` — the whole
 command surface as one `argparse.ArgumentParser`, so a test can check a command
@@ -3037,13 +3857,209 @@ nopekit ask [--kind]                     # what evidence to request from the use
 nopekit check [--tier N] [--only GATE] [--force] [--no-record]   nopekit gate list|selftest|show
 nopekit report [--write] [--milestone M]   nopekit why <param-or-claim>
 nopekit export [M [--dry-run] [--proceed --why TEXT]]   # P2.5b: the boundary that spends
-nopekit decide --title ... --summary ...  nopekit packs [list|show|validate|add]
+nopekit decide --title ... --summary ... [--rejected V|W [--type T] [--by NAME]
+               [--returns-if "C1 margin > 0.02" | --returns-text TEXT] [--input ID]]...
+nopekit prefer <decision> [--value V]    # phase 2: the person's channel, never the agent's
+nopekit round                            # phase 3a: tier-0 check, site, the round record; exits 0
+nopekit propose [<proposer> [ARGS...]] [--kind] [--desc] [--timeout S]   # phase 2
+nopekit ingest <path...> [--proposer ID] nopekit packs [list|show|validate|add]
 nopekit model [--write]                  nopekit doctor
 nopekit check [--junit [PATH]]
 nopekit gate selftest [GATE ...] [--pack NAME|DIR] [--user-packs] [--allow-empty] [--junit [PATH]]
 ```
 Output is terse and machine-parseable by default (one line per verdict);
 `--json` on every read command.
+
+**Requirements and mechanisms at the edge** (architecture phase 1). `gap` lists every
+claim whose mechanism has yet to run (`claims.yet_to_run`: Gap, Pending build, Assumed),
+resolved exactly as `status` resolves — the registry, the projection, the verdict cache
+— each row with its mechanism line, a warning per evaluator its mechanism names that
+does not settle it here, and the gap record that names it; `--propose` searches a gap
+record with its quantity and the `how` of the claims it names (`claims.need_how`), and a
+listed claim with its record's search or, with none, a transient Need (never written)
+and its own `how` (`claims.proposal_query`, `packs.match(..., how=)`) — one need, one
+pack list. For a physical, judged or assumed claim it says a pack's evaluator checks
+only a modelled part, and with no pack that its mechanism settles it: the extension
+protocol's trigger, and the footer's "propose a solver", are an automated claim's only. It stays a read: no
+lock, no record (S-43). `--json` keeps `gaps`/`n_gaps` (the Need records) and adds
+`yet_to_run`/`n_yet_to_run`. `check` prints the mechanism warnings on stdout after the
+limit warnings (`_mechanism_lines`) and adds `mechanism_problems` to `--json`; the exit
+code never moves. `status --json` and `report --json` add `requirements`
+(`_requirement_rows`); `why` takes the view's compositions (`_why_text`); `doctor` has a
+`requirements` and a `mechanisms` row (`_doctor_requirement_rows`).
+
+**Decisions, preferences and proposers at the edge** (architecture phase 2). `decide`'s
+part-flags (`_RejectedFlag`, `_RejectionPart`) fill one ordered list, so each `--type`,
+`--by`, `--returns-if`, `--returns-text` and `--input` applies to the `--rejected`
+before it (`_rejection_items`); a return condition on no claim or an input that is no
+record is refused under the lock (`_refuse_dangling_rejections`), nothing written.
+`prefer` (`cmd_prefer`) is `claim physical … assume`'s order: the refused flags before
+the project is read, then under the lock the decision, a preferred_against in it,
+git's identity, the channel — an agent marker or a pipe refused outright — the
+rejections whose `by` is this identity, the prompt and the decision's id typed, and one
+sealed entry (`store.append_sealed`); it reads the rejection back on `status`'s view.
+`round` (`cmd_round`, architecture phase 3a, SPEC 18 and 24 without the hook and the
+commit) takes the lock, migrates a legacy project as `check` does, loads the strict
+registry (a pack that does not import: `round not run`, no record), runs `_check_run` at
+tier 0 (`check`'s locked body, extracted: what `check` writes, and never the round
+record; a model that does not load refuses the check, builds no site — `site build`
+refuses that model too — and the record is still written), resolves once with no sweep
+overlay — what `status` shows — builds the site from that resolution when `site/` exists
+(`_site_build`, `site build`'s locked body), and writes
+the round record (`_round_inputs`: `graph.build` over `verdicts.design_of`, and
+`graph.tokens`; `rounds.write`). It prints one paragraph (`report.round_paragraph`) and
+exits 0 whatever the project says; every `NopekitError` is said in one line, and only a
+traceback exits 1 — a hook's exit 2 would block the turn. `status` prints a `round
+record:` line after `last check run:` and `status --json` a `round` object (`_round_state`:
+the record's state — its digests against the project's, and what it holds against the
+body `round` would write now — never what it holds); `doctor` has a warn-only `round` row and a
+`graph` row that FAILs on `store.pointer_problems` and on `PARAMS` grounding naming a
+non-assumption claim.
+```python
+def _check_run(root, ledger, *, tier, only, force, record, now, on_row, quiet,
+               registry=None) -> _Checked   # check's locked body after the migration
+def _site_build(root, ledger, registry, model, projection, view, resolution, *,
+                now) -> dict                # site build's locked work, over the caller's resolution
+def _round_inputs(root, ledger, registry, model, projection, view, resolution, *,
+                  model_error="", shown=None) -> tuple[dict, dict]   # (rounds.body, computed_from)
+def _round_state(root, ledger, model, projection, resolution, registry, view, *,
+                 model_error="", shown=None, traced=None) -> rounds.RoundState
+def _trace_for(root, model, projection, resolution=None) -> derivation.TraceRead
+                                            # phase 3b: the trace every graph.of/build takes
+def _amber_for(root, view, registry, built, tokens_, found) -> dict   # derivation.amber_now
+def _round_label(root) -> int | None        # the round record's number alone, for a trace
+def cmd_model_trace(args) -> int            # `nopekit model trace`
+# architecture phase 6: the round's commit and the Stop hook
+ROUND_LOCK_WAIT_S = 60.0                    # --hook only: how long it waits for the build lock
+class CommitOutcome(NamedTuple): made; oid; who; why; detail; staged; not_files; too_large;
+                                 secret; earlier; subject
+class RoundOutcome(NamedTuple): not_run; done; content; check; site; view; composed; prose;
+                                commit; trace; summary; trace_state
+def _round_run(root, *, commit, wait_s, now) -> RoundOutcome   # cmd_round's body; never raises
+                                            #   a NopekitError (not_run instead)
+def _round_commit(root, ledger, done, paragraph) -> CommitOutcome   # under the build lock
+def _round_start_trace(root, done, *, traced, view, resolution, registry, built, composed,
+                       model_error) -> dict   # the trace's seam, phase 3b's background start
+                                            #   after the lock: {state, key, log, why}
+def _round_hook(args) -> int                # Claude Code's Stop hook; always 0
+```
+**`round --commit`** (architecture phase 6, SPEC 24 with §0.3) runs the round, then,
+still under the build lock, `_round_commit`: refusals first, each leaving the index as
+it was — a round record a newer nopekit wrote, no repository, a merge, rebase,
+cherry-pick, revert or bisect in progress, a detached HEAD, no git identity, no
+`people`, an author `people` does not list (`rounds.listed`: name and email), a
+committer it does not list (`vcs.committer_ident`, review of phase 6) — then
+`vcs.changed_paths` (the project's subtree, ignored files left out) split by
+`rounds.stage_plan` — every file it lists is staged but a directory (an untracked
+nested repository), a file over 50 MiB and a name that looks like a secret, each named
+instead (the acceptance run after phase 3b: the closed list before it left the agent's
+own `bom/bom.json` out of every round) — `vcs.add` of what it stages, their
+intersection with `vcs.staged_paths` (an mtime-only change drops out), and
+`vcs.commit` with `report.round_commit_message`. Nothing changed makes no commit, and
+nothing staged under a repository that ignores the project's file says so
+(`_round_ignored`, why `ignored`) instead of "nothing changed"; a
+commit git refuses leaves the files staged and says so; it never pushes. Its paragraph
+appends `report.round_commit_sentence` and `report.round_prose_sentence`; `--json` adds
+a `commit` object (`staged`, `not_files`, `too_large`, `secret`, `earlier`, beside
+`made`, `oid`, `subject`, `who`, `why`, `detail`). A round whose check could not run,
+or whose claims fail, still commits: the commit is history, not a quality gate.
+**`round --hook`** reads the hook's JSON on stdin, finds the project from `-C`, its
+`cwd`, `$CLAUDE_PROJECT_DIR` or the process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
+Python stream and fd 1) and stderr sent nowhere, rebuilds the index itself
+(`args._index_done`, so `_after` writes nothing after it), and prints one JSON object:
+`{"systemMessage": report.round_hook_message(...)}`, or `{}` outside a project or when
+the record stood, nothing changed, no board's text is behind and the trace has no
+sentence (`report.round_trace_sentence`: none started, running, stopped short or
+refused). It
+always exits 0 and never prints `"decision": "block"`; a crash is a one-line message.
+The plugin runs it through `hooks/stop.py`, a script, never `python3 -m`: `-m` puts the
+session's cwd first on `sys.path`, and a `difflib.py` there ran as code at every turn's
+end and could exit 2 (review of phase 6); the launcher keeps every empty or relative
+entry off the path, puts the plugin's `src` first, and turns a failed import into the
+one-line message. **`init`** lists git's identity as the first person
+(`rounds.person_of(vcs.ident)`) when `store.people_problem` accepts it (git takes an
+email with a space; the strict reader does not, so listing it bricked the project),
+and starts a repository after `store.init` only on `vcs.in_repository`'s positive "no
+repository" (`vcs.init_repo`; `--no-git` starts none; git that does not answer —
+"dubious ownership", a timeout — starts none and says why); inside a repository that
+ignores the project it says so. Its next steps follow decision 21.
+**`packs skills`** (`cmd_packs_skills`) prints each live, found pack's PACK.md, its
+`lenses.md` and its `skills/<name>/SKILL.md` files (or `--pack` names'); a live pack not found is a FAIL
+line and exit 1. **`doctor`** gains a warn-only `people` row (`_doctor_people_row`).
+`model trace` (`cmd_model_trace`, architecture phase 3b) refuses a legacy project, no
+model entry, a model that does not load, an unknown `--choices` name (with a
+suggestion) and `--workers` below 1; plans from the model as loaded (never built in the
+project); names the amber choices from `graph.value_sources`; and hands
+`derivation.run` the project lock to snapshot and to write under. Exit 0 written,
+current or partial; 1 incomplete; 2 refused. `--from-round N` (hidden) is the
+background run `round` starts with `NOPEKIT_TRACE_BACKGROUND` unset or not `"0"`
+(`derivation.start_background`, from phase 6's seam `_round_start_trace`, after the
+round's lock and its commit, so a trace still writing lands in the next round's
+commit): a live trace makes it exit 0 silently. It starts in nopekit's own directory
+with the project named by `-C`, and each worker starts there too and moves into its copy
+itself (`worker_main`): `-m` puts the starting directory first on `sys.path`, and
+started in the project's root (or a copy of it) a `difflib.py` there was imported in
+place of the library's (the follow-up after phase 3b closed this limit). `status` prints
+a `trace:` line only when the trace is not the current design's, and an `amber:` line
+only when a Checked claim's amber is not `holds`; `status --json`, `report --json` and
+`state.json` gain `trace`/`amber`; `report` a `## Amber` section for flips and
+not-current; `why` a choice's `moves:`, a derived value's `derived from:`, `after:` and
+ties, and a claim's `amber:`; `doctor` a warn-only `trace` row; `round --json` a `trace`
+object. JUnit, `check`, `export` and exit codes never read amber.
+`propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
+non-zero exit, a timeout or any project file outside its directory that moved
+(`_project_files`, a stat of the project but its ignored scratch, each path named),
+then ingests each file under the lock (the script's arguments are the plain ones after
+the id and everything after the first `--`, which `main` splits off), `proposer` set
+on a new record only; `ingest --proposer` does the same for a file
+the agent got by hand. `check` prints a *may return* line for each rejection whose
+condition holds after its code is fixed and adds `may_return` to `--json`; `doctor`
+gains warn-only `decisions` and `basis` rows (`_doctor_decision_rows`,
+`_doctor_basis_rows`); `inputs` shows each input's proposer and looked-up basis
+(`_input_bases`); `status`'s packs line names up to eight packs, then how many more
+(`_names`).
+
+**The detached live server** (`site serve --detach`, `--stop`; the acceptance run after
+phase 3b). `--detach` (`_serve_detach`) starts
+`python -m nopekit site serve --detached-server` as a process of its own —
+`start_new_session` (no controlling terminal, its own process group), started in
+nopekit's own directory, stdin `/dev/null`, stdout and stderr appended to
+`SERVE_LOG_REL`, no other descriptor — waits until it records its address (`SERVE_DETACH_WAIT_S`), prints `site.SERVE_READY_LINE` and
+exits 0; never a browser. What slipped through: the agent ran `site serve --watch` as a
+background task, which there lives at most two hours, and under `claude -p` a running one
+keeps the turn from ending. The server holds `SERVE_LOCK_REL` (`flock`, exclusive) for
+its life, writes `SERVE_STATE_REL` once bound (so `-p 0` records the port it got), logs
+only failed requests, stops on SIGTERM between requests (`server.shutdown` from a
+thread: a first build in flight finishes), stops by itself within `SERVE_LEASE_S` once
+its record no longer names it, its lock file is another's or the site is gone
+(`_serve_lease`), and removes its record as it stops. A reader (`_serve_state`:
+`site status`, `doctor`'s `site` row, a second `--detach`) probes the lock without
+taking it for more than an instant and never creates the file: `running` needs the lock held AND
+a live pid in the record that leads its own session (`_session_leader`), so a record
+whose server died — its pid since given to another process — reads `stale` (whatever
+machine it names: a container's host name changes at every start), and `--stop`
+(`_serve_stop`: SIGTERM, then SIGKILL after `SERVE_STOP_WAIT_S`) never signals it. A
+second `--detach` prints the running URL and starts nothing; off POSIX both flags refuse
+with `SERVE_DETACH_UNSUPPORTED`. Here and not in `site.py`: fdm-print's and cad-solid's
+gates import `nopekit.site`, so a code edit there re-keys their verdicts in every
+project.
+```python
+SERVE_DETACH_WAIT_S = 30.0; SERVE_STOP_WAIT_S = 15.0; SERVE_LEASE_S = 2.0
+SERVE_STATE_REL = ".nopekit/out/serve.json"; SERVE_LOCK_REL = ".nopekit/out/serve.lock"
+SERVE_LOG_REL = ".nopekit/out/serve.log"; SERVE_LOCK_WAIT_S = 1.0
+SERVE_DETACH_UNSUPPORTED: str                # the one sentence off POSIX
+class Served(NamedTuple): state; pid; url; watch; started; node   # none | running | starting |
+                                             #   stale | elsewhere | unsupported
+def _serve_state(root) -> Served             # read-only
+def _serve_lock_held(root) -> bool | None    # a shared, non-blocking flock probe
+def _session_leader(pid) -> bool             # os.getsid(pid) == pid; True when not told
+def _hold_serve_lock(root, *, wait_s=SERVE_LOCK_WAIT_S) -> int | None   # the server's own
+def _write_serve_state(root, *, pid, host, port, url, watch, started) -> None
+def _clear_serve_state(root, pid) -> bool    # only the record naming pid (None: any)
+def _serve_lease(root, pid, lock_fd) -> bool
+def _serve_detach(root, args) -> int
+def _serve_stop(root, args) -> int
+```
 
 **Records at the edge** (checkpoint 1.3, spec §3.15). A record is a file, and a
 command writes exactly the one record it was asked to write — never the whole
@@ -3123,16 +4139,19 @@ def _entry_edit(root) -> str        # '"model_entry" in .nopekit/project.json' (
 def _param_views(root, ledger, model, model_error, *, read_sets=None) -> list[modelio.ParamView]
     # param_view, plus — when the model does not load — a bare view (no value, model_error
     # set) for each name modelio.static_param_prose finds in the model's TEXT and no record holds
-def _shown_params(root, ledger, model, model_error, resolution, registry) -> list[modelio.ParamView]
+def _shown_params(root, ledger, model, model_error, resolution, registry, *,
+                  projection=None) -> list[modelio.ParamView]
     # _param_views with gates from the resolution's read sets (registered gates only): what
-    # status, report, site build, the page-staleness judgement and doctor show and judge
+    # status, report, site build, the page-staleness judgement and doctor show and judge;
+    # read_by and sourced_from from graph.observe (projection: the derived names a read
+    # of the whole ctx.params reads)
 def _registered_reads(read_sets, registry) -> dict   # read sets of the registered gates only
-def _grounding(ledger, views) -> dict[str, list[str]]
-    # {param or claim: [artifact ids]}: extractions, then records' grounded_by
-    # (artifacts.grounding), then PARAMS' grounded_by — derived on every read
-def _why_text(root, ledger, registry, model, model_error, view, resolution, name) -> str
-    # decisions.why with view=_param_views (grounded_by from _grounding),
-    # coverage=claims.effective_gates, read_sets=verdicts.last_read_sets, verdicts=resolved
+def _why_text(root, ledger, registry, model, model_error, view, resolution, name, *,
+              projection=None) -> str
+    # decisions.why with view=_param_views (grounded_by from artifacts.value_grounding,
+    # read_by and sourced_from from graph.observe), coverage=claims.effective_gates,
+    # read_sets=verdicts.last_read_sets, verdicts=resolved, graph=graph.of(...)
+    # (phase 3a: read by, sourced from, rests on, resolves, resolved by)
 def _input_bytes(root, artifact, digests) -> dict
     # {"record", "sha256" (now), "pinned", "drift", "exists"} — the index's input-row rule
 ```
@@ -3441,6 +4460,8 @@ each `ok` when there is nothing to say — a clean project shows that it looked:
 | `env-reads` | warn | the static env-read detector (spec §3.17): an AST scan of every registered gate's closure files for `os.environ`, `os.getenv`, `os.putenv` (and the bytes twins), through any alias of `os` or a `from os import`. rho never keys a variable (§8): a read inside a window is named opaque (`env:<NAME>`) and costs a re-run on every check, and a module-level read made at import, before any window, is seen by nothing else |
 | `memos` | warn | the static memo detector: an AST scan of every registered gate's closure files for a module-global memo `modelio.clear_caches` cannot empty — a module-level container (a `{}`, `dict()`, `defaultdict` and the like) written into from a function body that does not bind the name itself, a module global a function rebinds under `global`, a mutable default argument its function writes into. The first gate to fill one opens the file; every later one opens nothing, and no entry keys it (review round 2) |
 | `dynamic-imports` | warn | the static dynamic-import detector (`modelio.dynamic_imports`): an AST scan of every registered gate's closure files and of its owner's `selftest/*.py` (the fixtures and the known-good module its control runs) for `importlib.import_module(...)` or `__import__(...)` whose module a VALUE names. Only the run that first loads such a module in a process keys its source; a later one is served it from `sys.modules` and keys nothing. A literal name is resolved into the code closure and is not named (admission review, round 2, c) |
+| `requirements` | FAIL / warn | architecture phase 1: a claim naming a requirement no file holds, or a requirement id that is also a claim's (FAIL, as a milestone requiring a missing claim is); else a requirement no claim serves (warn: it reads Gap) |
+| `mechanisms` | warn | architecture phase 1: an evaluator a claim's mechanism names that is not registered here, or does not cover that claim (`claims.mechanism_problems`). Never a FAIL: a cross-check is not an integrity fault, and it moves no status |
 | `sealed-fixtures` | FAIL | invariant 5 at runtime: every pack control run against this project's params through `packs.seal_findings`, into a temp `out_dir`; a control that reads its host is named with the paths it read |
 
 The four static detectors measured zero hits on the 54 bundled gates before they landed
@@ -3838,7 +4859,324 @@ sections above.
   never glue to a word (`report._REPRODUCE_COLUMN`); `doctor` resolves a generator
   bound any way at module level (`cli._bound_at_module`).
 
+## What phase 1 of the architecture moved
+
+Claims say how they settle (`docs/SPEC.md` §7 step 1: decisions 12, 13, 37's paths, the
+vocabulary of §0.9, METHOD's three edits). The spine digest moved (models, verdicts);
+every entry re-keys once, and the bracket's committed cache was regenerated with it.
+
+- **The mechanism** (`"mechanism": {"by", "how", "evaluators"}` in a claim file,
+  `models.CLAIM_MECHANISM`): `by` is the terminal, held to `TERMINALS_BY_KIND` as
+  `terminal` was; `how` is the older `note`; `evaluators` a cross-check that warns in
+  `check` and `doctor` and never covers. The older keys still read; one member under
+  both names is refused; the writer writes the new form. In memory the claim stays
+  flat, so `claims.claim_digest` — the seal under every recorded physical pass and
+  judgment — keeps its value for an unchanged claim in either spelling.
+- **Requirements** (`requirements/<id>.json`, `Requirement`): the person's words and
+  where they came from; claims point at them with `requirements`. A requirement's
+  status is the worst of its claims (`claims.requirement_statuses`), Gap with none,
+  shown in `status`, `why`, the report's `## Requirements`, the JSON summaries and
+  `state.json`; *ready* never reads it.
+- **`gap`** lists every claim whose mechanism has yet to run, physical and assumption
+  claims included, and `--propose` searches with the `how` text.
+- **Words.** Failing's hint and a control handed the live design say *the current
+  design* (GLOSSARY §1: a *candidate* is an alternative design with a disposition);
+  the three strings that named `"note"` name `"mechanism": {"how": …}`; a C5 with its
+  test written down no longer reads `; no test written down`.
+
+## What phase 2 of the architecture moved
+
+Decisions keep their losers (`docs/SPEC.md` §7 step 2: decisions 14, 22, 25, 38). The
+spine digest moved (models, gates, verdicts); every entry re-keys once, and the
+bracket's committed cache was regenerated with it. Nothing here moves a status, a
+qualification, a rho or `check`'s exit code.
+
+- **Typed rejections** (`Rejection(Rejected)`, `decisions/` only): `type`, `by`,
+  `returns_if` (`ReturnCondition`) and `input`, held by the strict reader
+  (`store.rejection_problem`) and by `write_record` before a decision is written; a
+  legacy entry reads untyped; PARAMS and `params/` keep text `Rejected`.
+- **Return conditions** are evaluated by one function (`claims.return_state`), only on
+  a claim reading Checked; `check` prints *may return* lines after its code is fixed,
+  and its JSON gains `may_return`; `summarise()["rejections"]` carries every row.
+- **Preferences** (`preferences/<decision>.json`, `PreferenceRecord`): the third
+  sealed kind, through `append_sealed`'s list writer (extracted from the exports
+  branch, unchanged for exports); `Decision.preferences` in memory, hidden from every
+  gate (out of the digest by `verdicts._IN_MEMORY_FIELDS["decisions"]`, off the
+  gate's copy by `verdicts._HIDDEN_FROM_THE_COPY`); `claims.preference_state` judges
+  one; `nopekit prefer` is the channel (invariant 13).
+- **Basis** (`GateSpec.basis`, `pack.json` `basis`, `PACK_BASIS`): shown in `gate
+  list`, `gate show`, the report and `state.json`; never in rho
+  (`verdicts.SPEC_FIELDS_IN_RHO` unchanged). The bundled gate files with an override
+  re-key once in every project.
+- **Proposers** (`provides_proposers`, `proposers/`, `InputArtifact.proposer`,
+  `nopekit propose`, `ingest --proposer`): scripts, never imported, never registered.
+- **`why <decision>`** shows a decision and every loser's facts line; the refusal
+  "is a decision id" is gone.
+
+## What phase 3a of the architecture moved
+
+The graph and the round record (`docs/SPEC.md` §7 step 3a: decisions 18 and 19). The
+spine digest moved (models: `Claim.resolves`, `FORBIDDEN_KEYS`; modelio: `ParamView`'s
+two fields; verdicts: `design_of`, `_ABSENT_WHEN_EMPTY`); every entry re-keys once, and
+the bracket's committed cache was regenerated with it. Article hashes are unchanged
+(`design_of` is `article_of`'s body). Nothing here moves a status, a qualification, a
+rho or `check`'s exit code, and `check` writes no new path.
+
+- **`graph.py`** builds the typed graph and its tokens; **`rounds.py`** the round
+  record. Neither is a spine module; only `cli` imports `rounds`.
+- **`nopekit round`** — a tier-0 check, the site, the round record, one paragraph,
+  exit 0. No hook and no commit yet (phase 6 of the sequence).
+- **`Claim.resolves`** (physical claims; strict reader) and an assumption's id in
+  `params/<name>.json` `grounded_by` (the value IS the assumption), both pointers the
+  index and `doctor` check (`store.pointer_problems`).
+- **The observed view** (`ParamView.read_by`, `sourced_from`, filled by
+  `graph.observe`) in `last_check.json`, `state.json` and `why`. `status` and the
+  report carry the view for the undefended rule only, and print neither field.
+- **`why`** says what reads a value and what sources it, what a claim rests on,
+  resolves or is resolved by, and resolves a derived value an evaluator read by name.
+- **`cli._grounding`** moved to `artifacts.value_grounding` (the graph cannot import
+  the CLI); `claims.outcome_key` and `report.status_token_word` are new public names.
+
+## What phase 5 of the architecture moved
+
+The site (`docs/SPEC.md` §7 step 5: decisions 17 and 28 to 36). The spine digest moved
+(models: `Group`, `GROUP_KINDS`, `Ledger.groups`, `FORBIDDEN_KEYS["Group"]`; verdicts:
+`_LEDGER_HIDDEN` gains `groups`); every entry re-keys once, and the bracket's committed
+cache was regenerated with it (its round record reads round 2). Nothing here moves a
+status, a qualification, a rho or `check`'s exit code.
+
+- **`groups/<id>.json`** (`store.GROUP_ID`, `_check_group`, `group_problems`,
+  `groups_in_order`): boards, zones and stations, hidden from every gate.
+- **`page.py`** bakes `map.json` and `page.json`; **`prose.py`** reads the agent's text
+  and scans it. Neither is a spine module.
+- **`site.py`**: `state.json` is clock-free (`ages` and `write_build_json` hold the
+  clock in the ignored `build.json`); `judgement_digest`/`judgement_moved` are
+  `resolution_digest`/`resolution_moved`; `build` refuses a page `page.status_problems`
+  names, copies evidence, writes tracked files only when their bytes differ;
+  `technical.html` is a shell.
+- **`claims.worst_of`** (a requirement's fold, now a board's too), **`graph.upward`**,
+  **`util.write_json_if_changed`**, and `report._verdict_sentence`/`limits_line`'s
+  `register="site"` with `HUMAN["site"]`.
+- **Commands**: `site stamp`, `site badge`, `site serve --watch`, `site build --live`;
+  `init` writes the README's badge block; `doctor` gains `groups`, `site text` and
+  `readme`; `why` resolves a group and names a claim's board; a site is present only
+  with `site/index.html` (`site.scaffolded`).
+
+## What phase 6 of the architecture moved
+
+Rounds and the plugin (SPEC decision 24 with §0.3, decision 37, the interview half of
+decision 21). `.nopekit/project.json` gains `people` (`models.Person`, read by
+`store.people_problem`); `vcs.py` gains its writing half (`init_repo`, `add`, `commit`,
+and the reads `changed_paths`, `staged_paths`, `operation`) under a contract of its
+own; `rounds.py` decides which paths a round stages and whose identity may commit them
+(`ROUND_DIRS`, `ROUND_NOPEKIT`, `ROUND_ROOT_FILES`, `ROUND_MAX_BYTES`, `stage_plan`,
+`listed`; the closed list went in the follow-up after the acceptance run, below);
+`round` gains `--commit` and `--hook` (`_round_run`, `_round_commit`,
+`_round_hook`, and the trace's seam `_round_start_trace`); `init` lists the person and
+starts a repository; `doctor` gains a `people` row; `packs skills` prints the live
+packs' PACK.md and skill files (`packs.skill_files`; `pack validate` refuses a
+`skills/<name>/` with no SKILL.md). The plugin ships `hooks/hooks.json`, a Stop hook
+running `round --hook` through `hooks/stop.py` (the session's cwd kept off the import
+path). `state.json`'s `meta` never carries `people` (`site._UNPUBLISHED_META`): the
+page is published. Invariant 8 gained the round's commit
+(`test_round.TheRoundCommitStagesOnlyTheProjectsPaths`), the identity it commits under
+(`test_round.RoundsCommitOnlyAsAListedPerson`) and the repository `init` starts
+(`test_record_commands.InitStartsARepository`). Its review added
+`vcs.committer_ident` and `vcs.in_repository`, `cli._round_ignored`, and the root
+ignore block's `/.vscode/launch.json`.
+
+## What phase 3b of the architecture moved
+
+The trace and amber (`docs/SPEC.md` §7 step 3b, decision 39), and the map's middle.
+No spine module moved, so no verdict re-keys. The bracket gains a `section` station, a
+committed trace and amber file, and round 3. Merged after phase 6, `round` starts the
+trace from phase 6's seam (`cli._round_start_trace`, after the commit and outside the
+lock, its words `report.round_trace_sentence`), and the bracket's round record was
+regenerated at the merge (round 5).
+
+- **`derivation.py`** (new): the key, the moves, the strict readers, the order
+  (`after_order`), the subprocess worker and its audit, the run, amber, the background
+  start.
+- **`graph.py`**: schema 2, the `after` edge type, `trace: {key, round}`, `upstream`,
+  `direct_derives`, `depths`, `ties_of`, `moves`, `moved_by`; the trace's unmoved values
+  are value nodes, so `why` can say they were not seen to move.
+- **`rounds.py`**: `MOVED` gains `trace`, `KEYS` gains `amber`.
+- **`page.py`**: map schema 2 (`MAP_SCHEMA`), feeds, taps, layers, ranks, sources, amber
+  marks; `status_problems` holds amber and feeds. **`site.py`**: `state.json` gains
+  `trace` and `amber` (inside its resolution digest); `build.json` gains `tracing`.
+- **Commands**: `model trace`; `round` starts it in the background; `status`, `why`,
+  `report`, `doctor` and `site build` say what the trace observed and amber.
+- **In its review** (`HARNESS` 2, the bracket's trace re-recorded): the key holds the
+  data the base build read (`keyed_on.data`), and `trace_for` serves a trace only while
+  those files hold the same bytes; the reader's code walk skips what a snapshot skips;
+  an integer moves toward zero and away by its own size, said at that size (`change`,
+  `step_word`); two equal numbers are no move; a file, a mesh and an array compare by
+  their bytes (`_content`); a move under `FAINT` does not count toward the order; a
+  scratch row is written only for a pair whose raises were confirmed alone and that
+  wrote nothing into the project, and carries its full key and, for amber, the subjects
+  it ran against; a worker watches every thread; an amber run carries the claim's
+  acceptance, and a flip the composition decided is said against it; the reason amber
+  is not current is read off the closest file. The map bakes `unmoved`, a zone's
+  `unmeasured` choices (idle only when every one was measured), a line's `sets` (an
+  assumption's springs) and `unseen`, the `unrecorded` source, a scalar station head
+  and units an evaluator reported.
+
+## What the follow-up after the acceptance run moved
+
+A sandboxed agent used the plugin for a person's request (`docs/SPEC.md` §8, "Follow-up
+after the acceptance run"). No spine module moved, and `site.py`'s code did not either
+(fdm-print's and cad-solid's gates import it), so no verdict re-keys.
+
+- **`rounds.py`**: a round stages every file git does not ignore inside the project's
+  directory (`stage_plan`), naming instead a directory, a file over `ROUND_MAX_BYTES` and
+  a name in `ROUND_SECRET_NAMES` (`secret_name`); `ROUND_DIRS`, `ROUND_NOPEKIT`,
+  `ROUND_ROOT_FILES` and `in_round_paths` are gone, and `StagePlan` is `staged`,
+  `not_files`, `too_large`, `secret`. **`report.py`**: the paragraph's and the commit
+  body's words for each, and `commit_parts`' `files` for a directory nopekit does not
+  name. **`cli.py`**: `CommitOutcome` and `round --json`'s `commit` carry `not_files`
+  and `secret` where they carried `outside`.
+- **`cli.py`**: `site serve --detach` and `--stop` (`_serve_detach`, `_serve_stop`, the
+  server's lock, record, log and lease); `site status` gains a `live:` line and `--json`
+  a `server` object; `doctor`'s `site` row names a running server.
+
 ## Limits: what the spine cannot see, named
+
+- **`people` guards against surprise, not against the agent (architecture phase 6).**
+  It is a key of `.nopekit/project.json`, which the agent edits like every record: it
+  stops a round committing under an identity the project never named (a CI runner, a
+  colleague's checkout, an unset or invented identity), and the skill tells the agent
+  to change it only when the person asks, with the name and email they give.
+- **A round's commit carries the person's identity though the agent made the change.**
+  Nothing reads commit authorship as a person's act: results, owners, judgments and
+  preferences take `vcs.ident` at the moment of the act, typed in the person's own
+  shell (invariant 11), never a commit's author.
+- **A commit hook that runs a nopekit command in the project meets the build lock the
+  round holds**, and fails; git's refusal is quoted and the round's files are left
+  staged. Releasing the lock before the commit was rejected: a writer could land
+  between the staging and the commit.
+- **gpg signing that waits for a pinentry runs into `vcs.VCS_WRITE_TIMEOUT_S`**, and
+  the round reads "did not finish"; the Stop hook has no terminal to ask from.
+- **A project directory its outer repository ignores reads "nothing to commit"**: git
+  lists no change there, and a round cannot tell that from a round that moved nothing.
+- **`changed_paths` sees what git sees, and the project's ignore files decide.** A file
+  git ignores is never staged and never named; one it does not ignore is committed at
+  the next turn's end — an environment (`.venv/`, `node_modules/`), downloads or scratch
+  the agent left unignored among them (`init`'s blocks name none of them; the skill tells
+  the agent to ignore them). The cap and the names are the only other guards.
+- **A secret is known by its name, never by its content.** A credential in a file named
+  otherwise (`config.yaml`, a CSV) is committed like any file; a design file whose name
+  matches (`secret-sauce.md`, a Keynote `.key`) is named, never staged, and the person
+  commits it by hand.
+- **A file listed and gone before the round stages it fails the whole `git add`**
+  (git refuses a pathspec that matches nothing, and the round reads "did not stage"): a
+  process outside nopekit writing temporary files in the project at a turn's end is the
+  one source, since every nopekit writer takes the build lock the round holds.
+- **The detached server's witness is `flock`.** On a network filesystem whose `flock`
+  is emulated or absent the probe cannot tell, and a server on another machine reads
+  `elsewhere` from its record alone. `--stop` signals the server's pid alone, so a
+  `site build` its watch had started finishes as an orphan.
+
+- **The trace sees one point at ±10% (architecture phase 3b).** A nonlinear model is
+  seen locally only: a `max()` hides a dependence there (the bracket's
+  `thickness -> bbox_max`). Not seen to move never means independent. `after` is
+  inferred: the two-mover floor drops single-mover evidence, and values the same
+  choices move tie and cannot be ordered; two values that share their inputs without
+  one feeding the other are ordered too (the bracket's slenderness before its bounding
+  box), so the map draws a stop the order puts before a claim's reads faded, and the
+  phone list names it apart. A move under 0.1% (`FAINT`) draws its edge and does not
+  count toward the order. Choices outside `Config`, and yes/no and word choices, are not
+  moved; a structure is compared by digest; a file a value names and a mesh or array are
+  compared by their bytes, any other object by its type. The key holds the files the
+  base build opened to read through Python (`_data_read`): a C extension's read, an
+  environment variable and the network are not in it. Writes by a C extension or a
+  subprocess of the build are not audited (a worker watches every thread of its own
+  process).
+  Amber's currency leaves out the spine digest, and a tool missing on one machine makes
+  amber unclear there, so two machines can write different amber files for one design
+  (an add/add conflict, resolved by keeping either); two people tracing one design at
+  different rounds conflict on its `round`. A snapshot leaves out `.git`, `out/`,
+  `site/`, `.nopekit/{out,obs,cache,trace}`, bytecode and environments. A background
+  trace outlives the agent's turn; its lock is pid-checked.
+
+- **The site's number scan is a floor, not a proof (architecture phase 5).** It is
+  sign-insensitive (prose says "40% past the limit" over a margin of −0.3994); blind to
+  number words, unit conversions and code spans; and small integers match counts. A
+  stamp guards age, never correctness, and qualitative prose ("the arm is stiff") is
+  never scanned: the floor sits under the prose so a reader sees the data beside it.
+- **Evidence over 2 MiB is not copied to the page**, and a viewgen that writes a clock
+  into its asset breaks the page's byte stability: every build then rewrites it.
+- **The watcher polls size and mtime over a fixed set of directories**
+  (`site.WATCH_DIRS`): an edit outside them, or one that keeps both, is not seen until
+  the next build.
+- **Zone and station members are judged by doctor and the build, never by the index**:
+  whether a name is a choice or a derived value needs the model.
+- **A forger who reseals a page and keeps its tokens can still change its words.**
+  `page.status_problems` compares tokens, *ready*, steps and marks with the
+  resolution; a word, a hint or a value text edited by hand and resealed reads
+  current until the next build writes it again.
+
+- **A resealed round record reads as no hand edit (architecture phase 3a).** Its
+  self-digest is tamper evidence against a hand edit, not a lock: anyone who can write
+  the file can recompute it. Resealed, a forged token still reads behind the records,
+  naming the resolution (what it holds is not what `round` would write now); one
+  resealed with a greater `schema` reads `newer` and is neither compared nor rewritten.
+  Nothing reads it for truth — every status is the resolver's — so a forgery changes
+  what `git log -p` shows about a past round, never what any command decides now.
+- **The round record is machine-independent only where the resolution is.** A missing
+  tool (an evaluator Skipped here and not there), a remembered crash in the ignored
+  cache, and an input's basis looked up over the user's packs each move its tokens by
+  machine. They are shown, never normalised away (invariants 1 and 2).
+- **A Stale evaluator's `reads` edges come from the entry the resolver stands on** —
+  what it read last time, not what it would read now.
+- **Instruction nodes inherit the code closure's known misses** (SPEC decision 11): a
+  sibling loaded by `spec_from_file_location` and imported lazily (PETGasus's
+  `topopt.py`) is no node, and a file `build()` reads is none.
+- **`rests_on` is a direct read until the trace (phase 3b).** C1 rests on C6 because
+  `bracket.deflection` read `load_n`; a claim whose evaluator reads a derived value
+  computed from an assumption-sourced choice rests on nothing until `derives` edges
+  exist.
+- **"Behind" sees inputs, not nopekit.** An upgrade that changes a composition moves
+  no digest the record holds, so the record reads current until `round` writes it
+  again; `TheCommittedRoundRecordIsCurrent` is what catches it for the bracket.
+- **`gates` and `read_by` can differ.** `ParamView.gates` follows the last executed
+  run (`obs/`), `read_by` the entry the resolution stands on; after a fresh clone the
+  first is empty and the second is not.
+
+- **A re-sealed preference is a forgery the seal does not catch (architecture phase
+  2),** as a results file's (below): `preferences/<id>.json` is sealed and chained
+  with a plain sha256, and a process that recomputes it, calls `store.append_sealed`
+  in process, or opens a pty with the agent markers unset mints a person's preference.
+  P3's permission rule is the lock.
+- **`ingest --proposer` is the agent's word (architecture phase 2).** It records which
+  proposer produced a file the agent ran by hand; nothing ran it, so the basis it
+  shows can be claimed for a file no proposer wrote. Display only: a basis moves no
+  status.
+- **`propose`'s guard is a stat of the project (architecture phase 2).** A proposer
+  that writes outside `$NOPEKIT_PROPOSAL_DIR` is refused, each moved path named, when
+  any file in the project but its ignored outputs and scratch (`cli._project_files`:
+  `.git/`, `.nopekit/out/`, `cache/`, `obs/`, the index, `/out/`, `/REPORT.md`,
+  bytecode) changes size or mtime, appears or goes — records, `model/`, `gates/`,
+  evidence bytes and the verdict cache included. Detected, never undone. A write
+  outside the project, into the ignored scratch, or one that puts a file's size and
+  mtime back is not seen. (Review of phase 2: the guard was the records digest, and a
+  proposer that edited `model/` was ingested silently.)
+- **A basis is declared, never verified (architecture phase 2).** `sourced` says the
+  logic follows a cited source; nothing reads the citation. Review reads it.
+- **A `value` or `limit` return condition reads the claim as it is now (architecture
+  phase 2).** It has no units of its own: an acceptance condition restated in other
+  units changes what it compares, silently but visibly (`why` prints the units).
+
+- **A mechanism's `how` is words, and nothing checks it (architecture phase 1).** It
+  says what would settle a claim, and for a physical claim it is the written test a
+  pass needs; nothing reads it for sense, so "looks fine" is a test as far as the spine
+  can tell. Review reads it.
+- **A mechanism's `evaluators` is a cross-check (architecture phase 1).** Coverage
+  stays the registry's id-or-tag rule, so a broad tag still files an adjacent evaluator
+  under a claim whatever its mechanism names; the list only warns about the evaluators
+  it names.
+- **A requirement's words are the person's only as the agent wrote them (architecture
+  phase 1).** Nothing records that the person said them until the interview (phase 6);
+  a `source` of `"interview"` is the agent's word.
 
 - **Ready on `status` and the page is as last evaluated (P2.5b).** It reads the
   verdict cache, which the inner loop never re-executes and can be forged (below);

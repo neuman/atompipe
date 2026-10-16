@@ -3,11 +3,13 @@
 add before recording a physical result — and the one reader every channel check
 goes through.
 
-* :func:`project` — a migrated bracket copy whose C5 has a written test (a
-  ``note``) and an evidence file (``photos/c5-root.jpg``), optionally with the
-  planted claims the tests name: C8 (an expert-judgment claim, its authority the
-  test identity), C9 (a second physical claim with a note), C10-C14 as V-14
-  places them. Neutral names only (``tests/test_packs.py`` FORBIDDEN).
+* :func:`project` — a migrated bracket copy whose C5 has a written test (its
+  ``mechanism.how``) and an evidence file (``photos/c5-root.jpg``), optionally
+  with the planted claims the tests name: C8 (an expert-judgment claim, its
+  authority the test identity), C9 (a second physical claim with a note),
+  C10-C14 as V-14 places them. C8 and C9 keep the older ``terminal`` and
+  ``note`` keys on purpose, so the older spelling stays exercised (SPEC decision
+  13: both still read). Neutral names only (``tests/test_packs.py`` FORBIDDEN).
 * :func:`channels` — one claim's status token and cause as every channel reads it:
   ``status --json``, ``check --json`` (its BLOCKING list and exit code),
   ``report --json``, ``claim show --json``, ``claim list --json``, the JUnit
@@ -86,9 +88,12 @@ def edit_claim(root: str, cid: str, **changes: Any) -> None:
 
 def project(dest: str, *, planted: tuple[str, ...] = (), thickness: float | None = None,
             git: bool = False) -> str:
-    """The migrated bracket at ``dest`` with C5's note and evidence, and ``planted``."""
+    """The migrated bracket at ``dest`` with C5's test and evidence, and ``planted``."""
     root = _projects.bracket_copy(dest, migrated=True, thickness=thickness)
-    edit_claim(root, "C5", note=C5_NOTE)
+    # C5's file holds its mechanism (`how`) since architecture phase 1, so the
+    # test is written there: a `note` beside it would be refused (one home per
+    # member).
+    edit_claim(root, "C5", mechanism={"how": C5_NOTE})
     os.makedirs(os.path.join(root, "photos"), exist_ok=True)
     with open(os.path.join(root, EVIDENCE), "wb") as fh:
         fh.write(b"\xff\xd8 a photo of the root after two winters \xff\xd9")
@@ -200,7 +205,7 @@ def channels(root: str, cid: str, *, site: bool = True) -> dict[str, Any]:
     out["status.text"] = text
     out["report.text"] = run(root, "report", code=0).stdout
     if site:
-        if not os.path.isdir(os.path.join(root, "site")):
+        if not os.path.isfile(os.path.join(root, "site", "index.html")):
             run(root, "site", "init", code=0)
         run(root, "site", "build", code=0)
         state = read_json(os.path.join(root, "site", "data", "state.json"))

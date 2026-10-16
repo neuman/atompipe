@@ -165,6 +165,9 @@ class InitIsBornMigrated(_env.EnvCase):
         for rel in (".gitignore", ".gitattributes", ".nopekit/.gitignore"):
             with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as fh:
                 self.assertIn("# nopekit:begin", fh.read(), rel)
+        # SPEC 36: the README, with the Made-with-nopekit block at its bottom.
+        with open(os.path.join(root, "README.md"), encoding="utf-8") as fh:
+            self.assertTrue(fh.read().endswith(store.README_BADGE_BLOCK))
 
         with open(os.path.join(dot, "project.json"), "rb") as fh:
             project = fh.read()
@@ -201,6 +204,115 @@ class InitIsBornMigrated(_env.EnvCase):
         self.assertEqual(data["project"], ".nopekit/project.json")
         self.assertTrue(os.path.isfile(os.path.join(root, *data["project"].split("/"))))
         self.assertNotIn("ledger", data, "init --json named a ledger it does not write")
+
+
+def _bytes(path: str) -> bytes:
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+class InitStartsARepository(_env.EnvCase):
+    """Architecture phase 6: a first session must not stall on git. `init` starts
+    a repository when the project sits in none and says so, lists the person
+    from git's identity in `people`, and inside an existing repository changes
+    nothing about git."""
+
+    IDENT = f"{_env.IDENTITY['GIT_AUTHOR_NAME']} <{_env.IDENTITY['GIT_AUTHOR_EMAIL']}>"
+
+    def _init(self, root: str, *extra: str, identity: bool = True):
+        proc = _env.nopekit(["init", "--name", "fresh", "-C", root, *extra], cwd=self.tmp(),
+                            identity=identity)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return proc
+
+    def _people(self, root: str) -> list:
+        with open(os.path.join(root, ".nopekit", "project.json"), encoding="utf-8") as fh:
+            return json.load(fh)["people"]
+
+    def test_outside_a_repository_it_starts_one(self):
+        root = os.path.join(self.tmp(), "fresh")
+        proc = self._init(root)
+        self.assertTrue(os.path.isdir(os.path.join(root, ".git")))
+        self.assertIn(".git/", proc.stdout)
+        self.assertIn("a new git repository: each round commits here", proc.stdout)
+        self.assertIn(f"people: {self.IDENT} — a round commits only as a person listed in "
+                      f".nopekit/project.json", proc.stdout)
+        self.assertEqual(self._people(root), [{"name": _env.IDENTITY["GIT_AUTHOR_NAME"],
+                                               "email": _env.IDENTITY["GIT_AUTHOR_EMAIL"]}])
+        self.assertEqual(_env.git(["status", "--porcelain"], cwd=root).returncode, 0)
+
+    def test_inside_a_repository_nothing_about_git_changes(self):
+        repo = self.tmp()
+        self.assertEqual(_env.git(["init", "-q"], cwd=repo).returncode, 0)
+        git_dir = os.path.join(repo, ".git")
+        before = {name: _bytes(os.path.join(git_dir, name)) for name in ("config", "HEAD")}
+        root = os.path.join(repo, "sub", "fresh")
+        proc = self._init(root)
+        self.assertFalse(os.path.exists(os.path.join(root, ".git")), "a nested repository")
+        self.assertEqual({name: _bytes(os.path.join(git_dir, name)) for name in before},
+                         before)
+        self.assertNotIn(".git/", proc.stdout)
+        self.assertNotIn("git: no repository", proc.stdout)
+        self.assertEqual(_env.git(["diff", "--cached", "--name-only"], cwd=repo).stdout, "")
+
+    def test_git_that_does_not_answer_starts_none(self):
+        """Review of phase 6: `is_repo` reads every failure as "no repository",
+        so under git's "dubious ownership" refusal (WSL's /mnt/c, a shared
+        drive, a container volume) `init` nested a repository inside one."""
+        repo = self.tmp()
+        self.assertEqual(_env.git(["init", "-q"], cwd=repo).returncode, 0)
+        root = os.path.join(repo, "sub", "fresh")
+        proc = _env.nopekit(["init", "--name", "fresh", "-C", root], cwd=self.tmp(),
+                            identity=True, env={"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"})
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(root, ".git")), "a nested repository")
+        self.assertNotIn("a new git repository", proc.stdout)
+        self.assertIn("git: no repository started (git did not answer: ", proc.stdout)
+        self.assertEqual(_env.git(["rev-parse", "--show-toplevel"], cwd=root).stdout.strip(),
+                         os.path.realpath(repo))
+
+    def test_an_identity_the_reader_refuses_is_not_listed(self):
+        """Review of phase 6: git takes `user.email = "a b@x.org"`; `init` listed
+        it, and every later command refused the project.json init wrote."""
+        root = os.path.join(self.tmp(), "fresh")
+        spaced = {"GIT_AUTHOR_EMAIL": "a b@x.org", "GIT_COMMITTER_EMAIL": "a b@x.org"}
+        proc = _env.nopekit(["init", "--name", "fresh", "-C", root], cwd=self.tmp(),
+                            identity=True, env=spaced)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(self._people(root), [])
+        self.assertIn("people: none — git's identity: people[0].email must be", proc.stdout)
+        status = _env.nopekit(["status"], cwd=root, identity=True, env=spaced)
+        self.assertNotIn("error:", status.stdout + status.stderr)
+        self.assertIn(status.returncode, (0, 1), status.stdout + status.stderr)
+
+    def test_no_git_starts_none(self):
+        root = os.path.join(self.tmp(), "fresh")
+        proc = self._init(root, "--no-git")
+        self.assertFalse(os.path.exists(os.path.join(root, ".git")))
+        self.assertIn("git: no repository started (--no-git)", proc.stdout)
+
+    def test_no_identity_lists_no_one_and_says_so(self):
+        root = os.path.join(self.tmp(), "fresh")
+        proc = self._init(root, identity=False)
+        self.assertEqual(self._people(root), [])
+        self.assertIn("people: none — git has no user.name and user.email here", proc.stdout)
+
+    def test_json_carries_git_and_people(self):
+        root = os.path.join(self.tmp(), "fresh")
+        doc = json.loads(self._init(root, "--json").stdout)
+        self.assertEqual(doc["git"], {"started": True, "inside": False, "why": "",
+                                      "ignored": False})
+        self.assertIsNone(doc["people_refused"])
+        self.assertEqual(doc["meta"]["people"], [{"name": _env.IDENTITY["GIT_AUTHOR_NAME"],
+                                                  "email": _env.IDENTITY["GIT_AUTHOR_EMAIL"]}])
+        self.assertEqual(len(doc["next"]), 4)
+
+    def test_a_refused_init_starts_no_repository(self):
+        root = os.path.join(self.tmp(), "fresh")
+        self._init(root, "--no-git")
+        proc = _env.nopekit(["init", "-C", root], cwd=self.tmp(), identity=True)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertFalse(os.path.exists(os.path.join(root, ".git")))
 
 
 # --------------------------------------------------------------------------- #

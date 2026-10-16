@@ -6,5 +6,6 @@
   "revision": "v0.1",
   "model_entry": "model/bracket.py",
   "packs": [],
-  "spine_version": "0.1.0"
+  "spine_version": "0.1.0",
+  "people": []
 }

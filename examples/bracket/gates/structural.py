@@ -60,6 +60,7 @@ MIN_SLENDERNESS = 5.0         # L/h below which Euler-Bernoulli under-predicts,
 
 @gate(
     id="bracket.deflection",
+    basis="sourced",
     title="Tip deflection under rated load",
     claims=["structural", "stiffness", "deflection"],
     tier=Tier.INSTANT,
@@ -105,6 +106,7 @@ def deflection(ctx: GateContext) -> Verdict:
 
 @gate(
     id="bracket.bending_stress",
+    basis="sourced",
     title="Root bending stress within the design allowable",
     claims=["structural", "strength", "bending-stress"],
     tier=Tier.INSTANT,
@@ -142,6 +144,7 @@ def bending_stress(ctx: GateContext) -> Verdict:
 
 @gate(
     id="bracket.bearing",
+    basis="sourced",
     title="Fastener bearing stress within the design allowable",
     claims=["structural", "fastener", "bearing"],
     tier=Tier.INSTANT,
@@ -174,6 +177,7 @@ def bearing(ctx: GateContext) -> Verdict:
 
 @gate(
     id="bracket.model_validity",
+    basis="sourced",
     title="Beam theory is applicable to this geometry",
     # DELIBERATELY BROAD, and the only gate here that should be. This one does not
     # measure a quantity — it decides whether the other gates' numbers mean anything
@@ -215,6 +219,7 @@ def model_validity(ctx: GateContext) -> Verdict:
 
 @gate(
     id="bracket.bed_fit",
+    basis="model-only",
     title="Part fits the usable build area",
     claims=["manufacturability", "fdm", "bed-fit", "footprint"],
     tier=Tier.INSTANT,
@@ -249,6 +254,7 @@ def bed_fit(ctx: GateContext) -> Verdict:
 
 @gate(
     id="bracket.min_wall",
+    basis="model-only",
     title="Every wall is thick enough to print reliably",
     claims=["manufacturability", "fdm", "wall-thickness", "min-wall"],
     tier=Tier.INSTANT,

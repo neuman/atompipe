@@ -226,7 +226,8 @@ a { color: var(--accent); text-underline-offset: 2px; }
 /* --------------------------------------------------------------------------
  * panels
  * -------------------------------------------------------------------------- */
-.sheet { max-width: 1200px; margin: 0 auto; padding: 0 20px 80px; display: grid; gap: 22px; }
+.sheet { max-width: 1200px; margin: 0 auto; padding: 0 20px 80px; display: grid; gap: 22px;
+  grid-template-columns: minmax(0, 1fr); }
 .panel {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
@@ -562,6 +563,9 @@ text.s0, text.s1, text.s2, text.s3, text.s4, text.s5 { fill: currentColor; strok
   .claim-measure { margin-left: 0; }
   .verdict-age { margin-left: 0; }
   .verdict-line { white-space: normal; flex-basis: 100%; }
+  .verdict-measure { white-space: normal; }
+  .made-with { flex-direction: column; align-items: flex-start; gap: .8rem; }
+  .made-with img { max-width: 100%; height: auto; }
   .show-me { position: static; margin: 0 0 .5em 1.2em; }
   .panel { padding: 14px; }
   .topbar, .headline, .section-nav, .sheet { padding-left: 14px; padding-right: 14px; }
@@ -593,3 +597,7 @@ text.s0, text.s1, text.s2, text.s3, text.s4, text.s5 { fill: currentColor; strok
 .annot-blurb { font-size: .84rem; color: var(--ink-2); }
 .annot-links { display: flex; flex-wrap: wrap; gap: .1em .6em; margin: 0; }
 .annot-links:empty { display: none; }
+
+/* Made with nopekit: the badge and two lines, at the bottom of every site. */
+.made-with { display: flex; gap: 1.5rem; align-items: center; margin-top: 3rem; }
+.made-with img { flex: 0 0 auto; }

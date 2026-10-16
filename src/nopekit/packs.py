@@ -34,16 +34,17 @@ create a cycle at spine import time.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import json
 import os
 import re
 import shutil
 import sys
 import tempfile
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, NamedTuple, Sequence
 
-from .models import GateSpec, KeyCollision, Ledger, Need, PackManifest, Tier
-from .store import NOPEKIT_DIR, PACKS_NAME, find_root
+from .models import BASES, BASIS_UNDECLARED, GateSpec, KeyCollision, Ledger, Need, PackManifest, Tier
+from .store import NOPEKIT_DIR, PACKS_NAME, PROPOSER_ID as _PROPOSER_ID, find_root
 from .util import NopekitError, read_json
 
 if TYPE_CHECKING:                          # annotations only; see the module docstring
@@ -86,6 +87,17 @@ __all__ = [
     "key_scope",
     "key_vocabulary",
     "key_collisions",
+    "PROPOSERS_DIR",
+    "PROPOSER_KEYS",
+    "Proposer",
+    "proposers",
+    "find_proposer",
+    "proposer_basis",
+    "proposer_problems",
+    # architecture phase 6 (SPEC 37): a pack's skills, read, never installed
+    "SKILLS_DIR",
+    "SKILL_NAME",
+    "skill_files",
 ]
 
 
@@ -97,7 +109,18 @@ DOC_NAME = "PACK.md"                 # tier 2
 REFERENCES_DIR = "references"        # tier 3
 GATES_DIR = "gates"
 GENERATORS_DIR = "generators"
+#: A pack's proposers (SPEC 22, 25): scripts run as a subprocess by `nopekit
+#: propose`, each declared in `pack.json`'s `provides_proposers`. Never imported
+#: by the spine and never registered as an evaluator: a proposal settles nothing.
+PROPOSERS_DIR = "proposers"
 SELFTEST_DIR = "selftest"
+#: A pack's skills (SPEC 37): ``skills/<name>/SKILL.md``, one per task the
+#: domain needs. READ by the agent (`nopekit packs skills` prints the live
+#: packs'), never installed as Claude Code skills: an installed skill would be
+#: there in every project on the machine, live pack or not, and a second copy
+#: of the pack's guidance that its PACK.md cannot see.
+SKILLS_DIR = "skills"
+SKILL_NAME = "SKILL.md"
 BASELINE_NAME = "baseline.json"
 """A plausible-good projection every gate in the pack passes, so its negative
 controls can actually be exercised. See docs/PACK_FORMAT.md."""
@@ -319,6 +342,12 @@ def read_manifest(pack_dir: str) -> PackManifest:
     except (ValueError, TypeError) as exc:
         # Almost always max_tier: a string, or an int outside 0..3.
         raise NopekitError(f"{path} has a bad field value: {exc}") from exc
+    # SPEC 38: the pack's default basis, refused here as `max_tier` is — it
+    # reaches every gate module as `PACK_BASIS`, and a malformed one would
+    # otherwise be refused once per gate at registration.
+    if manifest.basis not in ("", *BASES):
+        raise NopekitError(f"{path} has a bad field value: basis {manifest.basis!r} is not "
+                            f"one of established, sourced, model-only")
 
     if not (manifest.name or "").strip():
         raise NopekitError(f"{path} has no `name` — a pack without a name cannot be referenced")
@@ -486,6 +515,28 @@ def pack_doc(name: str, root: str | None = None) -> str:
     return _read_text(path, f"pack {name!r} {DOC_NAME}")
 
 
+def _natural_key(text: str) -> list:
+    return [int(part) if part.isdigit() else part.lower()
+            for part in re.split(r"(\d+)", text)]
+
+
+def skill_files(pack_dir: str) -> list[tuple[str, str]]:
+    """``[(name, path)]`` for each ``skills/<name>/SKILL.md`` the pack holds, in
+    natural order of ``<name>``; ``[]`` with no ``skills/``. A ``skills/<name>/``
+    without a SKILL.md is not listed here (`validate` names it)."""
+    base = os.path.join(pack_dir, SKILLS_DIR)
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return []
+    out = []
+    for name in sorted(names, key=_natural_key):
+        path = os.path.join(base, name, SKILL_NAME)
+        if not name.startswith(".") and os.path.isfile(path):
+            out.append((name, path))
+    return out
+
+
 def references(name: str, root: str | None = None) -> list[str]:
     """Reference names available for tier-3 loading, without loading any of them.
 
@@ -619,6 +670,18 @@ def _default_registry() -> Any:
     return _gates.REGISTRY
 
 
+def _manifest_basis(pack_dir: str) -> str:
+    """``pack.json``'s ``basis`` (SPEC 38), the default for the pack's gates:
+    set on each gate module as ``PACK_BASIS`` before it runs, the ``PACK``
+    precedent. Part of ``load_source_module``'s cache key (an edit re-runs the
+    module), never of the code digest (no verdict re-keys: basis is not in rho).
+    A manifest that does not read gives none here; ``load_gates`` names it."""
+    try:
+        return read_manifest(pack_dir).basis
+    except NopekitError:
+        return ""
+
+
 def _owned_by(spec: GateSpec, pack: str, module_names: set[str]) -> bool:
     """Did this spec come out of pack ``pack``'s gate files?
 
@@ -711,6 +774,7 @@ def _load_dir(name: str, pack_dir: str, registry: Any) -> list[GateSpec]:
     before = [(pool, {spec.id for spec in pool.specs()}) for pool in pools]
 
     module_names: set[str] = set()
+    basis = _manifest_basis(pack_dir)
     sys.path.insert(0, pack_dir)
     try:
         for path in files:
@@ -748,7 +812,8 @@ def _load_dir(name: str, pack_dir: str, registry: Any) -> list[GateSpec]:
                 with _gates.use_registry(registry):
                     _modelio.load_source_module(
                         path, name=mod_name, roots=[pack_dir], registry=registry,
-                        attrs={"PACK": name, "PACK_DIR": pack_dir})
+                        attrs={"PACK": name, "PACK_DIR": pack_dir,
+                               "PACK_BASIS": basis})
             except NopekitError as exc:
                 # The registry rejecting a gate (no negative control) lands here
                 # already phrased for a human; keep the phrasing, add the location.
@@ -1100,6 +1165,19 @@ def validate(pack_dir: str, *, tier: int = Tier.BUILD,
                 f"more damage than the gate list, because it names what a reader will otherwise assume"
             )
 
+    # -- the pack's skills (architecture phase 6, SPEC 37) ---------------- #
+    skills_base = os.path.join(pack_dir, SKILLS_DIR)
+    if os.path.isdir(skills_base):
+        for entry in sorted(os.listdir(skills_base), key=_natural_key):
+            if entry.startswith("."):
+                continue
+            if os.path.isdir(os.path.join(skills_base, entry)) and not os.path.isfile(
+                    os.path.join(skills_base, entry, SKILL_NAME)):
+                problems.append(
+                    f"{SKILLS_DIR}/{entry}/ holds no {SKILL_NAME} — `nopekit packs skills` "
+                    f"prints each skills/<name>/{SKILL_NAME}, and a directory without one "
+                    f"teaches the agent nothing")
+
     if not os.path.isfile(os.path.join(pack_dir, LENSES_NAME)):
         problems.append(
             f"{LENSES_NAME} is missing — a pack ships its domain's adversarial review "
@@ -1299,6 +1377,25 @@ def validate(pack_dir: str, *, tier: int = Tier.BUILD,
                 problems.append(
                     f"{MANIFEST_NAME}: requires_python does not list {mod!r}, needed by gate {spec.id!r}"
                 )
+
+    # SPEC 38: every bundled evaluator says where its verdict's logic comes
+    # from; any other pack's undeclared one shows as undeclared, said here.
+    from .gates import basis_of                # local import: packs stays free
+    bundled = origin_of(pack_dir) == "bundled"
+    for spec in specs:
+        if basis_of(spec) != BASIS_UNDECLARED:
+            continue
+        if bundled:
+            problems.append(
+                f"evaluator {spec.id}: no basis — declare basis= in @gate, or \"basis\" in "
+                f"pack.json, saying where its verdict's logic comes from: established, "
+                f"sourced or model-only")
+        elif notes is not None:
+            notes.append(f"basis undeclared: {spec.id} (shows as undeclared)")
+
+    # SPEC 22, 25: the proposers it declares, checked without importing or
+    # running one.
+    problems.extend(proposer_problems(pack_dir, raw, registered))
 
     # file-based fixtures imply a selftest/ directory
     file_fixtures = [
@@ -2057,7 +2154,7 @@ def _phrase(text: str) -> str:
     return " ".join(w for w in words if w)
 
 
-def score(need: Need, manifest: PackManifest) -> float:
+def score(need: Need, manifest: PackManifest, *, how: str = "") -> float:
     """How well one pack's vocabulary covers one capability gap. 0 = no signal.
 
     An exact phrase hit ("righting moment" appearing verbatim in ``settles``)
@@ -2101,10 +2198,22 @@ def score(need: Need, manifest: PackManifest) -> float:
     total += 2.0 * len(c_tokens & class_tokens)
     total += 1.0 * len(c_tokens & settles_tokens)
 
+    # The mechanism's words (SPEC decision 13: `gap --propose` searches with the
+    # claim's `how`) weigh half what the quantity weighs: the quantity is the
+    # sharpened form (extension protocol step 1), and `how` is prose with
+    # incidental words. Tokens already counted from the quantity or the class
+    # count once. *Rejected:* equal weight (prose length would outrank a pack
+    # that names the quantity); a whole-phrase bonus on `how` (prose almost
+    # never equals a `settles` phrase). With `how=""` every score is what it was.
+    h_tokens = _tokens(how) - q_tokens - c_tokens
+    total += 1.0 * len(h_tokens & settles_tokens)
+    total += 0.5 * len(h_tokens & class_tokens)
+
     return total
 
 
-def match(need: Need, manifests: Sequence[PackManifest]) -> list[PackManifest]:
+def match(need: Need, manifests: Sequence[PackManifest], *,
+          how: str = "") -> list[PackManifest]:
     """Packs that might close this gap, best first. Scored on vocabulary overlap.
 
     This is the function that turns "no gate covers C2" into something
@@ -2126,7 +2235,7 @@ def match(need: Need, manifests: Sequence[PackManifest]) -> list[PackManifest]:
     """
     scored: list[tuple[float, str, PackManifest]] = []
     for manifest in manifests or ():
-        value = score(need, manifest)
+        value = score(need, manifest, how=how)
         if value > 0:
             scored.append((value, manifest.name, manifest))
     scored.sort(key=lambda item: (-item[0], item[1]))
@@ -2136,6 +2245,150 @@ def match(need: Need, manifests: Sequence[PackManifest]) -> list[PackManifest]:
 # --------------------------------------------------------------------------- #
 # installed vs available
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# proposers (SPEC 22, 25, 38): tools that propose, never settle
+# --------------------------------------------------------------------------- #
+#: The keys of one ``provides_proposers`` entry, all required.
+PROPOSER_KEYS: tuple[str, ...] = ("id", "basis", "description", "run")
+
+
+class Proposer(NamedTuple):
+    """One declared proposer: its ``id``, its ``basis`` (``BASES``), its one-line
+    ``description``, ``run`` (the script, absolute), the ``pack`` declaring it
+    and that pack's directory. A proposer is a script run as ``python <run>
+    [args]`` with the project as its working directory; it writes every file it
+    produces under ``$NOPEKIT_PROPOSAL_DIR`` and exits 0. It is never imported
+    by the spine, never registered as an evaluator, and needs no control: a
+    proposal settles nothing (invariant 3)."""
+
+    id: str
+    basis: str
+    description: str
+    run: str
+    pack: str
+    pack_dir: str
+
+
+def _proposer_entries(manifest: PackManifest) -> list[dict]:
+    items = manifest.provides_proposers
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def proposers(root: str | None = None) -> dict[str, Proposer]:
+    """Every proposer a discoverable pack declares (``discover_dirs``, in search
+    order: the first declaration of an id wins), whether or not the pack is
+    installed in the project — an input's basis must never depend on install
+    state. A malformed entry is skipped here (``pack validate`` names it)."""
+    found: dict[str, Proposer] = {}
+    for pack_dir, manifest in discover_dirs(root):
+        for item in _proposer_entries(manifest):
+            pid, basis = item.get("id"), item.get("basis")
+            run, description = item.get("run"), item.get("description")
+            if not (isinstance(pid, str) and _PROPOSER_ID.match(pid) and basis in BASES
+                    and isinstance(run, str) and isinstance(description, str)):
+                continue
+            path = os.path.abspath(os.path.join(pack_dir, run))
+            if pid in found or not _inside(pack_dir, path):
+                continue
+            found[pid] = Proposer(pid, basis, " ".join(description.split()), path,
+                                  manifest.name, pack_dir)
+    return found
+
+
+def find_proposer(root: str | None, pid: str) -> Proposer:
+    """The proposer ``pid``, or an NopekitError naming where they are listed."""
+    found = proposers(root).get(str(pid or ""))
+    if found is None:
+        raise NopekitError(f"no discoverable pack declares {pid!r} — `nopekit propose` "
+                           f"lists what each can run")
+    return found
+
+
+def proposer_basis(found: Mapping[str, Proposer], pid: str) -> str:
+    """The basis of the proposer that produced an input (SPEC 38: looked up,
+    never stated by the input): ``""`` with no proposer, its declared basis, or
+    ``undeclared`` when no discoverable pack declares it now."""
+    if not pid:
+        return ""
+    proposer = found.get(pid)
+    return proposer.basis if proposer is not None else BASIS_UNDECLARED
+
+
+def proposer_problems(pack_dir: str, manifest: Any, gate_ids: Iterable[str]) -> list[str]:
+    """Every problem with a pack's ``provides_proposers`` (``pack validate``):
+    the shape of each entry, its id dotted and distinct from the pack's gate
+    ids, its basis, its description one line, its ``run`` a ``.py`` file under
+    ``proposers/`` that exists — and every ``proposers/*.py`` declared. Never
+    imports or runs one. ``manifest`` is the raw ``pack.json`` object or a
+    ``PackManifest``."""
+    raw = manifest.get("provides_proposers") if isinstance(manifest, dict) else getattr(
+        manifest, "provides_proposers", [])
+    problems: list[str] = []
+    if raw is None or raw == []:
+        items: list = []
+    elif not isinstance(raw, list) or not all(isinstance(i, dict) for i in raw):
+        return [f"{MANIFEST_NAME}: provides_proposers must be a list of objects"]
+    else:
+        items = raw
+    gates = set(gate_ids or ())
+    seen: set[str] = set()
+    declared_runs: set[str] = set()
+    for i, item in enumerate(items):
+        unknown = [key for key in item if key not in PROPOSER_KEYS]
+        if unknown:
+            close = difflib.get_close_matches(unknown[0], PROPOSER_KEYS, n=1, cutoff=0.6)
+            guess = f' (did you mean "{close[0]}"?)' if close else ""
+            problems.append(f'{MANIFEST_NAME}: provides_proposers[{i}] has unknown key '
+                            f'"{unknown[0]}"{guess} — a proposer is {{"id", "basis", '
+                            f'"description", "run"}}')
+            continue
+        missing = [key for key in PROPOSER_KEYS if key not in item]
+        if missing:
+            problems.append(f'{MANIFEST_NAME}: provides_proposers[{i}] has no "{missing[0]}"')
+            continue
+        pid = item["id"]
+        if not isinstance(pid, str) or not _PROPOSER_ID.match(pid):
+            problems.append(f"{MANIFEST_NAME}: proposer id {pid!r} must be dotted, e.g. "
+                            f"sourcing.parts_search")
+            continue
+        if pid in gates:
+            problems.append(f"{MANIFEST_NAME}: proposer id {pid!r} is also an evaluator id in "
+                            f"this pack — one id, one thing")
+        if pid in seen:
+            problems.append(f"{MANIFEST_NAME}: proposer {pid!r} declared twice")
+        seen.add(pid)
+        if item["basis"] not in BASES:
+            problems.append(f'{MANIFEST_NAME}: proposer {pid}: basis "{item["basis"]}" is not '
+                            f"a basis — established, sourced or model-only")
+        description = item["description"]
+        if (not isinstance(description, str) or not description.strip()
+                or "\n" in description.strip() or len(description) > MAX_DESCRIPTION_CHARS):
+            problems.append(f"{MANIFEST_NAME}: proposer {pid}: description must be one line "
+                            f"of at most {MAX_DESCRIPTION_CHARS} characters")
+        run = item["run"]
+        norm = str(run).replace("\\", "/") if isinstance(run, str) else ""
+        parts = norm.split("/")
+        if (not isinstance(run, str) or len(parts) != 2 or parts[0] != PROPOSERS_DIR
+                or not parts[1].endswith(".py") or parts[1] in ("", ".py")):
+            problems.append(f"{MANIFEST_NAME}: proposer {pid}: run must be a .py file under "
+                            f"{PROPOSERS_DIR}/, not {run!r}")
+            continue
+        declared_runs.add(parts[1])
+        if not os.path.isfile(os.path.join(pack_dir, PROPOSERS_DIR, parts[1])):
+            problems.append(f"{MANIFEST_NAME}: proposer {pid}: provides_proposers names {norm}, "
+                            f"and there is no such file")
+    try:
+        names = sorted(os.listdir(os.path.join(pack_dir, PROPOSERS_DIR)))
+    except OSError:
+        names = []
+    for name in names:
+        if name.endswith(".py") and not name.startswith(("_", ".")) \
+                and name not in declared_runs:
+            problems.append(f"{PROPOSERS_DIR}/{name} is declared by no proposer in "
+                            f"provides_proposers")
+    return problems
+
+
 def installed(root: str, *, ledger: Ledger | None = None) -> list[str]:
     """Pack names this project has opted into — ``packs`` in
     ``.nopekit/project.json``, in order, read through ``store.load(root).meta``.

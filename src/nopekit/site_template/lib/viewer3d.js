@@ -76,8 +76,8 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     } catch (err) {
       onError && onError(new Error(
         "three.js did not load (" + (err && err.message ? err.message : err) + "). " +
-        "The page is offline or the CDN is blocked — `nopekit site vendor` puts a copy " +
-        "in site/vendor/ and the import map prefers it."));
+        "The page is offline, or something blocks the CDN. The command `nopekit site vendor` " +
+        "puts a copy in site/vendor/, and the import map uses that copy first."));
       return;
     }
     THREE = mods.THREE;
@@ -113,8 +113,8 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     } catch (err) {
       onError && onError(new Error(
         `the model at ${view.src} did not load (${err && err.message ? err.message : err}). ` +
-        "`nopekit site build` writes it; if the file is missing, the viewgen that exports " +
-        "it reported unavailable."));
+        "The command `nopekit site build` writes it. When the file is missing, its viewgen " +
+        "said that it is not available."));
       return;
     }
     scene.add(root);

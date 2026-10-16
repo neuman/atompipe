@@ -714,6 +714,24 @@ def why_problems(channel: str, text: str, *, floor: tuple[str, ...]) -> list[Pro
             + lead_problems(channel, rows, lead=False))
 
 
+def round_problems(channel: str, text: str, *, appeared: bool) -> list[Problem]:
+    """`round`'s paragraph (architecture phase 3a): its count line splits the
+    crashes out (`N skipped (k errored)`), and — over the committed record,
+    where every probe claim is new — each errored claim appears as `skipped,
+    errored`, never as a bare skip."""
+    out: list[Problem] = []
+    n = len(ERRORED_CLAIMS) + len(SKIPPED_CLAIMS)
+    if f"{n} skipped ({len(ERRORED_CLAIMS)} errored)" not in text:
+        out.append(Problem(f"{channel}.counts", "counts", "*",
+                           "the count line does not split the crashes out", text[:400]))
+    if appeared:
+        for cid in ERRORED_CLAIMS:
+            if f"{cid} new (skipped, errored)" not in text:
+                out.append(Problem(channel, "tone", cid, "not said skipped, errored",
+                                   text[:400]))
+    return out
+
+
 def doctor_problems(text: str) -> list[Problem]:
     """Each errored evaluator is named in a loud row above every row that names
     the missing tool (F-4). The floor: the tool's rows are there to be outranked."""
@@ -818,9 +836,18 @@ def js_table(source: str, name: str) -> dict[str, dict[str, str]]:
     return out
 
 
-def js_order(source: str) -> dict[str, int]:
-    body = re.search(r"const VERDICT_ORDER = \{([^}]*)\}", source)
-    return {k: int(v) for k, v in re.findall(r"(\w+):\s*(\d+)", body.group(1) if body else "")}
+def row_order(state: dict) -> dict[str, int]:
+    """The worst reading position each verdict status takes on the page: the
+    baked `order` of `state.json`'s verdict rows (architecture phase 5, SPEC
+    32), which `panels.js` and `stage.js` read in place of the `VERDICT_ORDER`
+    table the page once kept. A status's position is its LAST row's, so a
+    crash sorted below any skip reads as such."""
+    out: dict[str, int] = {}
+    for row in state.get("verdicts") or ():
+        status, order = str(row.get("status")), row.get("order")
+        if isinstance(order, int):
+            out[status] = max(out.get(status, -1), order)
+    return out
 
 
 #: The statements in `panels.js` and `format.js` the claim-row tone mirror
@@ -873,9 +900,15 @@ def state_problems(state: dict, format_js: str, panels_js: str) -> list[Problem]
         tone = verdict_table.get(str(row.get("status")), {}).get("tone")
         if (tone == fail_tone) != (gate in ERRORED_GATES):
             out.append(Problem("site.verdicts", "tone", gate, f"tone {tone} (fail: {fail_tone})"))
-    order = js_order(panels_js)
-    if not order.get("errored", 9) < order.get("skipped", -1):
-        out.append(Problem("site.verdicts", "order", "*", f"VERDICT_ORDER {order}"))
+    # The reading order is the bake's (`order`): every crash above every skip.
+    order = row_order(state)
+    firsts = {str(r.get("status")): r.get("order") for r in sorted(
+        state.get("verdicts") or (), key=lambda r: -(r.get("order") or 0))}
+    if not order.get("errored", 9) < firsts.get("skipped", -1):
+        out.append(Problem("site.verdicts", "order", "*", f"baked order {order}"))
+    if "VERDICT_ORDER" in panels_js:
+        out.append(Problem("site.verdicts", "order", "*",
+                           "panels.js keeps its own VERDICT_ORDER beside the baked order"))
 
     claims = state.get("claims") or []
     by_id = {row.get("id"): row for row in claims}
@@ -1039,7 +1072,11 @@ def _SKIP_FIRST(composed: Any) -> int:
 # --------------------------------------------------------------------------- #
 #: (key, argv), in the order they run. The two check runs come before the model
 #: edit that makes C4 Stale; everything after reads it.
-_BEFORE_EDIT = (("check", ["check", "--junit"]), ("check.json", ["check", "--json"]))
+_BEFORE_EDIT = (("check", ["check", "--junit"]), ("check.json", ["check", "--json"]),
+                # Architecture phase 3a: the round over the committed bracket's
+                # round record — every probe claim appears, a crash's as
+                # `skipped, errored`.
+                ("round", ["round"]))
 #: The planted project's one milestone (P2.5b), requiring every probe claim.
 PROBE_MILESTONE = "probe"
 _AFTER_EDIT = (
@@ -1056,12 +1093,18 @@ _AFTER_EDIT = (
     # P2.5b: the boundary's dry run over a milestone requiring every probe — its
     # rows are the unresolved required claims, a crash's loud among them.
     ("export.probe", ["export", PROBE_MILESTONE, "--dry-run"]),
-    # Last: it records a result, and every command above reads P8 without one.
+    # Last but the round: it records a result, and every command above reads P8
+    # without one.
     # With its evidence (P2.5a-D9: a pass on a physical claim needs a file), and
     # under the test identity (D5: with none, nothing is recorded).
     ("claim.physical", ["claim", "physical", PHYSICAL_PROBE, "--pass",
                         "--evidence=photos/p8.jpg"]),
 )
+#: Architecture phase 3a, after everything above AND after the files are read:
+#: its tier-0 check re-runs what the edit invalidated and it rebuilds the site,
+#: so every reader and file before it sees C4 Stale. Its count line splits the
+#: crashes out.
+_AFTER_FILES = (("round.after", ["round"]),)
 
 #: Every CLI command path that renders a claim's status or an evaluator's
 #: verdict, each run above. `test_every_command_is_rendered_or_says_why` holds
@@ -1070,7 +1113,9 @@ RENDERED = frozenset({("check",), ("status",), ("report",), ("why",), ("claim", 
                       ("claim", "show"), ("claim", "physical"), ("gate", "show"),
                       ("doctor",), ("site", "init"), ("site", "build"),
                       # P2.5b: run above over the probe milestone.
-                      ("export",)})
+                      ("export",),
+                      # Architecture phase 3a: before and after the edit.
+                      ("round",)})
 
 #: The rest, each with why it shows no errored claim or verdict. A new command
 #: that does — `export <milestone>`, `export --dry-run`, the `/ready` path (P2,
@@ -1081,24 +1126,47 @@ NOT_A_STATUS_RENDERER: dict[tuple[str, ...], str] = {
     ("ingest",): "files an input; reads no verdict",
     ("inputs",): "lists inputs; reads no verdict",
     ("extract",): "records what an input says; reads no verdict",
-    ("gap",): "lists claims with no evaluator; an errored claim has one",
+    ("gap",): "lists claims whose mechanism has yet to run — Gap, Pending build, Assumed; "
+              "an errored claim reads Skipped and is never listed",
     ("gate", "list"): "describes registered gates from their specs; reads no verdict",
     ("gate", "selftest"): "prints known-bad control outcomes, not a claim's status: "
                           "a control that crashes is invariant 9's (test_admission)",
     ("decide",): "records a decision; reads no verdict",
+    # Architecture phase 2 (SPEC 14, 22). `prefer` runs only in a person's own
+    # shell (a pty no in-process world opens here); a status reaches its line
+    # only through `report.return_words`, which says a crash's Skipped as
+    # "skipped, errored" (test_returns.AConditionReadsOnlyACheckedClaim).
+    ("prefer",): "records a person's preference, refused outside their own shell; a "
+                 "claim's status reaches it only through report.return_words "
+                 "(test_returns)",
+    ("propose",): "runs a pack's proposer and files what it wrote as inputs; reads no "
+                  "verdict",
     ("packs", "list"): "lists packs", ("packs", "show"): "prints a pack's guide",
     ("packs", "validate"): "checks a pack's layout and its own controls, not a claim",
     ("packs", "add"): "opts a project into a pack",
+    # Architecture phase 6 (SPEC 37).
+    ("packs", "skills"): "prints the live packs' PACK.md and skill files; reads no verdict",
     ("model",): "prints the model's projection",
+    # Architecture phase 3b: the trace prints what moved and amber's flips by
+    # claim id, never a status word; amber is a display token beside Checked.
+    ("model", "trace"): "observes the derivation and amber; prints moves and claim ids, "
+                        "never a claim's status",
     ("site", "serve"): "serves the files `site build` wrote; the page is held through "
                        "`site init` and `site build` above",
     ("site", "vendor"): "downloads the page's libraries",
     ("site", "status"): "prints whether the site is built and current, and counts",
+    # Architecture phase 5: the stamp prints the as_of it wrote (a digest of
+    # tokens, never a word for one), and the badge a README block.
+    ("site", "stamp"): "writes the as_of digest into site/content prose; prints the digest, "
+                       "never a status word",
+    ("site", "badge"): "writes the README's Made-with-nopekit block; reads no verdict",
 }
 
 
 def command_paths(parser: argparse.ArgumentParser) -> set[tuple[str, ...]]:
-    """Every leaf command path the parser accepts, aliases folded to the first name."""
+    """Every leaf command path the parser accepts, aliases folded to the first name
+    — and a command whose subcommand is optional (`model`, architecture phase
+    3b's `model trace` beside it), which runs on its own too."""
     out: set[tuple[str, ...]] = set()
 
     def walk(p: argparse.ArgumentParser, prefix: tuple[str, ...]) -> None:
@@ -1107,6 +1175,11 @@ def command_paths(parser: argparse.ArgumentParser) -> set[tuple[str, ...]]:
             if prefix:
                 out.add(prefix)
             return
+        own = p.get_default("func")
+        children = {c.get_default("func") for a in subs for c in a.choices.values()}
+        if prefix and not any(a.required for a in subs) and own not in children \
+                and getattr(own, "__name__", "<lambda>") != "<lambda>":
+            out.add(prefix)
         seen: set[int] = set()
         for action in subs:
             for name, child in action.choices.items():
@@ -1202,6 +1275,8 @@ def _louder_project() -> _Run:
                       ("last_check", ".nopekit/cache/last_check.json")):
         with open(os.path.join(root, *rel.split("/")), encoding="utf-8") as fh:
             files[name] = fh.read()
+    for key, argv in _AFTER_FILES:
+        out[key] = _env.nopekit(argv, cwd=root, home=home, identity=True)
     run = _Run(root, out, files)
     _check_the_fixture(run)
     _SHARED.append(run)
@@ -1244,6 +1319,8 @@ def cli_problems(run: _Run) -> list[Problem]:
             if "last verdict:" in ln]
     out += row_problems("gate.show", gate_rows(last), cites=False, floor=("errored",))
     out += doctor_problems(run.out["doctor"].stdout)
+    out += round_problems("round", run.out["round"].stdout, appeared=True)
+    out += round_problems("round.after", run.out["round.after"].stdout, appeared=False)
     # P2.5b: `export <m> --dry-run`'s rows — the unresolved required claims, in
     # severity order, each as `check` prints a BLOCKING row.
     out += row_problems("export.probe", claim_rows(run.out["export.probe"].stdout.splitlines()),
@@ -1675,6 +1752,11 @@ class ErrorIsLouder(_env.EnvCase):
     def test_doctor(self):
         self._holds("doctor")
 
+    def test_round(self):
+        self._holds("round")
+        planted = "round 2: P2 new (skipped). 15 claims · 8 skipped."
+        self.assertTrue(round_problems("planted", planted, appeared=True))
+
     def test_site_state(self):
         self._holds("site.")
 
@@ -1692,7 +1774,7 @@ class ErrorIsLouder(_env.EnvCase):
         self.assertEqual(sorted(RENDERED & set(NOT_A_STATUS_RENDERER)), [])
         ran = {tuple(a for a in argv if not a.startswith("-") and a not in ERRORED_CLAIMS
                      and a not in ERRORED_GATES and a != PROBE_MILESTONE)
-               for _k, argv in _BEFORE_EDIT + _AFTER_EDIT}
+               for _k, argv in _BEFORE_EDIT + _AFTER_EDIT + _AFTER_FILES}
         self.assertEqual(sorted(RENDERED - ran), [], "a rendered command nobody runs")
         planted = cli_mod.build_parser()
         sub = next(a for a in planted._actions if isinstance(a, argparse._SubParsersAction))

@@ -94,9 +94,12 @@ def milestone_cls() -> Any:
 
 def captured(argv: list[str], *, stdin: str | None = None) -> tuple[int, str, str]:
     """``nopekit <argv>`` in THIS process (so a test can patch the spine):
-    ``(exit code, stdout, stderr)``."""
+    ``(exit code, stdout, stderr)``. With ``_env.IDENTITY``, as ``P.run`` gives
+    a child by default: `export` refuses without one, and these rows test
+    something else."""
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+            mock.patch.dict(os.environ, _env.IDENTITY):
         if stdin is not None:
             with mock.patch.object(sys, "stdin", io.StringIO(stdin)):
                 code = cli_mod.main(argv)
@@ -986,6 +989,10 @@ class EveryCacheReaderSaysAsLastEvaluated(_env.EnvCase):
             project = report_mod._verdict_sentence(ledger, composed, None, stale=False,
                                                    markdown=False)
             self.assertEqual(cache_ready_problems(project), [], f"seed {seed}")
+            # Architecture phase 5: the page's register reads the same cache.
+            site = report_mod._verdict_sentence(ledger, composed, None, stale=False,
+                                                markdown=False, register="site")
+            self.assertEqual(cache_ready_problems(site), [], f"seed {seed} (site)")
             for milestone in _milestones_of(ledger):
                 with self.subTest(seed=seed, milestone=milestone.id):
                     cache = report_mod._verdict_sentence(ledger, composed, None, stale=False,
@@ -994,6 +1001,9 @@ class EveryCacheReaderSaysAsLastEvaluated(_env.EnvCase):
                                                       milestone=milestone)
                     self.assertEqual(cache_ready_problems(cache), [])
                     self.assertEqual(cache_ready_problems(page), [])
+                    self.assertEqual(cache_ready_problems(report_mod._verdict_sentence(
+                        ledger, composed, None, stale=False, markdown=False,
+                        milestone=milestone, register="site")), [])
                     if expected_ready(ledger, composed, milestone):
                         boundary = report_mod._verdict_sentence(
                             ledger, composed, None, stale=False, markdown=False,
@@ -1040,6 +1050,14 @@ class EveryCacheReaderSaysAsLastEvaluated(_env.EnvCase):
     def test_the_project_report(self):
         text = P.run(self.root, "report", code=0).stdout
         self.assertRegex(text, r"\bis ready, as last evaluated: ")
+        self.assertEqual(cache_ready_problems(text), [])
+
+    def test_the_round_paragraph(self):
+        """(architecture phase 3a) `round` reads the cache — its tier-0 check
+        serves the forged pass from it — so its *ready* is as last evaluated."""
+        text = P.run(self.root, "round", code=0).stdout
+        self.assertIn("Ready, as last evaluated.", text)
+        self.assertNotRegex(text, r"(?<!NOT )\bready(?!, as last evaluated)")
         self.assertEqual(cache_ready_problems(text), [])
 
     def test_the_boundary_says_it_plainly(self):

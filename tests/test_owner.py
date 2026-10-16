@@ -105,7 +105,9 @@ def _owned_project() -> _Owned:
     with open(c5, encoding="utf-8") as fh:
         record = json.load(fh)
     record["tags"] = ["stiffness"]
-    record["note"] = "outdoor rack, two winters, look for crazing at the root"
+    # Its mechanism's `how` (architecture phase 1): C5's file holds one, and a
+    # `note` beside it would be refused (one home per member).
+    record["mechanism"] = {"how": "outdoor rack, two winters, look for crazing at the root"}
     with open(c5, "w", encoding="utf-8") as fh:
         json.dump(record, fh, indent=2)
     os.makedirs(os.path.join(root, "photos"))

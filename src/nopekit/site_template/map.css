@@ -1,0 +1,225 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* map.css: the grounding map (architecture phase 5, SPEC 29; the transit
+   layout, phase 3b), after the author's map.css. Font sizes are in map units (1400 wide). When the map is
+   drawn narrower than 1400 px, map.js sets --s (the drawn scale) and each size
+   below grows to max(its size, 12 px / --s), so text stays at 12 px or more on
+   screen. Colours come from page.css's tokens only. */
+
+.map-sec { position: relative; }
+.maptools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 10px 0 10px; }
+.maptools .cap { flex: 1 1 100%; margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); max-width: 90ch; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; flex: 1 1 auto; min-width: 0; margin-left: -6px; }
+.lgf { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid transparent; background: none; cursor: pointer; font-size: 13.5px; color: var(--ink-2); white-space: nowrap; }
+.lgf:hover { border-color: var(--border); background: var(--surface); }
+.lgf[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.lgf .nk-glyph { color: var(--tone-ink); }
+.lg-n { font: 600 12px/1 var(--sans); color: var(--ink); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 6px; min-width: 20px; text-align: center; }
+.lg-line { flex: none; }
+.lg-amber-band { flex: none; width: 24px; height: 9px; border-radius: 5px; background: var(--amber); opacity: 0.75; }
+.maptools .trace-note { color: var(--muted); font-size: 13px; }
+.lg-line .track { stroke-width: 3; }
+.mapctl { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+/* the frame breaks out of the text column, as the PETGasus page's map does */
+.mapframe { position: relative; width: min(1440px, 100vw - 32px); margin: 8px 0 10px 50%; transform: translateX(-50%);
+  border-radius: 14px; overflow: hidden; box-shadow: 0 0 0 1px var(--ring); background: var(--surface); }
+/* With the drawer open the frame narrows to the column beside it, and the map
+   scales down to fit it (map.js draws its rows again at the larger text), so
+   the claims lane, with each line's glyph and word, stays in view. What
+   slipped through (review of phase 5): the map kept 1400 px in a scrolling
+   frame, and the open drawer hid every glyph and word. */
+@media (min-width: 1180px) {
+  body.drawer-open .mapframe { width: 100%; margin-left: 0; transform: none; }
+}
+body.map-phone .mapframe { width: auto; margin: 8px 0; transform: none; overflow: visible; box-shadow: none; background: none; }
+body.map-phone .mapctl, body.map-phone .legend, body.map-phone .maptools .trace-note { display: none; }
+/* The caption says what the reader can do with what is drawn: lines on a
+   desk, cards on a phone (review of phase 5: the phone list kept the line
+   caption). */
+.maptools .cap-phone { display: none; }
+body.map-phone .maptools .cap-desk { display: none; }
+body.map-phone .maptools .cap-phone { display: block; }
+
+.nk-map { display: block; width: 100%; height: auto; user-select: none; touch-action: pan-y;
+  --s: 1;
+  --f11: max(11px, calc(11px / var(--s)));
+  --f12: max(12px, calc(12px / var(--s)));
+  --f13: max(13px, calc(12px / var(--s)));
+  --f14: max(14px, calc(12px / var(--s)));
+  --halo: var(--surface); }
+.nk-map text { font-family: var(--sans); font-size: var(--f12); fill: var(--ink); white-space: pre; }
+.nk-map .colhead { font: 700 max(13px, calc(12px / var(--s))) var(--mono); letter-spacing: 0.14em; fill: var(--ink-2); }
+.nk-map .caplabel, .nk-map .zkey, .nk-map .colhead {
+  paint-order: stroke; stroke: var(--halo); stroke-width: 4px; stroke-linejoin: round; stroke-opacity: 0.92; }
+
+/* lines: the stroke says the status with the glyph and the word on its row */
+.nk-map .track { fill: none; stroke: var(--line); stroke-width: 3.2; stroke-linecap: round; transition: opacity 0.15s; }
+.track.tone-ok { stroke: var(--ok); }
+.track.tone-bad { stroke: var(--fail); }
+.track.tone-warn { stroke: var(--amber-strong); }
+.track.tone-phys { stroke: var(--pending); }
+.track.tone-assum { stroke: var(--assum); }
+.track.tone-dim, .track.tone-muted { stroke: var(--line); }
+.track.tk-heavy { stroke-width: 5.5; }
+.track.tk-crash { stroke-width: 5.5; stroke-dasharray: 9 4; }
+.track.tk-dashed { stroke-dasharray: 7 5; }
+.track.tk-dotted { stroke-dasharray: 1.5 5; stroke-width: 3.4; }
+.nk-map .casing { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 13; opacity: 0.55; }
+.nk-map .casing.amber { stroke: var(--amber); stroke-width: 11; opacity: 0.7; }
+.nk-map .casing.disagree { stroke: var(--fail); opacity: 0.3; }
+.nk-map .hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
+.nk-map .bridge-gap { fill: none; stroke: var(--surface); stroke-width: 9; }
+
+/* each line has a halo under its stroke, so where two lines cross the later
+   one reads over the earlier one (the reference's tracks touched and merged) */
+.nk-map .halo { fill: none; stroke: var(--surface); stroke-width: 6.2; stroke-linecap: round; stroke-linejoin: round; }
+.nk-map .halo.tk-heavy, .nk-map .halo.tk-crash { stroke-width: 8.5; }
+.nk-map .track { stroke-linejoin: round; }
+
+/* capsules: the stations */
+.nk-map .capsule { cursor: pointer; }
+.nk-map .capsule rect.cap { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.8; }
+.nk-map .capsule.generated rect.cap { stroke-dasharray: 3 2; }
+.nk-map .capsule rect.hit { fill: transparent; stroke: none; pointer-events: all; }
+.nk-map .capsule:hover rect.cap, .nk-map .capsule.hl rect.cap { stroke: var(--accent); stroke-width: 2.6; }
+.nk-map .dot { stroke: var(--surface); stroke-width: 1.4; fill: var(--line-strong); }
+.dot.tone-ok { fill: var(--ok); } .dot.tone-bad { fill: var(--fail); } .dot.tone-warn { fill: var(--amber-strong); }
+.dot.tone-phys { fill: var(--pending); } .dot.tone-assum { fill: var(--assum); }
+/* a stop the trace puts before what the claim reads: a hollow dot */
+.nk-map .dot.up { fill: var(--surface); stroke-width: 1.8; stroke: var(--line-strong); }
+.dot.up.tone-ok { stroke: var(--ok); } .dot.up.tone-bad { stroke: var(--fail); } .dot.up.tone-warn { stroke: var(--amber-strong); }
+.dot.up.tone-phys { stroke: var(--pending); } .dot.up.tone-assum { stroke: var(--assum); }
+/* where a line starts: a tap a zone feeds, or a halt on a line with no station */
+.nk-map .tapdot { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.6; }
+.tapdot.tone-ok { stroke: var(--ok); } .tapdot.tone-bad { stroke: var(--fail); } .tapdot.tone-warn { stroke: var(--amber-strong); }
+.tapdot.tone-phys { stroke: var(--pending); } .tapdot.tone-assum { stroke: var(--assum); }
+.nk-map .caplabel .name { font-size: var(--f13); font-weight: 700; }
+.nk-map .caplabel .name.mono { font-family: var(--mono); font-weight: 600; font-style: italic; }
+.nk-map .caplabel .val { font-size: var(--f12); fill: var(--ink-2); font-weight: 400; }
+.nk-map .loose-head { font-size: var(--f12); fill: var(--muted); font-style: italic; }
+.nk-map .loose { cursor: pointer; }
+.nk-map .loose-bg { fill: var(--surface); stroke: var(--border); stroke-dasharray: 3 2; }
+.nk-map .loose:hover .loose-bg, .nk-map .loose.hl .loose-bg { stroke: var(--accent); stroke-dasharray: none; }
+.nk-map .loose-name { font-size: var(--f12); fill: var(--ink-2); }
+.nk-map .loose-name.mono { font-family: var(--mono); }
+
+/* requirement cards: what was asked, at the top of the left column */
+.nk-map .card { cursor: pointer; }
+.nk-map .card .cardbg { fill: var(--surface); stroke: var(--border); stroke-width: 1.2; }
+.nk-map .card:hover .cardbg, .nk-map .card.hl .cardbg { stroke: var(--accent); stroke-width: 2; }
+.nk-map .cardbar { fill: var(--line-strong); }
+.cardbar.tone-ok { fill: var(--ok); } .cardbar.tone-bad { fill: var(--fail); } .cardbar.tone-warn { fill: var(--amber-strong); }
+.cardbar.tone-phys { fill: var(--pending); } .cardbar.tone-assum { fill: var(--assum); }
+.nk-map .cglyph { font-size: var(--f13); font-weight: 800; fill: var(--tone-ink); }
+.nk-map .ctext { font-size: var(--f12); fill: var(--ink-2); }
+.nk-map .ctext .req-id { font: 700 var(--f12) var(--mono); fill: var(--ink); }
+
+/* zones: every group of choices, with where its numbers come from */
+.nk-map .zone { cursor: pointer; }
+.nk-map .zone .zbg { fill: var(--surface); stroke: var(--border); stroke-width: 1.2; }
+.nk-map .zone:hover .zbg, .nk-map .zone.hl .zbg { stroke: var(--accent); stroke-width: 2; }
+.nk-map .zone.generated .zbg { stroke-dasharray: 3 2; }
+.nk-map .zone.idle { opacity: 0.55; }
+.nk-map .zname { font-size: var(--f13); font-weight: 600; }
+.nk-map .zname.mono { font-family: var(--mono); font-style: italic; }
+.nk-map .zcount { font-size: var(--f12); fill: var(--ink-2); }
+.nk-map .gbar { fill: var(--line-strong); }
+.nk-map .gbar.g-chosen { fill: var(--line-strong); }
+.nk-map .gbar.g-sheet { fill: var(--line); }
+.nk-map .gbar.g-est { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 2 1.5; }
+.nk-map .gbar.g-guess { fill: var(--amber); }
+/* no record says where the number comes from (review of phase 3b) */
+.nk-map .gbar.g-none { fill: var(--surface); stroke: var(--line-strong); stroke-width: 0.9; stroke-dasharray: 1 1.6; }
+.nk-map .zdia { fill: var(--amber-soft); stroke: var(--amber-strong); stroke-width: 1.2; }
+.nk-map .zest { cursor: pointer; }
+.nk-map .zest:hover .zdia, .nk-map .zest:focus-visible .zdia { fill: var(--amber); }
+.nk-map .zid { font: 600 var(--f11) var(--mono); fill: var(--amber-ink); }
+.nk-map .zkey { font-size: var(--f12); fill: var(--ink-2); }
+
+/* feeds: a thin curve from a zone to each station its choices move, and to
+   the start of a line that reads one of its choices (a tap) */
+.nk-map .feed { fill: none; stroke: var(--line); stroke-width: 1; opacity: 0.5; transition: opacity 0.15s, stroke 0.15s; }
+.nk-map .feed.est { stroke: var(--amber-strong); stroke-dasharray: 3 2; opacity: 0.6; }
+.nk-map.hlon .feed { opacity: 0.1; }
+.nk-map .feed.on, .nk-map.hlon .feed.on { opacity: 0.95; stroke: var(--accent); stroke-width: 1.5; }
+.nk-map .feed.est.on { stroke: var(--amber-strong); }
+
+/* springs: an assumption's row (or a test on the real part) back to the
+   stations its choices move; the inferred part of a line, faded */
+.nk-map .spring { fill: none; stroke: var(--amber-strong); stroke-width: 1.1; stroke-dasharray: 1.5 2.5; opacity: 0.75; }
+.nk-map .spring.proof { stroke: var(--pending); }
+.nk-map .upfade { fill: none; stroke: var(--surface); stroke-width: 4.2; opacity: 0.55; stroke-linecap: round;
+  stroke-linejoin: round; pointer-events: none; }
+.nk-map .tapdot.unseen { stroke-dasharray: 1.5 1.5; }
+
+/* amber beside a row's word, and the requirement it serves */
+.nk-map .ramber { fill: var(--amber-strong); font-weight: 700; }
+.nk-map .rreq { font: 600 var(--f11) var(--mono); fill: var(--ink-2); }
+
+/* boards */
+.nk-map .hdr { cursor: pointer; }
+.nk-map .hdr rect.hbg { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.5; }
+.nk-map .hdr.st-failing rect.hbg, .nk-map .hdr.st-errored rect.hbg {
+  fill: color-mix(in srgb, var(--fail) 12%, var(--surface)); stroke: var(--fail); }
+.nk-map .hdr.st-checked rect.hbg { fill: color-mix(in srgb, var(--ok) 11%, var(--surface)); stroke: var(--ok); }
+.nk-map .hdr.st-gap rect.hbg, .nk-map .hdr.st-open rect.hbg, .nk-map .hdr.st-skipped rect.hbg {
+  fill: color-mix(in srgb, var(--amber) 13%, var(--surface)); stroke: var(--amber-strong); }
+.nk-map .hdr.st-stale rect.hbg { stroke: var(--muted); stroke-dasharray: 5 3; }
+.nk-map .hdr.st-pending_build rect.hbg { fill: var(--pending-soft); stroke: var(--pending); }
+.nk-map .hdr.st-assumed rect.hbg { fill: var(--assum-soft); stroke: var(--assum); }
+.nk-map .hdr:hover rect.hbg, .nk-map .hdr:focus-visible rect.hbg { stroke-width: 2.4; }
+.nk-map .hdr .ht { font: 700 max(12.5px, calc(12px / var(--s))) var(--mono); letter-spacing: 0.08em; }
+.nk-map .hdr .hd { font-size: var(--f12); fill: var(--ink-2); }
+.nk-map .hdr .hv { font: 800 max(13.5px, calc(12px / var(--s))) var(--mono); letter-spacing: 0.04em; fill: var(--tone-ink); }
+.nk-map .hdr .htally { font-size: var(--f12); fill: var(--ink-2); }
+.nk-map .row { cursor: pointer; }
+.nk-map .row .bg { fill: transparent; }
+.nk-map .row:hover .bg, .nk-map .row.hl .bg, .nk-map .row:focus-visible .bg { fill: var(--accent-soft); }
+.nk-map .row .failbar { fill: transparent; }
+.nk-map .row.st-failing .bg, .nk-map .row.st-errored .bg { fill: color-mix(in srgb, var(--fail) 9%, transparent); }
+.nk-map .row.st-failing .failbar, .nk-map .row.st-errored .failbar { fill: var(--fail); }
+.nk-map .rglyph { font-size: var(--f14); font-weight: 800; fill: var(--tone-ink); }
+.nk-map .rid { font: 600 var(--f11) var(--mono); fill: var(--muted); }
+.nk-map .rname { font-size: var(--f14); font-weight: 600; }
+.nk-map .rsub { font-size: var(--f12); }
+.nk-map .rword { font-weight: 700; fill: var(--tone-ink); }
+.nk-map .rdetail { fill: var(--ink-2); }
+.nk-map .mark-bang { font: 800 var(--f14) var(--sans); fill: var(--fail-ink); }
+.nk-map [tabindex]:focus { outline: none; }
+
+/* hover: one line lit, the rest dimmed */
+.nk-map.hlon .dim { opacity: 0.16; }
+.nk-map.hlon .row.dim, .nk-map.hlon .hdr.dim, .nk-map.hlon .zone.dim, .nk-map.hlon .card.dim { opacity: 0.38; }
+.nk-map.hlon .track.hl { stroke-width: 5; }
+.nk-map.hlon .track.tk-heavy.hl, .nk-map.hlon .track.tk-crash.hl { stroke-width: 7; }
+/* A claim the lit one rests on: lit too, wider, in its OWN status colour.
+   What slipped through (review of phase 5): it was repainted in the accent,
+   which is nearly the pending-build blue, so a gap read as pending build. */
+.nk-map.hlon .track.hl2 { opacity: 1; stroke-width: 4.4; }
+.nk-map .dim, .nk-map .row, .nk-map .hdr, .nk-map .capsule, .nk-map .zone, .nk-map .card { transition: opacity 0.15s; }
+@media (prefers-reduced-motion: reduce) { .nk-map .dim, .nk-map .track, .nk-map .row, .nk-map .feed { transition: none; } }
+
+/* the phone list */
+.nk-maplist { display: grid; gap: 14px; }
+.ml-head { font: 700 12px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+.ml-reqs, .ml-rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.ml-req, .ml-row { display: grid; gap: 2px; width: 100%; text-align: left; border: 1px solid var(--border);
+  background: var(--surface); border-radius: 12px; padding: 9px 12px; cursor: pointer; font-size: 14.5px; }
+.ml-req { display: block; }
+.ml-board { border-radius: 14px; background: var(--surface-2); padding: 10px; border-left: 4px solid var(--tone, var(--axis)); }
+.ml-bhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: 0;
+  background: none; padding: 2px 2px 6px; cursor: pointer; text-align: left; }
+.ml-btitle { font: 700 13px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.ml-bline { font-size: 13.5px; color: var(--ink-2); margin: 0 2px 8px; }
+.ml-top { display: flex; align-items: center; gap: 6px; }
+.ml-stmt { font-weight: 600; }
+.ml-val { font-size: 13.5px; color: var(--ink-2); }
+.ml-reads { font-size: 12.5px; color: var(--muted); }
+.ml-reads b { font-weight: 600; color: var(--ink-2); }
+.ml-up b { font-style: italic; font-weight: 500; }
+.ml-req-tag { font-size: 12px; color: var(--ink-2); margin-left: auto; }
+.ml-amber { font-size: 13px; color: var(--amber-ink); }
+.ml-dia { color: var(--amber-strong); }
+.ml-mark { display: block; margin-top: 4px; font-size: 13px; color: var(--fail-ink); font-weight: 600; }

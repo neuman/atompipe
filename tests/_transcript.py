@@ -145,6 +145,14 @@ LIMIT_WARNING = re.compile(
     r"(?P<claim>\S+)'s acceptance condition \((?P<condition>.+)\) — one number in two "
     r"places$")
 
+#: `check`'s warning for an evaluator a claim's mechanism names that is not
+#: registered here, or does not cover the claim (architecture phase 1, SPEC
+#: decision 13): one line per name, after the limit warnings. A cross-check,
+#: never coverage — so the line always says no status moves.
+MECHANISM_WARNING = re.compile(
+    r"^warning: (?P<claim>\S+)'s mechanism names (?P<gate>\S+), which is (?:not registered "
+    r"here|not one of \S+'s evaluators \(it is filed under .+\)) — no status moves; .+$")
+
 #: `check`'s controls line, printed only when a control ran or was re-qualified
 #: by its values — in GLOSSARY §9's words from P2.3 (R-6, words only: `N
 #: executed, N cached, N re-verified` before).
@@ -182,6 +190,32 @@ LAST_CHECK = re.compile(
     r"^last check run: (?:never|(?P<when>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)"
     r" \((?P<age>[^()]+) ago\))$")
 
+#: `status`: the round record's state, right after the last check run
+#: (architecture phase 3a) — never what it holds.
+ROUND_RECORD = re.compile(
+    r"^round record: (?:none — `nopekit round` writes the first"
+    r"|(?:round (?P<round>\d+), )?(?:current with the records, the verdict cache and the "
+    r"design|behind the records — (?P<moved>.+) moved since it was written; `nopekit round` "
+    r"writes the next|edited by hand — its digest does not match what it holds; `nopekit "
+    r"round` writes it again, and nothing reads it for truth)"
+    r"|does not read \(.+\) — `nopekit round` writes it again"
+    r"|written by a newer nopekit \(schema \d+\) — this one neither reads nor rewrites it)$")
+
+#: `status`: the trace's state when it is not the current design's
+#: (architecture phase 3b) — printed only then, so a clean clone prints none.
+TRACE_LINE = re.compile(
+    r"^trace: (?:not traced for this design — `nopekit round` starts it in the background; "
+    r"`nopekit model trace` runs it here"
+    r"|running \(process \d+; log \S+\)"
+    r"|incomplete for this design — \d+ build\(s\) did not finish; `nopekit model trace "
+    r"--timeout \d+` tries again"
+    r"|\S+ reads \S+ — nothing reads it; delete it and run `nopekit model trace`"
+    r"|not traced — .+)$")
+
+#: `status`: amber beside Checked, only when a Checked claim's amber is not
+#: `holds` (architecture phase 3b).
+AMBER_LINE = re.compile(r"^amber: \S+ (?:flips|not current|could not tell|not traced).*$")
+
 #: `status`: an instrument recorded under another library version (Q1.3).
 NOTE_INSTRUMENT = re.compile(
     r"^note: (?P<gate>\S+) — recorded under (?P<module>\S+) (?P<recorded>\S+); "
@@ -200,14 +234,14 @@ MODEL_BROKEN = re.compile(r"^model: (?P<entry>\S+) DOES NOT LOAD — (?P<error>.
 
 #: One evaluator's qualification line (P2.3, GLOSSARY §6 *reject*): each
 #: control's outcome in outcome words — `not run` for a known-good control that
-#: does not exist, `reads the candidate` for one handed the live design — then,
+#: does not exist, `reads the current design` for one handed the live design — then,
 #: for an evaluator walked by the mutation pass, its tally or why it made none,
 #: then a control-level fact, then the decision. Its own negative control lives
 #: in `test_shapes` (a line missing `→ …`, `0/0`, the walkthrough's `ok`,
 #: `rejected`, `flipped`, a fourth segment, an outcome tag before the id).
 QUALIFICATION_LINE = re.compile(
-    r"^(?P<id>[^\s\[]\S*) : known-good (?P<good>pass|fail|skipped|errored|not run|reads the candidate"
-    r"|outside its operating context)"
+    r"^(?P<id>[^\s\[]\S*) : known-good (?P<good>pass|fail|skipped|errored|not run"
+    r"|reads the current design|outside its operating context)"
     r" · known-bad (?P<bad>pass|fail(?: \(raised, as declared\))?|skipped|errored)"
     r"(?: · channels differ| · known-good and known-bad via ctx\.extra)?"
     r"(?: · mutation (?:(?P<fails>\d+)/(?P<conclusive>[1-9]\d*) fail|0 conclusive)"
@@ -270,7 +304,7 @@ SHAPES = {
     "ROW": ROW, "CACHED_ROW": CACHED_ROW, "CHECK_SUMMARY": CHECK_SUMMARY,
     "CONTROLS_SUMMARY": CONTROLS_SUMMARY, "BLOCKING_HEAD": BLOCKING_HEAD,
     "BLOCKING_ROW": BLOCKING_ROW, "STALE_LINE": STALE_LINE, "STALE_MORE": STALE_MORE,
-    "STALE_NONE": STALE_NONE, "LAST_CHECK": LAST_CHECK,
+    "STALE_NONE": STALE_NONE, "LAST_CHECK": LAST_CHECK, "ROUND_RECORD": ROUND_RECORD,
     "NOTE_INSTRUMENT": NOTE_INSTRUMENT, "NOTE_PENDING": NOTE_PENDING,
     "MODEL_BROKEN": MODEL_BROKEN, "BASELINES_FAILED": BASELINES_FAILED,
     "QUALIFICATION_LINE": QUALIFICATION_LINE, "QUALIFICATION_SHOW": QUALIFICATION_SHOW,
@@ -460,14 +494,25 @@ STEPS: Tuple[Step, ...] = (
              r"No claim is checked on any article\.$"),
         line(r"^7 claims · 3 checked · 1 failing · 2 gaps · 1 pending build$"),
         line(r"^\[gap  \] C6 The load is static and centred on the arm — no owner recorded$"),
-        line(r"^\[build\] C5 .+ — needs an article; no test written down$"),
+        line(r"^\[build\] C5 .+ — needs an article$"),
+        # Phase 1 (SPEC decision 12): the bracket's requirements, each the worst
+        # of the claims that serve it. C5's test is written down (its
+        # mechanism's `how`), so its row no longer says it is not.
+        line(r"^requirements 4 — R1 failing \(C1\) · R2 gap \(C7\) · R3 pending build \(C5\) "
+             r"· R4 checked$"),
         line(r"^invalidated: none   \(6 verdicts current\)$"),
+        # Architecture phase 3b: the clone's committed trace is its design's.
+        no_line_containing("trace: not traced"),
     )),
     Step("edit-bed-xy", (1, 2),
          Edit("model/bracket.py", "bed_xy: float = 220.0", "bed_xy: float = 250.0"), ()),
     Step("status-stale", (1, 2), Nopekit(("status",)), (
         line(r"^invalidated: bracket\.bed_fit — config\.bed_xy 220\.0 -> 250\.0   "
              r"\(5 verdicts current\)$"),
+        # Architecture phase 3b: a choice edit is another design, which has no
+        # trace until one is run; the committed one is never drawn for it.
+        line(r"^trace: not traced for this design — `nopekit round` starts it in the "
+             r"background; `nopekit model trace` runs it here$"),
     )),
     Step("check-after-edit", (1, 2), CHECK, (
         exit_code(1),

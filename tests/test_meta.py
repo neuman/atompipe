@@ -41,6 +41,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -v
 from __future__ import annotations
 
 import ast
+import functools
 import importlib
 import json
 import os
@@ -74,7 +75,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # P2.2: a crash behind a prerequisite reaches a claim bound only to the
         # dependent, and must read as loud there as anywhere (its critique).
         "test_prerequisites.AnErroredPrerequisiteStaysLouder"],
-    3: "test_invariants.RegistryRefusesLoggers",
+    3: ["test_invariants.RegistryRefusesLoggers",
+        # Architecture phase 2: a proposer is declared apart and never
+        # registered — a proposal settles nothing, so it needs no control.
+        "test_proposers.AProposerIsNeverAnEvaluator"],
     # 4 over a pass beside an evaluator that is not admitted (P2.0): an
     # invariant-9 change that drops the refused verdict would leave the pass
     # alone and the claim under PROVEN. In process on a planted verdict, and
@@ -93,7 +97,13 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_goalposts.AnEvaluatorStatesItsOwnUnits",
         # P2.5a: a physical or expert-judgment claim is listed Checked only on a
         # result that counts, and every claim in exactly one section.
-        "test_physical.TheCheckedSectionHoldsOnlyBoundResults"],
+        "test_physical.TheCheckedSectionHoldsOnlyBoundResults",
+        # Architecture phase 1: a requirement is never more resolved than its
+        # worst claim, and a mechanism's evaluator list moves no status.
+        "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
+        "test_mechanism.AMechanismNeverMovesAStatus",
+        # Architecture phase 2: an evaluator's declared basis moves no status.
+        "test_basis.ABasisNeverChangesAStatus"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.
@@ -101,11 +111,42 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # P2.5a: a physical pass whose article's design moved reads Stale.
         "test_physical.AMovedArticleReadsStale",
         # P2.5b: an exported article moves exactly with what its generator read.
-        "test_fig4.TwoArticlesExactly"],
+        "test_fig4.TwoArticlesExactly",
+        # Architecture phase 1: both spellings of a claim key alike, and an edit
+        # re-keys only the gates that read what moved.
+        "test_mechanism.TheMechanismMovesNoKey",
+        # Architecture phase 2: basis is never in rho.
+        "test_basis.ABasisIsNeverAKey",
+        # Architecture phase 3a: a round record the records, the cache or the
+        # design moved past is never shown as current.
+        "test_round.ABehindRoundRecordSaysSo",
+        # Architecture phase 3b: a trace is served only for its design.
+        "test_derivation.TheTraceIsKeyedToItsDesign"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
-        "test_records.MilestonesAreRecords", "test_records.TheExportRecordIsSealedAndChained"],
+        "test_records.MilestonesAreRecords", "test_records.TheExportRecordIsSealedAndChained",
+        # Architecture phase 1: requirements are records.
+        "test_records.RequirementsAreRecords",
+        # Architecture phase 2: preferences are records, and `propose` writes
+        # only the inputs its proposer produced.
+        "test_records.PreferencesAreRecords", "test_proposers.ProposeWritesOnlyItsInputs",
+        # Architecture phase 3a: only `round` writes the round record, and
+        # nothing reads it for truth.
+        "test_round.OnlyRoundWritesTheRoundRecord",
+        "test_round.NothingReadsTheRoundRecordForTruth",
+        # Architecture phase 5: groups are records.
+        "test_records.GroupsAreRecords",
+        # Architecture phase 6: the round's commit stages only the project's own
+        # paths, inside its directory, and writes no record.
+        "test_round.TheRoundCommitStagesOnlyTheProjectsPaths",
+        # Review of phase 6: the identity a round commits under, and the
+        # repository `init` starts, are invariant 8's own clauses; unmapped, a
+        # skip added to either went unseen.
+        "test_round.RoundsCommitOnlyAsAListedPerson",
+        "test_record_commands.InitStartsARepository",
+        # Architecture phase 3b: a trace file is written once, whole.
+        "test_derivation.TheTraceIsWrittenOnce"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -122,7 +163,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_context.AFailOutsideStillCounts",
         "test_context.KnownGoodOutsideIsUnqualified",
         "test_context.AMutationPassingOutsideStillCounts",
-        "test_goalposts.AGoalpostIsNeverAKey"],
+        "test_goalposts.AGoalpostIsNeverAKey",
+        # Architecture phase 2: a declared basis is never a qualification route.
+        "test_basis.ABasisNeverQualifies"],
     # 10 (P2.2): the rule in the run loop, the resolver and the composition; a
     # cached pass behind a failed guard, end to end in process; and the graph
     # the rule walks — a cycle or an inversion refused at registration.
@@ -141,7 +184,9 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # P2.5b: a result bound to an exported article; a fail superseded only
          # on another one, and counting again when the design returns.
          "test_physical.AResultBindsToAnExportedArticle",
-         "test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle"],
+         "test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle",
+         # Architecture phase 1: the seal keeps its form across the mechanism.
+         "test_mechanism.TheSealSurvivesTheNewSpelling"],
     # 12 (P2.5b): no reader says more than the composition — a claim's status on
     # every channel (P2.5a's renderer agreement), *ready* as one predicate — and
     # the boundary that spends re-executes; moved here from
@@ -153,10 +198,55 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Review of P2.5b: every reader but the boundary says ready as last
          # evaluated, through the commands (`report --milestone` said the
          # boundary's words over a forged cache; `status` listed no milestone).
-         "test_export.EveryCacheReaderSaysAsLastEvaluated"],
+         "test_export.EveryCacheReaderSaysAsLastEvaluated",
+         # Architecture phase 1: every reader agrees on a requirement, and
+         # *ready* stays the claims'.
+         "test_requirements.EveryReaderAgreesOnARequirement",
+         "test_requirements.ReadinessStaysTheClaims",
+         # Architecture phase 2: a return condition is evaluated only on a claim
+         # the composition reads Checked, `check`'s *may return* never moves its
+         # exit code, and every reader says one condition's state alike.
+         "test_returns.AConditionReadsOnlyACheckedClaim",
+         "test_returns.MayReturnNeverMovesTheExitCode",
+         "test_returns.EveryReaderAgreesOnAReturnCondition",
+         # Architecture phase 3a: the round record says what the composition
+         # says, a forged one moves nothing, and no graph edge moves a status.
+         "test_round.TheRoundRecordSaysWhatTheCompositionSays",
+         "test_round.NothingReadsTheRoundRecordForTruth",
+         "test_graph.AnEdgeChangesNoStatus",
+         # Architecture phase 5: next steps on the page are the predicate's.
+         "test_site_truth.NextStepsAreThePredicate",
+         # Architecture phase 3b: amber is display only.
+         "test_derivation.AmberChangesNoStatus"],
+    # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
+    # through the person's channel — never from an agent session or a pipe,
+    # never by `by` alone, never from a file that is not sealed and chained, and
+    # only for the rejection the person read.
+    13: ["test_preferences.APreferenceIsAPersonsAct",
+         "test_preferences.ANomineeAloneNeverCounts",
+         "test_preferences.ThePreferenceFileIsSealedAndChained",
+         "test_preferences.APreferenceIsBoundToWhatThePersonRead"],
+    # 14 (architecture phase 5, reserved in SPEC §8): the site never says more
+    # than the resolution, and stamped prose is flagged when behind — a baked
+    # token against the composition, a stale or missing stamp, a number no
+    # baked file holds.
+    14: ["test_site_truth.TheSiteNeverSaysMoreThanTheResolution",
+         "test_site_truth.StampedProseIsFlaggedWhenBehind",
+         "test_site_truth.ANumberNoBakedFileHoldsIsFlagged",
+         # The template side: no page script computes a status, a margin, a
+         # reading order or an age.
+         "test_site_truth.TheBrowserComputesNoTruth",
+         # Architecture phase 3b: the map's feeds, stops and amber are the trace's.
+         "test_derivation.TheMapDrawsWhatTheTraceObserved"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
-    15: "test_mutation.MutationIsSealed",
+    15: ["test_mutation.MutationIsSealed",
+         # Architecture phase 3b: a trace build and an amber run write nothing.
+         "test_derivation.TheTraceBuildsInACopy", "test_derivation.AnAmberRunWritesNothing"],
+    # Architecture phase 3b: the trace says what it saw, and no more.
+    16: ["test_derivation.UntracedIsNeverIndependent",
+         "test_derivation.APartialTraceIsNeverWritten",
+         "test_derivation.AmberOnlyWhileCurrent"],
 }
 
 #: Classes a later checkpoint will make invariants, guarded against skips from
@@ -354,8 +444,9 @@ class TheInvariantTableIsTheMap(unittest.TestCase):
         mapping[3] = []
         problems = _table_problems(_read(CLAUDE_MD), mapping)
         self.assertEqual(problems, [
-            "invariant 3: CLAUDE.md's table names ['test_invariants.RegistryRefusesLoggers'], "
-            "which INVARIANT_CLASSES does not map"])
+            "invariant 3: CLAUDE.md's table names ['test_invariants.RegistryRefusesLoggers', "
+            "'test_proposers.AProposerIsNeverAnEvaluator'], which INVARIANT_CLASSES does not "
+            "map"])
 
     def test_no_table_is_caught(self):
         text = _read(CLAUDE_MD)
@@ -386,6 +477,15 @@ _SKIP_STRINGS = frozenset({
 })
 
 
+@functools.lru_cache(maxsize=None)
+def _parsed(source: str, filename: str) -> ast.Module:
+    """``ast.parse``, once per source text. The review of phase 6's pay-back:
+    `InvariantClassesNeverSkip` parsed a test file again for each class mapped
+    in it — test_records.py eleven times — and parsing was most of its 1.7 s.
+    Read-only below, so one tree serves every class."""
+    return ast.parse(source, filename)
+
+
 def _skip_findings(source: str, class_name: str, filename: str = "<planted>") -> list[str] | None:
     """Skip spellings in what runs when ``class_name`` runs; None if it is absent.
 
@@ -394,7 +494,7 @@ def _skip_findings(source: str, class_name: str, filename: str = "<planted>") ->
     module-level function, class or assignment any of those names: a helper that
     raises ``SkipTest`` skips the invariant just as surely as a decorator.
     """
-    tree = ast.parse(source, filename)
+    tree = _parsed(source, filename)
     defs: dict[str, ast.AST] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -736,7 +836,18 @@ _CLOCK_ATTRS = frozenset({
 #: The spine modules that must never read the clock: they shape a verdict, a
 #: record or a digest, and a timestamp read inside one makes two identical runs
 #: write different bytes. The first three exist today; the others arrive in P1.2.
-CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs")
+CLOCKLESS_MODULES = ("store", "gates", "modelio", "verdicts", "vcs",
+                     # Architecture phase 3a: the graph and the round record are
+                     # clock-free by construction — their bytes must not move
+                     # with the time a command ran.
+                     "graph", "rounds",
+                     # Architecture phase 5: the front page's bake and the prose
+                     # scans — a clock in either would move a tracked baked byte
+                     # on every build.
+                     "page", "prose",
+                     # Architecture phase 3b: the trace's bytes must not move with
+                     # the time it ran (durations are perf_counter's, CLI-only).
+                     "derivation")
 
 
 def _clock_findings(source: str, filename: str = "<planted>") -> list[str]:

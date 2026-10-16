@@ -59,9 +59,14 @@ PRIOR_DIGESTS: tuple[str, ...] = (
 _INDEX = {digest: i for i, digest in enumerate(PRIOR_DIGESTS)}
 
 #: PLAN-v0.14's strip list: what the release bundle leaves out, so what this
-#: scan leaves out too. The paper is any PDF.
+#: scan leaves out too. The paper is any PDF. docs/SPEC.md replaced the plan
+#: (40cf553) and is stripped for the plan's reason: it quotes the conversation that
+#: decided the architecture, and an agent measured in the sandbox must not share it.
+#: What slipped through the retirement: the plan's prefixes stayed listed and the
+#: spec that replaced it was scanned as shipped.
 STRIPPED_PREFIXES = ("docs/PLAN", "docs/plan/", "tests/", "evals/")
-STRIPPED_FILES = ("docs/BENCHMARK_ENGINE.md", "docs/GLOSSARY.md", "docs/ORIGINS.md")
+STRIPPED_FILES = ("docs/BENCHMARK_ENGINE.md", "docs/GLOSSARY.md", "docs/ORIGINS.md",
+                  "docs/SPEC.md")
 
 #: A scan that reads nothing passes every check: the floor it must read. Why
 #: these: on 2026-10-04 the shipped files were 187 text files, 4.6 MB; half of

@@ -39,6 +39,17 @@ What a child gets, and why each line:
   ``PYTHONDONTWRITEBYTECODE`` stripped — a user's shell does not set it, and the
   fresh-clone transcript must see the ``__pycache__`` a real run writes.
 
+* ``NOPEKIT_TRACE_BACKGROUND=0`` (architecture phase 3b): `round` starts no
+  detached trace, so no test leaves a process running after it. It is set in
+  this process too, at import, for the in-process `cli.main` rows; a test that
+  wants the background start passes ``env={"NOPEKIT_TRACE_BACKGROUND": None}``.
+
+* The git lines above hold in this process too, at import: every ``GIT_*`` and
+  ``EMAIL`` stripped, ``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1``.
+  What slipped through: the in-process `cli.main` rows read the developer's
+  ``~/.gitconfig``, so four `export` rows that never asked for an identity had
+  one here and none on the runner — green on this box, red on CI for 11 days.
+
 Anything in ``env=`` is applied last and wins, so a test that WANTS one of the
 stripped variables passes it explicitly; a value of ``None`` removes a key.
 
@@ -57,6 +68,15 @@ import sys
 import tempfile
 import unittest
 from typing import Any, Mapping, Sequence
+
+#: `derivation.BACKGROUND_ENV`, spelled here so this module imports nothing of
+#: nopekit's: "0" keeps `round` from starting a detached trace in any test.
+TRACE_BACKGROUND = "NOPEKIT_TRACE_BACKGROUND"
+os.environ.setdefault(TRACE_BACKGROUND, "0")
+for _key in [k for k in os.environ if k.startswith("GIT_") or k == "EMAIL"]:
+    del os.environ[_key]
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(REPO, "src")
@@ -123,6 +143,7 @@ def clean_env(*, home: str, identity: bool = False,
     env["PYTHONPATH"] = _pythonpath()
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env[TRACE_BACKGROUND] = "0"
     if identity:
         env.update(IDENTITY)
     for key, value in (extra or {}).items():
@@ -150,13 +171,16 @@ def _rmtree(path: str) -> None:
 
 def run(argv: Sequence[Any], *, cwd: str, home: str | None = None, identity: bool = False,
         env: Mapping[str, Any] | None = None,
-        timeout: float = DEFAULT_TIMEOUT_S) -> subprocess.CompletedProcess:
+        timeout: float = DEFAULT_TIMEOUT_S,
+        input: str | None = None) -> subprocess.CompletedProcess:
     """Run ``argv`` in ``cwd`` under :func:`clean_env`; never raises on a non-zero exit.
 
     Output is captured as text (UTF-8, undecodable bytes replaced); stdin is
-    closed, so a child that asks a question fails instead of hanging. With no
-    ``home`` a fresh temp ``HOME`` is made for this call and removed after it.
-    A child that outlives ``timeout`` fails the test, naming the command.
+    closed, so a child that asks a question fails instead of hanging — unless
+    ``input`` is given, which is written to its stdin and then closed (the Stop
+    hook reads its JSON there, architecture phase 6). With no ``home`` a fresh
+    temp ``HOME`` is made for this call and removed after it. A child that
+    outlives ``timeout`` fails the test, naming the command.
     """
     own_home = None
     if home is None:
@@ -164,10 +188,11 @@ def run(argv: Sequence[Any], *, cwd: str, home: str | None = None, identity: boo
         home = own_home
     command = [os.fspath(a) for a in argv]
     try:
+        stdin = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
         return subprocess.run(
             command, cwd=cwd, env=clean_env(home=home, identity=identity, extra=env),
-            stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
-            errors="replace", timeout=timeout)
+            capture_output=True, encoding="utf-8",
+            errors="replace", timeout=timeout, **stdin)
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(
             f"{command!r} in {cwd} did not finish in {timeout}s") from exc

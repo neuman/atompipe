@@ -1,0 +1,10 @@
+{
+  "kind": "station",
+  "title": "Arm section",
+  "line": "The width and the thickness give the area and the stiffness of the arm.",
+  "members": [
+    "area",
+    "inertia",
+    "section_mod"
+  ]
+}

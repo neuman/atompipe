@@ -176,7 +176,7 @@ _CHECKED = _status_row(
     "does not mean true")
 _FAILING = _status_row(
     ClaimStatus.FAIL, "failing", "Failing", "failing", "FAIL ",
-    "an evaluator failed the current candidate, a physical result failed, or an "
+    "an evaluator failed the current design, a physical result failed, or an "
     "evaluator's value does not meet the claim's acceptance condition")
 _STALE = _status_row(
     ClaimStatus.STALE, "stale", "Stale", "stale", "STALE",
@@ -212,6 +212,341 @@ _SKIPPED_ERRORED = _SKIPPED._replace(
     tag="SKIP ", rank=claim_logic.SEVERITY_ORDER.index("errored"),
     hint="an evaluator errored: it crashed, so nothing was evaluated, and the evaluator "
          "itself is broken")
+
+#: The site's words (architecture phase 5, SPEC 34 and 35): every string the
+#: front page (`page.json`, `map.json`) bakes that is not record text, in
+#: ASD-STE100 — short sentences, one word for one thing, present tense, the
+#: imperative for an instruction, no contraction, no em-dash aside, no "not X
+#: but Y", no question. CLI output and REPORT.md keep the glossary's register
+#: (`HUMAN`'s other keys); the readiness sentence has one builder with two
+#: registers (`_verdict_sentence(..., register="site")`), so the page and the
+#: terminal never give two answers to "is it ready". `test_style` scans every
+#: string here, formatted with sample values. *Rejected:* rewriting the CLI's
+#: strings to STE (its transcript and shapes are pinned byte for byte, and the
+#: glossary is that channel's rule); a second sentence builder for the page.
+#:
+#: The page is for a newcomer, so it says no word the paper or the code made
+#: (follow-up after phase 3b): a built part where the CLI says an article
+#: (GLOSSARY §1 forbids *real part* and *built object*, not this), "showed that
+#: it can fail" for qualified, "does not count" for an unqualified evaluator's
+#: outcome, "the current design" for the current inputs (the page's hints
+#: already said it), "the results" for the verdict cache. What slipped
+#: through: the page read "Pending build: 1 claim needs an article (C5). No
+#: claim is checked on any article." — the CLI's hardware clause, which phase 5
+#: let through because it passed the style scan — and "This test on the real
+#: part", an article's Never-say. `test_style.TheSiteSaysABuiltPart` fails on
+#: "article" in any string here, in what the build bakes, or in the template.
+_SITE_WORDS: Mapping[str, Any] = MappingProxyType({
+    "generated": "nopekit site build wrote this file from the records, the results in "
+                 ".nopekit/verdicts/ and site/content/. It is not a source. Change those, "
+                 "then build again.",
+    "other_board": "Other",
+    "all_board": "Claims",
+    "other_zone": "Other choices",
+    "all_zone": "Choices",
+    "no_representation": "Add a model3d view to show the design here. An image view or a "
+                         "diagram view also works.",
+    "value": "{measured} {units} against a limit of {limit}",
+    "value_bare": "{measured} {units}",
+    "margin_inside": ", {pct} inside the limit",
+    "margin_past": ", {pct} past the limit",
+    "margin_at": ", at the limit",
+    "chart_margin": MappingProxyType({"inside": "{delta} inside the limit",
+                                      "past": "{delta} past the limit"}),
+    # One producer for a part to build again (`site_rebuild_text`): the
+    # readiness sentence's clause and next steps' row say it alike.
+    "rebuild": "Part {article} is from an earlier design. Build a new part for {claims}. "
+               "These values changed: {moves}.",
+    "rebuild_bare": "Part {article} is from an earlier design. Build a new part for "
+                    "{claims}.",
+    "ready_word": "ready",
+    "not_ready_word": "not ready",
+    # The readiness sentence in the site's register: one key per branch of
+    # `_verdict_sentence`, mirrored one for one.
+    "readiness": MappingProxyType({
+        "no_claims": "{rev} has no claims, so nothing is evaluated. A project with no claims "
+                     "is not ready. Write claims/C1.json with a statement and an acceptance "
+                     "condition to start.",
+        "never": "{rev} is NOT ready. No evaluator ran on its {n} {claims}. Run nopekit "
+                 "check --tier 0 to start.",
+        "never_ready": "{rev} is ready, as last evaluated. No evaluator ran on its {n} "
+                       "{claims}.",
+        "none_required": "{rev} is NOT ready. None of its {n} {claims} is required.",
+        "not_ready": "{rev} is NOT ready. {k} of {req} required {claims} {is_} unresolved: "
+                     "{groups}.",
+        "tally": "{k} of {n} {claims} {is_} {checked} on the current design.",
+        "ready_last": "{rev} is ready, as last evaluated. Every required claim is {checked} "
+                      "on the current design.",
+        "other": "{n} {claims} that {is_} not required {is_} unresolved: {groups}.",
+        "unrun": "{n} {evaluators} did not run.",
+        "ready_for": "{rev} is ready for {m}. Every claim that {m} requires is {checked} "
+                     "on the current design.",
+        "not_ready_for": "{rev} is NOT ready for {m}. {k} of {n} required {claims} {is_} "
+                         "unresolved: {groups}.",
+        "ready_for_last": "{rev} is ready for {m}, as last evaluated. Every claim that {m} "
+                          "requires is {checked} on the current design.",
+        "not_ready_for_last": "{rev} is NOT ready for {m}, as last evaluated. {k} of {n} "
+                              "required {claims} {is_} unresolved: {groups}.",
+        "requires_nothing": "{rev} is NOT ready for {m}. {m} requires no claim. Add the "
+                            "claims that it needs to milestones/{m}.json.",
+        # The hardware clause (`_hardware_clause(register="site")`), in every
+        # branch as the CLI's: the parts to build again are `rebuild` above.
+        "pending": "{Pending}: {n} {claims} {need} a test on a built part ({ids})",
+        "on_article": "{Checked} on a built part: {n} ({ids}).",
+        "none_on_article": "No claim is {checked} on any built part.",
+        "limits": "{Checked} does not mean true. Its evaluators have shown that they can "
+                  "fail. They have not shown that they are correct or sufficient. Nothing "
+                  "outside these {n} {claims} is evaluated.",
+    }),
+    # Each status token's hint on the page. The checked hint does not say
+    # "does not mean true": the page says that once, in `verdict.limits`.
+    "hint": MappingProxyType({
+        "checked": "Every evaluator showed that it can fail, and each one passed on the "
+                   "current design.",
+        "failing": "An evaluator or a test on a built part failed the current design.",
+        "errored": "An evaluator stopped with an error. A crash settles nothing.",
+        "skipped": "An evaluator did not run. A tool that it needs is missing.",
+        "gap": "Nothing can settle this claim yet.",
+        "open": "An evaluator can settle this claim. It did not run on the current design.",
+        "stale": "The design changed after the result.",
+        "pending_build": "Only a test on a built part can settle this claim.",
+        "assumed": "A person accepts this claim for now.",
+    }),
+    # One sentence per ClaimCause: why a claim reads what it reads.
+    "cause": MappingProxyType({
+        "failed": "An evaluator failed the current design.",
+        "physical-fail": "A test on a built part failed.",
+        "errored": "An evaluator stopped with an error. A crash settles nothing.",
+        "prerequisite-errored": "An evaluator that this claim needs first stopped with an "
+                                "error.",
+        "skipped": "An evaluator did not run because a tool that it needs is missing.",
+        "prerequisite": "An evaluator that this claim needs first did not pass, so the next "
+                        "evaluator did not run.",
+        "unqualified": "An evaluator did not show that it can fail, so its result does not "
+                       "count.",
+        "no-evaluator": "No evaluator checks this claim yet.",
+        "no-owner": "This assumption has no owner.",
+        "owner-unattributed": "The owner of this assumption did not record it in their own "
+                              "shell.",
+        "no-reason": "This assumption has no reason.",
+        "unrun": "An evaluator did not run on the current design.",
+        "invalidated": "The design changed after the result.",
+        "no-article": "No test on a built part is recorded.",
+        "owned": "Its owner accepts this assumption for now.",
+        "physical-pass": "A pass is recorded. It does not count for the current design.",
+        "checked": "Every evaluator showed that it can fail, and each one passed on the "
+                   "current design.",
+        "acceptance": "An evaluator passed. Its value does not meet the acceptance "
+                      "condition.",
+        "outside-context": "The design is outside the range that the evaluator was tested "
+                           "on.",
+        "fallback": "The design is outside the range of the evaluator. A person accepts the "
+                    "claim for now.",
+        "contradiction": "A test on a built part failed a claim that an evaluator passed.",
+        "judged-fail": "An expert judged that the claim fails.",
+        "no-authority": "The claim names no expert to judge it.",
+        "authority-unattributed": "The expert did not record the judgment in their own "
+                                  "shell.",
+        "article-moved": "The design changed after the test on the built part.",
+        "claim-moved": "The claim changed after its test or its judgment.",
+        "judgment-moved": "The design changed after the expert judgment.",
+        "article-unjudged": "The model does not load, so the test cannot be compared with "
+                            "the design.",
+        "awaiting-judgment": "The claim waits for the judgment of its expert.",
+        "on-article": "A test on a part built from the current design passed.",
+        "judged": "The expert judged that the claim holds.",
+    }),
+    # What settles each cause: STE text and the commands (`page.settle`).
+    "settle": MappingProxyType({
+        "fix": "Change the design until {id} passes. Then run the check again.",
+        "built_fail": "A test on a built part failed {id}. Change the design, build a new "
+                      "part and test it again.",
+        "crash": "An evaluator stopped with an error. Repair it, then run the check again.",
+        "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
+                "again.",
+        "run": "Run the check. It runs the evaluators and shows that each one can fail.",
+        "outside": "The design is outside the range that the evaluator was tested on.",
+        "find": "No evaluator checks {id} yet. Find one or write one.",
+        "owner": "{id} is an assumption. Its owner records it in their own shell.",
+        "reason": "{id} is an assumption with no reason. Write the reason in the claim file.",
+        "owned": "Its owner accepts {id} for now. A test can replace the assumption.",
+        "article": "{id} needs a test on a built part. Build the part, test it and record "
+                   "the result in your own shell.",
+        "article_free": "{id} needs a test on a built part. Build the part from the current "
+                        "design, test it and record the result in your own shell. "
+                        "To build it with nopekit export, name {id} in a milestone file.",
+        "no_authority": "{id} needs an expert judgment, and the claim names no expert.",
+        "judgment": "{id} needs a judgment from {authority}. That person records it in their "
+                    "own shell.",
+        "missing": "{milestone} requires {id}, and no claim file holds it.",
+    }),
+    "lanes": MappingProxyType({"requirements": "What was asked", "zones": "Choices",
+                               "stations": "Shared values", "boards": "Claims"}),
+    "kinds": MappingProxyType({"measurable": "Automated", "physical": "Test on a built part",
+                               "assumption": "Assumption"}),
+    "by": MappingProxyType({
+        "automated": "An evaluator settles it.",
+        "closed_form": "A formula settles it.",
+        "solver": "A solver settles it.",
+        "datasheet": "A datasheet settles it.",
+        "measurement": "A measurement on a built part settles it.",
+        "human": "A person settles it.",
+        "none": "Nothing settles it. It is accepted for now.",
+    }),
+    "basis": MappingProxyType({
+        "established": "An existing tool gives the answer.",
+        "sourced": "The logic follows a cited outside source.",
+        "model-only": "A model wrote the logic. It has no outside source.",
+        "undeclared": "The evaluator does not say where its answers come from.",
+    }),
+    "outcome": MappingProxyType({
+        "pass": "pass", "fail": "fail", "skipped": "skipped", "errored": "errored",
+        "unqualified": "does not count", "outside-context": "outside its range",
+        "unrun": "did not run",
+        # A recorded result the judge does not count (`RESULT_TOKENS`): the
+        # same words as an unqualified evaluator's, one thing said one way.
+        "not-counted": "does not count",
+    }),
+    "headings": MappingProxyType({"map": "Grounding map", "next": "Next steps",
+                                  "floor": "Show the data", "technical": "Technical record",
+                                  "project": "This revision", "open": "Other open claims",
+                                  "rebuild": "Parts to build again",
+                                  "made_with": "Made with nopekit"}),
+    "notices": MappingProxyType({
+        "prose_stale": "This text was written before the latest results. The data below "
+                       "shows the results now.",
+        "prose_unstamped": "This text has no stamp. It can be older than the results. The "
+                           "data below shows the results now.",
+        "unmatched": "No result on this page has this number.",
+        "unmatched_note": "A number with this mark is not in a result on this page.",
+        "build_failed": "The last build failed. This page shows the build before it.",
+        "no_intro": "Add site/content/intro.md to describe the design.",
+        "invalidated": "Some results are older than the design. Run nopekit check, then "
+                       "build the site again.",
+        "reads_all": "This evaluator reads every value of the design.",
+        "disagree": "The status and the evidence of this claim disagree. This is a defect "
+                    "in nopekit. Report it.",
+    }),
+    # Architecture phase 3b: the map's middle (the trace) and amber, in the
+    # site's register. "Assumption", never decision 39's "estimate": one word
+    # for one thing, and the baked kind word is already "Assumption".
+    "trace": MappingProxyType({
+        "notice_traced": "At round {round}, the model was built again with each choice "
+                         "changed by 10%. A thin line joins a group of choices to each shared "
+                         "value that moved.",
+        "notice_traced_no_round": "The model was built again with each choice changed by "
+                                  "10%. A thin line joins a group of choices to each shared "
+                                  "value that moved.",
+        "notice_untraced": "The links from the choices are not measured yet. Each line starts "
+                           "at the values that its evaluators read.",
+        "running": "The links from the choices are being measured now.",
+        "skipped": "The test did not change {n} choices: {names}. The map cannot show what "
+                   "they change.",
+        "skipped_one": "The test did not change the choice {names}. The map cannot show what "
+                       "it changes.",
+        "unmoved": "The test did not see {n} shared values change: {names}. This does not "
+                   "show that no choice changes them.",
+        "unmoved_one": "The test did not see the shared value {names} change. This does not "
+                       "show that no choice changes it.",
+        "caption": "Each line is one claim. It goes through the shared values that its "
+                   "evaluators read, in the order that the test found. It ends on its board.",
+        "amber_legend": "Amber: passes if the assumptions hold.",
+        "amber_flips": "This pass changes to a fail if an assumption is wrong by 10%.",
+        "amber_holds": "This pass stays a pass if an assumption is wrong by 10%.",
+        "amber_unclear": "The assumption test for this pass did not give an answer.",
+        "amber_not_current": "The assumption test for this pass is out of date.",
+        "amber_untraced": "The assumptions under this pass are not tested yet.",
+        "amber_item": "If {choice} changes by {step} ({assumption}), {evaluator} gives "
+                      "{value_text}.",
+        "rides": "Rides",
+        "fed_by": "Fed by",
+        "upstream_stop": "The test puts this value before the values that this claim reads.",
+        "upstream_rides": "Before them, from the test",
+        "unseen_line": "The test did not see a change in the values that this claim reads.",
+        "sets": "This assumption sets choices that change these shared values.",
+        "settles": "This test on a built part settles the assumptions at these shared "
+                   "values.",
+        "zones_summary": "{n} choices in {z} groups. The bar shows where each number comes "
+                         "from.",
+        "zone_idle": "No line uses these choices.",
+        "zone_unmeasured": "The test did not measure what these choices change.",
+        "feeds_key": "A thin line shows which shared values a group of choices changes.",
+        "sources": MappingProxyType({"chosen": "Design choice", "datasheet": "Datasheet",
+                                     "estimate": "Estimate", "assumption": "Assumption",
+                                     "unrecorded": "No source recorded"}),
+    }),
+    # The words beside evidence that is not on the page. They depend only on
+    # the path: why a file inside the project was not copied (its size, a
+    # directory, gone) reads one machine's disk, so the build warns with it
+    # and never bakes it (review of phase 5: a fresh clone baked "not on this
+    # computer" where the author's machine baked the file's size).
+    "evidence": MappingProxyType({
+        "outside": "Not on the page. The file is outside the project.",
+        "not_copied": "Not on the page. The site build gives the reason.",
+    }),
+    # A recorded result in the drawer (`result_facts(register="site")`): its
+    # heading, who recorded it, and why it does not count, in the branches of
+    # the CLI's `HUMAN["physical"]`, `["not_counted"]` and `["recorded"]`.
+    # What slipped through (follow-up after phase 3b): the page baked the
+    # CLI's own words here ("the result on article 3f2a… was recorded on a
+    # design that has since moved — a new article is needed, not a rerun"),
+    # exempt from the style scan as a shared producer.
+    "result": MappingProxyType({
+        "heading_test": "Test on a built part",
+        "heading_judgment": "Expert judgment",
+        "recorded": "Recorded by {who}.",
+        "recorded_agent": "Recorded by {who} from an agent session.",
+        "recorded_pipe": "Recorded by {who} from a pipe or a script.",
+        "recorded_none": "No person is named for this result.",
+        "superseded": "A pass on part {article} replaces this fail, because the design "
+                      "changed. The fail counts again if the design changes back.",
+        "moved": "The design changed after part {article} was built. These values "
+                 "changed: {moves}. Build a new part and test it.",
+        "moved_bare": "The design changed after part {article} was built. Build a new part "
+                      "and test it.",
+        "claim_moved": "The claim changed after the test on part {article}. Test it again.",
+        "unjudged": "The model does not load, so part {article} cannot be compared with the "
+                    "design.",
+        "judgment_moved": "{authority} judged an earlier design. {authority} judges it "
+                          "again.",
+        "judgment_claim_moved": "The claim changed after {authority} judged it. {authority} "
+                                "judges it again.",
+        "judgment_unjudged": "The model does not load, so the judgment of {authority} cannot "
+                             "be compared with the design.",
+        "not_counted": MappingProxyType({
+            "agent-session": "A pass recorded from an agent session does not count.",
+            "non-interactive": "A pass recorded from a pipe or a script does not count. The "
+                               "person who did the test records it in their own shell.",
+            "legacy": "A pass recorded before results were tied to a built part does not "
+                      "count. Record it again in your own shell.",
+            "who": "A pass that names no person does not count.",
+            "measured": "A pass at a value that does not meet the acceptance condition does "
+                        "not count.",
+            "evidence": "The evidence file {path} changed or is missing since the pass was "
+                        "recorded. The pass does not count. Record it again.",
+            "beside": "An evaluator settles this claim, so a pass on a built part settles "
+                      "nothing here.",
+            "none": "A pass does not settle an assumption. Its owner records it.",
+            "authority": "A judgment that {authority} did not record does not count.",
+            "export-missing": "No export record holds the built part of this pass, so the "
+                              "pass does not count. Restore the export record from git, or "
+                              "record the result again.",
+        }),
+        "judgment_not_counted": MappingProxyType({
+            "agent-session": "A judgment recorded from an agent session does not count.",
+            "non-interactive": "A judgment recorded from a pipe or a script does not count.",
+            "legacy": "A judgment recorded before results were tied to the design does not "
+                      "count.",
+            "who": "A judgment that names no person does not count.",
+            "authority": "A judgment that {authority} did not record does not count.",
+            "evidence": "The evidence file {path} changed since the judgment was recorded. "
+                        "The judgment does not count. {authority} records it again.",
+            "measured": "A judgment at a value that does not meet the acceptance condition "
+                        "does not count.",
+        }),
+    }),
+})
+
 
 HUMAN: Mapping[str, Any] = MappingProxyType({
     # ClaimStatus -> its row. Ten members, eight rows: a physical pass is
@@ -385,8 +720,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "none_pass": "nothing settles an assumption with a pass — its owner records it: "
                      "nopekit claim physical {id} assume. Nothing was written.",
         "no_test": "{id} has no test written down — a pass needs an acceptance condition or a "
-                   "note saying what was done (\"note\" in claims/{id}.json). Nothing was "
-                   "written.",
+                   "mechanism saying what was done (\"mechanism\": {{\"how\": …}} in "
+                   "claims/{id}.json). Nothing was written.",
         "no_evidence": "a pass on {id} needs --evidence <file>: a photo, a log or a "
                        "measurement file under the project. Nothing was written.",
         "bad_evidence": "--evidence {path}: {why}. Nothing was written.",
@@ -602,7 +937,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         # expert judgment, which takes none by design; *threshold* is the
         # acceptance condition's Never-say).
         "why_none": "acceptance: no acceptance condition",
-        "why_note": "acceptance: none — the test is its note",
+        "why_note": "acceptance: none — the test is its mechanism",
         "why_judgment": "acceptance: none — settled only by {authority}'s judgment",
         "doctor_warn": "{n} evaluator limit(s) part from their claim's: {list}",
     }),
@@ -663,6 +998,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "failing": "## Failing, stale, skipped or open",
         "reproduce": "## Reproduce",
         "gaps_context": "### Outside an evaluator's operating context",
+        "requirements": "## Requirements",
     }),
     # A milestone's one line (P2.5b-D18; critique 20 of its design: one shape
     # everywhere — the `export` list, REPORT.md, `export <m>`), the list's head,
@@ -839,7 +1175,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
                               "--measured <value> --detail \"…\" — the value decides; a "
                               "fail on a cross-check contradicts its evaluator, on its track "
                               "record",
-        "no_test": "no test written down: a pass needs one in claims/{id}.json (\"note\")",
+        "no_test": "no test written down: a pass needs one in claims/{id}.json "
+                   "(\"mechanism\": {{\"how\": …}})",
         "help": "the boundary that spends: re-run what a milestone requires, refuse while "
                 "a required claim is unresolved, and write its package",
         "milestone_help": "the milestone (milestones/<name>.json); none lists them",
@@ -862,11 +1199,13 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "known_bad": "known-bad",
         # A control's outcome on the line: GLOSSARY §1's outcome words, `not
         # run` for a known-good control that does not exist (§2's own reason
-        # for known-bad shown), `reads the candidate` for one handed the live
-        # design (GLOSSARY §1: the current configuration is a *candidate*).
+        # for known-bad shown), `reads the current design` for one handed the
+        # live design (GLOSSARY §1: a *candidate* is an alternative design with
+        # a disposition, SPEC decision 15; the design in the checkout is the
+        # current design).
         "outcome": MappingProxyType({"pass": "pass", "fail": "fail", "errored": "errored",
                                      "skipped": "skipped", "not-run": "not run",
-                                     "live": "reads the candidate",
+                                     "live": "reads the current design",
                                      # P2.4-D19: it passed outside its own
                                      # operating context.
                                      "outside": "outside its operating context"}),
@@ -913,7 +1252,7 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
             "known-good:errored": "known-good errored: {text}",
             "known-good:skipped": "known-good skipped itself: {text}",
             "known-good:not-run": "known-good not run",
-            "known-good:live": "known-good control reads the candidate",
+            "known-good:live": "known-good control reads the current design",
             "known-good:outside": "known-good outside its operating context",
             "goalpost:moves": "its known-good value moves when the acceptance condition it "
                               "reads ({text}) moves: a value is measured, never chosen by the "
@@ -1028,6 +1367,550 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "help": "run each evaluator's known-good and known-bad controls, and the mutation "
                 "pass for one not from a bundled pack; exits 1 on any unqualified evaluator",
     }),
+    # SPEC decision 13: what would settle a claim, and the cross-check of the
+    # evaluators its mechanism names (never coverage, never a status). Never
+    # "not run" (Open's word): a mechanism "has yet to run".
+    "mechanism": MappingProxyType({
+        # The label apart from the body (review of phase 1): the report's gap
+        # section puts its own bold label in front, and read "**Mechanism:**
+        # mechanism: automated — …".
+        "line": "mechanism: {body}",
+        "body": "{by} — {how}",
+        "unsaid": "{by} — what would settle it is not written down: say it in "
+                  "claims/{id}.json (\"mechanism\": {{\"how\": …}})",
+        "names": "evaluators it expects: {evaluators}",
+        "unregistered": "{id}'s mechanism names {evaluator}, which is not registered here — "
+                        "no status moves; install the pack that provides it, or fix the "
+                        "name in claims/{id}.json",
+        # Never "tag the claim for it" (review of phase 1): tags are coverage,
+        # so that advice turned the cross-check into coverage — C7 (first
+        # mode) read Checked on the bearing-stress pass once tagged `bearing`.
+        "uncovered": "{id}'s mechanism names {evaluator}, which is not one of {id}'s "
+                     "evaluators (it is filed under {filed}) — no status moves; it "
+                     "settles another claim's quantity: fix the name in "
+                     "claims/{id}.json, or name an evaluator that computes {id}'s own",
+        "filed_none": "nothing",
+        "warning": "warning: {line}",
+        "doctor_ok": "every evaluator a claim's mechanism names is registered here and "
+                     "covers that claim",
+        "doctor_none": "no claim's mechanism names an evaluator",
+        "doctor_warn": "{n} evaluator name(s) in claims' mechanisms do not match the "
+                       "registry: {list}",
+        "modelled_part": "a pack's evaluator can check a modelled part of {id}; its pass "
+                         "never settles {id} — {by} does",
+        "empty": "nothing to list: no claim reads {gap}, {pending_build} or {assumed}",
+        "footer": "{n} {claims} whose mechanism has yet to run: {counts}. Name the "
+                  "quantity, try the analytic answer first, and only then propose a "
+                  "solver — with its real cost said out loud.",
+        "need": "gap record {id} {quantity} ({word})",
+        "no_match": "no installed pack settles this vocabulary — this is the extension "
+                    "protocol's trigger (docs/EXTENSION_PROTOCOL.md)",
+        # A physical, judged or assumed claim (review of phase 1): the protocol
+        # never fires there, so no pack is not its trigger.
+        "no_match_settled": "no installed pack checks a modelled part of this — and "
+                            "none is needed: {by} settles it, never a solver",
+        "footer_settled": "{n} {claims} whose mechanism has yet to run: {counts}. Each "
+                          "is settled by its mechanism — a test on an article, a "
+                          "person's judgment or an owner — never by a solver.",
+    }),
+    # SPEC decision 12: what the person asked for, rolled up from its claims by
+    # `claims.requirement_statuses`, the one producer. Never a status of its
+    # own: the eight words, and *ready* stays the claims'.
+    "requirement": MappingProxyType({
+        "intro": "What the person asked for, in their words. Each reads the worst status "
+                 "among the claims that serve it, and one no claim serves reads {gap}. "
+                 "Ready is judged on the claims a milestone requires, never on these.",
+        "md_row": "- **{id}** *({word})* {statement} — {claims}",
+        "group": "{ids} {word}",
+        "sep": " · ",
+        "no_claim": "no claim serves it",
+        "line": "requirements {n} — {items}",
+        "item": "{id} {word}",
+        "item_worst": "{id} {word} ({ids})",
+        "item_none": "{id} {word} (no claim)",
+        # D18 carried up (review of phase 1): a requirement over a claim the
+        # resolver calls Checked while its evidence says otherwise is never a
+        # bare "checked" — the claim rows list that claim as a contradiction.
+        "item_disagree": "{id} {word} (status and evidence disagree: {ids})",
+        "md_disagree": "**status and evidence disagree: {ids}** — ",
+        "why_disagree": "status and evidence disagree on {ids} — the resolver and the "
+                        "verdicts disagree, a defect to report",
+        "more": "+{k} more",
+        "more_unresolved": "+{k} more ({u} unresolved)",
+        "why_head": "requirement  {id}  [{word}]",
+        "why_source": "source: {source}",
+        "why_claims": "CLAIMS ({n})",
+        "why_none": "(none — no claim names {id} in \"requirements\", so it reads {gap}: "
+                    "write a claim that settles it, and name {id} there)",
+        "serves": "serves: {ids}",
+        "serves_missing": "{id} (no requirements/{id}.json)",
+        "doctor_ok": "{n} requirement(s), each served by a claim",
+        "doctor_none": "none recorded — a requirement is requirements/<id>.json: the "
+                       "person's words",
+        "doctor_unserved": "{ids}: served by no claim — each reads {gap} until a claim "
+                           "names it in \"requirements\"",
+        "doctor_dangling": "claims/{claim}.json names requirement {id}, which has no "
+                           "requirements/{id}.json",
+    }),
+    # SPEC 14, §0.2 (architecture phase 2): what lost, why, and what would
+    # bring it back — `claims.rejection_rows`' tokens in words. A condition on
+    # a claim that is not Checked says so; it never silently reads false.
+    "rejection": MappingProxyType({
+        "types": MappingProxyType({
+            "infeasible": "infeasible", "dominated": "dominated",
+            "preferred_against": "preferred against", "unevaluated": "unevaluated",
+            "untyped": "untyped"}),
+        "recorded": "preferred against, recorded by {name} ({when})",
+        "not_recorded": "preferred against, not recorded by {name}",
+        "condition": "{claim} {quantity} {comparator} {value}",
+        "holds": "holds: {condition}, now {observed}{gate}",
+        "does_not_hold": "does not hold: {condition}, now {observed}{gate}",
+        "cannot": "cannot be evaluated: {claim} is {status}",
+        "cannot_no_claim": "cannot be evaluated: {claim} is not a claim",
+        "cannot_no_value": "cannot be evaluated: no value of {claim} is compared with its "
+                           "acceptance condition",
+        "cannot_no_margin": "cannot be evaluated: {gate} gives {claim} no margin ({detail})",
+        "cannot_no_limit": "cannot be evaluated: {claim} states no limit",
+        "cannot_band": "cannot be evaluated: {claim}'s acceptance condition is a band",
+        "margin_why": MappingProxyType({
+            "no-value": "it gave no value", "no-limit": "it gave no limit",
+            "band": "its limit is a band", "no-side": "its comparator has no side",
+            "zero-limit": "its limit is zero",
+            "disagrees": "its side and its outcome disagree",
+            "no-comparator": "it names no side of its limit",
+            "no-verdict": "it gave no usable verdict"}),
+        "text": "not machine-checkable: {text}",
+        "none": "no return condition",
+        "input": "source: input {input}",
+        "facts": "{type} · {condition}",
+        "may_return": "may return: {value} — rejected in decision {decision} ({type}); {state}",
+        # `decide`'s static row and the generated log: never a live state (the
+        # log is a generated document; the row is what was just written).
+        "returns_if": "returns if {condition}",
+        "returns_text": "returns if (not machine-checkable) \"{text}\"",
+        # The generated log's phrase: it is regenerated only by `report --write`,
+        # so it never says whether the person recorded it (a state that moves
+        # without the log), only where to read it.
+        "named": "preferred against, naming {name} — nopekit why {id} says whether they "
+                 "recorded it",
+        "records_it": "{name} records it in their own shell: nopekit prefer {id}",
+        "doctor_ok": "{n} decision(s), {m} rejection(s): every pointer resolves, every "
+                     "preference recorded",
+        "doctor_none": "no decision records a rejected alternative",
+        "doctor_dangling": "{where} names {what}, which has no {home}",
+        "doctor_orphan": "preferences/{id}.json: no decisions/{id}.json holds that decision",
+        "doctor_unrecorded": "{k} preferred_against rejection(s) not recorded: {items}",
+        "doctor_unrecorded_item": "{decision} ({value}, by {name}) — {name} runs: nopekit "
+                                  "prefer {decision}",
+    }),
+    # SPEC 38: where an evaluator's or a proposer's verdict logic comes from.
+    # Each word equals its token; shown, never a status. A basis word is said
+    # beside "basis" (GLOSSARY §6: `basis established`, apart from invariant
+    # 10's *prerequisite not established*) — review of phase 2.
+    "basis": MappingProxyType({
+        "established": "established", "sourced": "sourced", "model-only": "model-only",
+        "undeclared": "undeclared",
+        "doctor_ok": "every evaluator declares its basis",
+        "doctor_undeclared": "{n} evaluator(s) declare no basis and show as undeclared: "
+                             "{ids}",
+        "doctor_inputs": "{k} input(s) say they were proposed by something no discoverable "
+                         "pack declares: {ids}",
+        "proposed_by": "proposed by {id} (basis {basis})",
+    }),
+    # `decide`'s per-rejection flags (SPEC 14): each refusal writes nothing.
+    "decide": MappingProxyType({
+        "part_first": "{flag} applies to the --rejected before it, and none comes before "
+                      "it. Nothing was written.",
+        "part_twice": "{flag} is given twice for \"{value}\". Nothing was written.",
+        "both": "--returns-if and --returns-text both given for \"{value}\" — a return "
+                "condition is one or the other. Nothing was written.",
+        "bad_type": "--type \"{v}\" is not a rejection type{guess} — one of infeasible, "
+                    "dominated, preferred_against, unevaluated. Nothing was written.",
+        "grammar": "--returns-if \"{v}\" is not a return condition: say \"<claim> "
+                   "margin|value|limit <|<=|>|>= <number>\", e.g. \"C1 margin > 0.02\"; a "
+                   "condition in words goes in --returns-text. Nothing was written.",
+        "no_claim": "--returns-if names {cid}, which is no claim (claims/{cid}.json) — check "
+                    "evaluates the condition against that claim. Nothing was written.",
+        "no_input": "--input {aid!r} is no input (inputs/{aid}.json){close}. Nothing was "
+                    "written.",
+        "preferred_needs_by": "a preferred_against rejection is a person's preference: name "
+                              "them with --by \"<their name, as git knows them>\"; they "
+                              "record it with nopekit prefer <decision id>. Nothing was "
+                              "written.",
+        "by_needs_type": "--by names whose preference a rejection is, and \"{value}\" is not "
+                         "--type preferred_against. Nothing was written.",
+        "type_help": "the --rejected before it: infeasible, dominated, preferred_against "
+                     "(a person's preference, recorded with nopekit prefer) or unevaluated",
+        "by_help": "the --rejected before it is this person's preference (with --type "
+                   "preferred_against), named as git knows them",
+        "returns_if_help": "the --rejected before it returns when \"<claim> "
+                           "margin|value|limit <op> <number>\" holds, e.g. \"C1 margin > "
+                           "0.02\" — check evaluates it",
+        "returns_text_help": "what would bring the --rejected before it back, in words — "
+                             "shown, never evaluated",
+        "input_help": "the input (inputs/<id>.json) the --rejected before it rests on",
+    }),
+    # `nopekit prefer` (SPEC 14, invariant 13): the person's channel for a
+    # preference, the shape of `claim physical`'s owner path.
+    "prefer": MappingProxyType({
+        "help": "record your preference against a rejected alternative, typed in your own "
+                "shell; the rejection's \"by\" must name you as git does",
+        "value_help": "which preferred_against alternative, by its value, when the decision "
+                      "names you for several",
+        "who": "--who is not accepted: who records a preference is read from git's identity "
+               "(git config user.name and user.email), never typed. Nothing was written.",
+        "when": "--when is not accepted: a preference is dated when it is recorded. Nothing "
+                "was written.",
+        "no_decision": "no decision {id!r} — decisions/ holds each one, and nopekit why "
+                       "<decision id> shows one. Nothing was written.",
+        "none_preferred": "decision {id} has no preferred_against rejection — nothing in it "
+                          "is a person's preference to record. Nothing was written.",
+        "channel": "a preference counts only as its person records it, typed in their own "
+                   "shell, never from an agent session or a script{why}. Nothing was "
+                   "written. Ask {names} to run: nopekit prefer {id}",
+        "not_by": "decision {id} names {names} for its preferred_against rejections, and this "
+                  "shell's git identity is {who!r} — only the person named records it: run "
+                  "it in their shell, or name them in \"by\" as git names them. Nothing was "
+                  "written.",
+        "which": "decision {id} names you for {n} preferred_against rejections ({values}) — "
+                 "name one with --value. Nothing was written.",
+        "no_value": "decision {id} names you for no preferred_against rejection {value!r} — "
+                    "it names you for {values}. Nothing was written.",
+        "already": "{name}'s preference against {value!r} is already recorded ({when}) for "
+                   "the rejection as it reads now. Nothing was written.",
+        "row": "you record: your preference against {value!r} — {why}",
+        "returns_row": "reconsider: {condition}",
+        "recorded": "recorded {name}'s preference against {value!r} in preferences/{id}.json "
+                    "(entry {n})",
+    }),
+    # Architecture phase 3a (SPEC 18, 24): `nopekit round`'s one paragraph, and
+    # the round record's state as `status` and `doctor` say it. `{path}` is
+    # `rounds.ROUND_REL`, filled by the caller: the file's name has one home.
+    # *Ready* is said as last evaluated (invariant 12): nothing a round reads
+    # was re-run at a boundary.
+    "round": MappingProxyType({
+        "help": "end a round: a tier-0 check, the site rebuilt when site/ exists, and {path} "
+                "written when anything it records moved; with --commit, a commit of every "
+                "file in the project that git does not ignore, as a listed person; never "
+                "blocks",
+        # Architecture phase 6 (SPEC 24 with §0.3): the round's commit, the Stop
+        # hook's message, the commit message, and doctor's `people` row.
+        "commit_help": "then commit every file in the project's directory that git does not "
+                       "ignore (one over 50 MiB or named like a secret is named instead), only "
+                       "when git's identity is one of .nopekit/project.json's people; never "
+                       "pushes",
+        "hook_help": "Claude Code's Stop hook: read the hook's JSON on stdin, run --commit, "
+                     "print one JSON object; always exits 0",
+        "committed": " Committed {oid} as {who}: {n} {files}.",
+        "nothing": " Nothing to commit: no file in the project's directory changed.",
+        # The acceptance run after phase 3b: nothing staged, and something
+        # named below — "no file changed" beside "not staged: .env" would
+        # contradict itself.
+        "nothing_named": " Nothing to commit but what a round never stages.",
+        "no_repository": " Not committed: the project is in no git repository (`git init` "
+                         "starts one), or git is not on PATH.",
+        "no_identity": " Not committed: git has no user.name and user.email configured here.",
+        "no_people": " Not committed: .nopekit/project.json lists no people; a round commits "
+                     "only as a person listed there.",
+        "not_listed": " Not committed: git's identity here, {who}, is not in "
+                      ".nopekit/project.json's people.",
+        "committer_not_listed": " Not committed: git's committer here, {who} "
+                                "(committer.name and committer.email, or GIT_COMMITTER_*), "
+                                "is not in .nopekit/project.json's people.",
+        "ignored": " Not committed: the enclosing git repository ignores this project "
+                   "(.nopekit/project.json is ignored), so no change here is ever listed; "
+                   "un-ignore the project's directory, or `git init` in it.",
+        "in_progress": " Not committed: a {operation} is in progress in this repository; the "
+                       "next round commits after it ends.",
+        "detached": " Not committed: HEAD is detached; a round commits only on a branch.",
+        "newer_record": " Not committed: the round record was written by a newer nopekit.",
+        "add_failed": " Not committed: git did not stage the round's files ({why}).",
+        "refused": " Not committed: git refused the commit ({why}); the round's files are "
+                   "left staged.",
+        "unlisted_changes": " Not committed: git did not answer when asked which files "
+                            "changed.",
+        "timeout": " Not committed: git commit did not finish in {s} s (a slow commit hook?); "
+                   "the round's files are left staged.",
+        "secret": " Not staged, named like a secret: {paths}.",
+        "too_large": " Not staged, over 50 MiB: {paths}.",
+        "not_files": " Not staged, not a file: {paths}.",
+        "prose_behind": " Board text written before the latest results: {subjects} — read it "
+                        "against the page, rewrite it, then `nopekit site stamp <board>`.",
+        "paths_more": ", and {k} more",
+        "hook_not_run": "nopekit round not run: {why}. Nothing was committed.",
+        "hook_crash": "nopekit round crashed ({kind}: {line}); the round may be incomplete. "
+                      "Run `nopekit round` in the project to see the traceback.",
+        "commit_subject": "round {n}: {what}",
+        "commit_first": "the first round record",
+        "commit_compact": MappingProxyType({
+            "statuses": "{k} {statuses} moved", "verdicts": "{v} new {verdicts}",
+            "instructions": "instructions moved"}),
+        "commit_files": "{n} {files} committed: {groups}.",
+        "commit_earlier_one": "Round {a} was not committed; this commit holds it too.",
+        "commit_earlier_many": "Rounds {a} to {b} were not committed; this commit holds them "
+                               "too.",
+        "commit_secret": "Not committed, named like a secret: {paths}.",
+        "commit_too_large": "Not committed, over 50 MiB: {paths}.",
+        "commit_not_files": "Not committed, not a file: {paths}.",
+        "commit_parts": MappingProxyType({
+            "records": "records", "model": "the model", "evaluators": "evaluators",
+            "generators": "generators", "verdicts": "verdicts", "site_text": "site text",
+            "site": "the site", "trace": "the trace", "packs": "packs",
+            "project": "project files", "round": "the round record",
+            "files": "other files"}),
+        "commit_changed": "{parts} changed",
+        "people_ok": "{n} listed ({names}); git's identity here is listed, so rounds commit",
+        "people_none": "none listed — rounds make no commit; the person adds themselves to "
+                       "\"people\" in .nopekit/project.json as {{\"name\": \"...\", "
+                       "\"email\": \"...\"}}",
+        "people_not_listed": "{n} listed ({names}); git's identity here, {who}, is not one of "
+                             "them — rounds make no commit",
+        "people_no_identity": "{n} listed; git has no user.name and user.email here — rounds "
+                              "make no commit",
+        "people_committer_not_listed": "{n} listed ({names}); git's committer here, {who}, "
+                                       "is not one of them — rounds make no commit",
+        "people_no_repo": "{n} listed; the project is in no git repository — rounds make no "
+                          "commit (`git init`)",
+        "written": "round {n}: {changes}.",
+        "first": "round 1: the first round record.",
+        "replaced": "round {n}: the last round record was {how}, so nothing is compared.",
+        "replaced_how": MappingProxyType({"edited": "edited by hand",
+                                          "unreadable": "unreadable"}),
+        "unchanged": "round {n} stands: nothing it records moved.",
+        "newer": "round: {path} was written by a newer nopekit (schema {schema}); this one "
+                 "does not rewrite it.",
+        "ready": "Ready, as last evaluated.",
+        "not_ready": "NOT ready, as last evaluated: {k} of {n} required {claims} {are} "
+                     "unresolved.",
+        "check_ran": "Tier-0 check: {executed} run, {cached} from the cache.",
+        "check_not_run": "Tier-0 check not run: {why}.",
+        "site_built": " Site built.",
+        "site_warnings": " Site built with {n} {warnings} — `nopekit site build` lists them.",
+        "site_failed": " Site not built: {why}.",
+        "wrote": " Wrote {path}.",
+        "not_run": "round not run: {why}.",
+        "no_project": "round: no nopekit project here — nothing to record.",
+        "flip": "{id} {before} -> {after}",
+        "appeared": "{id} new ({after})",
+        "gone": "{id} gone (was {before})",
+        "more": "and {n} more",
+        "verdicts": "{n} new {verdicts} ({ids})",
+        "ids_more": "+{k} more",
+        "instructions": "instructions moved ({paths})",
+        "instructions_unrecorded": "instructions not recorded (the model does not load)",
+        "no_status": "no status moved ({what} moved)",
+        "moved": MappingProxyType({"records": "the records", "verdicts": "the verdict cache",
+                                   "design": "the design", "trace": "the trace",
+                                   "resolution": "the resolution (an evaluator's code, its "
+                                                 "controls, a pack or a tool)"}),
+        "state_head": "round record: {line}",
+        "state_absent": "none — `nopekit round` writes the first",
+        "state_current": "{round}current with the records, the verdict cache and the design",
+        "state_behind": "{round}behind the records — {what} moved since it was written; "
+                        "`nopekit round` writes the next",
+        "state_edited": "{round}edited by hand — its digest does not match what it holds; "
+                        "`nopekit round` writes it again, and nothing reads it for truth",
+        "state_unreadable": "does not read ({why}) — `nopekit round` writes it again",
+        "state_newer": "written by a newer nopekit (schema {schema}) — this one neither reads "
+                       "nor rewrites it",
+        "graph_ok": "{n} nodes, {m} edges ({k} rests on, {r} resolves)",
+        "graph_untraced": "; derivation not traced yet — each rests-on edge is a direct read",
+        "graph_traced": "; derivation {traced}",
+        "traced_at": "traced at round {r}",
+        "traced": "traced (no round record named it)",
+        # Architecture phase 3b: what the trace observed, and amber, in `why`.
+        "amber_flips": "amber: flips — {choice} {step} ({aid}, not confirmed) gives "
+                       "{evaluator} {measured} against {limit} {units}; shown beside Checked, it "
+                       "changes no status",
+        "amber_holds": "amber: holds — ±10% on {choices} ({aids}) leaves it Checked",
+        "amber_unclear": "amber: could not tell — {token} at {choice} {step}",
+        "amber_not_current": "amber: not current — {why}; `nopekit model trace`",
+        "amber_untraced": "amber: not traced — {why}",
+        "moves": "moves: {items} — {traced}",
+        "moves_none": "moves: nothing at ±10%",
+        "moves_raised": "moves: not observed — both moved builds raised {type}",
+        "moves_raised_one": "the {step} build raised {type}: nothing observed that way",
+        "moves_size": " (an integer: moved {lo} and {hi})",
+        "not_moved": "not moved by the trace: {word}",
+        "derived_from": "derived from: {items} — {traced}",
+        "after_of": "after: {before} · before: {after} (inferred from the trace: it moves with "
+                    "every choice that moves each of them, and with more)",
+        "ties": "moves together with: {ids}; the trace cannot order them",
+        "single": "moved by one choice only; the trace does not order it",
+        "unmoved": "not seen to move under any ±10% move; that does not show that it depends "
+                   "on nothing",
+        "changed": "changed",
+        "trace_started": " Tracing the derivation in the background (log {log}).",
+        "trace_amber": " Re-running amber in the background (log {log}).",
+        "trace_running": " A trace is running already (log {log}).",
+        "trace_incomplete": " The last trace stopped before it finished; `nopekit model trace` "
+                            "tries again.",
+        "trace_failed": " The trace did not start: {why}.",
+        # `why`'s lines (SPEC 10, 19): what reads a value, what sources it, and
+        # what a claim rests on, resolves or is resolved by.
+        "read_by": "read by: {ids}",
+        "read_by_none": "read by: none — no evaluator's verdict on record read it",
+        "sourced_from": "sourced from: {items}",
+        "sourced_from_none": "sourced from: nothing recorded",
+        "source_assumption": "assumption {id} ({word})",
+        "source_input": "input {id}",
+        "derived_from_untraced": "derived from: not traced yet",
+        "value_head": "value {name}{value}   (derived by build() in {entry})",
+        "rests_on": "rests on: {items}",
+        "rests_on_item": "{id} ({word}; {via})",
+        "rests_on_via": "{evaluator} read {value}",
+        "rests_on_untraced": "rests on, through derived values: not traced yet — only the "
+                             "values its evaluators read directly are followed",
+        "resolves": "resolves: {items}",
+        "resolved_by": "resolved by: {items}",
+        "item": "{id} ({word})",
+        "item_missing": "{id} (no such claim)",
+    }),
+    # `nopekit propose` (SPEC 22, 25): a pack's tool proposes, never settles.
+    # The noun "proposer" stays in keys and flags (SPEC §0.9).
+    "propose": MappingProxyType({
+        "help": "run a tool a pack ships to propose options or evidence, and record each "
+                "file it writes as an input — a proposal settles nothing",
+        "row": "{id}  basis {basis}  {description}  (pack {pack})",
+        "footer": "nopekit propose <id> [arguments] runs one and records each file it writes "
+                  "as an input",
+        "empty": "no discoverable pack ships anything to propose — a pack declares it in "
+                 "pack.json's provides_proposers",
+        "errored": "{id} exited {code}; nothing was recorded. Its last lines: {tail}",
+        "timeout": "{id} ran past --timeout {t:g} s and was stopped; nothing was recorded",
+        "outside": "{id} wrote outside $NOPEKIT_PROPOSAL_DIR while it ran: {paths}; nothing "
+                   "was recorded — a proposal writes only into that directory, and what it "
+                   "wrote here is not undone: git status shows it",
+        "outside_more": " and {n} more",
+        "none": "{id} wrote no file; nothing was recorded",
+        "known": "{where} is already recorded as {aid} — its record is unchanged",
+        "done": "{n} input(s) recorded, proposed by {id} (basis {basis}). A proposal "
+                "settles nothing: extract what each shows, and let an evaluator check what "
+                "it is the source of.",
+        "desc": "proposed by {id}",
+        "ingest_known": "{where} is already recorded as {aid} {was}; its record is unchanged",
+        "ingest_was_none": "with no proposer",
+        "proposer_help": "what produced this file (a pack's provides_proposers id), when the "
+                         "agent ran it by hand",
+        "kind_help": "the kind of every file it writes (default: from each extension)",
+        "desc_help": "a description for every file it writes (default: proposed by <id>)",
+        "timeout_help": "seconds before it is stopped (default 600)",
+        "args_help": "what the script is handed; a flag of the script's goes after --, as in "
+                     "nopekit propose <id> -- --limit 5",
+    }),
+    # `nopekit model trace` and every reader of the trace and of amber
+    # (architecture phase 3b, SPEC 39). Never "independent": a value not seen
+    # to move under a ±10% move is said as not seen to move, and the trace is
+    # one point of a nonlinear model (invariant 16).
+    "trace": MappingProxyType({
+        "help": "rebuild the model in copies with each choice moved -10% and +10%, and record "
+                "which derived values moved (the trace) and which passes an assumption's move "
+                "flips (amber)",
+        "choices_help": "trace only these choices (comma-separated, repeatable); the trace "
+                        "file is written when every choice is traced",
+        "workers_help": "builds at once (default: {n}, the cores less one, at most 8)",
+        "timeout_help": "seconds a build may take (default: the larger of {floor:.0f} and "
+                        "{factor:.0f}x the base build)",
+        "skip": MappingProxyType({
+            "yes-no": "a yes/no choice", "word": "a word", "none": "no value",
+            "structure": "a structure", "zero": "zero: no relative move",
+            "not-finite": "not a finite number", "fixed": "not settable (init=False)"}),
+        "refuse": MappingProxyType({
+            "legacy": "this project's records are still in the legacy ledger: `nopekit check` "
+                      "migrates them first",
+            "no_model": "the model does not load, so nothing can be traced: {why}",
+            "unrecorded": "the model's code was not recorded (code loaded from a string or "
+                          "exec), so no trace can be keyed to it",
+            "unknown_choice": "--choices names {name}, which is not a choice of {entry} (its "
+                              "Config){hint}",
+            "hint": "; did you mean {hint}?",
+            "workers": "--workers must be 1 or more",
+            "inside": "its temp directory {base} is inside {clash}: a build's copy would land "
+                      "in the tree the trace may not write (set TMPDIR outside the project)",
+            "running": "a trace is already running for this project (process {pid}; log "
+                       "{log}); wait for it",
+            "big": "the project is {size} without .git, out/, site/ and caches, more than the "
+                   "1 GiB a trace copies; the largest directories are {dirs}",
+            "base_raised": "the design does not build in a copy of the project: {line}",
+            "edited": "{path} reads {state}: {line}. Delete it to trace this design again",
+            "wrote": "{choice} {step}: the build wrote inside the project: {paths} — the "
+                     "trace keeps every build in a copy; make build() write under its own "
+                     "directory",
+            "wrote_base": "the base build wrote inside the project: {paths} — the trace "
+                          "keeps every build in a copy; make build() write under its own "
+                          "directory",
+        }),
+        "head": "trace: {entry}, design {key12} — {n} choices to move by ±10% ({builds} builds "
+                "on {workers} workers)",
+        "not_nudged": "  not moved: {items}",
+        "and_more": " and {n} more",
+        "steady": "  base built twice: steady",
+        "unsteady": "  base built twice: {names} differ between builds; the trace draws no "
+                    "edge to them",
+        "progress": "  [{done:>4}/{total}] {choice} {step}: {n} values moved",
+        "progress_raised": "  [{done:>4}/{total}] {choice} {step}: raised {type}: {line}",
+        "timed_out": "{choice} {step}: no result in {s:.0f} s (timed out)",
+        "dead": "{choice} {step}: the build process exited {code} with no result {why}",
+        "base_timed_out": "the base build gave no result in {s:.0f} s (timed out)",
+        "base_dead": "the base build exited {code} with no result: {why}",
+        "environmental": "{choice} {step}: raised {a}, then {b} when run alone — an "
+                         "environmental failure",
+        "written": "traced: {n} choices moved both ways; {moved} derived values moved, "
+                   "{unmoved} not seen to move ({names})",
+        "order": "  derives {d} edges · after {a} edges · {t} groups move together · {s} "
+                 "values moved by one choice",
+        "amber": "amber: {n} automated claims evaluated on {k} assumption-sourced choices; "
+                 "{flips}",
+        "amber_flip_item": "{id} flips",
+        "amber_none": "none flips",
+        "wrote": "written: {paths} ({seconds:.0f} s)",
+        "current": "trace: current for this design ({path}); amber current — nothing to "
+                   "observe",
+        "partial": "traced {done} of {total} choices for this design; the trace is written "
+                   "when every choice is traced — `nopekit model trace`",
+        "incomplete": "trace not written: {n} build(s) did not finish ({items}). The {k} that "
+                      "finished are kept for the next run",
+        "retry": "  run again with --timeout {suggest:.0f}",
+        # amber's reasons, said after "not traced —" or "not current —"
+        "amber_why": MappingProxyType({
+            "no_trace": "the design has no trace yet",
+            "skipped": "the trace does not move {name} ({word})",
+            "no_file": "no amber run holds it yet",
+            "not_run": "amber did not run on {name}",
+            "evaluators": "the evaluators changed",
+            "acceptance": "the acceptance condition changed",
+            "gate": "{gate} changed",
+        }),
+        # `status`
+        "status_none": "trace: not traced for this design — `nopekit round` starts it in the "
+                       "background; `nopekit model trace` runs it here",
+        "status_running": "trace: running (process {pid}; log {log})",
+        "status_incomplete": "trace: incomplete for this design — {k} build(s) did not "
+                             "finish; `nopekit model trace --timeout {s:.0f}` tries again",
+        "status_edited": "trace: {path} reads {state} — nothing reads it; delete it and run "
+                         "`nopekit model trace`",
+        "status_unrecorded": "trace: not traced — {why}",
+        "unrecorded_why": "the model's code was not recorded",
+        "amber_head": "amber: {items}",
+        "status_flips": "flips ({aid} {choice} {step})",
+        "status_not_current": "not current ({why})",
+        "status_unclear": "could not tell ({token} at {choice} {step})",
+        "status_untraced": "not traced",
+        "status_item": "{id} {words}",
+        # `doctor`
+        "doctor_ok": "current for this design: {n} choices moved, {k} not moved; after {a} "
+                     "edges, {t} groups move together",
+        "doctor_others": "{m} trace files for other designs ({size}); git keeps them; `git rm` "
+                         "the ones you do not need",
+        # `site build`
+        "map_traced": "map: {lines} lines, {boards} boards, {zones} zones, {stations} stations "
+                      "in {layers} layers, {feeds} feeds; derivation {traced}",
+        # the report's `## Amber`
+        "report_heading": "Amber",
+        "report_line": "Amber changes no status.",
+    }),
+    # Architecture phase 5: the front page's words, in ASD-STE100 (`_SITE_WORDS`).
+    "site": _SITE_WORDS,
 })
 
 
@@ -1882,9 +2765,12 @@ def claim_json(claim: Claim, *, composed: Any = None,
     hash), `standing` (the judge's state) and `contradicts` (evaluator ids).
     From P2.5b, additive: `superseded` (the fails a pass on another exported
     article superseded, by index) and `latency` (`{seconds, source, article}`:
-    measured from an export, else declared — `claims.latency`)."""
+    measured from an export, else declared — `claims.latency`). From phase 1
+    (SPEC decision 13), additive: `mechanism` — `{by, how, evaluators}` as
+    declared, all three keys always present — in place of a flat `evaluators`
+    (one spelling per channel); `requirements` stays flat, as the record holds it."""
     row = claim.to_dict()
-    for name in ("results", "attributions", "standing"):
+    for name in ("results", "attributions", "standing", "evaluators"):
         row.pop(name, None)
     standing = getattr(claim, "standing", None)
     row["terminal"] = str(getattr(claim, "terminal", "") or "")
@@ -1898,18 +2784,722 @@ def claim_json(claim: Claim, *, composed: Any = None,
     found = claim_logic.latency(claim, exports or ())
     row["latency"] = {"seconds": found.seconds, "source": found.source,
                       "article": found.article}
+    row["mechanism"] = {"by": str(getattr(claim, "terminal", "") or ""),
+                        "how": str(getattr(claim, "note", "") or ""),
+                        "evaluators": list(getattr(claim, "evaluators", None) or ())}
     if claim.physical_result is not None and isinstance(row.get("physical_result"), dict):
         row["physical_result"].update(result_facts(claim, claim.physical_result))
     return row
 
 
-def result_facts(claim: Claim, entry: Any) -> dict[str, Any]:
+def mechanism_body(claim: Claim) -> str:
+    """`<by> — <how>` (SPEC decision 13): where the claim's evidence bottoms
+    out, in its display word (`terminal_word`, never the raw token), and in
+    words what would settle it — or that nothing says so yet, and where to say
+    it. One line: `how` comes from a record (`_one`). Unlabelled, for a reader
+    that labels it itself (the report's `**Mechanism:**`, `why`'s MECHANISM)."""
+    said = HUMAN["mechanism"]
+    how = _one(getattr(claim, "note", ""))
+    if how:
+        return said["body"].format(by=terminal_word(claim), how=how)
+    return said["unsaid"].format(by=terminal_word(claim), id=claim.id)
+
+
+def mechanism_line(claim: Claim) -> str:
+    """`mechanism: <by> — <how>` — `mechanism_body`, labelled: `gap`'s line."""
+    return HUMAN["mechanism"]["line"].format(body=mechanism_body(claim))
+
+
+def mechanism_problem_words(problem: Any) -> str:
+    """One `claims.MechanismProblem` in words — the line `check` warns with and
+    `doctor` lists: the claim, the evaluator its mechanism names, and that no
+    status moves."""
+    said = HUMAN["mechanism"]
+    return said[problem.kind].format(
+        id=problem.claim, evaluator=problem.evaluator,
+        filed=", ".join(problem.filed) or said["filed_none"])
+
+
+#: How many requirements `status`'s one line names before `+N more`, and how
+#: many of a requirement's worst claims each names. Eight keeps the line near
+#: one screen width for the ids a project numbers R1..R8; *rejected:* one row
+#: per requirement (lines out of status's ~40-line budget, and a `[tag]` row the
+#: claim-row parsers would read as a claim).
+_MAX_REQUIREMENT_ITEMS = 8
+_MAX_WORST_IDS = 3
+
+
+def status_word(status: Any, *, errored: bool = False) -> str:
+    """A status's word with a crash said apart — `skipped, errored` — as the
+    report's section heads say it (invariant 2: louder than a missing tool,
+    wherever a status is rolled up and its tag is not printed beside it)."""
+    shown = word(status, errored=errored)
+    if errored and _norm_status(status) is ClaimStatus.BLOCKED:
+        shown += f", {HUMAN['lead'][ClaimCause.ERRORED]}"
+    return shown
+
+
+# --------------------------------------------------------------------------- #
+# rejected alternatives (SPEC 14, §0.2): `claims.rejection_rows` in words
+# --------------------------------------------------------------------------- #
+def condition_text(cond: Any) -> str:
+    """A structured return condition as written — `C3 margin < 0.1` — or its
+    text; `""` for none."""
+    if cond is None:
+        return ""
+    text = str(getattr(cond, "text", "") or "")
+    if text:
+        return _one(text)
+    return HUMAN["rejection"]["condition"].format(
+        claim=_one(getattr(cond, "claim", "")), quantity=getattr(cond, "quantity", ""),
+        comparator=getattr(cond, "comparator", ""), value=_num(getattr(cond, "value", "")))
+
+
+def _type_phrase(kind: str, preference: Any, by: str = "") -> str:
+    said = HUMAN["rejection"]
+    if kind == "preferred_against":
+        if preference is not None and getattr(preference, "state", "") == "recorded":
+            return said["recorded"].format(name=_one(preference.name),
+                                           when=_one(preference.when))
+        name = getattr(preference, "name", "") if preference is not None else by
+        return said["not_recorded"].format(name=_one(name) or "no one")
+    return said["types"].get(kind or "untyped", _one(kind))
+
+
+def _status_token_word(token: str) -> str:
+    """A `STATUS_KEY` token (or `errored`) as its lower-case word."""
+    if token == "errored":
+        return status_word(ClaimStatus.BLOCKED, errored=True)
+    for status, key in claim_logic.STATUS_KEY.items():
+        if key == token:
+            return word(status)
+    return _one(token)
+
+
+#: The public name of `_status_token_word` (architecture phase 3a): `round`'s
+#: summary says a flipped status token in the same words as a return condition,
+#: and the private name stays for its callers.
+status_token_word = _status_token_word
+
+
+def round_moved(moved: Iterable[str]) -> str:
+    """`the records, the verdict cache and the design` — what moved since a
+    round record, in `HUMAN["round"]["moved"]`'s words, in the record's order."""
+    said = HUMAN["round"]["moved"]
+    names = [said.get(key, key) for key in moved]
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _flip_words(flip: Any) -> str:
+    said = HUMAN["round"]
+    if flip.before is None:
+        return said["appeared"].format(id=flip.id, after=_status_token_word(flip.after))
+    if flip.after is None:
+        return said["gone"].format(id=flip.id, before=_status_token_word(flip.before))
+    return said["flip"].format(id=flip.id, before=_status_token_word(flip.before),
+                               after=_status_token_word(flip.after))
+
+
+#: How many claim and requirement flips `round`'s paragraph names before `and N
+#: more`, and how many new verdicts it names. Why 8: the status line's
+#: requirement cap — one short paragraph is the hook's whole message, and a
+#: round that flipped thirty claims says how many, never all thirty. *Rejected:*
+#: every flip (a wall in a hook's message); none (the one flip a person needs
+#: is the reason the paragraph exists).
+_ROUND_FLIPS = 8
+_ROUND_VERDICT_IDS = 4
+
+
+def _round_changes(changes: Any) -> str:
+    said = HUMAN["round"]
+    flips = [_flip_words(f) for f in (*changes.claims, *changes.requirements)]
+    parts: list[str] = []
+    if flips:
+        shown = flips[:_ROUND_FLIPS]
+        if len(flips) > _ROUND_FLIPS:
+            shown.append(said["more"].format(n=len(flips) - _ROUND_FLIPS))
+        parts.append(", ".join(shown))
+    if changes.verdicts:
+        ids = list(changes.verdicts[:_ROUND_VERDICT_IDS])
+        if len(changes.verdicts) > _ROUND_VERDICT_IDS:
+            ids.append(said["ids_more"].format(k=len(changes.verdicts) - _ROUND_VERDICT_IDS))
+        parts.append(said["verdicts"].format(n=len(changes.verdicts),
+                                             verdicts=_plural(len(changes.verdicts), "verdict"),
+                                             ids=", ".join(ids)))
+    if changes.instructions:
+        parts.append(said["instructions"].format(paths=", ".join(
+            nid.split(":", 1)[-1] for nid in changes.instructions)))
+    if getattr(changes, "unrecorded", False):
+        parts.append(said["instructions_unrecorded"])
+    if not parts:
+        parts.append(said["no_status"].format(what=round_moved(changes.moved)
+                                              or round_moved(("records",))))
+    return "; ".join(parts)
+
+
+def round_paragraph(shape: str, number: Any, changes: Any, *, view: Ledger,
+                    composed: Mapping[str, Any], check: Mapping[str, Any],
+                    site: Mapping[str, Any], wrote: bool, schema: Any, path: str,
+                    trace: Mapping[str, Any] | None = None) -> str:
+    """`nopekit round`'s one paragraph (architecture phase 3a): what changed since
+    the last round record (``shape``: ``written``, ``first``, ``replaced``,
+    ``unchanged`` or ``newer``), the count line, *ready* as last evaluated
+    (`claims.unresolved`, through `readiness`), what the tier-0 check did, the
+    site, the write, and (phase 3b) the background trace when one was started
+    or is running — ``trace`` ``{"state", "log", "why"}``; nothing when the
+    trace is current. One paragraph, because it is the Stop hook's message
+    (phase 6)."""
+    said = HUMAN["round"]
+    if shape == "newer":
+        opening = said["newer"].format(path=path, schema=schema)
+    elif shape == "first":
+        opening = said["first"]
+    elif shape == "replaced":
+        opening = said["replaced"].format(
+            n=number, how=said["replaced_how"].get(changes.replaced, changes.replaced))
+    elif shape == "unchanged":
+        opening = said["unchanged"].format(n=number)
+    else:
+        opening = said["written"].format(n=number, changes=_round_changes(changes))
+    found = readiness(view, composed)
+    if found["ready"]:
+        ready = said["ready"]
+    else:
+        k = len(found["unresolved"]) + len(found["missing"])
+        n = len(found["required"]) + len(found["missing"])
+        ready = said["not_ready"].format(k=k, n=n, claims=_plural(n, "claim"),
+                                         are="is" if k == 1 else "are")
+    if check.get("ran"):
+        ran = said["check_ran"].format(executed=check.get("executed", 0),
+                                       cached=check.get("cached", 0))
+    else:
+        ran = said["check_not_run"].format(why=str(check.get("why") or "").rstrip("."))
+    if not site.get("present"):
+        built = ""
+    elif site.get("built") and site.get("warnings"):
+        built = said["site_warnings"].format(n=site["warnings"],
+                                             warnings=_plural(site["warnings"], "warning"))
+    elif site.get("built"):
+        built = said["site_built"]
+    else:
+        built = said["site_failed"].format(why=str(site.get("why") or "").rstrip("."))
+    tail = said["wrote"].format(path=path) if wrote else ""
+    return f"{opening} {count_line(composed)}. {ready} {ran}{built}{tail}" \
+        f"{round_trace_sentence(trace)}"
+
+
+def round_trace_sentence(trace: Mapping[str, Any] | None) -> str:
+    """The background trace's sentence in `round`'s paragraph (architecture
+    phase 3b), with its leading space: ``trace`` ``{"state", "log", "why"}``,
+    the state `cli._round_start_trace` returns — ``started``, ``amber``,
+    ``running``, ``incomplete`` or ``failed`` — else ``""``. One home for the
+    words, because phase 6 appends it after the commit's sentence, where
+    `round_paragraph` cannot."""
+    said = HUMAN["round"]
+    state = str((trace or {}).get("state") or "")
+    log = str((trace or {}).get("log") or "")
+    return {"started": said["trace_started"].format(log=log),
+            "amber": said["trace_amber"].format(log=log),
+            "running": said["trace_running"].format(log=log),
+            "incomplete": said["trace_incomplete"],
+            "failed": said["trace_failed"].format(
+                why=str((trace or {}).get("why") or "").rstrip("."))}.get(state, "")
+
+
+# --------------------------------------------------------------------------- #
+# the round's commit (architecture phase 6, SPEC 24 with §0.3)
+# --------------------------------------------------------------------------- #
+#: How many paths a not-staged sentence names before ", and k more", and how many
+#: boards the prose sentence names. One short paragraph is the hook's whole
+#: message. *Rejected:* every path (a stray build directory of a thousand files
+#: would be the message); none (the person must see what the round left out).
+_ROUND_PATHS = 3
+_ROUND_SUBJECTS = 4
+
+#: The commit subject's limit: git's own convention (`git log --oneline` and
+#: every forge cut a longer one). *Rejected:* no limit (a thirty-claim flip list
+#: as a subject); 50 (most rounds' first flip would not fit).
+COMMIT_SUBJECT_MAX = 72
+
+
+def _paths_words(paths: Sequence[str], limit: int = _ROUND_PATHS) -> str:
+    shown = ", ".join(str(p) for p in paths[:limit])
+    if len(paths) > limit:
+        shown += HUMAN["round"]["paths_more"].format(k=len(paths) - limit)
+    return shown
+
+
+def _sized(items: Sequence[Any]) -> list[str]:
+    out = []
+    for item in items:
+        path, size = (item[0], item[1]) if isinstance(item, (tuple, list)) else \
+            (item.get("path"), item.get("bytes"))
+        size = int(size)
+        out.append(f"{path} ({size / (1024 * 1024):.0f} MiB)" if size >= 1024 * 1024
+                   else f"{path} ({size / 1024:.0f} KiB)")
+    return out
+
+
+def round_commit_sentence(commit: Any) -> str:
+    """The sentences `round --commit` adds to the paragraph: what the commit
+    did (``commit.why``: ``committed``, ``nothing-changed``, or why not), then
+    the changed paths it named instead of staging — a name that looks like a
+    secret, a file over the cap, what is not a file. ``commit`` is
+    `cli.CommitOutcome`'s shape."""
+    said = HUMAN["round"]
+    why = getattr(commit, "why", "")
+    named = [(key, list(getattr(commit, key, ()) or ()))
+             for key in ("secret", "too_large", "not_files")]
+    if why == "committed":
+        n = len(commit.staged)
+        text = said["committed"].format(oid=(commit.oid or "")[:7], who=commit.who,
+                                        n=n, files=_plural(n, "file"))
+    elif why == "nothing-changed":
+        text = said["nothing_named"] if any(paths for _key, paths in named) else said["nothing"]
+    elif why == "no-repository":
+        text = said["no_repository"]
+    elif why == "no-identity":
+        text = said["no_identity"]
+    elif why == "no-people":
+        text = said["no_people"]
+    elif why == "not-listed":
+        text = said["not_listed"].format(who=commit.who)
+    elif why == "committer-not-listed":
+        text = said["committer_not_listed"].format(who=commit.who)
+    elif why == "ignored":
+        text = said["ignored"]
+    elif why == "in-progress":
+        text = said["in_progress"].format(operation=commit.detail)
+    elif why == "detached":
+        text = said["detached"]
+    elif why == "newer-record":
+        text = said["newer_record"]
+    elif why == "add-failed":
+        text = said["add_failed"].format(why=commit.detail)
+    elif why == "unlisted":
+        text = said["unlisted_changes"]
+    elif why == "timeout":
+        text = said["timeout"].format(s=commit.detail)
+    else:
+        text = said["refused"].format(why=commit.detail or why)
+    for key, paths in named:
+        if paths:
+            text += said[key].format(paths=_paths_words(_sized(paths) if key == "too_large"
+                                                        else paths))
+    return text
+
+
+def round_prose_sentence(prose: Iterable[Mapping[str, Any]]) -> str:
+    """`" Board text written before the latest results: strength — …"`, or ``""``
+    when every board's text is stamped against the current results (``prose``:
+    `page.stamp_states`' rows). A file that names no board is not on the page,
+    and `doctor` says so; it is not a board to restamp."""
+    behind = [str(row.get("subject")) for row in prose
+              if row.get("subject") and row.get("stamp") != "current"]
+    if not behind:
+        return ""
+    return HUMAN["round"]["prose_behind"].format(
+        subjects=_paths_words(behind, _ROUND_SUBJECTS))
+
+
+#: Which `commit_parts` word a staged path falls under, by its first path part
+#: (two parts under `.nopekit/`), in the order the subject names them. `files`
+#: is a directory nopekit does not name (the acceptance run after phase 3b: a
+#: round stages them now — `bom/`, `build/` — and they are not records).
+_PART_ORDER = ("records", "model", "evaluators", "generators", "verdicts", "trace", "packs",
+               "site_text", "site", "round", "project", "files")
+
+
+def _commit_part(rel: str, round_rel: str = "") -> str:
+    parts = str(rel).split("/")
+    if round_rel and rel == round_rel:
+        return "round"
+    if parts[0] == store.NOPEKIT_DIR and len(parts) > 1:
+        second = parts[1]
+        if second == store.VERDICTS_NAME:
+            return "verdicts"
+        if second == "trace":
+            return "trace"
+        if second == store.PACKS_NAME:
+            return "packs"
+        return "project"
+    head = parts[0]
+    if len(parts) == 1:
+        return "project"
+    if head == "model":
+        return "model"
+    if head in ("gates", "selftest"):
+        return "evaluators"
+    if head == "generators":
+        return "generators"
+    if head == "site":
+        return "site_text" if len(parts) > 2 and parts[1] == "content" else "site"
+    if head in store.RECORD_DIRS:
+        return "records"
+    return "files"
+
+
+def _commit_group(rel: str) -> str:
+    parts = str(rel).split("/")
+    if parts[0] == store.NOPEKIT_DIR and len(parts) > 2:
+        return "/".join(parts[:2])
+    return parts[0]
+
+
+def _and_list(items: Sequence[str]) -> str:
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _wrap_message(text: str, width: int = COMMIT_SUBJECT_MAX) -> str:
+    """One paragraph wrapped at ``width``, never leaving a line that starts with
+    one token and a colon: `git interpret-trailers` reads such a line in the
+    last paragraph as a trailer, and the commit carries none (the house rule:
+    no attribution, nothing trailer-shaped)."""
+    import textwrap
+    lines = textwrap.wrap(" ".join(text.split()), width=width, break_long_words=False,
+                          break_on_hyphens=False)
+    out: list[str] = []
+    for line in lines:
+        if out and re.match(r"^[^\s:]+:(\s|$)", line):
+            out[-1] = out[-1] + " " + line
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def round_commit_message(number: Any, shape: str, changes: Any, staged: Sequence[str],
+                         not_files: Sequence[str], too_large: Sequence[Any],
+                         secret: Sequence[str], earlier: tuple | None, paragraph: str, *,
+                         round_rel: str = "") -> tuple[str, str]:
+    """``(subject, body)`` of a round's commit (SPEC 24): ``round N: <what
+    changed>`` — the flips and new verdicts when the record was written, ``the
+    first round record`` for round 1, else which kinds of the project's files
+    changed (a standing round's later work is still that round, so its number
+    is reused); compacted to counts, then cut, past `COMMIT_SUBJECT_MAX`. The
+    body: the paragraph the person saw, the files grouped by directory, the
+    earlier rounds this commit also holds, and what it left out (a name that
+    looks like a secret, a file over the cap, what is not a file). No trailer
+    and no attribution. ``round_rel`` is `rounds.ROUND_REL`, handed in: the
+    round record's file name has one home, and only `cli` imports `rounds`."""
+    said = HUMAN["round"]
+    if shape == "written":
+        what = _round_changes(changes)
+    elif shape == "first":
+        what = said["commit_first"]
+    else:
+        kinds = {_commit_part(rel, round_rel) for rel in staged}
+        words = [said["commit_parts"][k] for k in _PART_ORDER if k in kinds]
+        what = said["commit_changed"].format(parts=_and_list(words))
+    subject = said["commit_subject"].format(n=number, what=what)
+    if len(subject) > COMMIT_SUBJECT_MAX and shape == "written":
+        compact = said["commit_compact"]
+        bits = []
+        flips = len(getattr(changes, "claims", ())) + len(getattr(changes, "requirements", ()))
+        if flips:
+            bits.append(compact["statuses"].format(k=flips,
+                                                   statuses=_plural(flips, "status", "statuses")))
+        if getattr(changes, "verdicts", ()):
+            n = len(changes.verdicts)
+            bits.append(compact["verdicts"].format(v=n, verdicts=_plural(n, "verdict")))
+        if getattr(changes, "instructions", ()):
+            bits.append(compact["instructions"])
+        if bits:
+            subject = said["commit_subject"].format(n=number, what="; ".join(bits))
+    if len(subject) > COMMIT_SUBJECT_MAX:
+        subject = subject[:COMMIT_SUBJECT_MAX - 1].rstrip() + "…"
+    paragraphs = [paragraph.strip()]
+    groups: dict[str, int] = {}
+    for rel in staged:
+        key = _commit_group(rel)
+        groups[key] = groups.get(key, 0) + 1
+    group_words = ", ".join(f"{key} ({n})" for key, n in groups.items())
+    paragraphs.append(said["commit_files"].format(n=len(staged),
+                                                  files=_plural(len(staged), "file"),
+                                                  groups=group_words))
+    if earlier:
+        a, b = earlier
+        paragraphs.append(said["commit_earlier_one"].format(a=a) if a == b
+                          else said["commit_earlier_many"].format(a=a, b=b))
+    if secret:
+        paragraphs.append(said["commit_secret"].format(paths=", ".join(secret)))
+    if too_large:
+        paragraphs.append(said["commit_too_large"].format(paths=", ".join(_sized(too_large))))
+    if not_files:
+        paragraphs.append(said["commit_not_files"].format(paths=", ".join(not_files)))
+    body = "\n\n".join(_wrap_message(p) for p in paragraphs if p)
+    return subject, body
+
+
+def round_hook_message(outcome: Any) -> str:
+    """The Stop hook's ``systemMessage`` (SPEC 24): ``nopekit `` and the
+    paragraph `round --commit` prints, or, for a round that did not run, why
+    and that nothing was committed. ``outcome`` has ``not_run`` and
+    ``summary``."""
+    if getattr(outcome, "not_run", ""):
+        return HUMAN["round"]["hook_not_run"].format(
+            why=str(outcome.not_run).rstrip(".") or "it did not run")
+    return "nopekit " + str(getattr(outcome, "summary", "") or "").strip()
+
+
+def round_hook_crash(exc: BaseException) -> str:
+    """The Stop hook's message for a crash: its type and first line."""
+    line = (str(exc).strip().splitlines() or [""])[0]
+    return HUMAN["round"]["hook_crash"].format(kind=type(exc).__name__,
+                                               line=line or "no message")
+
+
+def return_words(row: Any, ledger: Ledger | None = None) -> str:
+    """The state of `row`'s return condition now, in words — from its
+    `ReturnState`, never computed here. `ledger` gives a value or a limit its
+    claim's units."""
+    said = HUMAN["rejection"]
+    state = row.returns
+    cond = row.condition
+    if state.state == "none":
+        return said["none"]
+    if state.state == "not-machine-checkable":
+        return said["text"].format(text=condition_text(cond))
+    claim = _one(state.claim or getattr(cond, "claim", ""))
+    if state.state == "cannot-evaluate":
+        if state.why == "status":
+            return said["cannot"].format(claim=claim, status=_status_token_word(state.status))
+        if state.why == "no-claim":
+            return said["cannot_no_claim"].format(claim=claim)
+        if state.why == "no-margin":
+            detail = said["margin_why"].get(state.detail, _one(state.detail))
+            return said["cannot_no_margin"].format(gate=state.gate or "its evaluator",
+                                                   claim=claim, detail=detail)
+        if state.why == "no-limit":
+            return said["cannot_no_limit"].format(claim=claim)
+        if state.why == "band":
+            return said["cannot_band"].format(claim=claim)
+        return said["cannot_no_value"].format(claim=claim)
+    units = ""
+    if ledger is not None and getattr(cond, "quantity", "") in ("value", "limit"):
+        found = ledger.claim(state.claim)
+        units = str(getattr(getattr(found, "acceptance", None), "units", "") or "") \
+            if found is not None else ""
+    observed = _num(state.observed) + (f" {_one(units)}" if units else "")
+    gate = f" ({state.gate})" if state.gate else ""
+    key = "holds" if state.state == "holds" else "does_not_hold"
+    return said[key].format(condition=condition_text(cond), observed=observed, gate=gate)
+
+
+def rejection_words(row: Any, ledger: Ledger | None = None) -> tuple[str, str]:
+    """`(type phrase, condition phrase)` for one `claims.RejectionRow` — the
+    words every reader of a rejection prints (`why`, `check`'s *may return*)."""
+    return (_type_phrase(row.type, row.preference, row.by), return_words(row, ledger))
+
+
+def rejection_facts(row: Any, ledger: Ledger | None = None) -> str:
+    """`why`'s facts line under a decision's rejection: `{type} · {condition}`
+    and, when an input is its source, `· source: input {id}`."""
+    kind, condition = rejection_words(row, ledger)
+    line = HUMAN["rejection"]["facts"].format(type=kind, condition=condition)
+    if row.input:
+        line += " · " + HUMAN["rejection"]["input"].format(input=_one(row.input))
+    return line
+
+
+def may_return_line(row: Any, ledger: Ledger | None = None) -> str:
+    """`check`'s line for a rejected alternative whose return condition holds."""
+    kind, condition = rejection_words(row, ledger)
+    return HUMAN["rejection"]["may_return"].format(
+        value=_one(row.value), decision=row.decision, type=kind, state=condition)
+
+
+def rejection_suffix(rejection: Any, *, decision: str = "") -> str:
+    """What `decide` prints after a rejection it wrote, and the decision log
+    after each loser: its type, its condition as written and its input —
+    static, never a live state. `decide` says a preference it just wrote is not
+    recorded (true when it is written); the log (``decision`` given, its id)
+    says only whom it names and where to read whether they recorded it, since
+    the log is regenerated by `report --write`, not by a person's `prefer`.
+    `""` for a legacy rejection that states none of them."""
+    said = HUMAN["rejection"]
+    kind = str(getattr(rejection, "type", "") or "")
+    name = claim_logic.name_of(getattr(rejection, "by", ""))
+    if kind == "preferred_against" and decision:
+        head = said["named"].format(name=_one(name) or "no one", id=decision)
+    else:
+        head = _type_phrase(kind, None, name) if kind else ""
+    parts: list[str] = []
+    cond = getattr(rejection, "returns_if", None)
+    if cond is not None and str(getattr(cond, "text", "") or ""):
+        parts.append(said["returns_text"].format(text=_one(cond.text)))
+    elif cond is not None:
+        parts.append(said["returns_if"].format(condition=condition_text(cond)))
+    if str(getattr(rejection, "input", "") or ""):
+        parts.append(said["input"].format(input=_one(rejection.input)))
+    if not head and not parts:
+        return ""
+    return " — " + " · ".join([p for p in (head, *parts) if p])
+
+
+def requirement_statuses(ledger: Ledger, composed: Mapping[str, Any],
+                         cover: Mapping[str, list[str]]) -> dict[str, Any]:
+    """`claims.requirement_statuses` — the one producer, its statuses untouched —
+    with each row's `disagree` filled: the serving claims whose status and
+    evidence disagree (`_disagreement`, D18), record order. Every requirement
+    reader asks this, so none prints a requirement bare "checked" over a claim
+    the claim rows list as a contradiction. What slipped through (review of
+    phase 1): the roll-up ranked by the composition alone, so a resolver
+    regression the claim rows caught read `R1 checked` one line below them."""
+    found = claim_logic.requirement_statuses(ledger, composed)
+    cover = dict(cover)
+    out: dict[str, Any] = {}
+    for rid, row in found.items():
+        bad = tuple(cid for cid in row.claims
+                    if (claim := ledger.claim(cid)) is not None
+                    and _disagreement(ledger, claim, composed[cid], cover))
+        out[rid] = row._replace(disagree=bad) if bad else row
+    return out
+
+
+def _requirement_order(requirements: list[Any], found: Mapping[str, Any]) -> list[Any]:
+    """The requirements `status`'s line names before `+N more`: worst first, in
+    `claims.SEVERITY_ORDER` as the claim rows above it are (a disagreement
+    first, as those rows list it), record order within a rank; Gap with no
+    claim at Gap's rank. What slipped through (review of phase 1): the line cut
+    at eight in record order, so a failing ninth read `+1 more` under eight
+    checked ones."""
+    def rank(requirement: Any) -> int:
+        row = found[requirement.id]
+        if row.disagree:
+            return -1
+        key = "errored" if row.errored else claim_logic.STATUS_KEY[row.status]
+        return claim_logic.SEVERITY_ORDER.index(key)
+    return sorted(requirements, key=rank)
+
+
+def requirement_line(ledger: Ledger, composed: Mapping[str, Any],
+                     cover: Mapping[str, list[str]] | None = None) -> str | None:
+    """`requirements 4 — R1 failing (C1) · R2 gap (C7) · R4 checked` — the
+    requirements line `status` prints (SPEC decision 12), or None when the
+    project records none. Every status from `requirement_statuses` over
+    `claims.requirement_statuses`, the one producer; record order while every
+    one fits, else worst first (`_requirement_order`) with `+N more (k
+    unresolved)`; Checked ones name no claim unless one disagrees with its
+    evidence. ``cover`` is the caller's coverage (`_coverage`); None reads
+    each claim's own cached list."""
+    requirements = list(getattr(ledger, "requirements", None) or ())
+    if not requirements:
+        return None
+    said = HUMAN["requirement"]
+    if cover is None:
+        cover = _coverage(ledger, None)
+    found = requirement_statuses(ledger, composed, cover)
+    shown_ones = (requirements if len(requirements) <= _MAX_REQUIREMENT_ITEMS
+                  else _requirement_order(requirements, found)[:_MAX_REQUIREMENT_ITEMS])
+    items = []
+    for requirement in shown_ones:
+        status = found[requirement.id]
+        shown = status_word(status.status, errored=status.errored)
+        if status.disagree:
+            items.append(said["item_disagree"].format(
+                id=requirement.id, word=shown, ids=", ".join(status.disagree)))
+        elif not status.claims:
+            items.append(said["item_none"].format(id=requirement.id, word=shown))
+        elif status.status in (ClaimStatus.PASS, ClaimStatus.VERIFIED):
+            items.append(said["item"].format(id=requirement.id, word=shown))
+        else:
+            ids = ", ".join(status.worst[:_MAX_WORST_IDS]) + (
+                f", {said['more'].format(k=len(status.worst) - _MAX_WORST_IDS)}"
+                if len(status.worst) > _MAX_WORST_IDS else "")
+            items.append(said["item_worst"].format(id=requirement.id, word=shown, ids=ids))
+    if len(requirements) > _MAX_REQUIREMENT_ITEMS:
+        kept = {r.id for r in shown_ones}
+        hidden = [found[r.id] for r in requirements if r.id not in kept]
+        left = sum(1 for r in hidden if r.disagree or r.status not in (
+            ClaimStatus.PASS, ClaimStatus.VERIFIED))
+        items.append(said["more_unresolved"].format(k=len(hidden), u=left) if left
+                     else said["more"].format(k=len(hidden)))
+    return said["line"].format(n=len(requirements), items=said["sep"].join(items))
+
+
+def requirement_json(requirement: Any, found: Any) -> dict[str, Any]:
+    """A requirement as every JSON channel shows it — `status --json`, `report
+    --json` and `state.json` (SPEC decision 12): its record, and its status from
+    `claims.requirement_statuses` (`found`), worded once here."""
+    return {"id": requirement.id, "statement": str(requirement.statement or ""),
+            "source": str(requirement.source or ""), "status": found.status.value,
+            "key": found.key, "word": status_word(found.status, errored=found.errored),
+            "errored": bool(found.errored), "claims": list(found.claims),
+            "worst": list(found.worst),
+            # D18 carried up: the serving claims whose status and evidence
+            # disagree (`requirement_statuses`); empty under the composition.
+            "disagree": list(getattr(found, "disagree", ()) or ())}
+
+
+def _section_requirements(ledger: Ledger, composed: Mapping[str, Any],
+                          cover: Mapping[str, list[str]] | None = None) -> list[str]:
+    """The report's `## Requirements` (SPEC decision 12): each requirement, its
+    status from `claims.requirement_statuses`, its words, and the claims that
+    serve it grouped by status, most urgent first. Empty when the project
+    records none, so a report without requirements is byte-identical to one
+    before phase 1. After the Failing section: SECTION_PROVEN stays first, and a
+    requirement is never a claim row (no JUnit suite either)."""
+    requirements = list(getattr(ledger, "requirements", None) or ())
+    if not requirements:
+        return []
+    said = HUMAN["requirement"]
+    found = requirement_statuses(ledger, composed,
+                                 _coverage(ledger, None) if cover is None else cover)
+    out = [HUMAN["heading"]["requirements"], "",
+           said["intro"].format(gap=word(ClaimStatus.UNCLAIMED)), ""]
+    for requirement in requirements:
+        status = found[requirement.id]
+        groups: dict[tuple, list[str]] = {}
+        for cid in status.claims:
+            one = composed[cid]
+            groups.setdefault((claim_logic.severity(one), one.status, one.errored),
+                              []).append(cid)
+        claims = said["sep"].join(
+            said["group"].format(ids=", ".join(ids), word=status_word(st, errored=err))
+            for (_rank, st, err), ids in sorted(groups.items(), key=lambda kv: kv[0][0])
+        ) or said["no_claim"]
+        statement = _trunc(_one(requirement.statement), 160)
+        if status.disagree:
+            statement = said["md_disagree"].format(ids=", ".join(status.disagree)) + statement
+        out.append(said["md_row"].format(
+            id=requirement.id, word=status_word(status.status, errored=status.errored),
+            statement=statement, claims=claims))
+    out.append("")
+    return out
+
+
+#: A recorded result's token (follow-up after phase 3b): its outcome as the
+#: judge counts it. ``pass`` is a pass that counts; ``fail`` a fail that counts,
+#: which is every fail but one a pass on another exported article superseded
+#: (R-3, P2.5b-D14); ``not-counted`` any other. Both pages colour and word a
+#: recorded result from this token alone, through one table (format.js
+#: `outcomeLook`). What slipped through: the front page's drawer coloured the
+#: block on ``counts`` alone, so a counted fail read green beside its Failing
+#: chip, and the technical record kept a second tone rule of its own.
+#: *Rejected:* the bare outcome, ``pass`` or ``fail`` (a pass that does not count
+#: would then read green, critique 3 of the P2.5a design); two flags the browser
+#: combines (the page computes no tone, SPEC 32).
+RESULT_TOKENS = ("pass", "fail", "not-counted")
+
+
+def result_facts(claim: Claim, entry: Any, *, register: str = "cli") -> dict[str, Any]:
     """What a renderer may show about one recorded result (critique 3 of the
     P2.5a design): ``counts`` — the judge counted it (a pass that settles the
-    claim now, or any fail: R-3); ``why`` — why not, in words; ``recorded`` —
-    who and from where. The page paints the ok tone only on ``counts`` and a
-    pass, never on ``passed`` (site.py's rule for verdict rows, now for results
-    too)."""
+    claim now, or any fail: R-3); ``token`` — its `RESULT_TOKENS` entry, the one
+    key a page colours it by; ``why`` — why not, in words; ``recorded`` — who
+    and from where. The page paints the ok tone only on a pass that counts,
+    never on ``passed`` (site.py's rule for verdict rows, now for results too).
+
+    ``register="site"`` (follow-up after phase 3b): the same branches, the same
+    ``counts`` and ``token``, worded by ``HUMAN["site"]["result"]`` for the
+    front page's drawer, with ``word``, the token's site word; `state.json`, the
+    technical record, keeps the CLI's words. One function, so the two pages
+    never disagree on whether a result counts, or on how it looks."""
+    site = register == "site"
     standing = getattr(claim, "standing", None)
     results = list(getattr(claim, "results", ()) or ())
     index = max((i for i, item in enumerate(results) if item == entry), default=None)
@@ -1924,17 +3514,28 @@ def result_facts(claim: Claim, entry: Any) -> dict[str, Any]:
         passing = (_entry(claim, standing.counted)
                    if getattr(standing, "counted", None) is not None else None)
         counts = False
-        why = HUMAN["physical"]["superseded_by"].format(
+        why = (HUMAN["site"]["result"]["superseded"] if site
+               else HUMAN["physical"]["superseded_by"]).format(
             article=article12(getattr(passing, "article", None) or {}))
     elif getattr(entry, "passed", None) is not True:
         counts, why = True, ""
     elif found is None:
-        counts, why = False, HUMAN["not_counted"]["legacy"] if standing is None else ""
+        counts = False
+        why = "" if standing is not None else (_site_not_counted(claim, "legacy") if site
+                                               else HUMAN["not_counted"]["legacy"])
     else:
         counts = bool(found.counts)
-        why = "" if counts else _why_words(claim, found)
+        why = "" if counts else (_site_why_words(claim, found) if site
+                                 else _why_words(claim, found))
+    token = (("pass" if getattr(entry, "passed", None) is True else "fail") if counts
+             else "not-counted")
+    if site:
+        said = HUMAN["site"]["result"]
+        return {"counts": counts, "token": token, "word": HUMAN["site"]["outcome"][token],
+                "why": why, "recorded": _site_recorded(entry),
+                "heading": said["heading_judgment" if _judgment(claim) else "heading_test"]}
     said = HUMAN["physical"]
-    return {"counts": counts, "why": why, "recorded": recorded_words(entry),
+    return {"counts": counts, "token": token, "why": why, "recorded": recorded_words(entry),
             # The block's heading in the page's words (review of P2.5a: a
             # judgment read "A physical result was recorded").
             "heading": said["judgment_recorded" if _judgment(claim) else "result_recorded"]}
@@ -1963,6 +3564,56 @@ def _why_words(claim: Claim, found: Any) -> str:
         return HUMAN["lead"][ClaimCause.ARTICLE_UNJUDGED].format(
             article=article12(found.article))
     return _not_counted(claim, why)
+
+
+def _site_why_words(claim: Claim, found: Any) -> str:
+    """`_why_words`, branch for branch, in the site's words."""
+    said = HUMAN["site"]["result"]
+    why = str(found.why or "")
+    authority = _one(getattr(claim, "authority", ""))
+    article = article12(found.article)
+    if why == "article-moved":
+        if found.moved:
+            return said["moved"].format(article=article,
+                                        moves=verdict_logic._stale_text(found.moved))
+        return said["moved_bare"].format(article=article)
+    if why == "judgment-moved":
+        return said["judgment_moved"].format(authority=authority)
+    if why == "claim-moved" and _judgment(claim):
+        return said["judgment_claim_moved"].format(authority=authority)
+    if why == "claim-moved":
+        return said["claim_moved"].format(article=article)
+    if why == "article-unjudged" and _judgment(claim):
+        return said["judgment_unjudged"].format(authority=authority)
+    if why == "article-unjudged":
+        return said["unjudged"].format(article=article)
+    return _site_not_counted(claim, why)
+
+
+def _site_not_counted(claim: Claim, why: str) -> str:
+    """`_not_counted` in the site's words: the judgment table for an expert
+    judgment, the pass table's key otherwise, the token itself when no table
+    knows it (as the CLI's)."""
+    said = HUMAN["site"]["result"]
+    table = said["judgment_not_counted"] if _judgment(claim) else said["not_counted"]
+    key, _sep, rest = why.partition(":")
+    template = table.get(key) or said["not_counted"].get(key) or why
+    return template.format(path=rest, authority=_one(getattr(claim, "authority", "")))
+
+
+def _site_recorded(entry: Any) -> str:
+    """`recorded_words` in the site's words: who recorded a result, and from
+    where when that is not their own shell."""
+    said = HUMAN["site"]["result"]
+    name = _one(getattr(entry, "who", "")) if entry is not None else ""
+    channel = str(getattr(entry, "channel", "") or "") if entry is not None else ""
+    if not name:
+        return said["recorded_none"]
+    if channel.startswith("agent-session"):
+        return said["recorded_agent"].format(who=name)
+    if channel == "non-interactive":
+        return said["recorded_pipe"].format(who=name)
+    return said["recorded"].format(who=name)
 
 
 def status_view(composed: Any, ledger: Ledger, claim: Claim, *,
@@ -2182,6 +3833,13 @@ def _specs(registry: Any) -> list[Any]:
     if registry is None:
         return []
     return list(registry.specs())
+
+
+def _bases(registry: Any) -> dict[str, str]:
+    """`{gate id: basis token}` of every registered evaluator (SPEC 38;
+    `gates.basis_of`'s rule): an unregistered gate is absent, and shows none."""
+    from .models import BASIS_UNDECLARED
+    return {s.id: (getattr(s, "basis", "") or BASIS_UNDECLARED) for s in _specs(registry)}
 
 
 def _unrun_specs(ledger: Ledger, registry: Any) -> list[Any]:
@@ -2412,7 +4070,8 @@ def milestone_line(ledger: Ledger, composed: Mapping[str, Any], milestone: Any) 
         stale_ids=f" ({_ids(stale)})" if stale else "", rest=tail)
 
 
-def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
+def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any], *,
+                     register: str = "cli") -> list[str]:
     """The readiness sentence's hardware clause (W13), in EVERY branch, ready
     included: `Pending build: N claims need an article (ids)` when any does —
     naming apart those with a pass that does not count — then one `Rebuild
@@ -2424,22 +4083,35 @@ def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
     a design change had made obsolete — they were a heading below. *Rejected:*
     dropping the clause where no physical claim exists (that design is the one
     most easily read as built); "It is unverified in physical hardware"
-    (GLOSSARY §9: *unverified* is Pending build's Never-say)."""
+    (GLOSSARY §9: *unverified* is Pending build's Never-say).
+
+    ``register="site"`` (follow-up after phase 3b): the same three clauses,
+    from the same lists, in ``HUMAN["site"]["readiness"]``'s words: a built
+    part where the CLI says an article. What slipped through: phase 5 left
+    this clause shared, since it passed the style scan, and the page said "1
+    claim needs an article" to a reader who had never met the word."""
     status_of = {cid: c.status for cid, c in composed.items()}
+    site = register == "site"
+    said = HUMAN["site"]["readiness"] if site else HUMAN["readiness"]
     parts: list[str] = []
     pending = [c for c in ledger.claims if status_of.get(c.id) is ClaimStatus.UNVERIFIED]
     if pending:
         recorded = [c for c in pending if composed[c.id].cause is ClaimCause.PHYSICAL_PASS]
-        text = (f"{words(ClaimStatus.UNVERIFIED).term}: {len(pending)}"
-                f" {_plural(len(pending), 'claim')}"
-                f" {_plural(len(pending), 'needs', 'need')} an article ({_ids(pending)})")
+        if site:
+            text = said["pending"].format(Pending=words(ClaimStatus.UNVERIFIED).term,
+                                          n=len(pending), claims=_plural(len(pending), "claim"),
+                                          need=_plural(len(pending), "needs", "need"),
+                                          ids=_ids(pending))
+        else:
+            text = (f"{words(ClaimStatus.UNVERIFIED).term}: {len(pending)}"
+                    f" {_plural(len(pending), 'claim')}"
+                    f" {_plural(len(pending), 'needs', 'need')} an article ({_ids(pending)})")
         if recorded:
             text += "; " + HUMAN["physical"]["unbound"].format(
                 ids=_ids(recorded), has=_plural(len(recorded), "has", "have"))
         parts.append(text + ".")
-    said = HUMAN["readiness"]
     for found in claim_logic.rebuild(ledger):
-        parts.append(said["rebuild"].format(
+        parts.append(site_rebuild_text(found) if site else said["rebuild"].format(
             article=article12(found.article), claims=", ".join(found.claims),
             moves=verdict_logic._stale_text(found.moved) if found.moved
             else "the design moved"))
@@ -2452,14 +4124,28 @@ def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
     return parts
 
 
-def limits_line(ledger: Ledger) -> str:
+def site_rebuild_text(found: Any) -> str:
+    """One part to build again, in the site's words (`claims.rebuild`'s row):
+    the readiness sentence's clause and next steps' row both say this, so the
+    page never names one part two ways."""
+    said = HUMAN["site"]
+    values = {"article": article12(found.article), "claims": ", ".join(found.claims)}
+    if found.moved:
+        return said["rebuild"].format(moves=verdict_logic._stale_text(found.moved), **values)
+    return said["rebuild_bare"].format(**values)
+
+
+def limits_line(ledger: Ledger, register: str = "cli") -> str:
     """The limits line (M18.1; METHOD rule 9: "Say so, in the report, every
     time"): what a checked claim does not mean, and that nothing outside the
     claims was evaluated — REPORT.md's paragraph and `export`'s line, verbatim
-    on both (critique 10 of the P2.5b design: `/ready` must carry it too)."""
+    on both (critique 10 of the P2.5b design: `/ready` must carry it too).
+    ``register="site"``: the same facts in the site's words (SPEC 34), the
+    page's only "Checked does not mean true"."""
     n = len(ledger.claims)
-    return HUMAN["readiness"]["limits"].format(Checked=words(ClaimStatus.PASS).term, n=n,
-                                               claims=_plural(n, "claim"))
+    table = HUMAN["site"]["readiness"] if register == "site" else HUMAN["readiness"]
+    return table["limits"].format(Checked=words(ClaimStatus.PASS).term, n=n,
+                                  claims=_plural(n, "claim"))
 
 
 def latency_words(claim: Claim, exports: Iterable[Any]) -> str:
@@ -2525,7 +4211,7 @@ def not_ready_line(ledger: Ledger, composed: Mapping[str, Any]) -> str:
 
 def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any,
                       *, stale: bool, markdown: bool, milestone: Any = None,
-                      boundary: bool = False) -> str:
+                      boundary: bool = False, register: str = "cli") -> str:
     """The readiness sentence, then what stays true whatever it says. Bad news
     first, always.
 
@@ -2576,7 +4262,17 @@ def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any
     … Nothing below is checked … 1 claim is checked on an article" — no NOT
     ready, and a contradiction in one sentence; and a crash on a claim not
     required was "unresolved", its errored said only on the count line.
+
+    ``register="site"`` (architecture phase 5, SPEC 34): the same branches,
+    the same predicate and the same groups, each branch's words from
+    ``HUMAN["site"]["readiness"]`` in ASD-STE100, never markdown. The CLI
+    branch's bytes are untouched (its transcript and shapes are pinned).
+    *Rejected:* a second sentence builder for the page (two answers to "is it
+    ready").
     """
+    if register == "site":
+        return _site_sentence(ledger, composed, registry, milestone=milestone,
+                              boundary=boundary)
     rev = ledger.meta.revision or "this revision"
     bold = (lambda s: f"**{s}**") if markdown else (lambda s: s)
     total = len(ledger.claims)
@@ -2649,19 +4345,74 @@ def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any
     return " ".join(parts)
 
 
+def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
+                   milestone: Any = None, boundary: bool = False) -> str:
+    """`_verdict_sentence`'s site register: branch for branch the CLI's, from
+    the same `readiness`, `_groups`, `_unrun_specs` and `_hardware_clause`,
+    worded by ``HUMAN["site"]["readiness"]``."""
+    said = HUMAN["site"]["readiness"]
+    rev = ledger.meta.revision or "this revision"
+    total = len(ledger.claims)
+    checked = word(ClaimStatus.PASS)
+    if total == 0:
+        return " ".join([said["no_claims"].format(rev=rev),
+                         *_hardware_clause(ledger, composed, register="site")])
+    if milestone is not None:
+        return " ".join([_milestone_sentence(ledger, composed, milestone, rev, lambda t: t,
+                                             boundary=boundary, register="site"),
+                         *_hardware_clause(ledger, composed, register="site")])
+    found = readiness(ledger, composed)
+    status_of = {cid: c.status for cid, c in composed.items()}
+    n_checked = sum(1 for st in status_of.values()
+                    if st in (ClaimStatus.PASS, ClaimStatus.VERIFIED))
+    tally = said["tally"].format(k=n_checked, n=total, claims=_plural(total, "claim"),
+                                 is_=_plural(n_checked, "is", "are"), checked=checked)
+    parts: list[str] = []
+    if not [v for v in ledger.verdicts if not verdict_logic.never_run(v)]:
+        parts.append(said["never_ready" if found["ready"] else "never"].format(
+            rev=rev, n=total, claims=_plural(total, "claim")))
+    elif not found["required"]:
+        parts.append(said["none_required"].format(rev=rev, n=total,
+                                                  claims=_plural(total, "claim")))
+        parts.append(tally)
+    elif found["unresolved"]:
+        n, req = len(found["unresolved"]), len(found["required"])
+        parts.append(said["not_ready"].format(
+            rev=rev, k=n, req=req, claims=_plural(req, "claim"), is_=_plural(n, "is", "are"),
+            groups=_groups(ledger, composed, found["unresolved"])))
+        parts.append(tally)
+    else:
+        parts.append(said["ready_last"].format(rev=rev, checked=checked))
+    other = [c for c in ledger.claims if not c.critical
+             and status_of.get(c.id) not in (ClaimStatus.PASS, ClaimStatus.VERIFIED)]
+    if other:
+        parts.append(said["other"].format(n=len(other), claims=_plural(len(other), "claim"),
+                                          is_=_plural(len(other), "is", "are"),
+                                          groups=_groups(ledger, composed, other)))
+    unrun = _unrun_specs(ledger, registry)
+    if unrun and ledger.verdicts:
+        parts.append(said["unrun"].format(n=len(unrun),
+                                          evaluators=_plural(len(unrun), "evaluator")))
+    parts += _hardware_clause(ledger, composed, register="site")
+    return " ".join(parts)
+
+
 def _milestone_sentence(ledger: Ledger, composed: Mapping[str, Any], milestone: Any,
                         rev: str, bold: Callable[[str], str], *,
-                        boundary: bool = False) -> str:
+                        boundary: bool = False, register: str = "cli") -> str:
     """The milestone variant's head (P2.5b §2.4), from `claims.unresolved` —
-    the boundary's words plainly, a cache reader's as last evaluated."""
-    said = HUMAN["readiness"]
+    the boundary's words plainly, a cache reader's as last evaluated.
+    ``register="site"``: the site's words for the same branches."""
+    said = HUMAN["site"]["readiness"] if register == "site" else HUMAN["readiness"]
+
     name = str(getattr(milestone, "id", "") or "")
     if not list(getattr(milestone, "requires", None) or ()):
         return bold(said["requires_nothing"].format(rev=rev, m=name))
     found = claim_logic.unresolved(ledger, composed, milestone)
     tail = "" if boundary else "_last"
     if found.ready:
-        return bold(said["ready_for" + tail].format(rev=rev, m=name))
+        return bold(said["ready_for" + tail].format(rev=rev, m=name,
+                                                    checked=word(ClaimStatus.PASS)))
     n = len(found.required) + len(found.missing)
     k = len(found.unresolved) + len(found.missing)
     groups = "; ".join(part for part in (
@@ -2703,6 +4454,7 @@ def _section_proven(ledger: Ledger, composed: Mapping[str, Any],
     checked = word(ClaimStatus.PASS)
     said = HUMAN["acceptance"]
     needs = {s.id: list(getattr(s, "needs", None) or ()) for s in _specs(registry)}
+    bases = _bases(registry)
 
     for claim in ledger.claims:
         if composed[claim.id].status is not ClaimStatus.PASS:
@@ -2710,7 +4462,9 @@ def _section_proven(ledger: Ledger, composed: Mapping[str, Any],
         if _disagreement(ledger, claim, composed[claim.id], cover):
             continue
         verdicts = _ok_verdicts(ledger, claim)
-        gates = ", ".join(_code(v.gate) for v in verdicts)
+        # SPEC 38: each evaluator's basis beside it — shown, never a status.
+        gates = ", ".join(_code(v.gate) + (f" (basis: {bases[v.gate]})" if v.gate in bases
+                                           else "") for v in verdicts)
         unlisted = dict(claim_logic.not_compared(claim, verdicts, needs))
         measured_bits = []
         evidence: list[str] = []
@@ -2925,8 +4679,9 @@ def _physical_test(claim: Claim) -> str:
         return (f"measure {rendered} on the article and compare against the "
                 f"acceptance")
     return ("**no test has been written down.** As stated, this claim cannot be "
-            "settled by any observation — give it an acceptance or a procedure in "
-            "its note, or it will stay on this list forever")
+            "settled by any observation — give it an acceptance condition, or say what "
+            "would settle it in its mechanism (\"how\"), or it will stay on this list "
+            "forever")
 
 
 def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
@@ -2965,9 +4720,10 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
         return out
 
     if needs or no_evaluator:
-        out.append(f"A claim with no evaluator is a {word(gap)}, not a defect. It is closed "
-                   f"by installing or writing a tool — with the cost said out loud before "
-                   f"anyone agrees to it.")
+        out.append(f"A claim with no evaluator is a {word(gap)}, not a defect. Its mechanism "
+                   f"says what would settle it; the cheapest evaluator that runs it comes "
+                   f"first, and a tool is installed or written only with its cost said out "
+                   f"loud before anyone agrees to it.")
         out.append("")
     recorded = {cid for need in needs for cid in (need.claim_ids or ())}
     for need in needs:
@@ -2979,6 +4735,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             found = composed.get(cid)
             tag = word(found.status, errored=found.errored) if found is not None else "?"
             out.append(f"- **Claim:** {cid} — {text}  `{tag}`")
+            if claim and claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
             if claim and claim.gates and found is not None and found.status in (
                     ClaimStatus.PENDING, ClaimStatus.BLOCKED):
                 # Not a contradiction, and worth one line so nobody reads it as
@@ -3038,6 +4796,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if outside:
@@ -3052,6 +4812,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if unjudged:
@@ -3067,6 +4829,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
 
     if unowned:
@@ -3079,6 +4843,8 @@ def _section_gaps(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
             why = reason(composed[claim.id], ledger, claim, full=True,
                          stale_reasons=stale_reasons)
             out.append(f"- **{claim.id}** {_claim_text(claim)} — {why}")
+            if claim.note:
+                out.append(f"  - **Mechanism:** {_trunc(mechanism_body(claim), 220)}")
         out.append("")
     return out
 
@@ -3460,10 +5226,13 @@ def _section_reproduce(ledger: Ledger, registry: Any, *, root: str = "") -> list
         out.append("")
         out.append("```sh")
         width = max(len(g) for g, _ in per_gate[:_MAX_REPRODUCE_GATES])
+        bases = _bases(registry)
         for gate_id, covers in per_gate[:_MAX_REPRODUCE_GATES]:
             files = code.get(gate_id)
             where = f" — {', '.join(files)}" if files else ""
-            out.append(f"nopekit check --only {gate_id.ljust(width)}   # {covers}{where}")
+            basis = f" — basis {bases[gate_id]}" if gate_id in bases else ""
+            out.append(f"nopekit check --only {gate_id.ljust(width)}   # {covers}{basis}"
+                       f"{where}")
         if len(per_gate) > _MAX_REPRODUCE_GATES:
             out.append(f"# ... and {len(per_gate) - _MAX_REPRODUCE_GATES} more;"
                        f" `nopekit gate list` prints them all")
@@ -3502,7 +5271,8 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
                     params: Sequence[Any] | None = None,
                     stale_reasons: Mapping[str, str] | None = None,
                     milestone: Any = None, boundary: bool = False,
-                    article: str = "", test_card: Sequence[str] = ()) -> str:
+                    article: str = "", test_card: Sequence[str] = (),
+                    amber: Sequence[str] | None = None) -> str:
     """The full readiness report as markdown — the project's public deliverable.
 
     Sections, in the order a sceptical reader needs them: the readiness
@@ -3622,12 +5392,14 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
         out.append("")
 
     out += _section_proven(ledger, composed, cover, stale=stale, registry=registry)
+    out += _section_amber(amber)
     out += _section_pending_build(ledger, composed, article=article)
     out += _section_gaps(ledger, composed, registry, stale_reasons=stale_reasons)
     out += _section_assumed(ledger, composed, params, model_error)
     out += _section_failing(ledger, composed, cover, registry, stale_gates=stale_gates,
                             stale_reasons=stale_reasons,
                             required_word="required" if milestone is not None else "critical")
+    out += _section_requirements(ledger, composed, cover)
     out += _section_reproduce(ledger, registry, root=root)
 
     out.append("---")
@@ -3636,6 +5408,19 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
                "Do not hand-edit: it is an output, not a source. If a line here is "
                "wrong, the ledger is wrong.*")
     return "\n".join(out).rstrip() + "\n"
+
+
+def _section_amber(amber: Sequence[str] | None) -> list[str]:
+    """``## Amber`` (architecture phase 3b): after the Checked section, only
+    when a Checked claim's amber flips or is not current — one line per claim
+    in `why`'s words, and the sentence that amber changes no status. The
+    lines are the caller's (`decisions.amber_text` over
+    `derivation.amber_states`): this module computes no amber."""
+    if not amber:
+        return []
+    said = HUMAN["trace"]
+    return [f"## {said['report_heading']}", "", *[f"- {line}" for line in amber], "",
+            said["report_line"], ""]
 
 
 def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
@@ -3697,6 +5482,11 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
         lines.append(f"       ... and {len(problems) - _MAX_TERMINAL_CLAIMS} more "
                      f"unresolved claims — see `nopekit report`")
     lines.extend(rebuild_line(found) for found in claim_logic.rebuild(ledger))
+    # SPEC decision 12: one untagged line, so status keeps its budget and no
+    # claim-row parser reads R1 as a claim; only when requirements are recorded.
+    said_requirements = requirement_line(ledger, composed, cover)
+    if said_requirements is not None:
+        lines.append(said_requirements)
 
     # The gap RECORDS (`find_gaps`' Needs), with their tool options. Headed
     # "gap records", never "gaps": the count line above counts the claims that
@@ -3788,7 +5578,8 @@ def _with_gates(claim: Claim, gates: list[str]) -> Claim:
 def write_report(root: str, ledger: Ledger, registry: Any, *,
                  stale: bool = False, stale_gates: Collection[str] = (),
                  model_error: str = "", params: Sequence[Any] | None = None,
-                 stale_reasons: Mapping[str, str] | None = None) -> str:
+                 stale_reasons: Mapping[str, str] | None = None,
+                 amber: Sequence[str] | None = None) -> str:
     """Render the markdown report to `REPORT.md` at the project root — an output
     git ignores (P2.5b-D17, PLAN D-14) — and return its path. What slipped
     through while it was the tracked `docs/readiness.md` (S-41): it drifted from
@@ -3816,7 +5607,7 @@ def write_report(root: str, ledger: Ledger, registry: Any, *,
     atomic_write_text(path, render_markdown(ledger, registry, stale=stale,
                                             stale_gates=stale_gates, root=root,
                                             model_error=model_error, params=params,
-                                            stale_reasons=stale_reasons))
+                                            stale_reasons=stale_reasons, amber=amber))
     return path
 
 
@@ -4229,6 +6020,7 @@ __all__ = [
     "StatusWords",
     "STATUS_TAG",
     "SECTION_PROVEN",
+    "RESULT_TOKENS",
     "JUNIT_DEFAULT",
     "RATIONALE_UNKNOWN",
     "words",
@@ -4255,4 +6047,29 @@ __all__ = [
     "render_junit",
     "render_selftest_junit",
     "junit_safe",
+    "mechanism_line",
+    "mechanism_body",
+    "mechanism_problem_words",
+    "requirement_line",
+    "requirement_json",
+    "requirement_statuses",
+    "status_word",
+    "condition_text",
+    "return_words",
+    "rejection_words",
+    "rejection_facts",
+    "rejection_suffix",
+    "may_return_line",
+    # architecture phase 3a: the round's summary
+    "status_token_word",
+    "round_paragraph",
+    "round_trace_sentence",
+    "round_moved",
+    # architecture phase 6: the round's commit and the Stop hook
+    "COMMIT_SUBJECT_MAX",
+    "round_commit_sentence",
+    "round_prose_sentence",
+    "round_commit_message",
+    "round_hook_message",
+    "round_hook_crash",
 ]

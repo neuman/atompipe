@@ -5,291 +5,169 @@ description: Design, validate and fabricate real physical things — hardware, e
 
 # nopekit
 
-Take a sketch or a discussion to a physical thing you can actually build, with an
-honest account of what has been verified and what has not.
+nopekit takes what a person asks for to a physical thing they can build, and keeps an
+honest account of what has been checked and what has not. Its chain is:
 
-**Read `METHOD.md` at the repo root before doing design work.** It is ten rules and
-it is the whole system. Everything below is how to apply it.
+```
+requirements  ->  claims  ->  evaluators  ->  packs  ->  readiness report
+```
 
-## First: make `nopekit` runnable
+A **requirement** is what the person asked for, in their words. A **claim** is what must
+be true for the design to work. An **evaluator** settles a claim and has shown it can
+fail. A **pack** holds one domain's evaluators and proposers. The **readiness report**
+is the claims and their verdicts, rendered. Your job is to keep that chain honest: the
+failure to guard against is a design that looks validated and is not.
 
-The spine is **standard library only** — no dependencies, nothing to build. Get a
-working command with the first of these that succeeds:
+Read `${CLAUDE_PLUGIN_ROOT}/METHOD.md` before design work: ten rules (it says *gate*
+where this skill says *evaluator*; `gates/` is where an evaluator's code lives).
+
+## Make it runnable
+
+The spine is standard library only. From the plugin, prefix every call — each Bash call
+starts a fresh shell, so an `export` or an `alias` is gone by the next one:
 
 ```sh
-nopekit --version                                    # already on PATH?
-python3 -m nopekit --version                         # already importable?
-PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src" python3 -m nopekit --version    # plugin install
-pip install --user git+https://github.com/neuman/nopekit            # anything else
+PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 -m nopekit --version
 ```
 
-If you are running from the plugin, export it once for the session rather than
-prefixing every call:
+Below, `nopekit …` stands for that form. `nopekit doctor` is the first thing to run when
+anything is confusing; it writes nothing. Every read command takes `--json`.
+
+## 1. Interview first
+
+Before any model, interview the person the way a product manager would, in their own
+words: what it is for, who uses it and where, what it must survive and fit, what it may
+cost, and what done looks like. Ask three to six questions at a time, never a form.
+
+Ask for evidence by name, early: a sketch (a napkin is fine), photos of the closest
+thing they would buy instead and what it gets right, links to similar things,
+measurements of everything it must fit with the tolerance they care about, datasheets
+or part numbers already chosen, existing CAD. `nopekit ask` lists what is still
+missing. Take each file in with `nopekit ingest`, then `nopekit extract` what was read
+out of it — an artifact nobody extracted from is decoration.
+
+Run `nopekit init` (it starts a git repository when there is none, and lists the person
+from git's identity in `.nopekit/project.json`'s `people`). Write each thing the person
+asked for as `requirements/R1.json`, `R2.json`, … in their words:
+
+```json
+{"statement": "It holds the pump without sagging", "source": "interview"}
+```
+
+Show the list back and ask for a yes. The person may say skip; then say which
+requirements are your guesses. Do not stall: ask for the two most valuable artifacts,
+go on, and record what you assumed as assumption claims so it stays visible.
+
+## 2. First light and the live site
+
+A person who has not seen an evaluator go green on their own numbers has no reason to
+continue. Write the model (a dataclass `CONFIG` plus `build(config) -> dict`, recorded as
+`"model_entry"` in `.nopekit/project.json`), `selftest/known_good.py`, and the two or
+three cheapest evaluators, then run `nopekit check`.
+
+Then start the live site as its own process (`--detach` returns at once; never run it as
+a background task, which stops within hours and keeps `claude -p` from ending your turn):
 
 ```sh
-export PYTHONPATH="$CLAUDE_PLUGIN_ROOT/src:$PYTHONPATH"
-alias nopekit='python3 -m nopekit'
+nopekit site init
+nopekit site serve --watch --detach   # run again: prints the running URL; --stop stops it
 ```
 
-`nopekit doctor` is the first thing to run whenever something is confusing — it
-checks the environment, the model, determinism, the records and their index, pack
-discovery, per-gate tool availability, and what the verdict cache cannot see, and
-says which of those is wrong. It never writes anything.
+**Give the person the URL it prints (`serving site at http://…`) in the first few
+minutes**, with one sentence on what the page shows. It rebuilds as the project moves,
+and it is how the person sees your work without reading a transcript. Claims come next,
+beside the first verdicts: most cannot be stated precisely before a model exists.
 
-Every read command takes `--json`. Prefer it when you are parsing rather than
-reading: `nopekit check --json` is a few KB where the human output is prose.
+## 3. Claims and boards
 
-## The project is files
-
-**Read the whole project in two reads.** `.nopekit/ledger.json` is every record —
-the claims, parameters' provenance, decisions, needs, inputs, physical results, views
-and the project's meta — in one generated file. `.nopekit/cache/last_check.json` is
-what the last full `nopekit check` concluded: every claim's status, the counts, the
-worst blocking claim with the gate and the words that explain it, and every
-parameter as the model states it, with what lost. Read those two before you open
-anything else. Both are outputs, rebuilt by the commands: never edit either, and
-never treat them as newer than the last command — `nopekit status` says what is
-stale now.
-
-**Change a record by editing its file**, then run `nopekit check`:
-
-| File | Holds |
-|---|---|
-| `claims/<id>.json` | one claim — the file name is its id |
-| `decisions/<slug>.json` | one decision, including what LOST |
-| `inputs/<id>.json` | one piece of evidence and what was extracted from it (its bytes stay in `inputs/<bucket>/`) |
-| `params/<name>.json` | only the provenance the model cannot hold: `source`, `grounded_by`, `tags` |
-| `needs/<id>.json` | a gap someone enriched (candidates, a chosen tool) |
-| `milestones/<name>.json` | one spend — a print, a board order, a field test: the claim ids it `requires` and the `generator` (`<path>.py:<function>`) that builds what it gets |
-| `.nopekit/project.json` | the project: `"model_entry"` — the model file that is the single source of truth — and `"packs"`, the live packs |
-
-Every record file is read strictly: a misspelled key is refused, naming the file,
-the key and the suggestion, instead of being dropped. A parameter's value, units and
-rationale live in the model (its `Config` field and that field's docstring), and the
-alternatives that lost in the model's `PARAMS` — never copy them into `params/`.
-
-Six commands write one record for you, with the time stamped for you:
-`nopekit ingest` (copies the file in and pins its hash), `nopekit extract`,
-`nopekit decide`, `nopekit packs add`, `nopekit claim physical` and
-`nopekit export <milestone>` (appends to `exports/<milestone>.json`; never edit it —
-it is sealed, like `results/`). `check` writes
-no record — only verdicts under `.nopekit/verdicts/`, which you commit with the
-records, and ignored scratch (the one exception: a project still in the old one-file
-layout is migrated to record files by its first `check`).
-
-## The shape
-
-```
-claims  ->  gates  ->  packs  ->  readiness report
-```
-
-A **claim** is something that must be true for the design to work. A **gate** is an
-executable that settles a claim *and is capable of failing*. A **pack** supplies
-gates for one physical domain. The **readiness report** is the claims and their
-verdicts, rendered.
-
-Your job is to keep that chain honest. The failure mode you are guarding against is
-not "the design is wrong" — it is "the design looks validated and is not".
-
-## Starting a project
-
-### 1. Intake is evidence, not just conversation
-
-**This is the step agents skip, and it is the one that decides the outcome.** A
-design conversation is the thinnest input a project has. Ask for artifacts, by name,
-early, and keep asking as the design sharpens.
-
-Run `nopekit ask` for the prioritised list of what is still missing. Ask for:
-
-- **A sketch.** Napkin, whiteboard photo, a rectangle with arrows. A bad sketch pins
-  down intent that a paragraph cannot.
-- **A photo of the closest existing product** they'd buy instead, even one they
-  hate — and what it gets right, and the thing it does that they refuse to copy.
-- **Anything they've taken apart** that solves part of this, photographed inside.
-- **Calipers** on everything this must fit, mate with, or sit inside — with the
-  tolerance they actually care about.
-- **Datasheets or vendor part numbers** for parts already chosen. *A part you cannot
-  order is a part you do not have.*
-- **Existing CAD** in any format, even wrong or abandoned.
-- **Screenshots** of the tool they were using, the vendor page, the spec they were
-  reading.
-- **The standard or code** it has to meet, if any.
-
-Then `nopekit ingest <files>` and — this is the half people drop —
-`nopekit extract` each one. An artifact nobody extracted from is decoration.
-Every extraction records *what was read out of it* and *which parameters and claims
-that grounds*. `nopekit inputs --unextracted` lists what arrived and was never read.
-
-Do not stall the project waiting for evidence. Ask for the two highest-value
-artifacts, proceed on stated assumptions, and record those assumptions as
-ASSUMPTION claims so they stay visible.
-
-### 2. Extract the claims
-
-Turn the brief into claims that must be true, each with a **machine-checkable
-acceptance**. "Strong enough" is not a claim. `≤0.5 mm tip deflection at 3 N` is.
-Write each one as its own file, `claims/<id>.json`:
+One claim per file, `claims/<id>.json`, with a machine-checkable acceptance, the
+mechanism that would settle it, and the requirements it serves:
 
 ```json
 {"statement": "Tip sags no more than 0.5 mm at rated load", "kind": "measurable",
  "acceptance": {"quantity": "tip deflection", "comparator": "<=", "limit": 0.5, "units": "mm"},
  "rationale": "past ~0.5 mm the droop is visible against a level shelf edge",
- "tags": ["stiffness"]}
+ "tags": ["stiffness"],
+ "mechanism": {"by": "closed_form",
+               "how": "Euler-Bernoulli tip deflection of the arm under the rated load",
+               "evaluators": ["bracket.deflection"]}, "requirements": ["R1"]}
 ```
 
-Give each the narrowest `tags` that describe what it asserts: a gate covers a claim
-by its id or by a shared tag, so a broad tag drags in gates that measure something
-else.
-
-Classify each one honestly:
-
-| Kind | Meaning | Where its evidence bottoms out |
+| Kind | Settled by | `by` |
 |---|---|---|
-| `measurable` | An automated evaluator settles it from the model — the only kind one settles. | *automated* |
-| `physical` | An article, or its authority's judgment, settles it. Watertightness, feel, RF range, taste. | *measurement*, or *expert judgment: <authority>* |
-| `assumption` | Accepted provisionally, with a reason and an owner. Recorded so it stays visible. | *assumption*, or *expert judgment: <authority>* |
+| `measurable` | an automated evaluator, from the model | `closed_form`, `solver`, `datasheet` |
+| `physical` | a measurement on a built article, or its authority's judgment | `measurement`, `human` |
+| `assumption` | accepted for now, with a reason and an owner who records it | `none`, `human` |
 
-`claim list` prints that last column. A claim may declare it with `"terminal"` in its
-file — `measurement` or `human` for a physical claim, `none` or `human` for an
-assumption — and a declaration never lowers the bar: the reader refuses a pairing
-outside those, and a measurable claim declared `closed_form`, `solver` or `datasheet`
-reads exactly as an undeclared one.
+Give each claim the narrowest `tags`: an evaluator covers a claim by its id or a shared
+tag. Say the physical ones out loud early: *"No evaluator here can settle C5 — it needs
+a real hull in real water. It is pending build until you test it."*
 
-Say the physical ones out loud early: *"No evaluator here can settle C5 — it needs a
-real hull in real water. It is pending build until you test it."* This builds trust
-and sets expectations correctly. A physical claim needs a test written down — an
-acceptance condition, or a `note` saying what to do — before any pass can count.
+Then draw the map in `groups/<id>.json`, one record each, and run `nopekit site build`.
+`{"kind": "board", "title": "Holds the pump", "members": ["C1", "C2"]}`: a board holds
+the claims of one thing the person cares about, its text in `site/content/<board>.md`; a
+`zone` the choices of one part as the person names it, never all in one; a `station`
+titles a shared value as the map shows it (`"Allowed stress"`, not `design_stress`).
 
-**The person who tested it records the result, in their own shell — never you.**
-Ask them to run `nopekit claim physical C5 pass --evidence photos/c5.jpg --detail
-"<what was seen>"` (or `fail`); the command shows what it will record, and they type
-the claim's id to confirm it. Who recorded it is read from git's identity; there is no
-`--who` and no `--when` (both are refused — say when it was observed in `--detail`).
-A pass on a physical claim needs at least one `--evidence` file under the project.
-From your own shell — your Bash tool, or a `!`-prefixed command inside Claude Code,
-which runs in your environment — a pass is recorded and **counts for nothing**: say
-so, and ask the person to record it themselves. A fail counts wherever it is
-recorded. A pass counts only on the article it was recorded on — the design as it
-was then — so when the design moves, the claim reads **Stale** and `check` and
-`status` name the article to rebuild (`rebuild: article <hash> (C5) — …`): a check run
-cannot restore it, a new article can. A fail keeps counting through every later pass
-and every edit — renaming or deleting the claim's file included: a result is sealed to
-its claim's id, and a fail whose claim file is gone still stops `check`. `--measured
-<value>` records the value in the claim's units, and decides pass or fail where the
-claim has a limit. A result is recordable on an automated claim too: a fail there,
-beside an evaluator that passed, is a **contradiction** on that evaluator's track
-record (`gate show`); a pass there settles nothing.
+## 4. The loop
 
-**An assumption needs an owner who records it.** Name the owner in the claim file
-(`"owner": "<name>"`, as git names them), and the owner runs `nopekit claim physical
-C6 assume` in their own shell. An owner you write into the file counts for nothing on
-its own: until the owner records it, C6 reads Gap, and `check` exits 1 for it if it is
-required. Say it as it is: *"C6 is a gap until Dana records its owner: ask Dana to run
-`nopekit claim physical C6 assume`."* Editing the owner or the rationale after it was
-recorded un-records it. Never edit an owner in to clear a gap, and never make a claim
-not required to get `check` to pass — whether it is required is the user's call.
+Change the design, run `nopekit check`, read the verdict lines. Tier 0 takes seconds.
 
-**Some claims end in a person's judgment** — "meets the venue's fire-safety rules". Write
-`"terminal": "human"` and `"authority": "<name>"` into its file. It reads Gap until
-that person records it with `nopekit claim physical <id> assume --authority
-"<name>"`, Assumed under their name until they judge it with `nopekit claim physical
-<id> pass --authority "<name>"` (or `fail`), each in their own shell, as themselves.
-Only the authority settles it; you never record it, and a physical claim judged this
-way still needs its test written down and its evidence. Editing the claim after it was
-judged un-records the judgment: it reads Gap again until the authority records the claim
-as it now reads. `results/<id>.json` records each person's git name and email beside
-what they recorded.
+- **Coverage.** `nopekit packs list` shows what exists; only packs marked `*` are live.
+  `nopekit packs add <name>` makes one live, then **run `nopekit packs skills` and read
+  what it prints** — each live pack's PACK.md, its lenses and its skills — before you
+  work in that domain. `nopekit gate list` is what will actually run.
+- **A claim with no evaluator** is a gap: `nopekit gap --propose`, then
+  `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md`. Offer the cheap analytic evaluator
+  now and the heavy solver when the geometry stops moving; say its real cost.
+- **Basis.** Use an `established` evaluator (an existing non-AI tool's own answer) when
+  one exists, then a `sourced` one, then `model-only`, and say why when you go lower.
+- **Proposers.** `nopekit propose` lists them; `nopekit propose <id>` runs one and files
+  each file it writes as an input (`ingest --proposer <id>` for one you ran by hand).
+  A proposal settles nothing: `extract` what you read from it, and keep or drop each
+  option it found in a `decide` record.
+- **Before you change a number,** run `nopekit why <claim|value|decision>`: what reads
+  it, what it rests on, and what lost to it.
+- **Decisions keep their losers.** `nopekit decide` with each rejected alternative's
+  `--type` and, where you can say it, `--returns-if`.
+- **The trace.** `round` starts `nopekit model trace` in the background; run it yourself
+  after a gate or acceptance edit, before your turn ends. Never edit `.nopekit/trace/`.
+- **Review.** Before anything is built, review the design along each live pack's lenses
+  (`nopekit packs skills` prints each `lenses.md`) and let the findings move the numbers.
 
-### 3. Reach first light fast
-
-A user who has not seen a gate go green on their own numbers has no reason to
-continue. Scaffold the model, write the two or three cheapest analytic gates, and
-run `nopekit check` within the first few minutes. Four verdict lines against their
-real numbers is the hook.
-
-Do not build the whole validation suite before showing anything.
-
-## The working loop
-
-**A discoverable pack contributes nothing until you add it.** `nopekit packs list`
-shows every pack it can see; only the ones marked `*` are live in this project. Reading
-a pack's `PACK.md` does not install it. Check `nopekit gate list` before you believe
-you have coverage — a tester spent twenty minutes designing against a gate set that was
-empty, which is this tool's own headline failure reproduced one level up.
-
-```
-nopekit packs list            # what exists; * = live in this project
-nopekit packs add <name>...   # make them live
-nopekit gate list             # what will ACTUALLY run — check this early
-nopekit status                # where is this project
-nopekit check                 # tier-0 gates, seconds — run this constantly
-nopekit check --tier 2        # the full sweep, before any spend decision
-nopekit gap --propose         # claims with no gate, and packs that might cover them
-nopekit why <param|claim>     # one thing's full history, instead of the whole log
-nopekit report --write        # REPORT.md, the readiness report — an ignored output
-nopekit export <m> --dry-run  # ready for milestone <m>? re-runs everything it requires
-nopekit site build            # rebuild the page after a sweep
-nopekit decide --title ...    # record a decision, including what LOST
-```
-
-Change a parameter, run `nopekit check`, read the verdict lines. That is the loop.
-It must stay fast — if tier 0 is not seconds, something is miscategorised.
-
-## The project site: how the human sees what you are doing
+**What only the person does**, typed in their own shell — ask them, and give them the
+command; from your shell it records nothing that counts:
 
 ```sh
-nopekit site init      # once, early
-nopekit site build     # after every check sweep
-nopekit site serve     # python3 -m http.server; no build step, no npm
+nopekit claim physical C5 pass --evidence photos/c5.jpg --detail "<what was seen>"
+nopekit claim physical C6 assume                     # an assumption's owner records it
+nopekit claim physical C7 pass --authority "<name>"  # an authority's judgment
+nopekit prefer <decision>                            # a preference against an alternative
+nopekit export <milestone> --proceed --why "..."     # going ahead over an unresolved claim
 ```
 
-**Build it early, not as a finishing touch.** You are working in a text channel on a
-physical object, and a page with the claims, the verdicts and the geometry on it is
-how the human sees what you have done without reading a transcript. The cost is one
-command.
+A physical pass counts only on the article it was tested on; a fail keeps counting.
 
-**Rebuild it after a check sweep.** `site build` does not run gates — it renders the
-verdicts already in the verdict cache and marks how old each one is — so a page you
-forgot to rebuild shows the last sweep, honestly labelled but not the one you just
-ran.
+## 5. Rounds
 
-**Use it to explain a failure instead of describing coordinates in prose.** When a
-gate fails somewhere specific, attach `Locator`s to the verdict and say *"open the
-site, the clash view, back_left is lit"*. Three sentences of coordinates are a
-worse answer than a link to the thing, and you will be wrong about one of the
-numbers. Attach a locator only where you genuinely know the position: a confident
-highlight on the wrong part sends someone to inspect a part that is fine, and after
-that they stop trusting the overlay.
+When your turn ends, the plugin's Stop hook runs `nopekit round --hook`: a tier-0 check,
+the site rebuilt, the round record written, and a commit `round N: <what changed>` of
+every file in the project that git does not ignore (one over 50 MiB or named like a
+secret, such as `.env`, is named instead), only when git's identity is one of `people`.
+It never pushes or blocks. Put scratch, downloads and environments in `.gitignore`. Do not
+commit rounds yourself; change `people` only when the person asks, to the name and email
+they give.
 
-`nopekit site status` lists **dangling locators** — verdicts pointing at a view or
-a part name that no view publishes. Check it after renaming anything in the model.
-A gate that thinks it is highlighting something and is not looks exactly like a gate
-that found nothing, from both ends.
+**Before your turn ends:**
 
-The site never computes truth; it renders the records and the verdict cache.
-Everything on the page is in `site/data/state.json`, so read that rather than the
-HTML when you want the state back. A project with no geometry still gets a useful
-site — claims, verdicts, evidence, provenance, readiness. Contract:
-`docs/SITE_CONTRACT.md`.
+1. Run `nopekit check`, so the page shows the results the round will commit.
+2. Read each `site/content/<board>.md`, and `intro.md` and `next.md` when they exist,
+   against the page; rewrite what the results no longer support, in ASD-STE100: short
+   sentences, present tense, only baked numbers. `intro` and `next` read every claim.
+3. Run `nopekit site stamp <board>` for each file you read (`--all` for every one).
+4. Leave no record half-written: the round commits what is there.
 
-## Rules you will be tempted to break
-
-**Never hand-edit a generated file.** If an output is wrong, the model is wrong.
-Fix it there and regenerate. A repo with hand-patched outputs has no source of truth.
-
-**Never write a number without its reason.** Record why this value, what was tried
-and rejected, and what measurement or datasheet it came from. The rejected
-alternatives are the part that pays: without them, every fresh context window
-re-litigates every settled number.
-
-**Never let a validator merely log.** It must refuse. And every gate declares a
-negative control — a known-bad input it must fail on. The registry will not accept
-one without it. And it must pass a known-good one: a gate is *qualified* only when it
-passes its known-good control (a pack's `selftest/baseline.json`, a project's
-`selftest/known_good.py`) and fails its known-bad one — and, for a gate of your own,
-fails every conclusive mutation of the known-good design. Until then its claim reads
-Gap: `unqualified: <gate> : <what does not hold>`. Write `selftest/known_good.py`
-before your first gate. Run `nopekit gate selftest` and believe the result.
+## Rules that must not bend
 
 **Never call a skipped or errored gate a pass.** A Skipped claim is not fine — even
 beside a gate that passed. Say so — and then **clear it**: Skipped is a call to
@@ -301,114 +179,80 @@ action, not a resting state, and its reason says which action:
 - `skipped: <gate> : <its own words>` with the tool present — the gate skipped itself
   on its input, usually a parameter the model does not publish. Add it to the model;
   installing changes nothing.
-- `skipped: <gate> : prerequisite failed: <evaluator>` — the gate was not run because
-  a validity guard that is its prerequisite failed: its number would not mean anything
-  here. It is not a missing tool: installing changes nothing. Fix what that evaluator
-  failed (its own row says what), and the gate runs again.
-- `skipped: <gate> : prerequisite not established: <evaluator> (<why>)` — the gate was
-  not run, and nothing about the gate itself is wrong: clear that evaluator, by `<why>`.
-  `(skipped)` — read the evaluator's own row: if it says `requires <tool>`, install
-  what it names; otherwise it skipped itself on its input, and the fix is to publish the
-  parameter it names — installing changes nothing. `(unqualified)` — the evaluator is
-  not qualified at its version (one of its controls did not hold, or a mutation of its
-  known-good control passed): fix the evaluator or its control — `nopekit gate
-  selftest` says which — never the gate behind it.
-  `(not registered)` — no evaluator has that id here: install the pack that provides
-  it, or drop the edge, as `nopekit doctor` says. A prerequisite that crashed reads
-  `errored:`, below.
+- `skipped: <gate> : prerequisite failed: <evaluator>` — a validity guard the gate needs
+  failed, so its number would mean nothing here; installing changes nothing. Fix what
+  that evaluator failed (its own row says what), and the gate runs again.
+- `skipped: <gate> : prerequisite not established: <evaluator> (<why>)` — nothing about
+  the gate is wrong: clear that evaluator, by `<why>`. `(skipped)`: its own row says
+  `requires <tool>` (install what it names) or that it skipped itself on its input
+  (publish the parameter it names). `(unqualified)`: one of its controls or a mutation
+  did not hold — `nopekit gate selftest` says which; fix the evaluator or its control,
+  never the gate behind it. `(not registered)`: install the pack that provides it, or
+  drop the edge, as `nopekit doctor` says. A crashed one reads `errored:`, below.
 
 What you must not do is leave the claim Skipped and move on as though the design were
 checked. A claim Skipped by a crash (its reason starts `errored:`, its tag is
 `[SKIP ]`) is louder still — the evaluator, or a prerequisite of it, is broken.
 
-**Never move a limit in a gate.** A limit is a claim's acceptance condition, in
-`claims/<id>.json`; a gate reads it with `ctx.acceptance("<id>")` and reports it as
-its limit. Move the limit in the claim — the gates that read it re-run, nothing else
-does — and never edit a gate's number to make a claim pass. Two readings follow from it:
+**Never move a limit.** A limit is a claim's acceptance condition, in its claim file; an
+evaluator reads it with `ctx.acceptance("<id>")`. Move it in the claim, said why in its
+`rationale`, never in an evaluator's code. `acceptance condition not met` means the
+design misses the claim; `outside operating context` means the evaluator was not
+qualified where the design is — bring the input inside, or find one that is. **Amber**
+on a Checked claim means "passes if the assumptions hold": a ±10% move of a choice an
+unconfirmed assumption sources flips it. It moves no status; the owner's `assume` or a
+physical claim that `resolves` the assumption clears it, never a number moved.
 
-- `acceptance condition not met: <gate> : <value> against <claim>'s <condition> (its
-  own limit <l>)` — Failing. The evaluator passed against a limit of its own, and its
-  value misses the claim's condition. The design misses the claim: change the design,
-  or — if the claim's number is wrong — the claim, said why in its `rationale`. A
-  `warning: <gate> : its limit … is not <claim>'s acceptance condition` line from
-  `check` is the same number in two places, the claim's and the evaluator's; it moves
-  no status, and it means one of the two is stale.
-- `outside operating context: <gate> : <key> = <v>, qualified on [a, b]` — Gap. The
-  evaluator was qualified on that range of its inputs, and this design is outside it:
-  its pass counts nothing here (a fail outside would). Bring the input inside, find an
-  evaluator qualified where the design is, or — the human's call, never yours —
-  carry the claim on an owned fallback (`owner` and `fallback` in its claim file,
-  and the owner runs `nopekit claim physical <id> assume` in their own shell).
+**Never record a person's act**: a physical result, an owner, a judgment, a preference,
+going ahead. Never write or edit `results/`, `preferences/` or `exports/`; they are
+sealed, and a hand edit is refused on every command.
 
+**Every evaluator must be able to fail.** It declares a negative control and passes its
+known-good one (`selftest/known_good.py`, written before your first evaluator); until
+`nopekit gate selftest` shows both, its claim reads Gap.
+
+**Every claim names its mechanism**: `by`, `how` in words, and the evaluators you expect.
+
+**Never hand-edit a generated file**: `site/data/`, `.nopekit/ledger.json`,
+`.nopekit/round.json`, `REPORT.md`. If an output is wrong, fix its source and regenerate.
+
+**Never write a number without its reason and what lost** — in the model's docstring and
+`PARAMS`, or a decision's rejected alternatives.
+
+**Say ready only when `nopekit export <milestone> --dry-run` says `would write`.** Checked
+does not mean true: it means every evaluator passed on the current inputs.
 **Never simulate a physical claim.** No CFD run makes a printed seam watertight.
 
-## When a claim has no gate
+## Commands
 
-That is a capability gap, and it is how the system grows. **Do not guess at a tool.**
-Read `docs/EXTENSION_PROTOCOL.md` and follow it: name the quantity precisely,
-classify it, try the analytic answer first, choose the standard open tool and record
-why, install pinned with a smoke test, wrap it as a gate **with a negative control
-you actually ran**, record every solver setting as a constant, and emit a pack.
-
-Offer the cheap analytic gate now and defer the heavy solver until the geometry stops
-moving. Say the real cost out loud — install size, run time — and let the human
-choose. Running CFD on a hull that is still being redrawn is a way of feeling
-productive.
-
-## Before an irreversible spend
-
-Ordering boards, buying stock, booking machine time, committing to a mould: that is a
-**milestone**. Declare it — `milestones/<name>.json` with the claim ids the spend
-requires and the generator that builds its files — and ask:
-
-```sh
-nopekit export <name> --dry-run   # re-runs every evaluator it requires, controls included
 ```
-
-`status` and the report say what each milestone is missing *as last evaluated*, from
-the verdict cache, which the inner loop never re-executes. `export` is where the cache
-is not trusted: it re-runs what the milestone requires at the top tier and refuses when
-any required claim is not Checked, or when the re-run disagrees with the records. Say
-*ready* only when it says `would write` — and when the person runs `nopekit export
-<name>`, the package is `out/<name>/`, with the article hash its results bind to
-(`nopekit claim physical <id> --article <hash>`) and a test card of what to measure.
-
-Going ahead over an unresolved required claim is the person's decision, never yours:
-`nopekit export <name> --proceed --why "…"`, typed in their own shell. From an agent
-session it is refused; tell them the command and why.
-
-`nopekit check` exits non-zero while any required claim is Failing, Skipped, a Gap,
-Open or Stale. Pending build and Assumed do not stop it, and they are still unresolved.
-
-Then say the honest sentence out loud, in the shape the report uses:
-
-> *Fab-ready: routed, DRC-clean, fab package exported, mechanicals fit-checked.
-> Pending build: 2 claims need an article.*
-
-The second sentence is why anyone believes the first. And "checked" does not mean
-true: it means every evaluator passed on the current inputs.
-
-## Adversarial review before building
-
-Run N independent reviews along **different** dimensions — structure,
-manufacturability, sourcing, thermal, usage, cost, safety — each trying to break the
-design on its own terms, and let the findings change the numbers **before** anything
-is generated. Packs ship their domain's lens list; `nopekit packs show <name>` has
-them. The most expensive mistakes are the ones that get built.
-
-## Adopting an existing project
-
-`nopekit init` in the repo, then set `"model_entry"` in `.nopekit/project.json` to
-the model file that already exists. Infer claims from what the code already asserts,
-ask about the rest, and write gates around the existing behaviour before changing
-anything. Most people are not starting from zero.
+nopekit init                    # the project layout, a git repository, the person in people
+nopekit status                  # where the project is, in one screen
+nopekit check                   # run the tier-0 evaluators; --tier 2 before any spend
+nopekit round                   # end a round by hand; --commit commits it, --hook is the Stop hook's
+nopekit ask                     # what evidence to ask the person for
+nopekit ingest <files> --kind sketch --desc '...'   # take a file in as evidence
+nopekit propose                 # a pack's proposers; run one and file what it wrote
+nopekit inputs                  # the evidence, and --unextracted what nobody read yet
+nopekit extract <id> --what '...' --grounds <param>   # what was read out of an input
+nopekit claim list              # every claim and where its evidence bottoms out
+nopekit gap --propose           # every claim whose mechanism has yet to run, and packs to run it
+nopekit gate list               # what will actually run; gate show <id> for one
+nopekit gate selftest           # each evaluator's controls: can it fail?
+nopekit report --write          # REPORT.md, the readiness report
+nopekit export <milestone> --dry-run   # re-runs everything a spend requires
+nopekit why <name>              # one value's, claim's, requirement's or decision's history
+nopekit decide --title '...'    # a decision, with what LOST and why
+nopekit prefer <decision>       # the PERSON's: a preference against an alternative
+nopekit packs skills            # the live packs' PACK.md, lenses and skills: read them
+nopekit model [trace]           # the model as nopekit sees it; trace: what each choice moves
+nopekit site serve --watch --detach   # the live site, its own process; --stop stops it
+nopekit doctor                  # what is wrong, and what to do; writes nothing
+```
 
 ## Reference
 
-- `METHOD.md` — the ten rules. Read this.
-- `docs/EXTENSION_PROTOCOL.md` — growing a new validation capability.
-- `docs/PACK_FORMAT.md` — the pack contract.
-- `docs/SITE_CONTRACT.md` — the project site: view kinds, locators, `state.json`.
-- `nopekit packs list` — what is installed; `nopekit packs show <name>` for its
-  PACK.md (tier 2). Load a pack's `references/` only for the specific task at hand.
-- `nopekit doctor` — run this first when something is confusing.
+- `${CLAUDE_PLUGIN_ROOT}/METHOD.md` — the ten rules. Read this.
+- `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md` — when a claim has no evaluator.
+- `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` — the pack contract.
+- `${CLAUDE_PLUGIN_ROOT}/docs/SITE_CONTRACT.md` — the site: groups, text, `state.json`.

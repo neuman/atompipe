@@ -210,11 +210,51 @@ class Scaffold(_SiteCase):
             self.assertTrue(os.path.isfile(os.path.join(site_dir, relative)),
                             f"site init did not write {relative}")
         # Created empty so a freshly scaffolded site serves before any build,
-        # instead of 404ing on its own data directory.
-        for relative in (site_mod.DATA_DIR, site_mod.ASSETS_DIR, site_mod.VIEWS_DIR):
+        # instead of 404ing on its own data directory — and, from phase 5, the
+        # directory the agent's prose goes in.
+        for relative in (site_mod.DATA_DIR, site_mod.ASSETS_DIR, site_mod.VIEWS_DIR,
+                         site_mod.CONTENT_DIR):
             self.assertTrue(
                 os.path.isdir(os.path.join(site_dir, relative.replace("/", os.sep))),
                 f"site init did not create {relative}/")
+
+    def test_init_writes_the_outline_and_the_technical_record(self):
+        """(SPEC 28, the template side) The front page's shell carries the
+        outline's marker, its renderer and the badge; `technical.html` keeps
+        today's panels; `site build` writes `technical.html` when it is absent
+        and never replaces one the project edited (PETGasus ships its own)."""
+        code, out = _capture(["site", "init", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        site_dir = os.path.join(self.root, site_mod.SITE_DIR)
+        for relative in ("technical.html", "page.js", "page.css", "map.css", "lib/map.js",
+                         "lib/drawer.js", "lib/sections.js", "lib/live.js",
+                         "img/made-with-nopekit.png"):
+            self.assertTrue(os.path.isfile(os.path.join(site_dir, *relative.split("/"))),
+                            f"site init did not write {relative}")
+        with open(os.path.join(site_dir, "index.html"), encoding="utf-8") as fh:
+            index = fh.read()
+        self.assertIn(site_mod.OUTLINE_MARKER, index)
+        self.assertEqual(site_mod.outline_of(self.root), 1)
+        self.assertIn('src="page.js"', index)
+        self.assertIn('href="https://github.com/neuman/nopekit"', index)
+        self.assertIn('id="made-with-nopekit"', index)
+        with open(os.path.join(site_dir, "technical.html"), encoding="utf-8") as fh:
+            technical = fh.read()
+        self.assertIn('src="app.js"', technical)
+        self.assertIn('href="index.html"', technical)
+        self.assertNotIn("nopekit-outline", technical)
+
+        path = os.path.join(site_dir, "technical.html")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("<!-- the project's own technical page -->")
+        code, out = _capture(["site", "build", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        with open(path, encoding="utf-8") as fh:
+            self.assertIn("the project's own", fh.read(), "site build replaced technical.html")
+        os.remove(path)
+        code, out = _capture(["site", "build", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(path), "site build did not write a missing technical.html")
 
     def test_gitignore_covers_vendor_and_not_the_generated_data(self):
         """`vendor/` is a third-party copy; `data/` and `assets/` ARE the site.
@@ -227,8 +267,64 @@ class Scaffold(_SiteCase):
                   encoding="utf-8") as fh:
             text = fh.read()
         self.assertIn("vendor/", text)
-        self.assertNotIn("data/", text)
+        lines = [line.strip() for line in text.splitlines()
+                 if line.strip() and not line.startswith("#")]
+        # Architecture phase 5 (SPEC 32): the clock file alone is ignored under
+        # data/; every other baked file is the published site.
+        self.assertEqual(sorted(lines), ["data/build.json", "vendor/"])
         self.assertNotIn("assets/", text)
+
+    def test_a_build_puts_back_the_clock_ignore(self):
+        """A site with no `.gitignore` (the scaffolded one said it could be
+        deleted) gets one holding only the clock file's lines, so a rebuild
+        that judged nothing new leaves `git status` clean (review of phase 5)."""
+        _capture(["site", "init", "-C", self.root])
+        path = os.path.join(self.root, site_mod.SITE_DIR, ".gitignore")
+        with open(path, encoding="utf-8") as fh:
+            self.assertIn("Delete the vendor/ line (and only that line)", fh.read())
+        os.remove(path)
+        code, out = _capture(["site", "build", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertEqual([line for line in text.splitlines() if line and not line.startswith("#")],
+                         ["data/build.json"])
+
+    def test_an_older_shell_is_warned_and_still_built(self):
+        """`site build` warns when `index.html` carries no outline marker or an
+        older one, and still writes the front page's documents; doctor's `site`
+        row warns and names `site init --force`; the scaffolded shell gives no
+        such warning (SPEC 28; review of phase 5: nothing tested it)."""
+        _capture(["site", "init", "-C", self.root])
+        code, out = _capture(["site", "build", "--json", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        summary = json.loads(out)
+        self.assertEqual(summary["outline"]["marker"], 1)
+        self.assertFalse([w for w in summary["warnings"] if "predates the page outline" in w])
+        index = os.path.join(self.root, site_mod.SITE_DIR, "index.html")
+        with open(index, encoding="utf-8") as fh:
+            shell = fh.read()
+        for name, edited, marker in (
+                ("no marker", shell.replace(site_mod.OUTLINE_MARKER, ""), None),
+                ("an older marker", shell.replace(site_mod.OUTLINE_MARKER,
+                                                  site_mod.OUTLINE_MARKER.replace('"1"', '"0"')),
+                 0)):
+            with self.subTest(name):
+                self.assertNotEqual(edited, shell)
+                with open(index, "w", encoding="utf-8") as fh:
+                    fh.write(edited)
+                code, out = _capture(["site", "build", "--json", "-C", self.root])
+                self.assertEqual(code, 0, out)
+                summary = json.loads(out)
+                self.assertEqual(summary["outline"]["marker"], marker)
+                self.assertTrue([w for w in summary["warnings"]
+                                 if "predates the page outline" in w], summary["warnings"])
+                self.assertTrue(os.path.isfile(os.path.join(
+                    self.root, site_mod.SITE_DIR, site_mod.DATA_DIR, site_mod.PAGE_NAME)))
+                code, out = _capture(["doctor", "--json", "-C", self.root])
+                [row] = [r for r in json.loads(out)["checks"] if r["check"] == "site"]
+                self.assertEqual(row["status"], "warn", row)
+                self.assertIn("site init --force", row["detail"])
 
     def test_second_init_refuses_and_keeps_the_edited_shell(self):
         _capture(["site", "init", "-C", self.root])
@@ -543,7 +639,11 @@ class StateIsJson(_SiteCase):
                      verdicts=[Verdict(gate="g.one", claims=["C1"], passed=True)])
         payload = site_mod.state(self.root, store_mod.load(self.root),
                                  self._registry(self._spec("g.one")))
-        self.assertIsNone(payload["verdicts"][0]["age_s"])
+        # Architecture phase 5 (SPEC 32): the age left state.json for build.json.
+        self.assertNotIn("age_s", payload["verdicts"][0])
+        resolution = site_mod._resolve(self.root, store_mod.load(self.root),
+                                       self._registry(self._spec("g.one")))
+        self.assertIsNone(site_mod.ages(resolution, "")["g.one"]["age_s"])
 
     def test_written_state_is_readable_json_on_disk(self):
         self._ledger(claims=[self._claim("C1")])
@@ -551,8 +651,9 @@ class StateIsJson(_SiteCase):
         _capture(["site", "build", "-C", self.root])
         self.assertIsInstance(self._state(), dict)
 
-    def test_the_judgement_digest_moves_with_a_judgement_and_not_with_the_clock(self):
-        """`meta.judgement_digest` is what the page judged (review, `repro_site`).
+    def test_the_resolution_digest_moves_with_a_judgement_and_not_with_the_clock(self):
+        """`meta.resolution_digest` is what the page judged (review, `repro_site`;
+        phase 3a's `judgement_digest`, renamed in phase 5).
 
         The negative half: the clock and the drawing move it not at all, or every
         check would send the reader to rebuild a page whose verdicts all stand.
@@ -566,19 +667,20 @@ class StateIsJson(_SiteCase):
         self._qualified(registry, "g.one")
         payload = site_mod.state(self.root, store_mod.load(self.root), registry,
                                  now="2026-01-01T00:00:00Z")
-        digest = payload["meta"]["judgement_digest"]
-        self.assertEqual(site_mod.judgement_digest(payload), digest,
+        digest = payload["meta"]["resolution_digest"]
+        self.assertEqual(site_mod.resolution_digest(payload), digest,
                          "the digest `state` set is not the digest of what it returned")
 
         def moved(change) -> bool:
             copy = json.loads(json.dumps(payload))
             change(copy)
-            return site_mod.judgement_digest(copy) != digest
+            return site_mod.resolution_digest(copy) != digest
+
+        self.assertNotIn("built", payload["meta"], "state.json is clock-free (SPEC 32)")
+        self.assertNotIn("when", payload["verdicts"][0])
 
         def clock(doc):
-            doc["meta"]["built"] = "2027-01-01T00:00:00Z"
-            doc["verdicts"][0]["when"] = "2027-01-01T00:00:00Z"
-            doc["verdicts"][0]["age_s"] = 5.0
+            doc["verdicts"][0]["evidence_assets"] = ["assets/evidence/x"]
             doc["meta"]["records_digest"] = "0" * 64
             doc["views"] = [{"id": "assembly"}]
             doc["locator_problems"] = [{"gate": "g.one"}]
@@ -598,17 +700,17 @@ class StateIsJson(_SiteCase):
                  "verdicts": [{"gate": "g.one", "status": "pass", "measured": 0.41,
                                "units": "mm", "stale_reason": ""}]}
         now = json.loads(json.dumps(shown))
-        self.assertEqual(site_mod.judgement_moved(shown, now), [])
+        self.assertEqual(site_mod.resolution_moved(shown, now), [])
         now["verdicts"][0].update(measured=0.29)
-        self.assertEqual(site_mod.judgement_moved(shown, now),
+        self.assertEqual(site_mod.resolution_moved(shown, now),
                          ["g.one pass 0.41 mm -> pass 0.29 mm"])
         now["verdicts"][0].update(stale_reason="config.thickness 8.0 -> 6.0")
-        self.assertEqual(site_mod.judgement_moved(shown, now),
+        self.assertEqual(site_mod.resolution_moved(shown, now),
                          ["g.one pass 0.41 mm -> pass 0.29 mm (stale)"])
         now["claims"][0].update(status="fail")
         now["claims"].append({"id": "C9", "status": "pending"})
         del now["claims"][1]
-        self.assertEqual(site_mod.judgement_moved(shown, now),
+        self.assertEqual(site_mod.resolution_moved(shown, now),
                          ["C1 pass -> fail", "C9 (none) -> pending", "C2 pass -> (none)"])
 
 
@@ -970,7 +1072,7 @@ class SiteStatusReports(_SiteCase):
         They live in the verdict cache now, which no record digest covers, so
         its replacement edited a claim file and no longer guarded the risk it
         was named for (R-6): a sweep lands after the build, not one record
-        moves, and the page still shows what it showed. `meta.judgement_digest`
+        moves, and the page still shows what it showed. `meta.resolution_digest`
         is what the page judged; `_site_state` asks the resolver again."""
         from nopekit import verdicts as verdicts_mod
 
@@ -1066,7 +1168,11 @@ class ThePageIsCurrentOnlyWithItsVerdicts(_env.EnvCase):
         self.assertFalse(shown["stale"], f"{why}: {shown['stale_reason']}")
         self.assertFalse(self._json(project, "status")["site"]["stale"], why)
         self.assertNotIn("STALE", self._site_line(project), why)
-        self.assertEqual(self._doctor_row(project)["status"], "ok", why)
+        # The row's currency, not its status: from phase 5 the row also warns
+        # on a shell older than the outline, which says nothing of the data.
+        row = self._doctor_row(project)
+        self.assertNotEqual(row["status"], "FAIL", why)
+        self.assertIn("current with the records and the verdicts", row["detail"], why)
 
     def _site_line(self, project: str) -> str:
         [line] = [text for text in self._run(project, "status").stdout.splitlines()

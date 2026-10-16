@@ -581,6 +581,7 @@ def watertight(ctx: GateContext) -> Verdict:
 
 @gate(
     id="cad.is_volume",
+    basis="established",
     title="Every solid is a volume: closed, consistently wound, positive volume",
     claims=["geometry", "mesh", "cad", "manufacturability"],
     tier=Tier.BUILD,

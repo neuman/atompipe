@@ -1,46 +1,38 @@
 <!doctype html>
 <!--
-  The shell. HACKABLE, YOURS, NEVER REGENERATED.
+  The front page. HACKABLE, YOURS, NEVER REGENERATED.
 
   `nopekit site init` writes this file once and then refuses to overwrite it;
-  `nopekit site build` never touches it at all. Add your own sections, change
-  the copy, drop in a logo — none of it is at risk from a later nopekit upgrade.
-  (app.js and style.css ARE refreshed by `site init`: they are the renderer, they
-  get fixes, and a project that could never receive one would be stuck with the
-  bugs of the day it was created. Keep your edits here, or rename what you fork.)
+  `nopekit site build` never touches it. Add your own sections, change the
+  copy, add a logo: a later nopekit upgrade does not put any of it at risk.
+  (page.js, page.css, map.css and lib/ ARE refreshed by `site build`: they are
+  the renderer, and they get fixes. Keep your edits here, or rename what you
+  fork.)
 
-  Nothing on this page is a source of truth. It reads site/data/state.json, which
-  `nopekit site build` generates from the ledger. If a number is wrong, the
-  ledger is wrong.
+  The outline is fixed (SPEC 28): the name, the representation, the verdict,
+  the description, the grounding map, one section per board, next steps, and
+  Made with nopekit. The meta tag below says which outline this shell carries;
+  `site build` warns when a shell carries an older one or none.
+
+  Nothing on this page is a source of truth. It reads site/data/page.json and
+  site/data/map.json, which `nopekit site build` bakes from the records, the
+  verdict cache and site/content/. If a number is wrong, a record, the cache or
+  the text in site/content/ is wrong. The technical record is technical.html.
 -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="nopekit-outline" content="1">
     <title>nopekit project</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="page.css" />
+    <link rel="stylesheet" href="map.css" />
 
     <script>
       // THE IMPORT MAP, chosen at load time: a vendored three.js when
-      // `nopekit site vendor` has been run, the CDN otherwise. Both spellings
-      // map the bare specifiers `three` and `three/addons/`, so every addon's
-      // internal `import ... from 'three'` resolves either way and not one line
-      // of vendored code needs rewriting.
-      //
-      // The probe is a SYNCHRONOUS XHR, which is deprecated and deliberate: an
-      // import map has to be in the document before the first module begins
-      // loading, so the choice cannot be awaited. It is a same-origin HEAD
-      // against a file the server either has or does not, next to the page
-      // itself — and the alternative (ship one map, then patch three.js's
-      // resolution afterwards) is not something a no-build-step site can do.
-      //
-      // The vendor layout MIRRORS the package's own (jsm/loaders/…,
-      // jsm/utils/…), because GLTFLoader.js imports
-      // '../utils/BufferGeometryUtils.js' relatively. Flattening the files into
-      // one directory produces a vendored site that 404s offline — the one
-      // situation vendoring exists for, and the one nobody tests before
-      // archiving a project.
+      // `nopekit site vendor` has been run, the CDN otherwise (technical.html
+      // carries the same probe, and says why it is a synchronous request).
       (function () {
         var CDN = "https://cdn.jsdelivr.net/npm/three@0.169.0/";
         var vendored = false;
@@ -50,7 +42,7 @@
           probe.send(null);
           vendored = probe.status >= 200 && probe.status < 400;
         } catch (err) {
-          vendored = false;               // no vendor/, or the server said no
+          vendored = false;
         }
         var imports = vendored
           ? { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" }
@@ -65,25 +57,65 @@
   </head>
 
   <body>
-    <div id="app">
-      <p class="booting">Reading the ledger…</p>
-    </div>
+    <button class="themebtn" id="themebtn" type="button" aria-label="Change between the dark and the light theme">Dark or light</button>
+    <p class="build-banner" id="build-banner" role="status" hidden></p>
+    <main>
+
+      <!-- 1 to 4: the name, the representation, the verdict, the description -->
+      <section class="hero" id="top">
+        <h1 class="hero-name" id="name">nopekit project</h1>
+        <div class="hero-rep" id="representation"></div>
+        <div class="hero-verdict" id="verdict"><p class="verdict muted">Reading the data.</p></div>
+        <div class="hero-desc" id="description"></div>
+      </section>
+
+      <!-- 5: the grounding map -->
+      <section class="nk-sec map-sec" id="map">
+        <h2 id="map-title"></h2>
+        <div class="maptools">
+          <p class="cap cap-desk">Each line is one claim. It goes through the shared values that its evaluators read, in the order that the test found. It ends on its board. Point at a line, a station or a group to show its links. Click one to see its evidence.</p>
+          <p class="cap cap-phone">Each card is one claim, on its board. Tap a card to see its evidence.</p>
+          <div class="legend" id="map-legend"></div>
+          <div class="mapctl" role="toolbar" aria-label="Map controls">
+            <button class="chip" id="map-worst" type="button" aria-pressed="false" title="Put the worst claims first on each board">Worst first</button>
+            <button class="iconbtn" id="map-out" type="button" aria-label="Zoom out">−</button>
+            <button class="iconbtn" id="map-in" type="button" aria-label="Zoom in">+</button>
+            <button class="iconbtn" id="map-fit" type="button" aria-label="Show the whole map" title="Show the whole map (key 0)">⤢</button>
+          </div>
+        </div>
+        <div class="mapframe" id="map-host"></div>
+      </section>
+
+      <!-- 6: one section for each board -->
+      <div id="boards"></div>
+
+      <!-- 7: next steps -->
+      <section class="nk-sec" id="next">
+        <h2 id="next-title"></h2>
+        <div class="next-body" id="next-body"></div>
+      </section>
+
+      <!-- 8: Made with nopekit, the last section of every nopekit site. The
+           badge ships with the template (img/made-with-nopekit.png); keep it. -->
+      <section class="nk-sec madewith" id="made-with-nopekit">
+        <a href="https://github.com/neuman/nopekit"><img src="img/made-with-nopekit.png" width="200" height="200" loading="lazy" alt="Made with nopekit: a honey badger with goggles, a tool belt and a red toolbox"></a>
+        <div>
+          <h2>Made with nopekit</h2>
+          <p class="lede">nopekit is the check tool for this design. It runs the checks, records the evidence and builds this site.</p>
+          <p><a href="https://github.com/neuman/nopekit">github.com/neuman/nopekit</a></p>
+        </div>
+      </section>
+
+      <footer>
+        <p>The technical record shows each check, its evidence and its history: <a href="technical.html" id="technical-link">technical.html</a>.</p>
+        <p class="muted" id="built"></p>
+      </footer>
+    </main>
 
     <noscript>
-      <div class="no-state">
-        <h1>This page needs JavaScript to render the ledger.</h1>
-        <p>
-          Everything it would show is in <code class="mono">data/state.json</code>, which is
-          plain JSON and readable without a browser:
-        </p>
-        <pre class="cmd"><code class="mono">curl -s http://localhost:8000/data/state.json | python3 -m json.tool</code></pre>
-        <p class="small muted">
-          That file is the whole page. It is complete on purpose — an agent that had to render
-          HTML to read a verdict would not read the verdict.
-        </p>
-      </div>
+      <p class="noscript">This page needs JavaScript to draw the data. The data is in data/page.json and data/map.json. Both are plain JSON.</p>
     </noscript>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="page.js"></script>
   </body>
 </html>

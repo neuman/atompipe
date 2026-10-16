@@ -35,9 +35,9 @@ no evaluator covers it yet; and C6 is an assumption nobody owns, a gap until its
 records it — name them as `"owner"` in `claims/C6.json`, and they run `nopekit claim
 physical C6 assume` in their own shell; the name in the file alone does not count). C5
 waits on an article: `nopekit status` says *pending build*, and the project is not
-*ready* until every required claim reads checked. Once its test is written down (a
-`note` in `claims/C5.json`), the person who tested a printed bracket records the result
-in their own shell — `nopekit claim physical C5 pass --evidence <photo> --detail "..."`
+*ready* until every required claim reads checked. Its test is written down in
+`claims/C5.json` (its mechanism's `how`), so the person who tested a printed bracket
+records the result in their own shell — `nopekit claim physical C5 pass --evidence <photo> --detail "..."`
 — and it counts on that design only: change a value afterwards and C5 reads stale, the
 article named for rebuild. Before you run anything, `nopekit status` names each gate the
 edit reached and what moved for it; `check` re-runs exactly those and serves the rest
@@ -47,6 +47,27 @@ That is the entire loop: one parameter, one gate, one verdict. Everything else i
 nopekit is this loop with more expensive gates attached.
 
 ## What it demonstrates
+
+**Requirements first, and every claim says how it settles.** `requirements/R1.json` to
+`R4.json` are what the person asked for, in their words ("Hold the pump on the shelf
+without breaking, and without a sag anyone can see"); each claim names the ones it
+serves, and each says in its `"mechanism"` what would settle it — where its evidence
+bottoms out (`by`), in words (`how`), and the evaluators it expects. A requirement reads
+the worst of its claims: R1 is failing while C1 is, R2 a gap while nothing evaluates
+C7. *Ready* stays the claims': a requirement is shown, never required. `nopekit status`
+says it in one line —
+
+```
+requirements 4 — R1 failing (C1) · R2 gap (C7) · R3 pending build (C5) · R4 checked
+```
+
+— and `nopekit gap` lists every claim whose mechanism has yet to run, with what would
+settle it:
+
+```
+[gap  ] C7 First mode is clear of the pump that sits on the sh… — no evaluator
+        mechanism: automated — A closed-form estimate of the arm's first natural frequency with the shelf and the pump at its tip, against the pump's 50 Hz with margin
+```
 
 **Rule 1 — one source of truth.** `model/bracket.py` holds every input. Section
 properties, stresses, deflections and the print footprint are all computed by
@@ -68,19 +89,46 @@ REJECTED (1)
   4.0 mm — 3.75 mm deflection, 7.5x the limit   (model/bracket.py PARAMS)
 ```
 
+**Decisions keep their losers.** `decisions/print-in-petg.json`, written by `nopekit
+decide`, gives each material that lost its type and what would bring it back: PLA is
+*infeasible* (it creeps under a sustained load), ABS *unevaluated* (the model holds no
+ABS properties), and a machined aluminium bracket *preferred against* — Robin, who
+prints their own parts (R4), is the person named. Run `nopekit why print-in-petg`:
+
+```
+REJECTED (3)
+  PLA — creeps under sustained load at room temperature — …
+      infeasible · not machine-checkable: when the load is no longer sustained: …
+  ABS — the model holds no ABS properties (MATERIALS has petg, pla and alu6061), …
+      unevaluated · not machine-checkable: when ABS is added to MATERIALS …
+  a machined 6061 aluminium bracket — Robin prints their own parts, in PETG (R4); …
+      preferred against, not recorded by Robin Okafor · does not hold: C3 margin < 0.1, now 0.987 (bracket.bearing)
+```
+
+The aluminium bracket's return condition is structured: `check` evaluates it against
+C3's margin and would print `may return:` if the bearing stress came within 10% of its
+limit (it never changes `check`'s exit code for it). The preference is Robin's to
+record, typed in Robin's own shell: `nopekit prefer print-in-petg`. No agent records it
+for them, so it reads *not recorded by Robin Okafor*, and `nopekit doctor` warns about
+it — as it should.
+
 **Rule 5 — falsification controls.** Six gates, six fixtures in
 `selftest/bad_configs.py`, each changing exactly one physically meaningful thing in
 the direction that gate cares about, starting from the known-good design in
 `selftest/known_good.py` — never from whatever the model says today:
 
-| Gate | Known-bad fixture |
-|---|---|
-| `bracket.deflection` | same bracket at 1/4 thickness (~64x worse) |
-| `bracket.bending_stress` | same bracket at 20x load |
-| `bracket.bearing` | one bolt in a thin plate, bearing area collapsed |
-| `bracket.model_validity` | short deep arm where shear deflection stops being negligible |
-| `bracket.bed_fit` | a 400 mm arm — nothing wrong but the footprint |
-| `bracket.min_wall` | a 1.2 mm nozzle that cannot resolve the section |
+| Gate | Basis | Known-bad fixture |
+|---|---|---|
+| `bracket.deflection` | sourced | same bracket at 1/4 thickness (~64x worse) |
+| `bracket.bending_stress` | sourced | same bracket at 20x load |
+| `bracket.bearing` | sourced | one bolt in a thin plate, bearing area collapsed |
+| `bracket.model_validity` | sourced | short deep arm where shear deflection stops being negligible |
+| `bracket.bed_fit` | model-only | a 400 mm arm — nothing wrong but the footprint |
+| `bracket.min_wall` | model-only | a 1.2 mm nozzle that cannot resolve the section |
+
+The basis says where each gate's verdict logic comes from: the four structural gates
+follow textbook beam formulae (sourced); the bed-fit and wall rules are the model's
+own (model-only). It is shown in `nopekit gate list`, and it changes no status.
 
 ```bash
 nopekit gate selftest
@@ -112,10 +160,21 @@ model/bracket.py              tracked   the model: Config, PARAMS, build(). Runn
 gates/structural.py           tracked   six tier-0 gates, all pure arithmetic
 selftest/known_good.py        tracked   the design every control starts from
 selftest/bad_configs.py       tracked   one known-bad fixture per gate
+requirements/R1.json … R4.json tracked  what the person asked for, in their words
 claims/C1.json … C7.json      tracked   what must be true: one record per claim, the
                                         filename is its id. Edit these by hand.
+params/load_n.json            tracked   the one param record: load_n IS assumption C6
+                                        (`"grounded_by": ["C6"]`), so C1 rests on C6
+decisions/print-in-petg.json  tracked   a decision and what lost, typed, with return
+                                        conditions (written by `nopekit decide`)
+docs/decisions.md             tracked   the decision log, generated from decisions/ by
+                                        `nopekit report --write`; never edit it
 milestones/print-v1.json      tracked   a spend — the print — and the claims it
                                         requires (C1-C4), with its generator
+groups/*.json                 tracked   the page's boards (claims), zones (choices)
+                                        and the one named station (`allowable`)
+site/content/*.md             tracked   the page's text, one file per board plus
+                                        intro.md and next.md, each stamped `as_of`
 generators/profile.py         tracked   writes the print's package: the plate's
                                         outline and the print settings
 exports/print-v1.json         tracked   written by `nopekit export print-v1` only:
@@ -124,19 +183,30 @@ exports/print-v1.json         tracked   written by `nopekit export print-v1` onl
 .nopekit/verdicts/<gate>/    tracked   the verdict cache: one entry per gate and one
                                         control entry per gate, keyed on the bytes
                                         each one read. Evidence, committed.
+.nopekit/round.json          tracked   the round record: every status as a token and
+                                        the typed graph, written only by `nopekit round`;
+                                        an output — never edit it, never read it for truth
+.nopekit/trace/              tracked   the trace and its amber file, written once per
+                                        design by `nopekit model trace`; never edited
 .gitignore, .gitattributes,   tracked   marked blocks nopekit maintains: bytecode is
 .nopekit/.gitignore                    ignored, line endings are pinned (digests are
                                         over bytes), outputs are ignored
 .nopekit/ledger.json         ignored   the generated index of the records — the whole
                                         project in one read; edit the records, never it
 REPORT.md                     ignored   the readiness report, `nopekit report --write`
+site/ (but site/content/)     ignored   the page, built on demand: `nopekit site init`,
+                                        then `nopekit site build`
 out/print-v1/                 ignored   the package `nopekit export print-v1` wrote
 .nopekit/cache/, obs/, out/  ignored   this checkout's memory, costs and gate scratch
 ```
 
-There is no `params/` directory: a parameter record holds only what the model cannot
-(where a number came from), and every value, rationale and rejected alternative here
-lives in `model/bracket.py`.
+There is one param record, `params/load_n.json`, and it holds only what the model
+cannot: that the rated load IS an assumption. C6 says the load is static and centred
+on the arm; `load_n` is that static load, so its `grounded_by` names C6, and because
+`bracket.deflection` reads `load_n`, C1's verdict rests on C6 (`nopekit why C1` says
+`rests on: C6 (gap; bracket.deflection read load_n)`). It moves no status: C1 fails
+on its own, and C6 reads Gap until its owner records it. Every value, rationale and
+rejected alternative lives in `model/bracket.py`.
 
 ## Move a limit in the claim, never in the gate
 
@@ -165,12 +235,56 @@ red until it does, and names these commands. To regenerate, from this directory:
 rm -rf .nopekit/verdicts .nopekit/cache .nopekit/obs .nopekit/out
 nopekit check              # exits 1: bracket.deflection fails on purpose
 nopekit gate selftest      # writes nothing new: the controls were just recorded
+nopekit model trace        # writes nothing when the committed trace is the design's
+nopekit round              # the round record of the regenerated cache
+nopekit site stamp --all   # only when a status moved: read the text again first
 git add -A .
 ```
+
+The bracket also commits its round record, `.nopekit/round.json` — the resolution at
+the end of a round, as tokens, with the typed graph. A change that moves what it holds
+without moving the cache (the composition, the graph, a bracket record) ends with
+`nopekit round` alone; `tests/test_bracket_cache.py` (`TheCommittedRoundRecordIsCurrent`)
+goes red until it does.
+
+The bracket commits its trace too, under `.nopekit/trace/`: one file for its design
+(which derived values each of its eleven numeric choices moved at -10% and +10%; the
+material is a word, and is not moved) and one amber file (C2 and C3 re-run with the
+load, which assumption C6 sources, moved: both hold). A change to the model is another
+design: run `nopekit model trace`, then `nopekit round`, and commit both
+(`TheCommittedTraceIsCurrent`). The trace never rewrites a file; the old design's
+stays until you `git rm` it.
+
+On a fresh clone `nopekit round` writes nothing and `git status`
+stays clean.
+
+The bracket lists no `people` in `.nopekit/project.json`, on purpose: `nopekit round
+--commit`, and the plugin's Stop hook that runs it, commits a round only as a person
+listed there, so a round run here, inside nopekit's own repository, never commits.
 
 The readiness report is not committed: `nopekit report --write` renders `REPORT.md`
 here, an output git ignores — it was `docs/readiness.md`, tracked, until it drifted
 from the records it was rendered from.
+
+## The page
+
+`nopekit site init` scaffolds `site/`, and `nopekit site build` bakes the page from the
+records, the verdict cache and the text in `site/content/`; `nopekit site serve
+--watch` serves it and builds it again when any of those change. The page reads like
+a poster: the verdict sentence, the grounding map, then one section per board, then
+the next steps. The map draws the four requirements on the left, the four zones of
+choices (`groups/arm.json` and its neighbours), the shared values the evaluators read
+— `allowable` is named in `groups/allowable.json`, and `slenderness`, which two
+claims' evaluators read, becomes a station on its own — and the four boards on the
+right, one line per claim in its status's colour, glyph and word.
+
+The text beside each board is the only part of the page an agent writes, so it is the
+part held most closely. Each file carries an `as_of` stamp, the digest of its claims'
+statuses when it was written (`nopekit site stamp <board>`, or `--all`); when a status
+moves, the page marks the text as written before the latest results. Every number in
+the text must be a number the build bakes: a number nothing holds is marked on the
+page and named by the build. The built page is not committed here (`.gitignore`
+keeps only `site/content/`), so a clone builds its own.
 
 ## Spend: `nopekit export print-v1`
 
@@ -202,3 +316,7 @@ fail), and a fail there is a contradiction on `bracket.deflection`'s track recor
 - Set `thickness=2.0` — now `bracket.min_wall` and `bracket.deflection` both trip, and
   `bracket.model_validity` warns that the remaining numbers are not trustworthy.
 - Delete a gate's `negative_control` — the registry refuses to load it at all.
+
+<!-- nopekit:begin badge -->
+<a href="https://github.com/neuman/nopekit"><img src="https://raw.githubusercontent.com/neuman/nopekit/main/docs/img/made-with-nopekit.png" width="160" alt="Made with nopekit"></a>
+<!-- nopekit:end badge -->

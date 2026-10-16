@@ -666,13 +666,18 @@ _PLAN_OUTPUT = {
                         "[gap  ] C6 The load is static and centred on the arm — "
                         "no owner recorded\n"
                         "[build] C5 Survives two winters outdoors without UV "
-                        "embrittlem… — needs an article; no test written down\n"
+                        "embrittlem… — needs an article\n"
+                        "requirements 4 — R1 failing (C1) · R2 gap (C7) · R3 pending build "
+                        "(C5) · R4 checked\n"
                         "invalidated: none   (6 verdicts current)\n"
                         "last check run: 2026-09-27T14:02:11Z (3m ago)\n"),
     "status-stale": (0, "bracket — 7 claims, 6 gates\n"
                         "invalidated: bracket.bed_fit — config.bed_xy 220.0 -> 250.0   "
                         "(5 verdicts current)\n"
-                        "last check run: 2026-09-27T14:02:11Z (3m ago)\n"),
+                        "last check run: 2026-09-27T14:02:11Z (3m ago)\n"
+                        # Architecture phase 3b: the edit is another design.
+                        "trace: not traced for this design — `nopekit round` starts it "
+                        "in the background; `nopekit model trace` runs it here\n"),
     "check-after-edit": (1, "[ok  ] bracket.bed_fit : 74 x 30 x 7 mm vs 234 mm usable "
                             "(250 bed - 2x8 brim)\n"
                             f"{_CACHED_FAIL}\n"

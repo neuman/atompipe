@@ -1,0 +1,9 @@
+{
+  "kind": "zone",
+  "title": "Bolts",
+  "members": [
+    "hole_d",
+    "n_bolts",
+    "edge_margin"
+  ]
+}

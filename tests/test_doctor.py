@@ -83,7 +83,23 @@ ROWS = ("instruments", "opaque-inputs", "cache-entries", "two-outcomes", "sealed
         "imports", "env-reads", "memos", "dynamic-imports", "code-digest", "pending-controls",
         "orphan-entries", "qualification", "known-good",
         # P2.5b: the milestones, their export records and packages, the report.
-        "milestones", "exports", "report")
+        "milestones", "exports", "report",
+        # Architecture phase 1 (SPEC decisions 12, 13): the requirements and the
+        # mechanisms' evaluator names.
+        "requirements", "mechanisms",
+        # Architecture phase 2 (SPEC 14, 38): decisions' pointers and unrecorded
+        # preferences, and every evaluator's basis — warnings, never a FAIL.
+        "decisions", "basis",
+        # Architecture phase 3a (SPEC 18, 19): the graph's pointers, and the
+        # round record's state (`test_round.ABehindRoundRecordSaysSo` plants
+        # each warning).
+        "graph", "round",
+        # Architecture phase 5 (SPEC 17, 36): the groups, and the README's badge
+        # (test_groups plants each FAIL and warning; `site text` shows only
+        # where a site and its text exist, and
+        # test_site_truth.TheReadersSayTheTextIsBehind holds its ok and its
+        # warning).
+        "groups", "readme")
 
 #: A fixture every planted project gate can borrow: the bracket's own, which
 #: sags the known-good design 30 mm — past any limit the planted gates use.
@@ -854,6 +870,139 @@ class MilestonesExportsAndTheReport(_env.EnvCase):
         _write(self.root, "docs/readiness.md", "# an old report\n")
         _code, rows = self.rows()
         self.assertRow(rows, "report", "warn", "docs/readiness.md", "git rm docs/readiness.md")
+
+
+
+class DecisionsAndBasis(_env.EnvCase):
+    """(architecture phase 2) `doctor`'s `decisions` row names each unrecorded
+    preferred_against rejection with the command its person runs, a return
+    condition or an input naming no record, and a preference file no decision
+    holds; its `basis` row names an evaluator that declares none. Both warn and
+    never FAIL: neither moves a status."""
+
+    def test_the_bracket(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        code, rows = _doctor_in_process(project)
+        self.assertEqual(rows["decisions"]["status"], "warn")
+        self.assertIn("print-in-petg (a machined 6061 aluminium bracket, by Robin Okafor) — "
+                      "Robin Okafor runs: nopekit prefer print-in-petg",
+                      rows["decisions"]["detail"])
+        self.assertEqual((rows["basis"]["status"], rows["basis"]["detail"]),
+                         ("ok", "every evaluator declares its basis"))
+        path = os.path.join(project, "decisions", "print-in-petg.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["rejected"][0]["input"] = "no-such-quote"
+        data["rejected"][2]["returns_if"]["claim"] = "C42"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        again, rows = _doctor_in_process(project)
+        self.assertEqual(again, code, "a warning never moves doctor's exit code")
+        detail = rows["decisions"]["detail"]
+        self.assertIn("rejected[0].input names 'no-such-quote', which has no "
+                      "inputs/no-such-quote.json", detail)
+        self.assertIn("rejected[2].returns_if names 'C42', which has no claims/C42.json",
+                      detail)
+
+    def test_an_undeclared_basis_warns(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        path = os.path.join(project, "gates", "structural.py")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace('    basis="model-only",\n', "", 1))
+        _code, rows = _doctor_in_process(project)
+        self.assertEqual(rows["basis"]["status"], "warn")
+        self.assertIn("1 evaluator(s) declare no basis and show as undeclared: bracket.bed_fit",
+                      rows["basis"]["detail"])
+
+
+class DoctorPeopleRow(_env.EnvCase):
+    """(architecture phase 6, SPEC §0.3) `doctor`'s `people` row says whether a
+    round here would commit — the people listed and whether git's identity is
+    one of them. Five states, and it never FAILs: a project that commits no
+    round is not broken. (Not in ROWS: the bracket lists no one on purpose.)"""
+
+    IDENT = f"{_env.IDENTITY['GIT_AUTHOR_NAME']} <{_env.IDENTITY['GIT_AUTHOR_EMAIL']}>"
+
+    def setUp(self):
+        environ = mock.patch.dict(os.environ)
+        environ.start()
+        self.addCleanup(environ.stop)
+        for name in list(os.environ):
+            if name.startswith(("GIT_", "CLAUDE")) or name in ("EMAIL", "XDG_CONFIG_HOME"):
+                del os.environ[name]
+        home = self.tmp()
+        os.environ.update({"HOME": home, "XDG_CONFIG_HOME": home,
+                           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                           **_env.IDENTITY})
+
+    def _row(self, project: str) -> dict:
+        code, rows = _doctor_in_process(project)
+        self.assertNotEqual(rows["people"]["status"], "FAIL")
+        return rows["people"]
+
+    def _project(self, *extra: str) -> str:
+        root = os.path.join(self.tmp(), "p")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli_mod.main(["init", "--name", "p", "-C", root, *extra]), 0)
+        return root
+
+    def test_the_five_states(self):
+        root = self._project()
+        row = self._row(root)
+        self.assertEqual((row["status"], row["detail"]),
+                         ("ok", f"1 listed ({self.IDENT}); git's identity here is listed, "
+                                f"so rounds commit"))
+        os.environ["GIT_AUTHOR_NAME"] = "Someone Else"
+        row = self._row(root)
+        self.assertEqual(row["status"], "warn")
+        self.assertIn("git's identity here, Someone Else <tests@nopekit.invalid>, is not one "
+                      "of them — rounds make no commit", row["detail"])
+        for name in _env.IDENTITY:
+            os.environ.pop(name)
+        row = self._row(root)
+        self.assertEqual((row["status"], row["detail"]),
+                         ("warn", "1 listed; git has no user.name and user.email here — "
+                                  "rounds make no commit"))
+        os.environ.update(_env.IDENTITY)
+        bare = self._project("--no-git")
+        self.assertEqual(self._row(bare)["detail"],
+                         "1 listed; the project is in no git repository — rounds make no "
+                         "commit (`git init`)")
+        path = os.path.join(bare, ".nopekit", "project.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["people"] = []
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        row = self._row(bare)
+        self.assertEqual(row["status"], "warn")
+        self.assertTrue(row["detail"].startswith("none listed — rounds make no commit"), row)
+
+    def test_none_listed_prints_the_records_shape(self):
+        """(follow-up after phase 3b) The printed row shows the entry a person
+        types, with single braces: the row was printed raw, so doctor said to
+        add `{{"name": "...", "email": "..."}}` to the project file."""
+        bare = self._project("--no-git")
+        path = os.path.join(bare, ".nopekit", "project.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["people"] = []
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            cli_mod.main(["doctor", "-C", bare])
+        rows = [line for line in out.getvalue().splitlines()
+                if line.startswith(f"{cli_mod._tag('warn')} people ")]
+        self.assertEqual(len(rows), 1, out.getvalue())
+        self.assertTrue(rows[0].endswith(
+            'none listed — rounds make no commit; the person adds themselves to "people" in '
+            '.nopekit/project.json as {"name": "...", "email": "..."}'), rows[0])
+        self.assertNotIn("{{", rows[0])
+        self.assertNotIn("}}", rows[0])
+        self.assertEqual(self._row(bare)["detail"], rows[0].split("people", 1)[1].strip())
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ import _projects
 import _transcript as T
 import test_fresh_clone
 import test_spine_digest
-from nopekit import verdicts
+from nopekit import cli, rounds, verdicts
 
 #: The bracket's six gates, in registration order.
 BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearing",
@@ -61,8 +61,35 @@ BRACKET_GATES = ("bracket.deflection", "bracket.bending_stress", "bracket.bearin
 #: regeneration is idempotent; examples/bracket/README.md spells out every step.
 REGENERATE = ("the committed bracket cache was written by another spine or model: in "
               "examples/bracket run `rm -rf .nopekit/verdicts && nopekit check; "
-              "nopekit gate selftest` and commit the result "
-              "(examples/bracket/README.md, \"The committed cache\")")
+              "nopekit gate selftest; nopekit model trace; nopekit round` and commit the "
+              "result "
+              "(examples/bracket/README.md, \"The committed cache\"); a status change "
+              "also needs `nopekit site stamp --all` after reading the text again")
+
+#: What a stale committed round record says (architecture phase 3a): a change
+#: that moves what it holds — the cache, the composition (`claims.py`,
+#: `report.requirement_statuses`), `graph.py`, `rounds.py` or a bracket record —
+#: ends with `nopekit round` in examples/bracket.
+ROUND_FIX = ("the committed round record is not the bracket's round record now: in "
+             "examples/bracket run `nopekit model trace` (it writes nothing when the trace "
+             "is current), then `nopekit round`, and commit .nopekit/trace/ and "
+             ".nopekit/round.json (examples/bracket/README.md, \"The committed cache\")")
+
+#: What a stale committed trace says (architecture phase 3b): an edit to the
+#: bracket's model, or to how the trace observes, leaves the committed trace
+#: keyed to another design.
+TRACE_FIX = ("the committed trace is not the bracket's design now: in examples/bracket run "
+             "`nopekit model trace`, then `nopekit round`, and commit .nopekit/trace/ and "
+             ".nopekit/round.json (examples/bracket/README.md, \"The committed cache\")")
+
+#: What it says when the trace is current and its amber is not: a gate that
+#: covers C2 or C3, or their acceptance condition, moved (review of phase 3b:
+#: TRACE_FIX said the trace was not the design's, and `round` alone only starts
+#: the trace in the background).
+AMBER_FIX = ("the committed trace is the bracket's design, and its amber file is not current "
+             "(C2's or C3's evaluator or acceptance condition moved: {why}): in "
+             "examples/bracket run `nopekit model trace` in the foreground, then `nopekit "
+             "round`, and commit .nopekit/trace/ and .nopekit/round.json")
 
 #: What it says instead when the walk, not the cache, is what moved.
 NOT_PORTABLE = ("the canonical AST walk is not portable to Python {version}: "
@@ -73,6 +100,10 @@ NOT_PORTABLE = ("the canonical AST walk is not portable to Python {version}: "
 #: phase-1.md's `claims/C1.json`, as (key, value) pairs so key ORDER is compared
 #: too, nested included: the record writer writes dataclass field order, and a
 #: file that reads the same but orders its keys otherwise was not written by it.
+#: The committed C1 has grown past that example since (architecture phase 1,
+#: SPEC decisions 12 and 13): its mechanism, folded where `note` sat, and the
+#: requirement it serves, last. `test_records.PHASE_1_C1` stays the old example:
+#: the legacy migration's output is unchanged.
 C1_PAIRS = [
     ("statement", "Tip sags no more than 0.5 mm at rated load"),
     ("kind", "measurable"),
@@ -81,6 +112,13 @@ C1_PAIRS = [
     ("rationale", "past ~0.5 mm the droop is visible against a level shelf edge; "
                   "this is a product decision, not a physics one"),
     ("tags", ["stiffness"]),
+    ("mechanism", [("by", "closed_form"),
+                   ("how", "Euler-Bernoulli tip deflection of the arm as a cantilever under "
+                           "the rated 15 N, from the model's section and PETG's conservative "
+                           "modulus, once the arm is shown slender enough for that beam "
+                           "theory"),
+                   ("evaluators", ["bracket.deflection", "bracket.model_validity"])]),
+    ("requirements", ["R1"]),
 ]
 
 #: The claims the bracket's ledger held, migrated one file each.
@@ -418,6 +456,7 @@ class CacheCheckersRefuse(_env.EnvCase):
     def test_the_message_names_the_fix(self):
         self.assertIn("rm -rf .nopekit/verdicts && nopekit check", fix_message(portable=True))
         self.assertIn("nopekit gate selftest", fix_message(portable=True))
+        self.assertIn("nopekit round", fix_message(portable=True))
         # P2.5b (R-6, the same property): the report is an ignored output, so
         # regenerating the cache writes no tracked report.
         self.assertNotIn("report --write", fix_message(portable=True))
@@ -426,6 +465,112 @@ class CacheCheckersRefuse(_env.EnvCase):
         self.assertIn(platform.python_version(), not_portable)
         self.assertNotIn("rm -rf", not_portable)
         self.assertEqual(fix_message(), fix_message(portable=walk_is_portable()))
+
+
+def round_record_problems(root: str) -> list[str]:
+    """What is wrong with ``root``'s round record against the project as it
+    stands: it does not read, its seal is broken, or anything it holds — the
+    digests it was computed from, the tokens, the graph — is not what `round`
+    would write now (`cli._round_inputs`, in process)."""
+    found = rounds.read(root)
+    if found.state != "ok":
+        return [f"{rounds.ROUND_REL} reads {found.state} {found.why}".rstrip()]
+    ledger = cli._load(root)
+    registry, _ = cli._registry(root, ledger)
+    model, projection, error = cli._projection_safe(root, ledger)
+    view, resolution = cli._resolved(root, ledger, registry, projection, error,
+                                     now="2026-10-15T00:00:00Z", model=model)
+    body, _now = cli._round_inputs(root, ledger, registry, model, projection, view,
+                                   resolution, model_error=error)
+    return [f"{rounds.ROUND_REL}: {key} is not what `nopekit round` writes now"
+            for key in rounds.KEYS
+            if key not in ("generated", "round", "self") and found.doc.get(key) != body[key]]
+
+
+class TheCommittedRoundRecordIsCurrent(_env.EnvCase):
+    """(architecture phase 3a) The bracket commits `.nopekit/round.json`, and it
+    is the round record of the committed tree: its seal holds, everything it
+    holds is what `round` would write now, and on a fresh git copy `round`
+    writes nothing and leaves `git status` empty. A non-spine edit (the
+    composition, the graph, a bracket record) moves it without moving the cache
+    — this is what catches that."""
+
+    def test_the_committed_record_is_current(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        problems = round_record_problems(project)
+        if problems:
+            self.fail("\n".join(problems) + "\n" + ROUND_FIX)
+
+    def test_a_fresh_clone_rounds_to_nothing(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True,
+                                         git=True)
+        proc = _env.nopekit(["round", "--json"], cwd=project)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertFalse(_json(proc)["written"], ROUND_FIX)
+        porcelain = _env.git(["status", "--porcelain"], cwd=project)
+        self.assertEqual(porcelain.stdout, "", ROUND_FIX)
+
+    def test_a_stale_record_is_named(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        path = os.path.join(project, "claims", "C7.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["rationale"] = "a bracket record edited and the round record left behind"
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        self.assertEqual(round_record_problems(project),
+                         [f"{rounds.ROUND_REL}: computed_from is not what `nopekit round` "
+                          f"writes now"])
+        self.assertIn("nopekit round", ROUND_FIX)
+
+
+class TheCommittedTraceIsCurrent(_env.EnvCase):
+    """(architecture phase 3b) The bracket commits its trace and its amber file:
+    the trace is keyed to the committed design, amber reads `holds` for C2 and
+    C3, and on a fresh copy `model trace` writes nothing and says current."""
+
+    def test_the_trace_is_the_designs_and_amber_holds(self):
+        from nopekit import derivation, graph
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        ledger = cli._load(project)
+        registry, _ = cli._registry(project, ledger)
+        model, projection, error = cli._projection_safe(project, ledger)
+        view, resolution = cli._resolved(project, ledger, registry, projection, error,
+                                         now="2026-10-15T00:00:00Z", model=model)
+        traced = cli._trace_for(project, model, projection, resolution)
+        if traced.state != "current":
+            self.fail(f"trace reads {traced.state} {traced.problems}\n{TRACE_FIX}")
+        built = graph.of(project, view, resolution, registry, projection=projection,
+                         model=model, trace=traced.trace)
+        amber = cli._amber_for(project, view, registry, built,
+                               graph.tokens(view, resolution, registry).claims, traced)
+        self.assertEqual({cid: a.state for cid, a in amber.items()},
+                         {"C2": "holds", "C3": "holds"},
+                         AMBER_FIX.format(why="; ".join(f"{cid}: {a.state} {a.why}".strip()
+                                                         for cid, a in amber.items())))
+        self.assertEqual(derivation.needed(traced, amber), "")
+
+    def test_an_acceptance_edit_is_named_as_amber(self):
+        """The message a red build gives when only amber moved names amber
+        and the foreground run, never "not the design"."""
+        from nopekit import report
+        self.assertNotIn("is not the bracket's design", AMBER_FIX)
+        self.assertIn("in the foreground", AMBER_FIX)
+        self.assertIn(report.HUMAN["trace"]["amber_why"]["acceptance"],
+                      AMBER_FIX.format(why=report.HUMAN["trace"]["amber_why"]["acceptance"]))
+        with open(os.path.join(_env.REPO, "CLAUDE.md"), encoding="utf-8") as fh:
+            text = " ".join(fh.read().split())
+        self.assertIn("or to their acceptance condition runs `nopekit model trace` and then "
+                      "`nopekit round`", text)
+
+    def test_a_fresh_copy_traces_to_nothing(self):
+        project = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True,
+                                         git=True)
+        proc = _env.nopekit(["model", "trace", "--json"], cwd=project)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        self.assertEqual(_json(proc)["state"], "current", TRACE_FIX)
+        porcelain = _env.git(["status", "--porcelain"], cwd=project)
+        self.assertEqual(porcelain.stdout, "", TRACE_FIX)
 
 
 class BracketIsMigrated(unittest.TestCase):
@@ -443,17 +588,25 @@ class BracketIsMigrated(unittest.TestCase):
 
     def test_the_records_and_the_marker_are_committed(self):
         for rel in (".nopekit/project.json", ".nopekit/.gitignore", ".gitignore",
-                    ".gitattributes", *(f"claims/{c}.json" for c in CLAIM_IDS)):
+                    ".gitattributes", *(f"claims/{c}.json" for c in CLAIM_IDS),
+                    *(f"requirements/R{n}.json" for n in range(1, 5))):
             self.assertIn(rel, self.files, f"{rel} is not committed ({self.source} listing)")
         self.assertEqual(json.loads(self.read(".nopekit/project.json"))["schema"], 2)
 
-    def test_the_index_the_run_history_and_params_are_not(self):
+    def test_the_index_the_run_history_are_not_and_params_hold_only_provenance(self):
         leftovers = sorted(rel for rel in self.files
                            if rel in (".nopekit/ledger.json", ".nopekit/ledger.legacy.json")
-                           or rel.startswith((".nopekit/runs/", "params/")))
-        self.assertEqual(leftovers, [], "the index is an output (D-06), the run history "
-                                        "is gone (D-05), and no param record is written "
-                                        "where the model states the prose (§3.15)")
+                           or rel.startswith(".nopekit/runs/"))
+        self.assertEqual(leftovers, [], "the index is an output (D-06) and the run history "
+                                        "is gone (D-05)")
+        # Architecture phase 3a: exactly one param record — load_n IS the
+        # assumption C6 — and only provenance in it: no param record is written
+        # where the model states the prose (§3.15).
+        params = sorted(rel for rel in self.files if rel.startswith("params/"))
+        self.assertEqual(params, ["params/load_n.json"])
+        keys = set(json.loads(self.read("params/load_n.json")))
+        self.assertLessEqual(keys, {"source", "grounded_by", "tags"})
+        self.assertIn(".nopekit/round.json", self.files)
 
     def test_c1_is_the_phase_1_example_key_for_key(self):
         pairs = json.loads(self.read("claims/C1.json"), object_pairs_hook=list)

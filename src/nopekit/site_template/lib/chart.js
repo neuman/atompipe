@@ -59,8 +59,7 @@ export function renderChart(view, locators = []) {
     return el("div", { class: "chart-empty" },
       el("p", { text: "This chart view carries no series." }),
       el("p", { class: "small muted", text:
-        "A viewgen returning an empty chart rather than None is the one case the site cannot " +
-        "draw its way out of — there is nothing to plot." }));
+        "The viewgen returned an empty chart. There is nothing to plot." }));
   }
 
   // Domain from every point, both limit lines and the current marker: a limit
@@ -161,7 +160,7 @@ export function renderChart(view, locators = []) {
     kids.push(svg("line", { class: "current-stem", x1: x, x2: x, y1: y, y2: H - PAD.b }));
     kids.push(svg("circle", { class: "current-halo", cx: x, cy: y, r: 9 }));
     kids.push(svg("circle", { class: "current", cx: x, cy: y, r: 4.5 }));
-    const gap = marginText(c, limits, axes);
+    const gap = c.margin_text;
     kids.push(svg("text", { class: "current-label", x: x + 12, y: y - 12,
       text: c.label || "as designed" }));
     if (gap) kids.push(svg("text", { class: "current-margin", x: x + 12, y: y + 4, text: gap }));
@@ -180,21 +179,11 @@ export function renderChart(view, locators = []) {
   return figure;
 }
 
-/** The distance from the design point to the limit, in the axis's own units.
- *
- *  This is a SUBTRACTION OF TWO NUMBERS THE LEDGER ALREADY PUBLISHED, and it is
- *  phrased as a distance ("0.20 mm under the limit") rather than as a judgement.
- *  The page does not get to decide whether that margin is a pass: the verdict
- *  does, it is printed beside this chart, and if the two ever disagreed the
- *  ledger would be the one telling the truth. */
-function marginText(current, limits, axes) {
-  const limit = limits.find((l) => l.axis === "y");
-  if (!limit || !isNum(current.y)) return "";
-  const delta = current.y - limit.value;
-  const under = limit.comparator.startsWith("<") ? delta < 0 : delta > 0;
-  const units = axes.y.units ? ` ${axes.y.units}` : "";
-  return `${num(Math.abs(delta))}${units} ${under ? "inside" : "outside"} the limit`;
-}
+/* The distance from the design point to the limit is `current.margin_text`,
+ * baked by `site build` (`site._chart_margins`, SPEC 32) from the view's own
+ * limit. What slipped through before phase 5: this file subtracted the two
+ * numbers itself and said "inside" or "outside" from the comparator, a margin
+ * computed in the browser beside the one the spine publishes. */
 
 // --------------------------------------------------------------------------- //
 // payload normalisation — liberal in what it accepts
@@ -244,8 +233,8 @@ function normaliseLimits(raw) {
 function normaliseCurrent(raw) {
   const list = raw === null || raw === undefined ? [] : (Array.isArray(raw) ? raw : [raw]);
   return list.map((c) => (typeof c === "object" && c !== null
-    ? { x: Number(c.x), y: Number(c.y ?? c.value), label: c.label || "" }
-    : { x: NaN, y: Number(c), label: "" }))
+    ? { x: Number(c.x), y: Number(c.y ?? c.value), label: c.label || "", margin_text: c.margin_text || "" }
+    : { x: NaN, y: Number(c), label: "", margin_text: "" }))
     .filter((c) => isNum(c.y));
 }
 

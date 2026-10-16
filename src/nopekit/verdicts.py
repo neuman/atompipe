@@ -168,6 +168,8 @@ __all__ = [
     "moving_limits", "moved_goalposts",
     # P2.5a: the article a physical result is bound to, the judge, the one view
     "article_of", "judge_results", "Contradiction", "track_record", "view", "REMOVED",
+    # architecture phase 3a: the design an article names, for the round record
+    "design_of",
 ]
 
 
@@ -1092,8 +1094,11 @@ _LEDGER_FIELD_SET = frozenset(_LEDGER_FIELDS)
 
 #: Reading one of these through ``ctx.ledger`` makes the whole list an input.
 #: openmodelica's ``claims_addressable`` walks ``claims``: honest (packs:H21).
+#: SPEC decision 12 adds ``requirements``: a gate that reads what the person
+#: asked for is honest, and traced like ``milestones``; untraced, an edit to a
+#: requirement would leave its verdict Fresh.
 _LEDGER_WHOLE = frozenset({"claims", "params", "inputs", "needs", "decisions",
-                           "views", "meta", "milestones"})
+                           "views", "meta", "milestones", "requirements"})
 
 #: Never an input: a gate that read other gates' verdicts would put verdicts
 #: inside rho, a staleness that feeds itself. (The ledger's run record — the
@@ -1103,15 +1108,46 @@ _LEDGER_WHOLE = frozenset({"claims", "params", "inputs", "needs", "decisions",
 #: its own spend, and every export after a check would invalidate any gate
 #: that read the ledger whole. *Rejected:* hiding `milestones` too (a gate that
 #: reads what a spend requires is honest, and traced like `decisions`).
-_LEDGER_HIDDEN = frozenset({"verdicts", "exports"}) & _LEDGER_FIELD_SET
+#: Architecture phase 5 (SPEC 17) hides the groups: a gate that read board
+#: membership would re-key on a regroup, so presentation would move evidence;
+#: a gate that reads ``ctx.ledger.groups`` gets ``[]``.
+_LEDGER_HIDDEN = frozenset({"verdicts", "exports", "groups"}) & _LEDGER_FIELD_SET
 
 #: Filled in memory from somewhere other than the record: `Claim.gates` from
 #: registry coverage, `physical_result`, `results` and `attributions` from
 #: `results/`, `standing` from the judge (P2.5a), `Param.gates` from the last
-#: read sets. A coverage change is not something a gate read.
+#: read sets. A coverage change is not something a gate read. Phase 2 adds
+#: `Decision.preferences` (from `preferences/`): a gate never keys on a
+#: person's act (`Decision.to_dict` drops it too).
 _IN_MEMORY_FIELDS = {"claims": ("gates", "physical_result", "results", "attributions",
                                 "standing"),
-                     "params": ("gates",)}
+                     "params": ("gates",),
+                     "decisions": ("preferences",)}
+
+#: In-memory fields a gate's copy never holds: out of the digest is not
+#: enough, because a field the gate can read but rho never keys on is a read no
+#: invalidation follows. What slipped through (review of phase 2): `decisions`
+#: reached the gate with each `Decision.preferences` attached, so a gate that
+#: branched on one kept its cached pass Fresh after `nopekit prefer` — a
+#: person's act moving a verdict nothing re-keyed (invariants 7 and 13).
+#: *Rejected:* every `_IN_MEMORY_FIELDS` entry — `Claim.gates`,
+#: `physical_result` and the rest have been on a gate's copy since P2.1, and
+#: what the bundled and project gates read of them is not phase 2's question;
+#: `preferences` is new, so nothing reads it yet.
+_HIDDEN_FROM_THE_COPY = {"decisions": ("preferences",)}
+
+
+def _without(item: Any, names: tuple) -> Any:
+    """``item`` with each in-memory field in ``names`` back at its default."""
+    if not dataclasses.is_dataclass(item) or isinstance(item, type):
+        return item
+    blank = {}
+    for spec in dataclasses.fields(item):
+        if spec.name in names:
+            blank[spec.name] = (spec.default_factory()            # type: ignore[misc]
+                                if spec.default_factory is not dataclasses.MISSING
+                                else spec.default)
+    return dataclasses.replace(item, **blank)
 
 
 #: Fields a gate's read of a record leaves out of the digest while they hold
@@ -1122,14 +1158,26 @@ _IN_MEMORY_FIELDS = {"claims": ("gates", "physical_result", "results", "attribut
 #: that read the claim.
 _ABSENT_WHEN_EMPTY = frozenset({"owner", "fallback", "terminal", "authority",
                                 # P2.5b-D4: a declared latency, empty ({}).
-                                "expected_latency"})
+                                "expected_latency",
+                                # Phase 1 (SPEC 12, 13): empty lists, so a claim
+                                # that names neither digests as before.
+                                "evaluators", "requirements",
+                                # Phase 2 (SPEC 22): an input no proposer
+                                # produced digests as before.
+                                "proposer",
+                                # Phase 3a (SPEC 19): a physical claim naming no
+                                # assumption it resolves digests as before —
+                                # without this, every gate that reads a claim
+                                # would re-key the day the field existed.
+                                "resolves"})
 
 
 def _record_form(item: Any, strip: tuple = ()) -> Any:
     form = item.to_dict() if hasattr(item, "to_dict") else item
     if isinstance(form, dict):
         form = {k: v for k, v in form.items()
-                if k not in strip and not (k in _ABSENT_WHEN_EMPTY and (v == "" or v == {}))}
+                if k not in strip and not (k in _ABSENT_WHEN_EMPTY
+                                           and (v == "" or v == {} or v == []))}
     return form
 
 
@@ -1322,6 +1370,8 @@ class LedgerView(Ledger):
                 value = None
         else:
             value = copy.deepcopy(_peek(source, name))
+            if name in _HIDDEN_FROM_THE_COPY and isinstance(value, list):
+                value = [_without(item, _HIDDEN_FROM_THE_COPY[name]) for item in value]
         values[name] = value
         return value
 
@@ -2700,6 +2750,19 @@ def _install_stat_probes() -> None:
             if isinstance(known, set) and original in known:
                 known.add(probe)
         setattr(os, name, probe)
+    # Python 3.10's pathlib asks through ``_NormalAccessor``, whose ``stat`` and
+    # ``lstat`` are class attributes bound to the originals when pathlib was
+    # imported — before the spine. What slipped through (CI on 3.10, 2026-10-16):
+    # ``Path.exists``/``is_file``/``is_dir``/``stat`` recorded nothing, so a PASS
+    # that decided on ``Path(p).exists()`` stayed Fresh after ``p`` appeared.
+    # 3.11 dropped the accessor and looks ``os.stat`` up at call time.
+    accessor = getattr(sys.modules.get("pathlib"), "_NormalAccessor", None)
+    for name in _STAT_FUNCTIONS if accessor is not None else ():
+        original = accessor.__dict__.get(name)
+        if original is not None and not getattr(original, "__nopekit_probe__", False):
+            # staticmethod: a probe is a Python function, and on a class it would
+            # bind the accessor as the path.
+            setattr(accessor, name, staticmethod(getattr(os, name)))
     for name in _STAT_PREDICATES:
         original = getattr(os.path, name, None)
         if (original is None or not isinstance(original, type(len))
@@ -7493,6 +7556,32 @@ def _built_from(root: str, projection: Any, model: Any, *, anchors: Anchors,
     return {"params": params, "model": code, "files": named}
 
 
+def design_of(root: str, projection: Any, model: Any, *, anchors: Anchors,
+              resolution: Any = None, digests: FileDigests | None = None) -> dict | None:
+    """The current design as an article names it: ``_built_from``'s
+    ``{"params", "model", "files"}`` over every value the projection holds, the
+    model's code closure, and the project files the design names and the
+    registered evaluators' served verdicts read — or ``None`` when the projection
+    or the model is ``None``, or the code closure was not recorded.
+
+    ``article_of``'s body, extracted (architecture phase 3a) so the round
+    record's ``design`` digest and the graph's instruction nodes are the
+    article's own reading of the design, never a second one: ``article_of``
+    calls this, so every article hash is unchanged. No git call: the revision
+    and ``dirty`` are ``article_of``'s provenance, never part of what the design
+    is. *Rejected:* a second walk of the projection for the round record (two
+    readings of "what the design is", and the one nobody tests drifts)."""
+    if projection is None or model is None:
+        return None
+    digests = digests if digests is not None else FileDigests()
+    flat, _conflicts = modelio.flat_params(projection)
+    files = set(_named_files(root, flat.values()))
+    if resolution is not None:
+        files |= set(_read_files(root, resolution, anchors))
+    return _built_from(root, projection, model, anchors=anchors, digests=digests,
+                       files=files)
+
+
 def article_of(root: str, projection: Any, model: Any, *, anchors: Anchors | None = None,
                digests: FileDigests | None = None, resolution: Any = None) -> dict:
     """The article a physical result recorded NOW is bound to (P2.5a-D8): the
@@ -7527,13 +7616,8 @@ def article_of(root: str, projection: Any, model: Any, *, anchors: Anchors | Non
         return {}
     anchors = anchors if anchors is not None else (
         getattr(resolution, "anchors", None) or Anchors(root=os.path.abspath(root)))
-    digests = digests if digests is not None else FileDigests()
-    flat, _conflicts = modelio.flat_params(projection)
-    files = set(_named_files(root, flat.values()))
-    if resolution is not None:
-        files |= set(_read_files(root, resolution, anchors))
-    built = _built_from(root, projection, model, anchors=anchors, digests=digests,
-                        files=files)
+    built = design_of(root, projection, model, anchors=anchors, resolution=resolution,
+                      digests=digests)
     if built is None:
         return {}
     module = getattr(model, "module", model)

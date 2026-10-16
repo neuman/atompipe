@@ -64,5 +64,6 @@
   ],
   "authors": [],
   "licence": "Apache-2.0",
-  "origin": "built by the extension protocol as the analytic-first baseline; formulae from standard strength-of-materials tables, material numbers are order-of-magnitude and flagged as such in every verdict"
+  "origin": "built by the extension protocol as the analytic-first baseline; formulae from standard strength-of-materials tables, material numbers are order-of-magnitude and flagged as such in every verdict",
+  "basis": "sourced"
 }

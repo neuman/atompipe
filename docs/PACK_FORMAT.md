@@ -14,9 +14,12 @@ packs/<name>/
   pack.json          # tier 1 — the manifest. ~20 words. Always affordable to read.
   PACK.md            # tier 2 — ~150 lines. Loaded when the domain is relevant.
   references/*.md    # tier 3 — loaded only for the specific task at hand.
-  gates/*.py         # validators. Each declares a negative control.
+  gates/*.py         # evaluators. Each declares a negative control.
+  proposers/*.py     # tools that propose options or evidence; never evaluators (optional)
   generators/*.py    # model -> domain artifact (optional)
   views/*.py         # viewgens: model -> a view the site renders (optional)
+  skills/<name>/SKILL.md   # what an agent needs for one task in the domain; read, never
+                           #   installed: `nopekit packs skills` prints them (optional)
   lenses.md          # adversarial review dimensions for this domain
   sourcing.md        # real-world procurement and process constraints (optional)
   scaffold/          # starter model + claims for a new project in this domain (optional)
@@ -41,6 +44,14 @@ it.
 Tier 3 is where the depth goes. A CFD pack's `references/meshing.md` can be nine
 hundred lines; it costs nothing until an agent is actually meshing.
 
+**Skills** (architecture phase 6, SPEC 37) sit beside tier 2: `skills/<name>/SKILL.md`,
+one per task the domain needs — set up a solver case, read its log. They are read,
+never installed as Claude Code skills: an installed skill would be there in every
+project on the machine, live pack or not. `nopekit packs skills` prints each live pack's
+`PACK.md` and then its skill files (`--pack <name>` for one that is not live), and the
+nopekit skill tells the agent to read them before it works in that domain. `pack
+validate` refuses a `skills/<name>/` directory that holds no `SKILL.md`.
+
 ## `pack.json`
 
 ```json
@@ -62,14 +73,21 @@ hundred lines; it costs nothing until an agent is actually meshing.
   "max_tier": 1,
   "lenses": ["printability", "part orientation", "assembly order", "material"],
   "licence": "Apache-2.0",
-  "origin": "extracted from a production FDM project"
+  "origin": "extracted from a production FDM project",
+  "basis": "model-only",
+  "provides_proposers": [
+    {"id": "fdm.slicer_estimate", "basis": "established",
+     "description": "runs the installed slicer on the part and keeps its time estimate",
+     "run": "proposers/slicer_estimate.py"}
+  ]
 }
 ```
 
 `settles` is the **matching vocabulary**. When `nopekit gap` finds a claim with no
 gate, it scores every manifest's `settles` and `claim_classes` against the claim's
-quantity to suggest candidates. Write the phrases a person would actually use for
-the quantity, not your internal gate names.
+quantity and the words of its mechanism (`"mechanism": {"how": …}`, weighed below the
+quantity) to suggest packs. Write the phrases a person would actually use for the
+quantity, not your internal gate names.
 
 `provides_views` lists the view ids `views/*.py` registers. It is tier 1 for two
 reasons: a reader deciding whether to install a pack wants to know it comes with a
@@ -79,6 +97,61 @@ address — declared here, the pair can be checked without importing anything.
 `origin` matters. Say where the pack came from — extracted from a real project,
 built by the extension protocol, ported from a paper. It tells the next reader how
 much to trust it.
+
+`basis` is the default basis of the pack's evaluators (see "Basis" below);
+`provides_proposers` declares its proposers (see "Proposers").
+
+## Basis
+
+Every evaluator says where its verdict's logic comes from (SPEC 38), in a fixed
+order of preference:
+
+| Basis | When |
+|---|---|
+| `established` | the verdict is an existing non-AI tool's own answer: trimesh's `is_volume`, omc's `checkModel` |
+| `sourced` | the logic follows a cited outside source: a textbook formula, a standard, a datasheet |
+| `model-only` | the model wrote the logic with no outside source — even when it calls a tool's primitives |
+
+Declare the pack's default in `pack.json` (`"basis": "sourced"`) and override one
+evaluator with `@gate(..., basis="model-only")`. The bundled packs are the examples:
+beam-analytic is `sourced` (closed-form formulae in `references/formulae.md`) with
+`beam.input_sanity` `model-only` (the pack's own sign and unit bands); cad-solid is
+`model-only` with `cad.is_volume` `established` — and `cad.watertight` stays
+`model-only` on purpose, because its verdict is its own edge count and trimesh's
+answer is only evidence. Use the highest basis you honestly can, and say why when it
+is lower. The basis is shown in `gate list`, `gate show`, the report and the page; it
+changes no status, no qualification and no rho. `pack validate` requires every
+evaluator of a bundled pack to resolve to one; elsewhere an undeclared one is a note,
+and reads `undeclared`. `grounded` is not a basis word (it is the paper's word for a
+whole system).
+
+## Proposers
+
+A **proposer** is a tool a pack ships to propose options or evidence — a parts search,
+a layout optimiser, a slicer's estimate. Its output is an input; it settles nothing.
+So it is never registered as an evaluator and needs no negative control. Declare each
+in `pack.json`:
+
+```json
+"provides_proposers": [
+  {"id": "sourcing.parts_search", "basis": "sourced",
+   "description": "one line", "run": "proposers/parts_search.py"}
+]
+```
+
+`id` is dotted and distinct from every gate id in the pack; `basis` is the proposer's
+own (there is no pack default for proposers); `description` is one line of at most 200
+characters; `run` is a `.py` file under `proposers/`. `nopekit propose <id> [args]`
+runs it as `python <run> [args]` with the project as its working directory (a flag of
+the script's goes after `--`: `nopekit propose <id> -- --limit 5`): it writes
+every file it produces under `$NOPEKIT_PROPOSAL_DIR` (`$NOPEKIT_PROJECT` names the
+project) and exits 0. Each file becomes an input record with `proposer` set, and the
+input's basis is looked up from this declaration — never stated by the input. A
+non-zero exit, a run past `--timeout`, or a run that wrote anywhere in the project
+outside that directory (its ignored scratch aside) ingests nothing, naming each path
+it moved. `pack validate` checks every declared proposer exists and every
+`proposers/*.py` is declared (files starting with `_` are helpers); it never imports
+or runs one.
 
 ## `PACK.md`
 
@@ -248,6 +321,13 @@ need that names the gate itself, a glob or a duplicate. `Verdict.blocked_by` and
 `blocked_kind` are the spine's mark for a gate not run behind a prerequisite;
 `run_gate` clears both on whatever a gate returns.
 
+**In the graph** (architecture phase 3a, `graph.py`): each evaluator is a node with
+its pack, its basis and its tier; its `needs` are `needs` edges, the claims it covers
+(its `claims` and tags, through the registry) are `settles` edges, and what its
+served verdict entry read are `reads` edges to the values it read. Nothing a pack
+declares changes for this: the graph reads what the registry and the verdict cache
+already hold.
+
 ### Which side of the limit passes (`comparator`)
 
 ```python
@@ -350,6 +430,17 @@ the gate READS: a fitted range on an intermediate quantity it computes (a Raylei
 number from temperatures and a length) is a guard gate of its own, or a range on its
 inputs.
 
+## Amber runs your evaluators on moved designs
+
+`nopekit model trace` (architecture phase 3b) rebuilds the project's model with each
+choice an unconfirmed assumption sources moved -10% and +10%, and runs every covering
+evaluator on each moved design, to show a Checked pass the assumption's error would
+flip (amber). It runs in a temp copy of the project — `ctx.root` is the copy — through
+the check run's own rules (`verdicts.sweep` with nothing recorded, then the one
+composition), and it writes nothing in the project. An evaluator must therefore read
+through `ctx`: a path built from the project's location rather than `ctx.root`, or a
+file written beside the model, reads or writes the wrong tree. Amber changes no status.
+
 ## The surface a gate sees
 
 Everything a pack can set, read or call, in one place. `tests/test_contracts.py`
@@ -376,6 +467,8 @@ class GateSpec:                        # what @gate(...) builds and registers fo
                                        #   must be established first (see "Prerequisites")
     operating_context: dict            # {key: (lo, hi)}: the range of its read set it was
                                        #   qualified on; outside, a pass does not count
+    basis: str = ""                    # established | sourced | model-only; "" takes the
+                                       #   pack.json default (PACK_BASIS), else "undeclared"
 
 @dataclass
 class NegativeControl:
@@ -524,7 +617,10 @@ by exactly those reads (`rho`). So:
   checkout) — never decide a verdict on either.
 - **`ctx.ledger` holds no verdicts.** A gate that read other gates' verdicts would put
   verdicts inside its own content address. Claims are readable; `ctx.ledger.claim(id)`
-  makes that claim an input.
+  makes that claim an input. `requirements` (what the person asked for) is readable
+  and read whole (traced), like `claims`. A project's claims may name your evaluator
+  ids in their mechanism's `evaluators` — a cross-check, never coverage — so a renamed
+  id warns there (`check`, `doctor`); coverage stays your `claims=` ids and tags.
 - **Reading `ctx.tier` makes the tier an input.** A gate may pick a cheaper path by
   it — `if ctx.tier < Tier.SOLVE`, `PATHS[ctx.tier]` — and then its verdict is keyed
   on the tier it read: a sweep at tier N serves an entry recorded at N or above (the
@@ -817,7 +913,7 @@ the bundled packs — every conclusive mutation of its known-good control failed
   for a pack's gate, the pack's own `selftest/baseline.json`; else, for a project's,
   `selftest/known_good.py`'s `context(ctx)`. A gate with none is *known-bad shown*,
   never qualified (`known-good not run`). A `good` fixture that reads the live design
-  it is handed is unusable (`known-good control reads the candidate`), and in a pack
+  it is handed is unusable (`known-good control reads the current design`), and in a pack
   it is a seal finding too (invariant 5).
 - **Both controls reach the gate through the same channel**: the `ctx.extra` keys
   each hands its gate (the spine's `pack_dir`, `pack_dirs` removed) must be equal,
@@ -910,6 +1006,11 @@ sweep, so a gate that returned `True` with a control on paper produced PROVEN ro
 
 ## Views and locators
 
+A pack's part of the project site is its views and the evidence its evaluators write:
+a file a verdict names as evidence is copied into the board posters
+(`site/assets/evidence/<gate>/…`). There is no other site partial format; the page's
+words, statuses and layout are the build's, never a pack's.
+
 A pack can also draw what its gates measure. `views/*.py` holds **viewgens**, which
 are to the project site what gates are to the report: same context shape, same
 `requires_*` declarations, same registry. A pack that emits a view in one of the
@@ -953,6 +1054,15 @@ Rules:
   Only what the context recorded is known to be live, so a file written behind its
   back either survives forever or gets swept the first time the cleaner is made
   stricter. `write_asset` returns the site-relative path that goes in `View.src`.
+- **Write byte-stable assets** (architecture phase 5, SPEC 32). The site is
+  committed, and `write_asset` writes only when the bytes differ, so a rebuild that
+  judged nothing new changes no tracked byte. A viewgen that stamps a clock, a random
+  id or an unordered dict into its GLB or SVG rewrites the asset on every build and
+  dirties `git status` every time.
+- **The representation is the first `model3d` view by order**, else the first image
+  or diagram view (`page.representation`): it heads the front page, beside the
+  verdict sentence. Give the view that best shows the whole design the lowest
+  `order`.
 - **Node names are an interface the pack must publish.** Whatever a `model3d`
   viewgen calls its nodes is what every gate in that domain must use in its
   locators, and `PACK.md` is where that scheme belongs. It is an interface between
@@ -1002,7 +1112,8 @@ are silent.
 
 The adversarial review dimensions for this domain — the angles a reviewer should
 attack from before anything gets built. One heading each, a few pointed questions
-under it. Rule 8 of the method lives here.
+under it. Rule 8 of the method lives here. `nopekit packs skills` prints it, after
+PACK.md, for every live pack: it is how the agent reaches it.
 
 Good lenses are specific and uncomfortable: *"the part is loaded at its tip and its
 root is a cantilever — what is the free span, really, and did you measure it from
@@ -1025,7 +1136,7 @@ nopekit pack validate <name>
 ```
 
 checks that the manifest parses and matches its directory, `PACK.md` exists and is
-substantive, every declared gate actually registers, every gate has a negative
+substantive, every `skills/<name>/` holds a `SKILL.md`, every declared gate actually registers, every gate has a negative
 control, `max_tier` matches the gates, the description is one line, and every
 file-based fixture exists — and then **demonstrates** the pack at tiers 0–1, gate by
 gate, with the pack loaded alone: its known-good control passes (its own

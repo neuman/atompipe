@@ -210,6 +210,10 @@ def command_problems(words: list[str], parser: argparse.ArgumentParser) -> list[
         i += 1
         if not token or set(token) <= {".", "…"}:
             continue
+        if token == "--":
+            # Everything after `--` is handed on, never nopekit's to parse
+            # (`nopekit propose <id> -- --limit 5`: the script's flag).
+            break
         if token.startswith("<"):
             if resolving and any(_subcommands(p) for p in parsers):
                 resolving = False         # `nopekit <command>`: nothing literal to check
@@ -546,6 +550,7 @@ class DocsCommandsParse(unittest.TestCase):
             "a bad subcommand in an optional group": "`nopekit packs [list|publish]`\n",
             # P2.5a (V-17): the skill's line before P2.5a — `--who` is refused.
             "a refused flag": "`nopekit claim physical C5 pass --who <name> --detail x`\n",
+            "nopekit's own flag before --": "`nopekit propose <id> --limitt 5 -- --x`\n",
             "a table row": """
                 ```
                 nopekit init                  nopekit pack new
@@ -581,6 +586,7 @@ class DocsCommandsParse(unittest.TestCase):
             "prose after a leaf": "```\nnopekit gate selftest every negative control\n```\n",
             "an XML sample": '```\n<testsuites name="nopekit check" tests="13">\n```\n',
             "gate ids and pack names": "`nopekit gate selftest sourcing modelica.checks`\n",
+            "a script's flags after --": "`nopekit propose <id> -- --limit 5`\n",
         }
         for label, markdown in tolerated.items():
             with self.subTest(tolerated=label):

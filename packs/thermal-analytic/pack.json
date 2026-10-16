@@ -64,5 +64,6 @@
   ],
   "authors": [],
   "licence": "Apache-2.0",
-  "origin": "built by the extension protocol from standard heat-transfer texts (Churchill-Chu, Churchill-Bernstein, McAdams, Duffie & Beckman, ASHRAE clear-day); no solver, no network calls"
+  "origin": "built by the extension protocol from standard heat-transfer texts (Churchill-Chu, Churchill-Bernstein, McAdams, Duffie & Beckman, ASHRAE clear-day); no solver, no network calls",
+  "basis": "sourced"
 }

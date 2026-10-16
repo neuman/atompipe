@@ -109,6 +109,29 @@ _MIGRATED_FILES = frozenset({".nopekit/project.json", ".nopekit/.gitignore",
 _MIGRATED_DIRS = (".nopekit/verdicts/", "claims/", "params/", "decisions/", "needs/",
                   "results/")
 
+#: Records the bracket gained after its migration that its legacy ledger never
+#: held (architecture phase 1, SPEC decision 12): a legacy copy carrying them
+#: would hold four requirements no claim serves, each reading Gap, in every
+#: legacy world. *Rejected:* adding them to `_MIGRATED_DIRS` (the migration did
+#: not write them). Architecture phase 2 adds the decision `nopekit decide` wrote
+#: (SPEC 14: typed rejections and a preferred_against by an invented person) —
+#: already left out of a legacy copy by `decisions/` above, and named here
+#: because the migration did not write it either.
+_ADDED_AFTER_MIGRATION = ("requirements/", "decisions/print-in-petg.json",
+                          # Architecture phase 3a (SPEC 18): the round record, an
+                          # output `nopekit round` writes and the legacy bracket
+                          # never had. (`params/load_n.json`, the same phase's, is
+                          # already left out by `params/` above.)
+                          ".nopekit/round.json",
+                          # Architecture phase 5 (SPEC 17, 30): the page's boards,
+                          # zones and stations, and its text — a legacy bracket
+                          # holding them would show groups no legacy ledger knew.
+                          "groups/", "site/",
+                          # Architecture phase 3b (SPEC 39): the trace and its amber
+                          # file, which `nopekit model trace` writes and the legacy
+                          # bracket never had — a legacy copy stays untraced.
+                          ".nopekit/trace/")
+
 #: The thickness default in `model/bracket.py`, as the model spells it. Exactly
 #: one line may match: a second match (a comment quoting the line, a second
 #: dataclass) would make "the thickness edit" ambiguous, and a copy edited in
@@ -223,7 +246,7 @@ def _migrated_path(rel: str) -> bool:
     """Whether ``rel`` (bracket-relative) is something the bracket's migration
     wrote, which a legacy copy leaves out. Refuses an ``.nopekit/`` path it does
     not know (see ``_MIGRATED_FILES``)."""
-    if rel in _MIGRATED_FILES or rel.startswith(_MIGRATED_DIRS):
+    if rel in _MIGRATED_FILES or rel.startswith(_MIGRATED_DIRS + _ADDED_AFTER_MIGRATION):
         return True
     if rel.startswith(".nopekit/"):
         raise AssertionError(

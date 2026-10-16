@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Contracts move with the code (PLAN R-14): the documents an agent reads first
+"""Contracts move with the code: the documents an agent reads first
 must describe the spine that exists.
 
 What slipped through without this: `docs/SPINE_CONTRACT.md` had no heading at all
@@ -29,8 +29,6 @@ a string instead of editing the tree:
                                 every file under site/data/ is in SITE_CONTRACT
     SiteMetaKeysAreDocumented   ... and every key of its `meta`, in SITE_CONTRACT's
                                 ### `meta` table
-    ClosedRowsResolve           a PLAN §3 row marked closed names tests that exist
-    ClosedRowsStayClosed        the rows Phase 1 closed stay marked closed
     DocumentedNamesExist        the reverse: every name SPINE_CONTRACT writes in a
                                 module's section — a `name(` call form, a fenced
                                 def / class / CONSTANT, a member of a `class`
@@ -88,14 +86,13 @@ DOCS_DIR = os.path.join(REPO, "docs")
 SPINE_CONTRACT = os.path.join(DOCS_DIR, "SPINE_CONTRACT.md")
 PACK_FORMAT = os.path.join(DOCS_DIR, "PACK_FORMAT.md")
 SITE_CONTRACT = os.path.join(DOCS_DIR, "SITE_CONTRACT.md")
-PLAN = os.path.join(DOCS_DIR, "PLAN.md")
 
 #: Modules that carry no public surface of their own: the package marker and the
 #: `python -m nopekit` shim. Everything else under src/nopekit/ is a spine
 #: module and owes the contract a heading.
 NOT_SPINE_MODULES = frozenset({"__init__.py", "__main__.py"})
 
-#: The record kinds (PLAN R-14). These are the shapes Phase 1.3
+#: The record kinds. These are the shapes Phase 1.3
 #: turns into files a human edits by hand, so their fields are the ones a reader
 #: of the contract must be able to find. `Verdict`, `GateSpec` and
 #: `NegativeControl` are checked against PACK_FORMAT instead — the pack author is
@@ -103,6 +100,13 @@ NOT_SPINE_MODULES = frozenset({"__init__.py", "__main__.py"})
 RECORD_KINDS = (
     "Claim", "Acceptance", "Param", "Rejected", "Decision", "Need",
     "InputArtifact", "Extraction", "PhysicalResult", "View", "ProjectMeta",
+    # Architecture phase 1 (SPEC decision 12): the person's words.
+    "Requirement",
+    # Architecture phase 2 (SPEC 14, 22, 25, 38): a typed rejection, its return
+    # condition, a person's preference, and pack.json (`basis`,
+    # `provides_proposers`). What slipped through (review of phase 2): none was
+    # named here, so a field planted in any of the four passed the suite.
+    "Rejection", "ReturnCondition", "PreferenceRecord", "PackManifest",
 )
 
 #: What PACK_FORMAT owes a pack author, class by class: `(where the class is
@@ -144,14 +148,6 @@ PACK_SURFACE_AT_1E09113: dict[str, frozenset[str]] = {
                               "pack_param", "first_pack_param", "first_pack_param_named",
                               "require_param", "out_path", "with_extra"}),
 }
-
-#: The gap map at 7ecf953 holds 74 rows. The floor sits below that so a later
-#: phase may merge or retire rows without touching this file, and far enough above
-#: zero that a parser which stopped seeing a table (a renamed `Ph` header, an
-#: unescaped pipe) fails here instead of reporting "no closed rows, all green".
-#: Rejected: pinning 74 exactly (every honest edit to the map would turn this red),
-#: and no floor (the checker could go vacuous and nobody would know).
-MIN_GAP_MAP_ROWS = 60
 
 _WORD = r"(?<![A-Za-z0-9_]){}(?![A-Za-z0-9_])"
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -453,194 +449,63 @@ def site_problems(state_keys, data_files, site_contract: str) -> list[str]:
     return problems
 
 
-# -- PLAN §3: closed rows ----------------------------------------------------- #
-#: The Phase 1 token rule: a backticked token is a test reference iff
-#: it matches one of these. Anything else in a Proof cell (`gate list --json`,
-#: `why thickness`, `C:`) is prose about the proof, not its name.
-TEST_TOKEN = re.compile(r"^test_\w+(\.\w+)*$|^[A-Z]\w*(\.(\w+|\*))*$")
+#: Objects whose keys are names (ids, gate ids, word tables), not schema keys:
+#: their keys are never looked up in SITE_CONTRACT; what lies under them is.
+_BAKED_ID_MAPS = frozenset({"values", "evaluators", "edges", "via", "claims", "tokens",
+                            "lanes", "kinds", "by", "basis", "outcome", "headings", "notices",
+                            "ready", "columns", "ground", "verdicts",
+                            # architecture phase 3b: keyed by a station or claim id,
+                            # or a choice's name
+                            "stop_kind", "stop_kinds", "skipped"})
 
-
-def _cells(row: str) -> list[str]:
-    """Split a markdown table row on unescaped pipes (`bench e2\\|e5` is one cell)."""
-    body = row.strip()
-    if body.startswith("|"):
-        body = body[1:]
-    if body.endswith("|") and not body.endswith("\\|"):
-        body = body[:-1]
-    return [cell.strip() for cell in re.split(r"(?<!\\)\|", body)]
-
-
-def gap_map_rows(plan: str) -> list[dict]:
-    """Every row of PLAN §3's tables as `{"id", "ph", "proof", "has_columns"}`.
-
-    Columns are found from each table's own header, because the §18 table has
-    five columns where the others have six: an index fixed at 4 would read the
-    Proof cell there as the Ph cell.
-    """
-    section = md_section(plan, r"^##\s+3\.\s")
-    if section is None:
-        return []
-    rows: list[dict[str, str]] = []
-    header: list[str] | None = None
-    for line in section.splitlines():
-        if not line.lstrip().startswith("|"):
-            header = None
-            continue
-        cells = _cells(line)
-        if header is None:
-            header = [c.strip("* ") for c in cells]
-            continue
-        if all(re.fullmatch(r":?-{3,}:?", c) for c in cells):
-            continue
-        row = dict(zip(header, cells))
-        rows.append({"id": row.get("#", ""), "ph": row.get("Ph", ""),
-                     "proof": row.get("Proof", ""),
-                     "has_columns": "Ph" in header and "Proof" in header})
-    return rows
-
-
-def row_is_closed(ph: str) -> bool:
-    """True iff the Ph cell lists at least one phase and marks EVERY one closed.
-
-    `closed 1.2` is closed; `closed 1.2, 2.2` is not (P2 still owes its half);
-    `—` lists no phase and is not closed. Parenthesised notes are dropped first,
-    so `2 (no-field test)` reads as phase 2.
-    """
-    text = re.sub(r"\([^)]*\)", " ", ph)
-    phases = list(re.finditer(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", text))
-    return bool(phases) and all(re.search(r"closed\s+$", text[:m.start()])
-                                for m in phases)
-
-
-def proof_refs(cell: str) -> list[str]:
-    """The backticked tokens of a Proof cell that name tests (TEST_TOKEN)."""
-    return [tok for tok in re.findall(r"`([^`\n]+)`", cell) if TEST_TOKEN.match(tok)]
-
-
-def tests_index(sources: dict[str, str]) -> dict[str, dict]:
-    """`{module stem: {"classes": {name: (methods, bases)}, "functions": set}}`."""
-    index: dict[str, dict] = {}
-    for filename, source in sources.items():
-        tree = ast.parse(source, filename=filename)
-        classes: dict[str, tuple[set[str], list[str]]] = {}
-        functions: set[str] = set()
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                methods = {item.name for item in node.body
-                           if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))}
-                bases = [b.id if isinstance(b, ast.Name) else
-                         b.attr if isinstance(b, ast.Attribute) else ""
-                         for b in node.bases]
-                classes[node.name] = (methods, bases)
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.add(node.name)
-        stem = os.path.splitext(os.path.basename(filename))[0]
-        index[stem] = {"classes": classes, "functions": functions}
-    return index
-
-
-def _class_has(index: dict, module: str | None, cls: str, member: str,
-               _seen: frozenset = frozenset()) -> bool:
-    """`cls` (in `module`, or in any module) defines or inherits `member` or
-    `test_<member>` — `RenderersAgree.table` names `RenderersAgree.test_table`."""
-    for stem, mod in index.items():
-        if module is not None and stem != module:
-            continue
-        found = mod["classes"].get(cls)
-        if found is None or (stem, cls) in _seen:
-            continue
-        methods, bases = found
-        if member == "*" or member in methods or f"test_{member}" in methods:
-            return True
-        if any(base and _class_has(index, None, base, member, _seen | {(stem, cls)})
-               for base in bases):
-            return True
-    return False
-
-
-def resolves(token: str, index: dict) -> bool:
-    """Does a test reference name a module, class or method under tests/?"""
-    parts = token.split(".")
-    if parts[0].startswith("test_"):
-        if len(parts) == 1:
-            return parts[0] in index or any(
-                parts[0] in mod["functions"]
-                or any(parts[0] in methods for methods, _ in mod["classes"].values())
-                for mod in index.values())
-        module, rest = parts[0], parts[1:]
-        if module not in index:
-            return False
-        if len(rest) == 1 and rest[0] in index[module]["functions"]:
-            return True
-        if rest[0] not in index[module]["classes"]:
-            return False
-        return len(rest) == 1 or (len(rest) == 2 and
-                                  _class_has(index, module, rest[0], rest[1]))
-    cls, rest = parts[0], parts[1:]
-    if not rest:
-        return any(cls in mod["classes"] for mod in index.values())
-    return len(rest) == 1 and _class_has(index, None, cls, rest[0])
-
-
-def closed_row_problems(plan: str, index: dict) -> list[str]:
-    """Closed §3 rows whose Proof names a test that does not exist."""
-    problems: list[str] = []
-    for row in gap_map_rows(plan):
-        if not row_is_closed(row["ph"]):
-            continue
-        refs = proof_refs(row["proof"])
-        if not refs:
-            problems.append(f"{row['id']} is closed and its Proof names no test")
-        for ref in refs:
-            if not resolves(ref, index):
-                problems.append(f"{row['id']} is closed and its Proof names "
-                                f"`{ref}`, which is no module, class or method "
-                                f"under tests/")
-    return problems
-
-
-#: The §3 rows Phase 1 closed, and the checkpoints each carries `closed` before.
-#: `ClosedRowsResolve` checks a closed row's tests exist; nothing there notices a
-#: row that stops SAYING closed — the cheapest way to make a deleted proof go
-#: green is to strike the word. So the Phase 1 closures are pinned: a later phase
-#: adds its own `closed` marks and never removes these. *Rejected:* pinning every
-#: Ph cell verbatim (every honest later closure would turn this red).
-PHASE_1_CLOSURES: dict[str, tuple[str, ...]] = {
-    # closed in every phase they list
-    "M2.1a": ("1.0", "1.1"), "M2.1b": ("1.0",), "M2.1c": ("1.2",),
-    "M2.1e": ("1.1", "1.2"), "M5.1": ("1",), "M11.1": ("1.2",), "M11.2": ("1.2",),
-    "M11.4": ("1.2", "1.3"), "M11.5": ("1.2",), "M11.7": ("1.2",), "M11.9": ("1.2",),
-    "M11.11": ("1.2",),
-    # partial: only their Phase 1 checkpoints are closed
-    "M0.1": ("1",), "M2.1d": ("1.1", "1.2"), "M2.2b": ("1.2",), "M3.L": ("1.2",),
-    "M3.C": ("1.2",), "M9.2": ("1.3",), "M11.3": ("1.2",), "M11.6": ("1.2",),
-    "M13.3": ("1.2",), "M13.7": ("1.2",), "M14.3": ("1.2",), "M14.6": ("1",),
-    "M18.3": ("1",), "M18.5": ("1",), "M9.1": ("1",),
+#: Each baked file and the SITE_CONTRACT sections that document its keys (a
+#: prose piece's blocks and runs are in "Prose and the stamp").
+BAKED_SECTIONS = {
+    "map.json": (r"^##\s+`map\.json`",),
+    "page.json": (r"^##\s+`page\.json`", r"^##\s+Prose and the stamp"),
+    "build.json": (r"^##\s+`build\.json`",),
 }
 
 
-def closed_phases(ph: str) -> set[str]:
-    """The phases a Ph cell marks `closed` (`closed 1.2, 2.4` -> {"1.2"}),
-    by `row_is_closed`'s rule: parenthesised notes dropped first."""
-    text = re.sub(r"\([^)]*\)", " ", ph)
-    return {m.group(0) for m in re.finditer(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", text)
-            if re.search(r"closed\s+$", text[:m.start()])}
+def baked_keys(doc) -> set[str]:
+    """Every schema key of a baked document, the keys of `_BAKED_ID_MAPS`
+    objects left out (an `edges` object is two levels of ids)."""
+    found: set[str] = set()
+
+    def walk(node, ids: int) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if not ids:
+                    found.add(key)
+                if ids:
+                    walk(value, ids - 1)
+                elif key in _BAKED_ID_MAPS and isinstance(value, dict):
+                    walk(value, 2 if key == "edges" else 1)
+                else:
+                    walk(value, 0)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, 0)
+
+    walk(doc, 0)
+    return found
 
 
-def closure_problems(plan: str, pinned: dict[str, tuple[str, ...]] = PHASE_1_CLOSURES
-                     ) -> list[str]:
-    """Pinned closures a §3 row no longer carries (or a pinned row that is gone)."""
-    rows = {row["id"]: row for row in gap_map_rows(plan)}
+def baked_key_problems(docs: dict, site_contract: str) -> list[str]:
+    """Each key of `map.json`, `page.json` and `build.json` that the code of
+    its SITE_CONTRACT sections never names. What slipped through (review of
+    phase 5): only `state.json`'s top-level keys were held, so a key added to
+    `page.bake_page` reached the template undocumented."""
     problems: list[str] = []
-    for row_id, phases in pinned.items():
-        row = rows.get(row_id)
-        if row is None:
-            problems.append(f"{row_id} was closed by Phase 1 and is no longer a §3 row")
+    for name, doc in sorted(docs.items()):
+        sections = [md_section(site_contract, h) for h in BAKED_SECTIONS[name]]
+        if any(s is None for s in sections):
+            problems.append(f"SITE_CONTRACT has no section for {name}")
             continue
-        lost = [p for p in phases if p not in closed_phases(row["ph"])]
-        if lost:
-            problems.append(f"{row_id} was closed at {', '.join(lost)} by Phase 1 and "
-                            f"its Ph cell no longer says so: {row['ph']!r}")
+        code = "\n".join(code_text(s) for s in sections)
+        for key in sorted(baked_keys(doc)):
+            if not mentions(code, key):
+                problems.append(f"{name} key `{key}` is not in SITE_CONTRACT's {name} section")
     return problems
 
 
@@ -1100,7 +965,7 @@ class SpineModulesAreDocumented(unittest.TestCase):
     """Every spine module has its heading; every public name is in its section.
 
     `test_every_…` is the check on the tree; every other test plants a violator
-    (PLAN's `V:`) or pins a rule that keeps the check from going soft."""
+    (a `V:` case) or pins a rule that keeps the check from going soft."""
 
     def test_every_module_and_public_name_is_documented(self):
         problems = spine_problems(_spine_sources(), _read(SPINE_CONTRACT))
@@ -1182,6 +1047,15 @@ class RecordFieldsAreDocumented(unittest.TestCase):
         self.assertEqual(problems,
                          ["Claim.planted_field_u01 (field) is not in "
                           "SPINE_CONTRACT's `class Claim` block"])
+
+    def test_a_planted_field_in_a_phase_2_record_is_caught(self):
+        source = _read(os.path.join(SPINE_SRC, "models.py"))
+        for kind in ("Rejection", "ReturnCondition", "PreferenceRecord", "PackManifest"):
+            with self.subTest(kind):
+                planted = _plant_field(source, kind, "planted_field_p2: str = ''")
+                self.assertEqual(record_problems(planted, _read(SPINE_CONTRACT)),
+                                 [f"{kind}.planted_field_p2 (field) is not in "
+                                  f"SPINE_CONTRACT's `class {kind}` block"])
 
     def test_a_field_documented_under_another_class_does_not_count(self):
         source = "class Claim:\n    note: str = ''\n"
@@ -1298,7 +1172,13 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
         # build.lock rode a copytree, P2.3's gate) — and without a `site/` an
         # earlier `site init` left untracked there, which `site init` here would meet.
         self.root = _projects.bracket_copy(os.path.join(tmp, "bracket"), migrated=True)
-        shutil.rmtree(os.path.join(self.root, "site"), ignore_errors=True)
+        # The bracket tracks its page's text (architecture phase 5): everything
+        # under site/ goes but site/content/, which the build reads.
+        site_dir = os.path.join(self.root, "site")
+        for name in os.listdir(site_dir) if os.path.isdir(site_dir) else ():
+            if name != "content":
+                path = os.path.join(site_dir, name)
+                (shutil.rmtree if os.path.isdir(path) else os.remove)(path)
         saved = gates_mod.REGISTRY
         gates_mod.REGISTRY = gates_mod.Registry()
         self.addCleanup(setattr, gates_mod, "REGISTRY", saved)
@@ -1337,114 +1217,87 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
         self.assertEqual(problems, ["site/data/planted_u01.json is written by "
                                     "`site build` and not named in SITE_CONTRACT"])
 
+    def test_every_baked_key_is_documented(self):
+        """Every key of `map.json`, `page.json` and `build.json` is in its own
+        SITE_CONTRACT section, and a planted key in each is named."""
+        docs = {}
+        for name in BAKED_SECTIONS:
+            with open(os.path.join(self.root, "site", "data", name), encoding="utf-8") as fh:
+                docs[name] = json.load(fh)
+        self.assertIn("nodes", baked_keys(docs["map.json"]))
+        self.assertIn("value_text", baked_keys(docs["page.json"]))
+        self.assertNotIn("C1", baked_keys(docs["page.json"]))
+        problems = baked_key_problems(docs, _read(SITE_CONTRACT))
+        self.assertEqual(problems, [], "\n".join(problems))
+        for name in BAKED_SECTIONS:
+            with self.subTest(name):
+                planted = json.loads(json.dumps(docs))
+                target = planted[name]
+                if name == "page.json":
+                    target = target["claims"]["C1"]["values"][0]
+                target["planted_key_u01"] = 1
+                self.assertEqual(baked_key_problems(planted, _read(SITE_CONTRACT)),
+                                 [f"{name} key `planted_key_u01` is not in SITE_CONTRACT's "
+                                  f"{name} section"])
+
     def test_a_split_view_payload_is_covered_by_the_template(self):
         self.assertEqual(site_problems([], ["views/assembly.json"],
                                        _read(SITE_CONTRACT)), [])
 
 
-class ClosedRowsResolve(unittest.TestCase):
-    """A §3 row marked closed names tests that exist (PLAN §3's header rule)."""
-
-    _PLANTED_ROW = "| M99.9 | planted | planted | planted | {ph} | {proof} |"
-
-    def _plan_with(self, ph: str, proof: str) -> str:
-        plan = _read(PLAN)
-        anchor = plan.index("\n| M0.1 |")
-        return (plan[:anchor] + "\n" + self._PLANTED_ROW.format(ph=ph, proof=proof)
-                + plan[anchor:])
-
-    def test_every_closed_row_names_tests_that_exist(self):
-        problems = closed_row_problems(_read(PLAN), tests_index(_test_sources()))
-        self.assertEqual(problems, [], "\n".join(problems))
-
-    def test_the_parser_sees_the_whole_gap_map(self):
-        """Every `| M…` line in §3 is parsed, with a Ph and a Proof column."""
-        plan = _read(PLAN)
-        rows = gap_map_rows(plan)
-        section = md_section(plan, r"^##\s+3\.\s") or ""
-        ids = [_cells(line)[0] for line in section.splitlines()
-               if re.match(r"^\|\s*M\d", line)]
-        self.assertGreaterEqual(len(rows), MIN_GAP_MAP_ROWS)
-        self.assertEqual([row["id"] for row in rows], ids)
-        self.assertTrue(all(row["has_columns"] for row in rows),
-                        [row["id"] for row in rows if not row["has_columns"]])
-
-    def test_a_planted_closed_row_naming_a_missing_test_is_caught(self):
-        plan = self._plan_with("closed 1.0", "`test_no_such_module_u01.Nope`")
-        problems = closed_row_problems(plan, tests_index(_test_sources()))
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("M99.9", problems[0])
-        self.assertIn("test_no_such_module_u01.Nope", problems[0])
-
-    def test_a_planted_closed_row_naming_no_test_is_caught(self):
-        plan = self._plan_with("closed 1.1", "the CI step")
-        problems = closed_row_problems(plan, tests_index(_test_sources()))
-        self.assertEqual(problems, ["M99.9 is closed and its Proof names no test"])
-
-    def test_a_closed_row_naming_real_tests_resolves(self):
-        """The positive half: without it the V above could pass on a checker
-        that refuses every row."""
-        plan = self._plan_with(
-            "closed 1.0, closed 1.1",
-            "`test_invariants.SkipIsNotPass`; `test_packs`; `ErrorIsNotPass.*`;"
-            " `SkipIsNotPass.verdict_ok_is_false_when_skipped`; `gate list --json`")
-        self.assertEqual(closed_row_problems(plan, tests_index(_test_sources())), [])
-
-    def test_only_rows_closed_in_every_phase_are_checked(self):
-        index = tests_index(_test_sources())
-        for ph in ("closed 1.2, 2.2", "1.2", "—", "2 (no-field test), closed 5"):
-            plan = self._plan_with(ph, "`test_no_such_module_u01`")
-            self.assertEqual(closed_row_problems(plan, index), [], ph)
-
-    def test_the_token_rule(self):
-        self.assertTrue(row_is_closed("closed 2 (no-field test), closed 5"))
-        self.assertFalse(row_is_closed("closed 1.2, 2.2"))
-        self.assertFalse(row_is_closed("—"))
-        self.assertEqual(proof_refs("`test_a.B`; `C:` x; `why thickness`;"
-                                    " `Goalposts.*`; `executed`;"
-                                    " `Objectives.test_weight_is_refused…`"),
-                         ["test_a.B", "Goalposts.*"])
-        index = tests_index({
-            "test_x.py": ("class Base:\n    def test_inherited(self): pass\n"
-                          "class Child(Base):\n    def test_table(self): pass\n"
-                          "def test_free(): pass\n")})
-        for token in ("test_x", "test_x.Child", "test_x.Child.test_table",
-                      "Child.table", "Child.inherited", "Child.*", "test_free",
-                      "test_x.test_free", "test_table"):
-            self.assertTrue(resolves(token, index), token)
-        for token in ("test_y", "test_x.Nope", "Child.nope", "Nope",
-                      "test_x.Child.nope", "test_nope"):
-            self.assertFalse(resolves(token, index), token)
+def layout_problems(doc: str) -> list[str]:
+    """Every record directory (`store.RECORD_DIRS`) CLAUDE.md's "Where facts
+    live" does not name as `<dir>/`. What slipped through (review of
+    architecture phase 1): README opened its chain with requirements, and its
+    layout named no `requirements/`. README has kept no layout since its
+    rewrite for a first-time reader (2026-10-16); the layout a contributor
+    reads is CLAUDE.md's, so the check follows it there."""
+    from nopekit import store
+    section = doc.split("## Where facts live", 1)[1].split("\n## ", 1)[0]
+    named = set(re.findall(r"(?<![\w./-])([a-z_]+)/", section))
+    return [f"the layout names no {d}/" for d in store.RECORD_DIRS if d not in named]
 
 
-class ClosedRowsStayClosed(unittest.TestCase):
-    """The rows Phase 1 closed keep saying so (`PHASE_1_CLOSURES`)."""
+def terminal_problems(contract: str) -> list[str]:
+    """Every claim row of SITE_CONTRACT's `state.json` example whose flat
+    `terminal` is not its `mechanism.by` — one field in memory
+    (`report.claim_json` sets both from `Claim.terminal`), so an example that
+    parts them teaches a page author to prefer one (review of phase 1)."""
+    terminals = re.findall(r'"terminal": "([^"]*)"', contract)
+    bys = re.findall(r'"mechanism": \{ "by": "([^"]*)"', contract)
+    out = []
+    if not terminals or len(terminals) != len(bys):
+        out.append(f"{len(terminals)} terminal(s) beside {len(bys)} mechanism.by")
+    out += [f'"terminal": "{t}" beside "by": "{b}"' for t, b in zip(terminals, bys) if t != b]
+    return out
 
-    def test_every_phase_1_closure_is_still_marked(self):
-        problems = closure_problems(_read(PLAN))
-        self.assertEqual(problems, [], "\n".join(problems))
 
-    def test_the_pin_is_not_vacuous(self):
-        """Twelve rows closed outright and fourteen in part: a pin that lost its
-        rows would hold nothing."""
-        full = [r for r in gap_map_rows(_read(PLAN)) if row_is_closed(r["ph"])]
-        self.assertGreaterEqual(len(full), 12, [r["id"] for r in full])
-        self.assertGreaterEqual(len(PHASE_1_CLOSURES), 26)
+class TheLayoutAndTheRowsAgree(unittest.TestCase):
+    """CLAUDE.md's record layout names every record directory, and SITE_CONTRACT's
+    claim row shows `terminal` and `mechanism.by` as the one field they are."""
 
-    def test_a_struck_closure_is_caught(self):
-        plan = _read(PLAN)
-        row = next(line for line in plan.splitlines() if line.startswith("| M2.1b |"))
-        self.assertIn("| closed 1.0 |", row, "the planted edit has nothing to strike")
-        struck = plan.replace(row, row.replace("| closed 1.0 |", "| 1.0 |"))
-        self.assertEqual(closure_problems(struck),
-                         ["M2.1b was closed at 1.0 by Phase 1 and its Ph cell no "
-                          "longer says so: '1.0'"])
+    def test_the_layout_names_every_record_directory(self):
+        doc = _read(os.path.join(REPO, "CLAUDE.md"))
+        self.assertEqual(layout_problems(doc), [])
+        planted = doc.replace("`requirements/<id>.json`", "`claims/<id>.json`")
+        self.assertNotEqual(planted, doc)
+        self.assertEqual(layout_problems(planted), ["the layout names no requirements/"])
 
-    def test_a_partial_closure_keeps_only_its_phase(self):
-        self.assertEqual(closed_phases("closed 1.2, 2.4"), {"1.2"})
-        self.assertEqual(closed_phases("closed 1 (statement), 2, 2.5 (the line), 5"), {"1"})
-        self.assertEqual(closed_phases("closed 1.1, closed 1.2, 2.3, 5"), {"1.1", "1.2"})
-        self.assertEqual(closed_phases("1.2"), set())
+    def test_the_contract_shows_one_terminal(self):
+        contract = _read(SITE_CONTRACT)
+        self.assertEqual(terminal_problems(contract), [])
+        planted = contract.replace('"terminal": "closed_form"', '"terminal": ""', 1)
+        self.assertNotEqual(planted, contract)
+        self.assertEqual(terminal_problems(planted),
+                         ['"terminal": "" beside "by": "closed_form"'])
+
+    def test_every_bracket_row_has_one_terminal(self):
+        from nopekit import report, store
+        ledger = store.load(os.path.join(REPO, "examples", "bracket"))
+        rows = {c.id: report.claim_json(c) for c in ledger.claims}
+        self.assertEqual({cid: r["terminal"] for cid, r in rows.items()},
+                         {cid: r["mechanism"]["by"] for cid, r in rows.items()})
+        self.assertEqual(rows["C1"]["terminal"], "closed_form")
 
 
 class DocumentedNamesExist(unittest.TestCase):

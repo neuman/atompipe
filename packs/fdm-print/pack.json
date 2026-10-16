@@ -54,5 +54,6 @@
   ],
   "authors": [],
   "licence": "Apache-2.0",
-  "origin": "written against filament-machine practice; thresholds carry their provenance inline in gates/"
+  "origin": "written against filament-machine practice; thresholds carry their provenance inline in gates/",
+  "basis": "model-only"
 }

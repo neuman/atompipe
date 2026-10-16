@@ -1,261 +1,227 @@
 # nopekit
 
-A framework for **grounding by falsification**: propose candidates as fast as you
-like, and keep an honest account of which claims about them have survived an
-evaluator that could have rejected them — and which have not.
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/nopey.png">
+  <img src="docs/img/nopey-transparent.png" width="300" alt="Nopey the honey badger, nopekit's mascot">
+</picture>
+</p>
 
-nopekit implements the grounded design state described in the paper
-[*Grounding by Falsification*](grounding_by_falsification.pdf): the claims a candidate
-must satisfy, the evaluators that can falsify them, and the provenance and current
-validity of every verdict. A generator, human or model, can propose anything, but it
-cannot settle a claim by asserting it. A claim is checked only when an evaluator that
-has shown it can fail has run against the current inputs, and a change to those inputs
-makes exactly the verdicts that read them stale.
+**Have an idea for a real thing? Let's find out what holds up.**
 
-It works in any domain where a claim can be stated and an evaluator can be written: an
-analysis, a model, a process, a codebase, a physical product. Physical design is where
-it was first proven, and where its bundled packs live today: a product taken from a
-napkin sketch to manufacturable outputs, working firmware and a published readiness
-report, across dozens of revisions ([origins](docs/ORIGINS.md)). That is where
-evaluators are slowest and most expensive, and where an honest line between evidence
-and assumption pays the most.
+Nopekit is a Claude Code plugin for exploring and engineering physical designs with an AI agent. Tell it what you want to make. It helps you work out what the design needs to do, explore possible approaches, build and run checks, and keep track of what the evidence actually says as the design changes.
 
-The hard part is never the domain. It is knowing which of your claims have actually
-been checked.
+It's based on the [Grounding by Falsification](grounding_by_falsification.pdf) approach. AI has gotten very good at making believable proposals for all sorts of things both digital and physical but it is especially good at coding. The problem is that it's still not great at figuring out which proposals are actually good on its own. Grounding by falsification is the idea that we need to wrap AI with something outside itself that can check its work and say "nope" using trusted reasoning/math/physics/etc. Nopekit turns that approach into an extensible framework with room for plugins that can falsify proposals across any domain but especially physical design work.
 
-```
-claims  ->  gates  ->  packs  ->  readiness report
-```
+You don't need to learn a new engineering framework before you start. Install the plugin, open a conversation, and bring your idea. The agent will work through the process with you.
 
-A **claim** is something that must be true for a candidate to be accepted. A **gate**
-is an evaluator that settles a claim *and is capable of failing*. A **pack** supplies
-gates for one domain. The **readiness report** is the claims and their verdicts
-rendered: what is checked, what is not, and why.
+<p align="center">
+<img src="docs/img/site-example.png" width="900" alt="Nopekit project site showing a 3D-printed drone design and the grounding map that connects design choices to claims and checks">
+</p>
 
-## Install
+*An example project site. It shows the design, the current candidate, the claims that matter, and how those claims connect to the choices and checks behind them.*
 
-**In Claude Code** — the repo is a plugin marketplace:
+> **Early preview:** Nopekit is currently most useful for small physical-design projects: 3D printing, simple mechanics, beams, heat, fluids, and parts lists. Windows is untested. The plugin and its interfaces are still evolving.
 
-```
+## Get started
+
+### 1. Install Nopekit in Claude Code
+
+If you're already using Claude Code, start by asking it:
+
+> Install the Nopekit plugin from `https://github.com/neuman/nopekit` and help me get it ready to use.
+
+Or install it directly with Claude Code's plugin commands:
+
+```text
 /plugin marketplace add neuman/nopekit
 /plugin install nopekit
 ```
 
-**Anywhere else** — the spine is **standard library only**, so there is nothing to
-build and nothing to resolve:
+You'll need Python 3.10 or newer available as `python3`. Nopekit's core has no third-party Python dependencies. Some checks need optional tools or packages; the agent should tell you when one is needed. For mesh checks used in 3D printing and solid-part work, install:
 
 ```sh
-pip install git+https://github.com/neuman/nopekit
-# or just:
-git clone https://github.com/neuman/nopekit && cd nopekit
-PYTHONPATH=src python3 -m nopekit --help
+pip install trimesh numpy
 ```
 
-Try it immediately on the reference project, which has zero dependencies:
+### 2. Start a project
+
+Open Claude Code in an empty directory and start with a prompt like this:
+
+```text
+I want to use Nopekit to design something new. Interview me about the idea, one question at a time. Help me turn what I want into requirements, explore possible designs, set up the project and its checks, and launch the project site so I can understand the design and follow its progress.
+```
+
+Then have a conversation. You can bring a rough idea, a half-finished project, a sketch, or a folder of existing files. You don't need to arrive with a complete specification.
+
+### 3. Follow the work in the project site
+
+As the project takes shape, Nopekit starts a local site for the project. Open the URL Claude Code gives you. The site is the human-readable surface of the project's **grounded design state**: it helps you see what you're trying to build, what alternatives are in play, which candidate is current, and why that candidate is or isn't ready.
+
+Keep talking with the agent, question its conclusions, change your mind, and try alternatives. The design and its evidence evolve together.
+
+---
+
+## What Nopekit is for
+
+AI can generate design ideas quickly. The hard part is finding out which ones survive contact with reality—and keeping track of what you learned when the design changes.
+
+Nopekit helps you explore a **space of possible designs**, not just produce one plausible-looking answer. It records the requirements, the choices and parameters that shape the design, the claims that need to hold, the checks used to evaluate those claims, and the evidence those checks produce. When an input changes, choices and results that depended on it can become stale so the agent knows to reexamine them.
+
+## A concrete example: PETGasus
+
+[PETGasus](https://neuman.github.io/PETGasusDrone/) is a useful example of the kind of iterative design process Nopekit is meant to support. Its [project repository](https://github.com/neuman/petgasusdrone) shows the work behind a 3D-printed drone design.
+
+The point isn't just to get a model that looks right. A design has to fit its requirements; its parts and parameters affect one another; and checks can reveal that a candidate fails, that an assumption needs attention, or that more evidence is needed. As the design changes, the reasons for the current choices should remain understandable.
+
+That is the goal of Nopekit: to help the human and agent work through design, evaluation, and evidence together, rather than treating a generated artifact as the end of the job.
+
+## How the pieces fit together
+
+A Nopekit project connects what you want to make with the evidence needed to judge whether a candidate is ready.
+
+```mermaid
+flowchart LR
+    A[Your idea and requirements] --> B[Claims: what must be true]
+    B --> C[Design choices and parameters]
+    C --> D[Gates: checks that can fail]
+    D --> E[Evidence and current verdicts]
+    E --> F[Grounded design state]
+    F --> G[Project site: a human-readable view]
+    G -. questions, decisions, new ideas .-> A
+    G -. changes to try .-> C
+```
+
+The real project is interconnected: one choice can affect several values, claims, and checks, and one claim can depend on several choices. The diagram above is just a simplified way to orient yourself.
+
+- **Requirements** capture what you asked for, in your own terms.
+- **Claims** describe things that must be true for the design to meet those requirements.
+- **Parameters and decisions** describe the choices that shape the candidate, including why a value was chosen and what alternatives were rejected.
+- **Gates** are executable checks that evaluate claims. A gate must show that it can fail on a known-bad input before its result can count as qualified evidence.
+- **Evidence and verdicts** record what happened when a gate ran, what inputs it used, and whether that result still applies to the current design.
+- **The grounded design state** is the connected record of the design, its alternatives, dependencies, checks, and evidence.
+- **The project site** is where that state becomes understandable to a person. It presents the project's intent, tradespace, current candidate, and the reasons it is or isn't ready. It doesn't replace the underlying evidence or decide that a design is true; it renders the project's recorded state so you and the agent can reason about it.
+
+## Using Nopekit, step by step
+
+You don't have to manually run every step. Claude Code and Nopekit work through the cycle with you; this section explains what you're likely to see and how to make sense of it.
+
+### 1. Start with the thing you want to make
+
+Describe the goal in everyday language. It helps to say what the thing is for, where it will be used, what it needs to fit, what it must survive, and what matters most to you. You can add details later.
+
+The agent may ask for supporting material: sketches, photos, measurements, existing parts, links, datasheets, or examples of something similar. Share what you have; gaps can be made explicit rather than filled with invented certainty.
+
+### 2. Turn the idea into requirements and claims
+
+The agent helps turn your answers into requirements, then identifies claims that need to hold for a design to work. Review the requirements when it asks. Correct misunderstandings early: the goal is to preserve your intent, not to make the project fit the first interpretation the model came up with.
+
+Some claims can be checked analytically. Others need a simulation, an external tool, a human judgment, or a physical build. Nopekit should keep those differences visible.
+
+### 3. Explore candidates and record decisions
+
+The agent works with you to develop the model and explore alternatives. The project should preserve not just the current choice, but useful context about why it was chosen and what was rejected. That helps a future iteration avoid repeating the same dead ends—and makes it easier to revisit an old option when its assumptions change.
+
+You can still change your mind. The goal isn't to lock you into an early decision; it's to make the consequences of a change easier to see.
+
+### 4. Run checks and read the results
+
+A check, or **gate**, evaluates a specific claim against the current inputs. Results are recorded with their provenance. A result may be useful without being a pass: it can reveal a failure, expose a missing capability, or show that an earlier result is now stale.
+
+Here are the important distinctions:
+
+| Status | What it means |
+|---|---|
+| **Checked** | A qualified gate passed on the inputs that apply to the current candidate. This is evidence for the claim the gate tests—not a guarantee that the whole product works. |
+| **Failing** | A gate found a problem with the current candidate. Use the detail to decide what to change or investigate. |
+| **Gap** | No suitable qualified gate currently settles the claim. The claim remains unresolved. |
+| **Open** | A gate exists, but hasn't produced a current result for the inputs. |
+| **Stale** | A gate passed earlier, but something it depended on has changed. The old result doesn't establish the claim for the current candidate. |
+| **Skipped** | The gate was skipped, often because a required tool or dependency is missing. Nothing was established by that run. |
+| **Skipped (errored)** | The gate crashed. Treat the result as unresolved, not as a pass. |
+| **Pending build / physical** | The claim needs evidence from building or testing the real thing. Software checks cannot substitute for that evidence. |
+| **Assumed** | The project is relying on something that has not yet been established by a qualifying check. |
+
+The key habit is to ask: **What exactly does this result establish, and what does it leave open?** A clean CAD check isn't proof that a physical part will behave as intended. A simulation result isn't a real-world measurement. A claim with no check isn't checked just because the design looks plausible.
+
+### 5. Use the site to reason about the design
+
+The site isn't just a progress dashboard or a picture of the model. It's a way to inspect the relationships inside the grounded design state.
+
+Depending on the project and the views it provides, use it to:
+
+- understand the project's intent and requirements;
+- explore the available design choices and how they connect;
+- inspect the current candidate and its representation;
+- trace a claim through the values and choices it depends on to the gate that evaluates it;
+- see why the candidate is ready, not ready, or ready only in a limited sense;
+- spot failures, missing checks, stale results, and assumptions that need attention.
+
+The site renders the recorded state; it doesn't independently verify the design. If a number or claim looks wrong, follow it back to the underlying record or evidence and work with the agent to correct it.
+
+### 6. Iterate
+
+The process loops. A failed check may change a parameter. A new requirement may bring an old alternative back into consideration. A physical test may contradict a simulation. A new tool may make a previously unresolved claim testable.
+
+After a meaningful change, the agent can re-run the checks affected by that change and update the project's recorded state and site. Keep asking questions and redirecting the work: the point is to make the engineering reasoning visible enough that you can participate in it.
+
+## Useful commands
+
+Most people can begin through conversation with Claude Code. If you want to inspect or operate the project directly, these commands are a useful starting point.
+
+| Command | What it does |
+|---|---|
+| `nopekit status` | Summarizes the current claims and their statuses. |
+| `nopekit check` | Runs the available gates against the current project. |
+| `nopekit report` | Shows the readiness report. Use `--write` to write `REPORT.md`. |
+| `nopekit why <name>` | Shows the history for a parameter, claim, or requirement, including recorded alternatives. |
+| `nopekit gap --propose` | Lists unresolved claims and proposes available ways to evaluate them. |
+| `nopekit gate selftest` | Runs the gates' negative controls to check that they can fail on known-bad inputs. |
+| `nopekit doctor` | Helps diagnose a confusing or broken setup. |
+| `nopekit round` | Ends a round of work with a quick check, an updated site, and a round record. |
+| `nopekit site build` | Builds the project's site from the recorded state and verdicts. It does not run gates. |
+| `nopekit site serve --watch --detach` | Serves the local site and watches for project changes. |
+| `nopekit site serve --stop` | Stops the detached site server. |
+
+To see the complete command list and options, run:
+
+```sh
+nopekit --help
+```
+
+### Try the included example
+
+The repository includes a small bracket project you can inspect without starting from scratch. From the Nopekit repository:
 
 ```sh
 cd examples/bracket
-nopekit status         # 7 claims · 3 checked · 1 failing · 2 gaps · 1 pending build
-nopekit check          # 6 gates; one fails on purpose — fix `thickness` 7.0 -> 8.0
-nopekit gate selftest  # every gate proves it can fail on known-bad input
-nopekit why thickness  # one parameter's full history, including what was rejected
+nopekit status
+nopekit check
+nopekit gate selftest
+nopekit why thickness
 ```
 
-It ships with its records and its verdicts, because those *are* sources of truth —
-not build artifacts: each claim is a file under `claims/`, and every gate's verdict
-is committed under `.nopekit/verdicts/`, so a fresh clone's first `check` is served
-from the cache and reads the same answer the author saw.
+The example includes a deliberately failing check. That's intentional: a useful example should show you what a failure looks like, not just produce a reassuring green screen.
 
-Nothing heavy installs until a claim needs it and you have said yes. The two packs
-that want `trimesh` report their claims as **Skipped** — visibly — when it is absent,
-rather than quietly passing.
+## If something isn't working
 
-## What using it looks like
+- **The agent can't find Nopekit or its instructions:** check that the plugin is installed in Claude Code and start a new session if needed.
+- **A check is skipped:** read the reason. It may need an optional Python package or external tool; install it only if you want to run that check.
+- **A result is stale:** a dependency changed after the check ran. Re-run the relevant checks rather than treating the old result as current.
+- **The design looks ready, but the report says otherwise:** follow the unresolved claims. A gap, assumption, or physical-only claim is information—not a bug to hide.
+- **You're not sure where to start:** run `nopekit doctor`, or ask Claude Code to explain the current readiness report in plain language.
 
-An example from physical design, the domain the bundled packs cover. You describe a
-thing. nopekit asks for the evidence a design conversation never produces on its own:
-sketches, a photo of the closest product you'd buy instead, calipers on whatever it
-has to fit, datasheets for parts you have already chosen. Then it extracts the claims:
+## More detail
 
-```
-C1  Floats with the full payload at <=60% draft          [measurable]
-C2  Directionally stable at cruise (~4 m/s)              [measurable]
-C3  Hull prints on a 220x220 bed without supports        [measurable]
-C4  Runtime >=20 min at cruise on one pack               [measurable]
-C5  Watertight at the hatch seam                         [physical only]
-```
+- [The method](METHOD.md) — the principles Nopekit encodes.
+- [Site contract](docs/SITE_CONTRACT.md) — how the project site represents the recorded state.
+- [Origins](docs/ORIGINS.md) — the real project that informed the method.
+- [Pack format](docs/PACK_FORMAT.md) — how domain-specific gates and capabilities are packaged.
+- [Extension protocol](docs/EXTENSION_PROTOCOL.md) — how the system can grow new capabilities.
+- [Grounding by falsification paper](grounding_by_falsification.pdf) — optional background on the underlying idea.
 
-No evaluator here can settle C5. It stays **pending build**, visibly, until you build
-one and record a result. Everything else gets gated:
+## Status and license
 
-```
-$ nopekit check
-[ok  ] displacement  : 1.94 kg at 60% draft vs 1.2 kg payload
-[ok  ] bed-fit       : 580 x 148 x 121 mm, splits into 2 parts
-[FAIL] print-overhang: 14 faces past 52 deg on the bow flare
-[skip] stability     : no gate installed for C2
-```
+Nopekit is an early project. The core engine and bundled packs work, but interfaces may change and the range of supported checks is still growing. Use it, inspect it, fork it, and tell us what breaks.
 
-That last line is the interesting one. A claim with no gate is a **capability gap**,
-and it is how the system grows: the agent names the unvalidated quantity, tries the
-analytic answer first, and only then proposes a solver — with the real cost said out
-loud.
-
-```
-$ nopekit gap --propose
-C2  directional stability at cruise        no gate
-
-  (a) analytic  metacentric height from the waterplane. Runs now.
-                Catches gross instability; misses planing and yaw at speed.
-  (b) solver    OpenFOAM ~2 GB, ~20 min install, ~15 min/run.
-```
-
-When you take the solver, the agent installs it pinned, smoke-tests it, wraps it as a
-gate, **proves the gate fails on a hull it should reject**, and offers to export the
-whole thing as a pack so nobody has to do it again.
-
-## Why you should believe the output
-
-Because of what it refuses to claim. Every row in the report's checked section cites
-the gate that passed it and the evidence file it wrote, and a claim is listed there
-only when every gate covering it ran and passed — *checked*, which does not mean true.
-Everything else is listed under its own status, with the reason: failing, skipped, a
-gap, open, stale, pending build or assumed.
-
-None of these ever blurs into a pass, even beside a gate that passed:
-
-- **Skipped** — a gate skipped: its tool is missing here. Nothing was evaluated.
-- **Skipped, errored** — a gate crashed. Nothing was evaluated, and it reads louder
-  than a missing tool: the gate itself is broken.
-- **Open** — a gate exists and is unrun on the current inputs.
-- **Gap** — no gate covers the claim, or one has not shown it can fail; or an
-  assumption nobody owns.
-- **Stale** — it passed, but inputs have changed since. Nothing is checked *now*.
-
-And every gate must declare a **negative control**: known-bad input it has been shown
-to fail on. The registry refuses to register a gate without one. This is not
-bureaucracy — an agent that writes plausible code will write plausible validators,
-and plausible validators are worse than none, because they launder assumption into
-apparent proof.
-
-## Where the facts live
-
-Records are files — one fact, one file, in the project, under git:
-
-```
-my-project/
-  model/bracket.py          the model: each parameter's value, why, and what lost (PARAMS)
-  gates/   selftest/        the project's own gates, and the known-bad inputs they must fail on
-  claims/C1.json            one claim per file: what must be true, and its limit
-  params/  decisions/  needs/  inputs/  results/  views/     one record per file
-  .nopekit/project.json    the project: its name, its model entry, its live packs
-  .nopekit/verdicts/       every gate's verdict, keyed by the hash of what it read (tracked)
-  .nopekit/ledger.json     an index of every record, generated (ignored: never edit it)
-  .nopekit/cache/  obs/  out/     the last check's statuses, what runs cost, scratch (ignored)
-```
-
-You — or the agent — edit a record the way you edit code, and `nopekit check`
-validates it: a misspelled key in `claims/C1.json` is refused with a suggestion, never
-silently dropped. A verdict goes stale when something its gate was seen to read
-changes — a parameter, a file, a claim, its own code — so an edit to one parameter
-re-runs only the gates that read it; what the tracer cannot see is named in
-[`docs/SPINE_CONTRACT.md`](docs/SPINE_CONTRACT.md)'s limits. There is no run history
-to keep: git and the verdict cache are the history.
-
-## The method
-
-Ten rules, in [`METHOD.md`](METHOD.md). The short version:
-
-1. One parametric model is the only source of truth; everything else is generated.
-2. Derive, never duplicate.
-3. Every constant carries its provenance — especially the alternatives that lost.
-4. Validators are gates, not loggers. *A logger is not a gate.*
-5. Every gate needs a falsification control.
-6. Check agreement across representations.
-7. Wrap external solvers in converging loops.
-8. Adversarial review moves the spec before anything is built.
-9. Separate what is proven from what is assumed, in public.
-10. Cheap inner loops, or there is no loop.
-
-## Packs
-
-| Pack | Gates | Needs | Settles |
-|---|---|---|---|
-| `beam-analytic` | 8 (8 tier-0) | none | tip deflection, mid-span deflection, deflection ratio, span over deflection limit, stiffness |
-| `cad-solid` | 7 (1 tier-0) | trimesh, numpy | watertightness, solid validity, degenerate faces, duplicate vertices, part interference |
-| `fdm-print` | 7 (5 tier-0) | trimesh, numpy | bed fit, bridge span, build volume, cantilever overhang, filament mass |
-| `fluids-analytic` | 7 (7 tier-0) | none | buoyancy, displaced volume fraction, freeboard at load, reserve buoyancy, metacentric height |
-| `sourcing` | 7 (7 tier-0) | none | bill of materials completeness, unpriced line, build cost per unit, rolled-up cost, budget |
-| `thermal-analytic` | 10 (10 tier-0) | none | u-value, wall heat loss, insulation thickness, convective heat transfer coefficient, natural convection |
-
-Packs are ordinary directories. No build step, no registration, no central authority
-— drop one in and it is found. Three-tier disclosure keeps them cheap: a ~20-word
-manifest is always in context, `PACK.md` loads when the domain is relevant, and
-`references/` loads only for the task at hand.
-
-See [`docs/PACK_FORMAT.md`](docs/PACK_FORMAT.md) to write one, and
-[`docs/EXTENSION_PROTOCOL.md`](docs/EXTENSION_PROTOCOL.md) for how an agent grows a
-capability that nobody prebaked.
-
-## The project site
-
-Every project can build a static site, and the reason to build one is not the
-presentation. It is that **gate verdicts are anchored to the geometry they are
-about.** `cad.clash: back_left interferes with grip_lid_left by 0.41 mm³` is a
-sentence you have to go and act on. The same verdict carrying locators lights both
-parts up in the viewer, at the pose where it happens, and you are looking at the
-problem instead of reading about it.
-
-```sh
-nopekit site init      # scaffold site/ — index.html is yours, never regenerated
-nopekit site build     # run the viewgens, write site/data/ and site/assets/
-nopekit site serve     # python3 -m http.server. No build step, no npm, ever.
-```
-
-`site build` never runs gates. It renders the verdicts already in the verdict
-cache and stamps each with its own age, because a page that re-ran the cheap gates
-and not the expensive ones would show a mixed-age picture under one timestamp. It also reports
-every locator naming a view or a part that does not exist — a gate that thinks it is
-highlighting something and is not looks exactly like a gate that found nothing.
-
-Everything the page shows is in `site/data/state.json`, so `curl` answers "what is
-the status of this project?" with no browser. And 3D is one view kind of six: a
-project with no geometry still gets claims, verdicts, evidence, provenance and the
-readiness sentence. `nopekit site vendor` pulls three.js local for offline use.
-
-See [`docs/SITE_CONTRACT.md`](docs/SITE_CONTRACT.md).
-
-## Commands
-
-```
-nopekit init                  nopekit status
-nopekit ask                   what evidence to request from the human
-nopekit ingest <files>        sketches, photos, CAD, datasheets, measurements
-nopekit extract <artifact>    what was read out of it, and what that grounds
-nopekit check [--tier N]      run gates; exits non-zero while anything critical blocks
-nopekit gap [--propose]       claims with no gate, and packs that might cover them
-nopekit why <param|claim>     one thing's full history, instead of the whole log
-nopekit gate selftest         every negative control; fails any gate that can't fail
-nopekit report [--write]      the readiness report (--write: REPORT.md, an ignored output)
-nopekit export <milestone>    the spend: re-runs what it requires, then builds out/<milestone>/
-nopekit site build|serve      the project site: the ledger, rendered and clickable
-nopekit doctor                run this first when something is confusing
-```
-
-## Status
-
-Early. The spine and the first extracted packs work; the interfaces will move. It is
-Apache 2.0 — use it, fork it, or take the ten rules and ignore the code.
-
-**Do not run an older nopekit on a project in this layout.** A version from before
-records became files reads `.nopekit/ledger.json` as the project's records, and may
-rewrite it; nothing a newer version writes can stop it, because the older one
-predates every guard. (A project whose `.nopekit/project.json` says a newer `schema`
-than your nopekit knows is refused — that check runs only from this layout forward.)
-A project still in the old one-file layout migrates itself the first time `check`, or
-a command that writes a record, runs: its `ledger.json` becomes one file per record and
-is renamed `ledger.legacy.json`, never deleted.
-
-## Licence
-
-Apache License 2.0. See [LICENSE](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE).
