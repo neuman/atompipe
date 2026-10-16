@@ -1478,6 +1478,61 @@ joining them:
   114.4 s wall, load 1.4-2.4): the next change that touches the tier pays that first
   (`tests/fast.py`).
 
+**Follow-up after phase 3b** (three small fixes), decided while making them:
+
+- **The site says a built part.** `HUMAN["site"]` says *a built part* where the CLI
+  says *article* (*part <a12>* for a hash, *Parts to build again*); GLOSSARY §1 forbids
+  *real part* and *built object*, not this (`trace.settles` said *the real part*). With
+  it: "showed that it can fail" for *qualified*; "does not count" for an unqualified
+  evaluator's outcome (*Rejected:* "not shown to fail", which reads as a pass); "the
+  current design" for "the current inputs"; "the results in .nopekit/verdicts/" for
+  "the verdict cache"; "shows that each one can fail" for "their controls"; no
+  "registered". The status words and *evaluator* stay, and the CLI, REPORT.md and
+  JUnit keep their words.
+- **The hardware clause has a site register**
+  (`report._hardware_clause(register="site")`): phase 5 shared it because it passed
+  the style scan, and the page said "1 claim needs an article". Its rebuild part and
+  next steps' row share `report.site_rebuild_text` (`rebuild_bare` when nothing is
+  named as moved: the row had read "These values moved: the design").
+  `TheHardwareClauseIsAlwaysSaid` reads each register's needles, and its planted drop
+  removes both forms.
+- **A recorded result in the drawer is the site's words**:
+  `report.result_facts(register="site")`, the CLI's branches and the same `counts`;
+  `state.json` keeps the CLI's. `heading`, `why` and `recorded` moved to
+  `page.WORD_KEYS`, so the style scan reads them. *Rejected:* exempt as a shared
+  producer (the drawer said "a new article is needed, not a rerun" after an em-dash).
+- **`test_style.TheSiteSaysABuiltPart`** fails on *article* in any `HUMAN["site"]`
+  string, in the words baked for the bracket and three seeded ledgers chosen to reach
+  every clause (`ARTICLE_SEEDS`), and in any template string (`lib/format.js`'s blurb).
+- **The background trace and its workers start in nopekit's own directory**
+  (`derivation._package_parent`, already first on their `PYTHONPATH`), the project
+  named by `-C`; a worker moves into its copy itself (`worker_main`). The request named
+  the start alone, but a planted `difflib.py` was imported by the workers too, from
+  the copy's root, so the limit is gone only with both. *Rejected:* `-I` and `-P`
+  (`hooks/stop.py`'s reasons); a temporary directory (anyone may write a module
+  there). Its test runs a real trace, so it is the full suite's.
+- **doctor's `people` row with no one listed is formatted**, like every `HUMAN`
+  template, and prints `{"name": "...", "email": "..."}`.
+- **A recorded result is coloured by its token** (the follow-up's second commit): the
+  drawer painted the block in the ok tone on `counts` alone, so a counted fail read
+  green beside its Failing chip, the site saying more than the resolution (invariant
+  14). `report.result_facts` gains `token` (`RESULT_TOKENS`: `pass` a pass that
+  counts, `fail` a fail that counts, `not-counted` any other) in both registers, so
+  `page.json`'s block, `state.json`'s `physical_result` and the JSON channels carry
+  one producer's answer; the site register adds its `word`. The drawer (so the floor)
+  and the technical record take glyph and tone from format.js's outcome table
+  (`outcomeLook`), the one place a result's tone is said, and no page script reads
+  `counts` (a `BROWSER_TRUTH` rule). `page.status_problems` holds the block's token
+  and word to `result_facts`. *Rejected:* the bare outcome, `pass` or `fail` (a pass
+  that does not count would read green, critique 3 of the P2.5a design); two flags
+  the browser combines (SPEC 32).
+- **No spine module moved**: the bracket's cache, round record and trace stand. The
+  new class costs ~0.18 s in the fast tier, ~0.1 s of it paid by reading the
+  template's strings once per process; the ~4 s the merge left is not paid here. One
+  unpaired run at load 0.8-2.7: 106.2 s wall, 76.2 s user, 692 tests (`tests/fast.py`).
+  The second commit adds ~0.15 s (a counted fail recorded and baked, ~0.1 s warm, and
+  the template's token row): 101.5 s wall, 73.8 s user, 694 tests at load 0.2-1.2.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

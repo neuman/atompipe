@@ -314,6 +314,7 @@ was the one a reader of the contract would never look for.
                   "resolves": [ ],                    // phase 3a: a physical claim's assumptions
                   "board": "strength",                // phase 5: its board, or "other"
                   "physical_result": { "passed": true, …, "counts": false,
+                                       "token": "not-counted",  // pass | fail | not-counted
                                        "why": "a pass recorded from an agent session does not count",
                                        "recorded": "recorded by Dana, from an agent session",
                                        "heading": "A physical result was recorded:",
@@ -413,10 +414,15 @@ an agent can read the site's state without a browser.
   `contradicts` (the evaluators a Failing contradiction names). `physical_result`
   carries `counts` — the judge counted it (a pass on its current article, or any
   fail) — `why` in words when it does not, `recorded` (who, and from where) and
-  `heading` (the block's first words: a physical result's, or a judgment's): the
-  page paints a result's ok tone ONLY on `counts` and a pass, never on `passed` (what
-  slipped through, critique 3 of the P2.5a design: an agent's pass on a Pending build
-  claim read green on the page alone). `rebuild` is the rebuild prediction
+  `heading` (the block's first words: a physical result's, or a judgment's), and
+  `token` (`report.RESULT_TOKENS`: `pass` a pass that counts, `fail` a fail that
+  counts, `not-counted` any other), the one key either page colours a result by,
+  through format.js's outcome table: the page paints a result's ok tone ONLY on a
+  pass that counts, never on `passed` (what slipped through, critique 3 of the P2.5a
+  design: an agent's pass on a Pending build claim read green on the page alone), and
+  a counted fail in Failing's tone (the follow-up after phase 3b: the drawer coloured
+  the block on `counts` alone, and a counted fail read green). No page script reads
+  `counts` (`test_site_truth.BROWSER_TRUTH`). `rebuild` is the rebuild prediction
   (`claims.rebuild`). `phrases.disagree` is the title of a claim whose status its
   evidence does not back — the page's own "contradict" was a second sense for the
   ledger's *contradiction*. A claim whose `terminal` is `human` is grouped apart,
@@ -980,7 +986,10 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
                                     "source": "<out>/deflection.json",
                                     "href": "assets/evidence/…/deflection.json",
                                     "missing": "" } ] } ],
-  "physical": null, "rests_on": ["C6"], "resolves": [], "resolved_by": [],
+  "physical": null,   // a recorded result: { "counts": true, "token": "fail",
+                      //   "word": "fail", "why": "", "recorded": "Recorded by …",
+                      //   "heading": "Test on a built part" } — the site's words
+  "rests_on": ["C6"], "resolves": [], "resolved_by": [],
   "settle": { "text": "...", "commands": ["nopekit why C1", "nopekit check"] },
   "amber": null }   // architecture phase 3b, a Checked claim resting on an unconfirmed
                     // assumption: { "state": "flips", "word": "...", "items": [
@@ -1017,7 +1026,7 @@ required claims) and a step:
   requires (with no milestone, the claims that are not required). `settle` comes
   from `page.settle`, one entry per `ClaimCause`; every command parses, and a pass
   is shown as `claim physical` takes it (`--evidence <file>`, and a judgment's
-  `--authority <name>`). A test on a built article with no milestone has no `export`
+  `--authority <name>`). A test on a built part with no milestone has no `export`
   command: its text says how to build the part and to name the claim in a milestone
   file. A step carries its claim's `marks`, as the floor row does.
 - **The checker** (`page.status_problems`, invariant 14) holds every token, *ready*,
@@ -1181,19 +1190,24 @@ for each (`--all` for every one).
 
 The site's words follow ASD-STE100 (SPEC 34): short sentences (25 words at most, rule
 4.1; ids, parentheses, code and URLs not counted), one word for one thing, present
-tense, the imperative for an instruction, no contraction. And no LLM register (SPEC
-35): no em-dash aside, no "not X but Y", no rhetorical question, none of "delve",
-"robust", "seamless", "crucial", "honest". `tests/test_style.py` scans, with
-`prose.register_problems` and `prose.long_sentences`: every `HUMAN["site"]` string,
-the word keys of a built `page.json` and `map.json` (`page.WORD_KEYS`; every string
-key is in it or in `page.RECORD_KEYS`), every template string, the README block and the
+tense, the imperative for an instruction, no contraction. And no LLM register (SPEC 35):
+no em-dash aside, no "not X but Y", no rhetorical question, none of "delve", "robust",
+"seamless", "crucial", "honest". `tests/test_style.py` scans, with
+`prose.register_problems` and `prose.long_sentences`: every `HUMAN["site"]` string, the
+word keys of a built `page.json` and `map.json` (`page.WORD_KEYS`; every string key is
+in it or in `page.RECORD_KEYS`), every template string, the README block and the
 bracket's `site/content/`. Exempt: record text (statements, a group's title and line,
 `mechanism.how`, an evaluator's detail, a rationale), the CLI's shared producers
-(`reason`, `stale_reason`, `limit_text`) and `state.json`'s words, phrases and
-readiness sentence (the technical record, in the glossary's register). Two rules are
-review-only, because no pattern catches them without false positives: a list of three
-for rhythm, and a closing line that restates the paragraph. "Checked does not mean
-true" appears once per page: `verdict.limits`.
+(`reason`, `stale_reason`, `limit_text`) and `state.json`'s words, phrases and readiness
+sentence (the technical record, in the glossary's register). A recorded result in the
+drawer (`claims[id].physical`: `heading`, `why`, `recorded`) is the site's words
+(`report.result_facts(register="site")`), scanned. The front page says no word a
+newcomer cannot know: "a built part" where the CLI says "an article", "showed that it
+can fail" for qualified, "the current design" for the current inputs, and
+`TheSiteSaysABuiltPart` fails on "article" in any site string, baked word or template
+string. Two rules are review-only, because no pattern catches them without false
+positives: a list of three for rhythm, and a closing line that restates the paragraph.
+"Checked does not mean true" appears once per page: `verdict.limits`.
 
 ## The badge
 

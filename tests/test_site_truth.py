@@ -135,6 +135,22 @@ def _token(found: Any) -> str:
     return "errored" if found.errored else claims_mod.STATUS_KEY[found.status]
 
 
+def _result_token(claim: Any) -> str:
+    """The token a recorded result's block must bake, computed here from the
+    judge's standing, never through `report.result_facts`: ``pass`` a pass the
+    judge counts, ``fail`` a fail (every fail counts but one a pass on another
+    exported article superseded, R-3), ``not-counted`` any other."""
+    result = claim.physical_result
+    results = list(getattr(claim, "results", ()) or ())
+    index = max((i for i, r in enumerate(results) if r == result), default=None)
+    standing = getattr(claim, "standing", None)
+    if result.passed is not True:
+        superseded = tuple(getattr(standing, "superseded", ()) or ())
+        return "not-counted" if index in superseded else "fail"
+    entry = next((e for e in getattr(standing, "entries", ()) or () if e.index == index), None)
+    return "pass" if entry is not None and entry.counts else "not-counted"
+
+
 def _worst(ids: list, composed: dict) -> str:
     """The worst token among ``ids``, by `SEVERITY_ORDER`, computed here; Gap
     with none."""
@@ -174,6 +190,14 @@ def disagreements(baked: Baked) -> list[str]:
     for cid, row in baked.page_doc["claims"].items():
         check(f"floor {cid}", row["token"], want[cid])
         claim = next(c for c in view.claims if c.id == cid)
+        # A recorded result's block, shown exactly when one is recorded, with
+        # the judge's token (follow-up after phase 3b: a counted fail read green).
+        recorded = getattr(claim, "physical_result", None)
+        check(f"floor {cid} result shown", row.get("physical") is not None,
+              recorded is not None)
+        if row.get("physical") is not None and recorded is not None:
+            check(f"floor {cid} result token", row["physical"].get("token"),
+                  _result_token(claim))
         for value in row["values"]:
             if value.get("gate") is None:
                 continue
@@ -330,6 +354,46 @@ class TheSiteNeverSaysMoreThanTheResolution(_env.EnvCase):
         self.assertTrue(page.status_problems(baked.map_doc, planted, baked.view, baked.composed,
                                              baked.toks))
         self.assertTrue(disagreements(baked._replace(page_doc=planted)))
+
+    def test_a_counted_fail_bakes_the_fail_token(self):
+        """(follow-up after phase 3b) A bracket whose physical claim C5 has a
+        recorded fail, which counts from any channel: C5 reads Failing, its
+        recorded result bakes the `fail` token and word, the checker refuses a
+        page that bakes it as a pass, and the test's own answer catches a
+        producer that says so. What slipped through: the drawer coloured the
+        block on `counts` alone, so this fail read green beside its Failing
+        chip."""
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "b"), migrated=True)
+        with mock.patch.dict(os.environ, {**_env.IDENTITY, "GIT_CONFIG_GLOBAL": os.devnull,
+                                          "GIT_CONFIG_NOSYSTEM": "1"}):
+            code, said = _main("-C", root, "claim", "physical", "C5", "fail", "--detail",
+                               "the arm cracked at the bolt")
+        self.assertEqual(code, 0, said)
+        baked = bake_project(root, fresh=True)
+        row = baked.page_doc["claims"]["C5"]
+        self.assertEqual(row["token"], "failing")
+        shown = row["physical"]
+        self.assertEqual((shown["token"], shown["word"], shown["counts"]),
+                         ("fail", report.HUMAN["site"]["outcome"]["fail"], True))
+        self.assertEqual(disagreements(baked), [])
+        self.assertEqual(page.status_problems(baked.map_doc, baked.page_doc, baked.view,
+                                              baked.composed, baked.toks), [])
+        planted = json.loads(json.dumps(baked.page_doc))
+        planted["claims"]["C5"]["physical"].update(token="pass", word="pass")
+        found = page.status_problems(baked.map_doc, planted, baked.view, baked.composed,
+                                     baked.toks)
+        self.assertTrue([p for p in found if p.startswith("page claim C5 result")], found)
+        self.assertTrue(disagreements(baked._replace(page_doc=planted)))
+        real = report.result_facts
+
+        def says_pass(claim, entry, **kw):
+            facts = real(claim, entry, **kw)
+            return dict(facts, token="pass") if claim.id == "C5" else facts
+
+        with mock.patch.object(report, "result_facts", says_pass):
+            lying = bake_project(root)
+        self.assertEqual(lying.page_doc["claims"]["C5"]["physical"]["token"], "pass")
+        self.assertTrue([p for p in disagreements(lying) if "C5 result token" in p])
 
     def test_a_forced_disagreement_is_marked(self):
         with mock.patch.object(report, "_disagreement",
@@ -1134,7 +1198,37 @@ BROWSER_TRUTH = {
         r"\.sort\s*\([^;]*?(?:\.(?:status|token|outcome)\b|[A-Z_]{4,}\s*\[)"),
     # An age judged in the browser: `aged` and `mixed_age` are build.json's.
     "an age compared": re.compile(r"\bage_s\b\s*[<>]=?|[<>]=?\s*[\w.]*\bage_s\b"),
+    # A recorded result read by its `counts` flag: its look is its baked
+    # `token`'s (follow-up after phase 3b: the drawer coloured the block on
+    # `counts` alone, and a counted fail read green beside its Failing chip).
+    "a result's counts": re.compile(r"\.counts\b"),
 }
+
+
+def js_table(source: str, name: str) -> dict:
+    """``{key: {glyph, tone}}`` of the object literal ``const <name> = {...}`` in
+    ``source``: one entry a line, as format.js writes its look tables."""
+    start = source.index(f"const {name} = {{") if f"const {name} = {{" in source \
+        else source.index(f"export const {name} = {{")
+    body = source[source.index("{", start) + 1:source.index("\n};", start)]
+    out = {}
+    for m in re.finditer(r'^\s*"?([\w-]+)"?\s*:\s*\{\s*glyph:\s*"([^"]*)",\s*tone:\s*"(\w+)"',
+                         body, re.M):
+        out[m.group(1)] = {"glyph": m.group(2), "tone": m.group(3)}
+    return out
+
+
+def js_function(code: str, name: str) -> str:
+    """The body of ``function <name>`` in ``code`` (strings blanked), braces
+    matched."""
+    at = code.index("{", code.index(f"function {name}("))
+    depth, end = 0, at
+    while end < len(code):
+        depth += {"{": 1, "}": -1}.get(code[end], 0)
+        end += 1
+        if depth == 0:
+            break
+    return code[at:end]
 
 
 def browser_truth(sources: dict) -> list:
@@ -1177,6 +1271,7 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
             "every or some over a status": 'const go = rows.every((c) => c.token === "checked");',
             "a sort over a status": "rows.sort((a, b) => RANK[a.status] - RANK[b.status]);",
             "an age compared": "const old = v.age_s >= 86400;",
+            "a result's counts": 'const tone = found.counts ? "tone-ok" : "tone-muted";',
         }
         self.assertEqual(sorted(planted), sorted(BROWSER_TRUTH))
         for rule, line in planted.items():
@@ -1185,6 +1280,37 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
                 source["page.js"] = source["page.js"] + "\n" + line + "\n"
                 found = browser_truth(source)
                 self.assertTrue(any(f": {rule}: " in f for f in found), found)
+
+    def test_a_recorded_result_takes_its_look_from_its_token(self):
+        """(follow-up after phase 3b) A recorded result's block takes its glyph
+        and tone from the bake's `token` through format.js's outcome table, the
+        one place a result's tone is said: in the drawer (so the floor too) and
+        on the technical record. Through it a counted fail renders in the
+        failing tone and never the checked tone, and a pass that does not count
+        never in the checked tone."""
+        looks = {name: js_table(self.sources["lib/format.js"], name)
+                 for name in ("VERDICT_STATUS", "TOKEN_LOOK")}
+        result, token = looks["VERDICT_STATUS"], looks["TOKEN_LOOK"]
+        self.assertEqual(sorted(set(report.RESULT_TOKENS) - set(result)), [])
+        self.assertEqual(result["fail"]["tone"], token["failing"]["tone"])
+        self.assertNotEqual(result["fail"]["tone"], token["checked"]["tone"])
+        self.assertEqual(result["pass"]["tone"], token["checked"]["tone"])
+        self.assertNotEqual(result["not-counted"]["tone"], token["checked"]["tone"])
+        self.assertNotEqual(result["not-counted"]["glyph"], result["pass"]["glyph"])
+        import _template
+        for name, function in (("lib/drawer.js", "physicalBlock"),
+                               ("lib/panels.js", "physicalResult")):
+            with self.subTest(name):
+                body = js_function(_template.js_code(self.sources[name]), function)
+                self.assertRegex(body, r"\blook\s*=\s*outcomeLook\(\s*\w+\.token\s*\)")
+                self.assertIn("look.tone", body)
+                self.assertNotRegex(js_function(self.sources[name], function),
+                                    r"tone-(?:ok|bad|warn|muted|dim)\b")
+        planted = dict(self.sources)
+        planted["lib/drawer.js"] = planted["lib/drawer.js"].replace(
+            "const look = outcomeLook(found.token);",
+            "const look = outcomeLook(found.counts ? \"pass\" : \"not-counted\");")
+        self.assertTrue([f for f in browser_truth(planted) if ": a result's counts: " in f])
 
     def test_a_violator_in_a_comment_or_a_string_is_not_code(self):
         source = {"page.js": "// a.verdict.passed ? 1 : 0\nconst t = \"v.age_s >= 1\";\n"

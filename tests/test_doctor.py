@@ -980,6 +980,30 @@ class DoctorPeopleRow(_env.EnvCase):
         self.assertEqual(row["status"], "warn")
         self.assertTrue(row["detail"].startswith("none listed — rounds make no commit"), row)
 
+    def test_none_listed_prints_the_records_shape(self):
+        """(follow-up after phase 3b) The printed row shows the entry a person
+        types, with single braces: the row was printed raw, so doctor said to
+        add `{{"name": "...", "email": "..."}}` to the project file."""
+        bare = self._project("--no-git")
+        path = os.path.join(bare, ".nopekit", "project.json")
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        data["people"] = []
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            cli_mod.main(["doctor", "-C", bare])
+        rows = [line for line in out.getvalue().splitlines()
+                if line.startswith(f"{cli_mod._tag('warn')} people ")]
+        self.assertEqual(len(rows), 1, out.getvalue())
+        self.assertTrue(rows[0].endswith(
+            'none listed — rounds make no commit; the person adds themselves to "people" in '
+            '.nopekit/project.json as {"name": "...", "email": "..."}'), rows[0])
+        self.assertNotIn("{{", rows[0])
+        self.assertNotIn("}}", rows[0])
+        self.assertEqual(self._row(bare)["detail"], rows[0].split("people", 1)[1].strip())
+
 
 if __name__ == "__main__":
     unittest.main()

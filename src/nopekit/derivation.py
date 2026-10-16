@@ -1393,12 +1393,17 @@ def worker_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
 
 
 def subprocess_launch(job: Mapping[str, Any], job_path: str, timeout: float) -> Launched:
-    """The real launcher: ``python -m nopekit.derivation <job>`` in the copy,
-    in its own session, stopped (its whole process group) at ``timeout``."""
+    """The real launcher: ``python -m nopekit.derivation <job>``, in its own
+    session, stopped (its whole process group) at ``timeout``. It starts in
+    nopekit's own directory and moves into the copy itself (`worker_main`),
+    so its build still runs there; started in the copy, ``-m`` put the copy's
+    root first on ``sys.path``, and a ``difflib.py`` the project held there
+    was imported by every build of every trace (found beside the background
+    start's own, the follow-up after phase 3b)."""
     err_path = job_path + ".err"
     posix = os.name == "posix"
     with open(err_path, "wb") as err:
-        kwargs: dict[str, Any] = {"cwd": job["copy"], "env": worker_env(),
+        kwargs: dict[str, Any] = {"cwd": _package_parent(), "env": worker_env(),
                                   "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
                                   "stderr": err}
         if posix:
@@ -2381,7 +2386,18 @@ def start_background(root: str, *, round_: int | None, key: str | None,
     ``"0"``), ``running`` (a live process holds the trace lock), ``incomplete``
     (the last background run for this key stopped before it finished: it is
     never started again by itself — a person runs it in the foreground),
-    ``started``, or ``failed`` with the one-line reason. Never raises."""
+    ``started``, or ``failed`` with the one-line reason. Never raises.
+
+    It runs in nopekit's own directory (`_package_parent`, already first on
+    its ``PYTHONPATH``), with the project named by ``-C``, absolute. What
+    slipped through (the merge of phase 3b into phase 6, closed after it):
+    it ran with the project as its cwd, and ``-m`` puts the cwd first on
+    ``sys.path``, so a ``difflib.py`` in the project's root was imported in
+    place of the library's at every round that started a trace — what the
+    Stop hook's own launcher (``hooks/stop.py``) exists to stop. *Rejected:*
+    ``python -I`` and ``-P`` (``hooks/stop.py`` gives the reasons: user
+    site-packages, Python 3.11); a temporary directory (anyone may write a
+    module there)."""
     if os.environ.get(BACKGROUND_ENV) == "0":
         return "off", ""
     pid = live_holder(root)
@@ -2393,13 +2409,13 @@ def start_background(root: str, *, round_: int | None, key: str | None,
     log = os.path.join(root, *LOG_REL.split("/"))
     try:
         util.ensure_dir(os.path.dirname(log))
-        argv = [sys.executable, "-m", "nopekit", "model", "trace", "--dir", root]
+        argv = [sys.executable, "-m", "nopekit", "model", "trace", "-C", os.path.abspath(root)]
         if round_ is not None:
             argv += ["--from-round", str(int(round_))]
         else:
             argv += ["--from-round", "0"]
         kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "close_fds": True,
-                                  "env": worker_env(), "cwd": root}
+                                  "env": worker_env(), "cwd": _package_parent()}
         if os.name == "posix":
             kwargs["start_new_session"] = True
         else:                                                    # pragma: no cover - windows

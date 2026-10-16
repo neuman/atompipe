@@ -370,8 +370,9 @@ prose: the one place the site persuades. Enforced in `tests/test_site_truth.py`:
     requirement, a board, a milestone or the project differs, or whose words put a value
     inside a limit its claim's condition rejects (`page.status_problems`), and the browser
     computes no status, margin, readiness, reading order, age or sensitivity: no page
-    script reads a verdict's flags, does arithmetic on a limit, takes a worst-of or sorts
-    by a status. A baked file edited by hand reads *edited by hand* in `site status`,
+    script reads a verdict's flags or a recorded result's `counts`, does arithmetic on a
+    limit, takes a worst-of or sorts by a status; a recorded result's tone comes from its
+    baked token. A baked file edited by hand reads *edited by hand* in `site status`,
     `status` and `doctor`, a resealed page that shows behind text as current included. The
     agent's text in `site/content/` reads current only while its `as_of` stamp equals the
     digest of the tokens of its board's claims and of every claim it names now; otherwise

@@ -21,7 +21,7 @@
 import { el, mount, field } from "./dom.js";
 import {
   chip, tag, claimStatus, verdictStatus, claimKind,
-  num, quantity, age, stamp, plural, code, phrase, needWord, outcomeWord,
+  num, quantity, age, stamp, plural, code, phrase, needWord, outcomeWord, outcomeLook,
 } from "./format.js";
 
 /** `invalidated` -> `Invalidated`, for a field label. */
@@ -267,24 +267,26 @@ function claimRow(claim, state, app) {
     el("details", { class: "disclosure" }, summary, body));
 }
 
-/** One recorded physical result. Its tone is keyed on `result.counts`, the
- *  judge's word (state.json, `report.result_facts`), and its word on
+/** One recorded physical result. Its tone comes from `result.token`, the
+ *  judge's (state.json, `report.result_facts`), through the outcome table that
+ *  colours the front page's drawer (`outcomeLook`), and its word from
  *  `result.outcome` ("pass" or "fail", baked beside it): a pass that does not
  *  count (from an agent session, on a moved article, with changed evidence) is
  *  never the ok tone, and says why. What slipped through (critique 3 of the
  *  P2.5a design): this painted any `passed` in the ok tone, so an agent's pass
- *  on a Pending build claim read green on the page alone. The page reads no
- *  `passed` flag at all since phase 5 (SPEC 32). */
+ *  on a Pending build claim read green on the page alone; and until the
+ *  follow-up after phase 3b this file and the drawer each kept a tone rule, and
+ *  the drawer's painted a counted fail green. The page reads no `passed` flag
+ *  since phase 5 (SPEC 32), and no `counts` flag since then either. */
 function physicalResult(result) {
-  const failed = result.outcome !== "pass";
-  const counts = result.counts === true;
-  const tone = failed ? "tone-bad" : counts ? "tone-ok" : "tone-muted";
-  return el("div", { class: `physical-result ${tone}` },
+  const look = outcomeLook(result.token);
+  return el("div", { class: `physical-result tone-${look.tone}` },
     el("b", { text: `${result.heading || phrase("result_recorded")} ` +
-                    `${outcomeWord(failed ? "fail" : "pass")}; ` +
-                    `${phrase(counts ? "result_counts" : "result_not_counted")}. ` }),
+                    `${outcomeWord(result.outcome === "pass" ? "pass" : "fail")}; ` +
+                    `${phrase(result.token === "not-counted" ? "result_not_counted"
+                                                            : "result_counts")}. ` }),
     el("span", { text: result.detail || "" }),
-    !counts && result.why ? el("p", { class: "claim-reason", text: result.why }) : null,
+    result.why ? el("p", { class: "claim-reason", text: result.why }) : null,
     el("p", { class: "muted small" },
       [result.recorded || result.who, stamp(result.when)].filter(Boolean).join(" · ")),
     (result.evidence || []).length

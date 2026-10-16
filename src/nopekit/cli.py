@@ -8703,13 +8703,19 @@ def _doctor_people_row(results: list[dict], root: str, ledger: Ledger) -> None:
     writing nothing, never a FAIL: whether a round here would commit — the
     people listed, and whether git's identity here is one of them. A project
     that commits nothing is not broken; it is a project whose history the
-    person must keep by hand, and they should know."""
+    person must keep by hand, and they should know.
+
+    Every row's words go through ``format``, the none-listed row's too: its
+    sentence spells the record's braces doubled, as every `HUMAN` template
+    does. What slipped through (follow-up after phase 3b): that row alone was
+    printed raw, and doctor told a person to add ``{{"name": ..., "email":
+    ...}}`` to the project file."""
     said = report.HUMAN["round"]
     people = list(getattr(ledger.meta, "people", None) or [])
     names = ", ".join(f"{p.name} <{p.email}>" for p in people[:4]) \
         + (f", +{len(people) - 4} more" if len(people) > 4 else "")
     if not people:
-        _check(results, "people", "warn", said["people_none"])
+        _check(results, "people", "warn", said["people_none"].format())
         return
     if not vcs.is_repo(root):
         _check(results, "people", "warn", said["people_no_repo"].format(n=len(people)))

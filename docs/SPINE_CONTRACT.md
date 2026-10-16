@@ -3049,6 +3049,12 @@ def prerequisite_phrase(verdict) -> str      # "prerequisite failed: <root>" | "
 def readiness(ledger, composed, milestone=None) -> dict   # claims.unresolved's rows, + missing
 def milestone_line(ledger, composed, milestone) -> str     # "<m>: k of n required claims checked · …"
 def limits_line(ledger) -> str               # what Checked does not mean, said where ready is (P2.5b)
+def site_rebuild_text(found) -> str          # a part to build again, in the site's words: the
+                                             #   page's readiness clause and next steps' row
+RESULT_TOKENS = ("pass", "fail", "not-counted")  # a recorded result's token: what a page
+                                             #   colours it by (format.js `outcomeLook`)
+def result_facts(claim, entry, *, register="cli") -> dict  # {counts, token, why, recorded,
+                                             #   heading}; "site" adds `word`, the drawer's
 def latency_words(claim, exports) -> str     # "measured 26 h on article <a12> (expected 1 day)" |
                                              #   "expected 1 day (declared)" | that none is declared
 def not_ready_line(ledger, composed) -> str  # `check`'s line when nothing blocks it
@@ -3978,13 +3984,17 @@ current or partial; 1 incomplete; 2 refused. `--from-round N` (hidden) is the
 background run `round` starts with `NOPEKIT_TRACE_BACKGROUND` unset or not `"0"`
 (`derivation.start_background`, from phase 6's seam `_round_start_trace`, after the
 round's lock and its commit, so a trace still writing lands in the next round's
-commit): a live trace makes it exit 0 silently. `status` prints a `trace:` line only when the trace is not the current
-design's, and an `amber:` line only when a Checked claim's amber is not `holds`;
-`status --json`, `report --json` and `state.json` gain `trace`/`amber`; `report` a
-`## Amber` section for flips and not-current; `why` a choice's `moves:`, a derived
-value's `derived from:`, `after:` and ties, and a claim's `amber:`; `doctor` a warn-only
-`trace` row; `round --json` a `trace` object. JUnit, `check`, `export` and exit codes
-never read amber.
+commit): a live trace makes it exit 0 silently. It starts in nopekit's own directory
+with the project named by `-C`, and each worker starts there too and moves into its copy
+itself (`worker_main`): `-m` puts the starting directory first on `sys.path`, and
+started in the project's root (or a copy of it) a `difflib.py` there was imported in
+place of the library's (the follow-up after phase 3b closed this limit). `status` prints
+a `trace:` line only when the trace is not the current design's, and an `amber:` line
+only when a Checked claim's amber is not `holds`; `status --json`, `report --json` and
+`state.json` gain `trace`/`amber`; `report` a `## Amber` section for flips and
+not-current; `why` a choice's `moves:`, a derived value's `derived from:`, `after:` and
+ties, and a claim's `amber:`; `doctor` a warn-only `trace` row; `round --json` a `trace`
+object. JUnit, `check`, `export` and exit codes never read amber.
 `propose` (`cmd_propose`) runs a proposer as a subprocess outside the lock, refuses a
 non-zero exit, a timeout or any project file outside its directory that moved
 (`_project_files`, a stat of the project but its ignored scratch, each path named),
@@ -5001,14 +5011,6 @@ regenerated at the merge (round 5).
   different rounds conflict on its `round`. A snapshot leaves out `.git`, `out/`,
   `site/`, `.nopekit/{out,obs,cache,trace}`, bytecode and environments. A background
   trace outlives the agent's turn; its lock is pid-checked.
-- **The background trace imports from the project's root (the merge of phase 3b into
-  phase 6).** `derivation.start_background` runs `python -m nopekit model trace` with
-  the project as its cwd, which `-m` puts first on `sys.path`: a module the root holds
-  under a standard library name is imported before the library's, as the Stop hook's
-  own launcher (`hooks/stop.py`) no longer allows. The hook still never blocks — the
-  trace is detached and its output goes to `.nopekit/out/trace.log` — and the trace
-  runs the project's model code in any case; a trace that fails at import starts again
-  at the next round.
 
 - **The site's number scan is a floor, not a proof (architecture phase 5).** It is
   sign-insensitive (prose says "40% past the limit" over a margin of −0.3994); blind to

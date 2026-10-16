@@ -19,7 +19,7 @@ import { outcomeLook, tokenChip } from "./format.js";
 
 /** The blocks that explain one claim, in the order a reader asks for them:
  *  what it reads now and why, the value against the limit, how it is settled,
- *  each evaluator, a recorded test on a built article, what it rests on, and
+ *  each evaluator, a recorded test on a built part, what it rests on, and
  *  what settles it next. ``row`` is `page.json`'s `claims[id]`. */
 export function claimBlocks(row, page, { onClaim } = {}) {
   const words = (page && page.words) || {};
@@ -118,9 +118,19 @@ function amberBlock(amber) {
       : null);
 }
 
+/** A recorded test on a built part, or an expert judgment: its glyph, tone and
+ *  word from the bake's `token` and `word` (`report.result_facts`), through the
+ *  outcome table, the one place a result's tone is said. What slipped through
+ *  (follow-up after phase 3b): the block took its tone from `counts` alone, so
+ *  a counted fail read green beside its Failing chip. */
 function physicalBlock(found) {
-  return el("div", { class: `cb-block cb-physical ${found.counts ? "tone-ok" : "tone-muted"}` },
+  const look = outcomeLook(found.token);
+  return el("div", { class: `cb-block cb-physical tone-${look.tone}` },
     found.heading ? el("h4", { text: found.heading }) : null,
+    el("div", { class: "cb-eval-head" },
+      el("span", { class: `nk-chip nk-chip-sm tone-${look.tone}` },
+        el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }),
+        el("span", { class: "nk-word", text: found.word || found.token || "" }))),
     found.why ? el("p", { text: found.why }) : null,
     found.recorded ? el("p", { class: "muted small", text: found.recorded }) : null);
 }

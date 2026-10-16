@@ -1758,15 +1758,25 @@ class PhysicalWordsComeFromOneTable(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 #: The two forms of the clause that says what is checked on an article.
 _ON_ARTICLE = re.compile(r"Checked on an article: \d+ \(|No claim is checked on any article\.")
+#: The same two in the site's register (follow-up after phase 3b): a built part
+#: where the CLI says an article.
+_SITE_ON_ARTICLE = re.compile(
+    r"Checked on a built part: \d+ \(|No claim is checked on any built part\.")
+#: A part to build again, each register's way: the needle every row's clause
+#: carries, and the clause for one article's first 12 hex.
+_REBUILD = {"cli": ("Rebuild article ", "Rebuild article {a12} "),
+            "site": (" is from an earlier design.", "Part {a12} is from an earlier design.")}
 _LIMITS = "Checked does not mean true: "
 
 
-def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any) -> list[str]:
+def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any,
+                      register: str = "cli") -> list[str]:
     """The hardware clause (W13) in one rendering of the readiness sentence:
     exactly one on-article clause; `Pending build: …` iff a claim reads Pending
-    build; one `Rebuild article <a12>` per rebuild row."""
+    build; one `Rebuild article <a12>` per rebuild row — in the site's register
+    (``register="site"``), the same clauses said of a built part."""
     out = []
-    found = _ON_ARTICLE.findall(sentence)
+    found = (_SITE_ON_ARTICLE if register == "site" else _ON_ARTICLE).findall(sentence)
     if len(found) != 1:
         out.append(f"{name}: {len(found)} on-article clauses: {sentence[-160:]}")
     pending = any(c.status is ClaimStatus.UNVERIFIED for c in composed.values())
@@ -1774,11 +1784,11 @@ def hardware_problems(name: str, sentence: str, ledger: Any, composed: Any) -> l
         out.append(f"{name}: Pending build {'missing' if pending else 'said'}: "
                    f"{sentence[-160:]}")
     rows = claims_mod.rebuild(ledger)
-    if sentence.count("Rebuild article ") != len(rows):
-        out.append(f"{name}: {sentence.count('Rebuild article ')} rebuild clauses for "
-                   f"{len(rows)} rows")
+    needle, one = _REBUILD[register]
+    if sentence.count(needle) != len(rows):
+        out.append(f"{name}: {sentence.count(needle)} rebuild clauses for {len(rows)} rows")
     for row in rows:
-        if f"Rebuild article {row.article[:12]} " not in sentence:
+        if one.format(a12=row.article[:12]) not in sentence:
             out.append(f"{name}: no rebuild clause for {row.article[:12]}")
     return out
 
@@ -1837,7 +1847,8 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
                     out.append(f"{name}: REPORT.md[{milestone.id}] carries "
                                f"{mmd.count(_LIMITS)} limits paragraphs")
             for key, sentence in renderings.items():
-                out += hardware_problems(f"{name} {key}", sentence, ledger, composed)
+                out += hardware_problems(f"{name} {key}", sentence, ledger, composed,
+                                         register="site" if ".site" in key else "cli")
                 for hit in never_say_hits(sentence, banned, masks):
                     out.append(f"{name} {key}: says {hit!r}")
         return out
@@ -1862,18 +1873,36 @@ class TheHardwareClauseIsAlwaysSaid(unittest.TestCase):
         self.assertEqual(kinds, {"rebuild", "article", "none", "pending"})
 
     def test_a_ready_branch_without_the_clause_is_caught(self):
-        """Planted: the ready branch drops the clause."""
+        """Planted: the ready branch drops the clause, in either register."""
         real = report_mod._verdict_sentence
 
         def dropped(*args, **kwargs):
             said = real(*args, **kwargs)
             if re.search(r"\bis ready\b", said):
-                said = _ON_ARTICLE.sub("", said)
+                said = _SITE_ON_ARTICLE.sub("", _ON_ARTICLE.sub("", said))
             return said
 
         with mock.patch.object(report_mod, "_verdict_sentence", dropped):
             found = self.problems()
         self.assertTrue([p for p in found if "on-article clauses" in p], found[:5])
+        self.assertTrue([p for p in found if "sentence.site" in p and "on-article clauses" in p],
+                        found[:5])
+
+    def test_the_site_says_it_of_a_built_part(self):
+        """(follow-up after phase 3b) The page's rendering carries the clause
+        in the site's words (`test_every_branch` reads every one), and the
+        CLI's clause planted on the page reads as no clause at all."""
+        for name, (rows, _ready, _line) in ReadyIsThePredicate.CASES.items():
+            ledger, composed = ReadyIsThePredicate()._composed(*rows)
+            said = {register: report_mod._verdict_sentence(
+                ledger, composed, None, stale=False, markdown=False, register=register)
+                for register in ("cli", "site")}
+            with self.subTest(name):
+                self.assertEqual(hardware_problems(name, said["site"], ledger, composed,
+                                                   register="site"), [])
+                self.assertTrue(hardware_problems(name, said["cli"], ledger, composed,
+                                                  register="site"))
+                self.assertNotRegex(said["site"], r"(?i)\barticles?\b")
 
 
 # --------------------------------------------------------------------------- #

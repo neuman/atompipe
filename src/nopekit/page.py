@@ -99,18 +99,21 @@ PROSE_SUBJECTS = ("intro", "next")
 #: register, `test_style`) and keys whose strings are record text, ids, tokens,
 #: paths or the CLI's shared producers (exempt). Every string-valued key of
 #: `page.json` and `map.json` is in exactly one (`test_style.EveryBakedKeyIsClassified`).
+#: A recorded result's `why`, `recorded` and `heading` are words (follow-up
+#: after phase 3b): they were the CLI's `result_facts`, exempt, and the drawer
+#: said "a new article is needed, not a rerun" under the scan's nose.
 WORD_KEYS = frozenset({
     "generated", "notice", "sentence", "limits", "label", "word", "value_text", "hint",
     "cause_text", "text", "kind_word", "by_word", "basis_word", "outcome_word", "missing",
-    "term"})
+    "term", "why", "recorded", "heading"})
 RECORD_KEYS = frozenset({
     "schema", "name", "summary", "revision", "records_digest", "resolution_digest",
     "content_digest", "trace", "view", "kind", "title", "token", "id", "key", "lane",
     "line", "board", "claim_kind", "role", "units", "zone", "station", "ground", "basis",
     "pack", "outcome", "self", "reads_all", "claim", "status", "file", "subject", "as_of",
     "current_as_of", "stamp", "statement", "cause", "by", "how", "acceptance",
-    "limit_text", "gate", "comparator", "source", "stale_reason", "detail", "href", "why",
-    "recorded", "heading", "description", "article", "type", "src", "alt", "t", "num",
+    "limit_text", "gate", "comparator", "source", "stale_reason", "detail", "href",
+    "description", "article", "type", "src", "alt", "t", "num",
     "unit", "unmatched", "register", "problems", "lanes", "members", "claims", "marks",
     "stops", "values", "unread", "evaluators", "requirements", "rests_on", "resolves",
     "resolved_by", "commands", "legend", "nodes", "edges", "via", "steps", "milestones",
@@ -981,7 +984,7 @@ def settle(claim: Any, composed: Any, *, milestone: str | None = None,
     """What settles ``claim`` now, by its composition's cause: ``{text,
     commands}`` in the site's words. ``cover`` the claim's covering evaluators
     (`claims.effective_gates`), ``tiers`` each evaluator's tier; ``milestone``
-    names the export a test on a built article needs. A Checked claim has
+    names the export a test on a built part needs. A Checked claim has
     none."""
     cause = str(getattr(composed.cause, "value", composed.cause))
     key, commands = _SETTLE[cause]
@@ -1715,8 +1718,12 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
         physical = None
         counted = getattr(claim, "physical_result", None)
         if counted is not None:
-            facts = report_logic.result_facts(claim, counted)
-            physical = {"counts": bool(facts["counts"]), "why": facts["why"],
+            facts = report_logic.result_facts(claim, counted, register="site")
+            # `token` is the one key the drawer colours the block by
+            # (`report.RESULT_TOKENS`), beside its word (follow-up after phase
+            # 3b: the drawer read `counts` alone, and a counted fail read green).
+            physical = {"counts": bool(facts["counts"]), "token": facts["token"],
+                        "word": facts["word"], "why": facts["why"],
                         "recorded": facts["recorded"], "heading": facts["heading"]}
         claims_out[cid] = {
             "id": cid, "statement": claim.statement,
@@ -1808,13 +1815,9 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
     open_steps = [_step(c, composed[c.id], milestone=None, cover=cover, tiers=tiers,
                         marks=marks)
                   for c in report_logic.in_severity(view, composed, open_claims)]
-    rebuild = []
-    for found in claim_logic.rebuild(view):
-        from .verdicts import _stale_text
-        rebuild.append({"article": str(found.article)[:12], "claims": list(found.claims),
-                        "text": said["rebuild"].format(
-                            article=str(found.article)[:12], claims=", ".join(found.claims),
-                            moves=_stale_text(found.moved) if found.moved else "the design")})
+    rebuild = [{"article": str(found.article)[:12], "claims": list(found.claims),
+                "text": report_logic.site_rebuild_text(found)}
+               for found in claim_logic.rebuild(view)]
 
     summary = str(getattr(meta, "summary", "") or "")
     return {
@@ -1980,6 +1983,18 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
         word_of(f"page claim {cid}", row)
         mark_of(f"page claim {cid}", row, cid in disagree)
         claim = by_id.get(cid)
+        # A recorded result's block: its token and word are the judge's
+        # (`report.result_facts`), and a block where no result is recorded is
+        # the page saying more (follow-up after phase 3b: a counted fail read
+        # green, from `counts` alone, beside its Failing chip).
+        physical = row.get("physical")
+        recorded = getattr(claim, "physical_result", None) if claim is not None else None
+        if isinstance(physical, Mapping) and recorded is None:
+            problems.append(f"page claim {cid} shows a recorded result, and none is recorded")
+        elif isinstance(physical, Mapping):
+            facts = report_logic.result_facts(claim, recorded, register="site")
+            check(f"page claim {cid} result", physical.get("token"), facts["token"])
+            check(f"page claim {cid} result word", physical.get("word"), facts["word"])
         for value in row.get("values") or ():
             if claim is None or not value.get("compared") or value.get("gate") is None:
                 continue

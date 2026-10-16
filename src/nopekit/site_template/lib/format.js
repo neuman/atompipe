@@ -82,7 +82,14 @@ export function needWord(status) {
  *  `unqualified` takes Gap's glyph and tone (P2.3): its claim reads Gap, and it
  *  crashed nothing. `outside-context` too (P2.4): a pass outside the inputs its
  *  evaluator was qualified on — its claim reads Gap, its evaluator is still
- *  qualified, and the word is state.json's, never UNQUALIFIED (review of P2.4). */
+ *  qualified, and the word is state.json's, never UNQUALIFIED (review of P2.4).
+ *
+ *  A recorded result's `token` (`report.RESULT_TOKENS`) reads here too, on both
+ *  pages: `pass` a pass that counts, `fail` a fail that counts (Failing's tone),
+ *  `not-counted` muted, never a pass's look. This is the one place a recorded
+ *  result's tone is said. What slipped through (follow-up after phase 3b): the
+ *  drawer coloured the block on `counts` alone, so a counted fail read green
+ *  beside its Failing chip, and the technical record kept a rule of its own. */
 const VERDICT_STATUS = {
   pass:    { glyph: "✓", tone: "ok" },
   fail:    { glyph: "✕", tone: "bad" },
@@ -90,6 +97,7 @@ const VERDICT_STATUS = {
   errored: { glyph: "!", tone: "bad" },
   unqualified: { glyph: "?", tone: "warn" },
   "outside-context": { glyph: "?", tone: "warn" },
+  "not-counted": { glyph: "◌", tone: "muted" },
 };
 
 /** Each verdict row's outcome word, from state.json's `outcome_words`
@@ -106,7 +114,7 @@ const CLAIM_KIND = {
   },
   physical: {
     title: "Physical",
-    blurb: "Only a test on a built article settles these claims. They stay on this " +
+    blurb: "Only a test on a built part settles these claims. They stay on this " +
            "list until a person records a result.",
   },
   // No status word in a blurb: each row's chip and reason say what it reads
@@ -153,8 +161,8 @@ export function verdictStatus(key) {
 
 /** A baked outcome's look (`pass`, `fail`, `errored`, `skipped`,
  *  `unqualified`, `outside-context`, and `unrun` for an evaluator with no
- *  result): the verdict table's glyph and tone. The word is always the baked
- *  `outcome_word`. */
+ *  result; a recorded result's `token`): the verdict table's glyph and tone.
+ *  The word is always the baked one (`outcome_word`, a result's `word`). */
 export function outcomeLook(key) {
   return VERDICT_STATUS[key] || { glyph: "◌", tone: "dim" };
 }

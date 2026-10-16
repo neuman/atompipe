@@ -20,7 +20,14 @@ tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs again
 3d8eaaf (load average 1.4-2.4, not idle): 122.9 s and 119.5 s wall (89.9 s and 87.3 s
 user) for its 685 tests, against 118.1 s and 114.4 s (85.9 s and 83.7 s user) for
 3d8eaaf's 662 — about 4 s over its base, which is over the line: the next change that
-touches the tier pays that first. The review of
+touches the tier pays that first. The follow-up after phase 3b did not: it added
+test_style.TheSiteSaysABuiltPart (~0.18 s warm) and paid ~0.1 s of it by reading the
+template's strings once per process (test_style.template_strings). Measured once on
+2026-10-15 at load 0.8-2.7, not paired against its base: 106.2 s wall (76.2 s user)
+for its 692 tests. Its second commit (a recorded result coloured by its token) added
+~0.15 s: test_site_truth's counted fail, recorded and baked in process (~0.1 s warm),
+and TheBrowserComputesNoTruth's token row; 101.5 s wall (73.8 s user) for 694 tests at
+load 0.2-1.2, unpaired. The review of
 architecture phase 6 added ~1.2 s in the tier (invariant 8's identity and `init`
 clauses: three in-process identity rows, two `init` rows, and the nested repository
 in the staging class) and paid ~1.2 s by parsing each test file once in
@@ -971,6 +978,9 @@ FAST: list[str] = [
     # prose, and the number scan's units, joined letters and structure keys.
     "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_failing_claim_never_reads_inside_its_limit",
     "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_the_project_group_is_held_too",
+    # The follow-up after phase 3b (~0.1 s warm): a counted fail recorded on a
+    # bracket copy in process bakes the `fail` token, and a planted pass is named.
+    "test_site_truth.TheSiteNeverSaysMoreThanTheResolution.test_a_counted_fail_bakes_the_fail_token",
     "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_claim_named_from_another_board_moves_the_stamp",
     "test_site_truth.StampedProseIsFlaggedWhenBehind.test_the_checker_reads_the_baked_prose",
     "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_joined_units_and_bare_fractions_are_read",

@@ -108,7 +108,7 @@ export function renderSections(page, { onClaim } = {}) {
 
 /** Next steps: one card for each milestone (what it still needs, and the
  *  command that settles each), the revision's own group when there is no
- *  milestone, the claims no milestone requires, the articles to rebuild, and
+ *  milestone, the claims no milestone requires, the parts to build again, and
  *  the agent's text. `next: true` and `ready` are the bake's. */
 export function renderNext(page, { onClaim } = {}) {
   const next = (page && page.next) || {};

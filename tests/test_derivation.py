@@ -1405,7 +1405,36 @@ class RoundStartsTheTrace(_env.EnvCase):
                                  ("running", "4242"))
             found = derivation.start_background(root, round_=3, key=None, popen=popen)
         self.assertEqual(found, ("started", derivation.LOG_REL))
-        self.assertEqual(started[0][-4:], ["--dir", root, "--from-round", "3"])
+        self.assertEqual(started[0][-4:], ["-C", root, "--from-round", "3"])
+
+    def test_a_module_in_the_projects_root_is_never_imported(self):
+        """The background trace starts in nopekit's own directory with the
+        project named by `-C`, and its workers move into their copies
+        themselves: a `difflib.py` planted in the project's root is imported
+        by neither. What slipped through (the merge of phase 3b into phase 6,
+        a named limit until the follow-up after it): the start ran with the
+        root as its cwd, each worker in its copy, and `-m` put that directory
+        first on `sys.path` — what `hooks/stop.py` exists to stop. The planted
+        module is shown to bite: the same command run from the root runs it."""
+        root = bracket(self)
+        marker = os.path.join(root, "planted-ran")
+        with open(os.path.join(root, "difflib.py"), "w", encoding="utf-8") as fh:
+            fh.write(f"open({marker!r}, 'a').close()\nraise SystemExit(7)\n")
+        launched: list = []
+        with mock.patch.dict(os.environ, {derivation.BACKGROUND_ENV: "1"}):
+            found = derivation.start_background(
+                root, round_=5, key=None, popen=lambda argv, **kw: launched.append((argv, kw)))
+        self.assertEqual(found, ("started", derivation.LOG_REL))
+        [(argv, kwargs)] = launched
+        proc = _env.run(argv, cwd=kwargs["cwd"])
+        self.assertFalse(os.path.exists(marker),
+                         "the project's difflib.py ran: " + proc.stdout + proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("trace: current for this design", proc.stdout)
+        self.assertEqual(argv[argv.index("-C") + 1], root)
+        proc = _env.run(argv, cwd=root)
+        self.assertEqual(proc.returncode, 7, "the planted module never ran from the root")
+        self.assertTrue(os.path.exists(marker))
 
     def test_the_paragraph_and_the_record(self):
         said = report.HUMAN["round"]

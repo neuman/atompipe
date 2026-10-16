@@ -224,9 +224,22 @@ _SKIPPED_ERRORED = _SKIPPED._replace(
 #: string here, formatted with sample values. *Rejected:* rewriting the CLI's
 #: strings to STE (its transcript and shapes are pinned byte for byte, and the
 #: glossary is that channel's rule); a second sentence builder for the page.
+#:
+#: The page is for a newcomer, so it says no word the paper or the code made
+#: (follow-up after phase 3b): a built part where the CLI says an article
+#: (GLOSSARY §1 forbids *real part* and *built object*, not this), "showed that
+#: it can fail" for qualified, "does not count" for an unqualified evaluator's
+#: outcome, "the current design" for the current inputs (the page's hints
+#: already said it), "the results" for the verdict cache. What slipped
+#: through: the page read "Pending build: 1 claim needs an article (C5). No
+#: claim is checked on any article." — the CLI's hardware clause, which phase 5
+#: let through because it passed the style scan — and "This test on the real
+#: part", an article's Never-say. `test_style.TheSiteSaysABuiltPart` fails on
+#: "article" in any string here, in what the build bakes, or in the template.
 _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
-    "generated": "nopekit site build wrote this file from the records, the verdict cache "
-                 "and site/content/. It is not a source. Change those, then build again.",
+    "generated": "nopekit site build wrote this file from the records, the results in "
+                 ".nopekit/verdicts/ and site/content/. It is not a source. Change those, "
+                 "then build again.",
     "other_board": "Other",
     "all_board": "Claims",
     "other_zone": "Other choices",
@@ -240,7 +253,12 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     "margin_at": ", at the limit",
     "chart_margin": MappingProxyType({"inside": "{delta} inside the limit",
                                       "past": "{delta} past the limit"}),
-    "rebuild": "Rebuild article {article} for {claims}. These values moved: {moves}.",
+    # One producer for a part to build again (`site_rebuild_text`): the
+    # readiness sentence's clause and next steps' row say it alike.
+    "rebuild": "Part {article} is from an earlier design. Build a new part for {claims}. "
+               "These values changed: {moves}.",
+    "rebuild_bare": "Part {article} is from an earlier design. Build a new part for "
+                    "{claims}.",
     "ready_word": "ready",
     "not_ready_word": "not ready",
     # The readiness sentence in the site's register: one key per branch of
@@ -256,21 +274,26 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "none_required": "{rev} is NOT ready. None of its {n} {claims} is required.",
         "not_ready": "{rev} is NOT ready. {k} of {req} required {claims} {is_} unresolved: "
                      "{groups}.",
-        "tally": "{k} of {n} {claims} {is_} {checked} against the current inputs.",
+        "tally": "{k} of {n} {claims} {is_} {checked} on the current design.",
         "ready_last": "{rev} is ready, as last evaluated. Every required claim is {checked} "
-                      "against the current inputs.",
+                      "on the current design.",
         "other": "{n} {claims} that {is_} not required {is_} unresolved: {groups}.",
-        "unrun": "{n} registered {evaluators} did not run.",
+        "unrun": "{n} {evaluators} did not run.",
         "ready_for": "{rev} is ready for {m}. Every claim that {m} requires is {checked} "
-                     "against the current inputs.",
+                     "on the current design.",
         "not_ready_for": "{rev} is NOT ready for {m}. {k} of {n} required {claims} {is_} "
                          "unresolved: {groups}.",
         "ready_for_last": "{rev} is ready for {m}, as last evaluated. Every claim that {m} "
-                          "requires is {checked} against the current inputs.",
+                          "requires is {checked} on the current design.",
         "not_ready_for_last": "{rev} is NOT ready for {m}, as last evaluated. {k} of {n} "
                               "required {claims} {is_} unresolved: {groups}.",
         "requires_nothing": "{rev} is NOT ready for {m}. {m} requires no claim. Add the "
                             "claims that it needs to milestones/{m}.json.",
+        # The hardware clause (`_hardware_clause(register="site")`), in every
+        # branch as the CLI's: the parts to build again are `rebuild` above.
+        "pending": "{Pending}: {n} {claims} {need} a test on a built part ({ids})",
+        "on_article": "{Checked} on a built part: {n} ({ids}).",
+        "none_on_article": "No claim is {checked} on any built part.",
         "limits": "{Checked} does not mean true. Its evaluators have shown that they can "
                   "fail. They have not shown that they are correct or sufficient. Nothing "
                   "outside these {n} {claims} is evaluated.",
@@ -278,20 +301,21 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     # Each status token's hint on the page. The checked hint does not say
     # "does not mean true": the page says that once, in `verdict.limits`.
     "hint": MappingProxyType({
-        "checked": "Every evaluator is qualified and passed on the current inputs.",
-        "failing": "An evaluator or a test on a built article failed the current design.",
+        "checked": "Every evaluator showed that it can fail, and each one passed on the "
+                   "current design.",
+        "failing": "An evaluator or a test on a built part failed the current design.",
         "errored": "An evaluator stopped with an error. A crash settles nothing.",
         "skipped": "An evaluator did not run. A tool that it needs is missing.",
         "gap": "Nothing can settle this claim yet.",
         "open": "An evaluator can settle this claim. It did not run on the current design.",
         "stale": "The design changed after the result.",
-        "pending_build": "Only a test on a built article can settle this claim.",
+        "pending_build": "Only a test on a built part can settle this claim.",
         "assumed": "A person accepts this claim for now.",
     }),
     # One sentence per ClaimCause: why a claim reads what it reads.
     "cause": MappingProxyType({
         "failed": "An evaluator failed the current design.",
-        "physical-fail": "A test on a built article failed.",
+        "physical-fail": "A test on a built part failed.",
         "errored": "An evaluator stopped with an error. A crash settles nothing.",
         "prerequisite-errored": "An evaluator that this claim needs first stopped with an "
                                 "error.",
@@ -307,49 +331,49 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "no-reason": "This assumption has no reason.",
         "unrun": "An evaluator did not run on the current design.",
         "invalidated": "The design changed after the result.",
-        "no-article": "No test on a built article is recorded.",
+        "no-article": "No test on a built part is recorded.",
         "owned": "Its owner accepts this assumption for now.",
-        "physical-pass": "A pass is recorded. No built article of the current design holds "
-                         "it.",
-        "checked": "Every evaluator is qualified and passed on the current inputs.",
+        "physical-pass": "A pass is recorded. It does not count for the current design.",
+        "checked": "Every evaluator showed that it can fail, and each one passed on the "
+                   "current design.",
         "acceptance": "An evaluator passed. Its value does not meet the acceptance "
                       "condition.",
         "outside-context": "The design is outside the range that the evaluator was tested "
                            "on.",
         "fallback": "The design is outside the range of the evaluator. A person accepts the "
                     "claim for now.",
-        "contradiction": "A test on a built article failed a claim that an evaluator passed.",
+        "contradiction": "A test on a built part failed a claim that an evaluator passed.",
         "judged-fail": "An expert judged that the claim fails.",
         "no-authority": "The claim names no expert to judge it.",
         "authority-unattributed": "The expert did not record the judgment in their own "
                                   "shell.",
-        "article-moved": "The design changed after the test on the built article.",
+        "article-moved": "The design changed after the test on the built part.",
         "claim-moved": "The claim changed after its test or its judgment.",
         "judgment-moved": "The design changed after the expert judgment.",
         "article-unjudged": "The model does not load, so the test cannot be compared with "
                             "the design.",
         "awaiting-judgment": "The claim waits for the judgment of its expert.",
-        "on-article": "A test on a built article of the current design passed.",
+        "on-article": "A test on a part built from the current design passed.",
         "judged": "The expert judged that the claim holds.",
     }),
     # What settles each cause: STE text and the commands (`page.settle`).
     "settle": MappingProxyType({
         "fix": "Change the design until {id} passes. Then run the check again.",
-        "built_fail": "A test on a built article failed {id}. Change the design, build a new "
-                      "article and test it again.",
+        "built_fail": "A test on a built part failed {id}. Change the design, build a new "
+                      "part and test it again.",
         "crash": "An evaluator stopped with an error. Repair it, then run the check again.",
         "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
                 "again.",
-        "run": "Run the check. It runs the evaluators and their controls.",
+        "run": "Run the check. It runs the evaluators and shows that each one can fail.",
         "outside": "The design is outside the range that the evaluator was tested on.",
         "find": "No evaluator checks {id} yet. Find one or write one.",
         "owner": "{id} is an assumption. Its owner records it in their own shell.",
         "reason": "{id} is an assumption with no reason. Write the reason in the claim file.",
         "owned": "Its owner accepts {id} for now. A test can replace the assumption.",
-        "article": "{id} needs a test on a built article. Build the article, test it and "
-                   "record the result in your own shell.",
-        "article_free": "{id} needs a test on a built article. Build the part from the "
-                        "current design, test it and record the result in your own shell. "
+        "article": "{id} needs a test on a built part. Build the part, test it and record "
+                   "the result in your own shell.",
+        "article_free": "{id} needs a test on a built part. Build the part from the current "
+                        "design, test it and record the result in your own shell. "
                         "To build it with nopekit export, name {id} in a milestone file.",
         "no_authority": "{id} needs an expert judgment, and the claim names no expert.",
         "judgment": "{id} needs a judgment from {authority}. That person records it in their "
@@ -358,14 +382,14 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     }),
     "lanes": MappingProxyType({"requirements": "What was asked", "zones": "Choices",
                                "stations": "Shared values", "boards": "Claims"}),
-    "kinds": MappingProxyType({"measurable": "Automated", "physical": "Test on a built article",
+    "kinds": MappingProxyType({"measurable": "Automated", "physical": "Test on a built part",
                                "assumption": "Assumption"}),
     "by": MappingProxyType({
         "automated": "An evaluator settles it.",
         "closed_form": "A formula settles it.",
         "solver": "A solver settles it.",
         "datasheet": "A datasheet settles it.",
-        "measurement": "A measurement on a built article settles it.",
+        "measurement": "A measurement on a built part settles it.",
         "human": "A person settles it.",
         "none": "Nothing settles it. It is accepted for now.",
     }),
@@ -377,13 +401,16 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     }),
     "outcome": MappingProxyType({
         "pass": "pass", "fail": "fail", "skipped": "skipped", "errored": "errored",
-        "unqualified": "not qualified", "outside-context": "outside its range",
+        "unqualified": "does not count", "outside-context": "outside its range",
         "unrun": "did not run",
+        # A recorded result the judge does not count (`RESULT_TOKENS`): the
+        # same words as an unqualified evaluator's, one thing said one way.
+        "not-counted": "does not count",
     }),
     "headings": MappingProxyType({"map": "Grounding map", "next": "Next steps",
                                   "floor": "Show the data", "technical": "Technical record",
                                   "project": "This revision", "open": "Other open claims",
-                                  "rebuild": "Articles to rebuild",
+                                  "rebuild": "Parts to build again",
                                   "made_with": "Made with nopekit"}),
     "notices": MappingProxyType({
         "prose_stale": "This text was written before the latest results. The data below "
@@ -437,7 +464,8 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "upstream_rides": "Before them, from the test",
         "unseen_line": "The test did not see a change in the values that this claim reads.",
         "sets": "This assumption sets choices that change these shared values.",
-        "settles": "This test on the real part settles the assumptions at these shared values.",
+        "settles": "This test on a built part settles the assumptions at these shared "
+                   "values.",
         "zones_summary": "{n} choices in {z} groups. The bar shows where each number comes "
                          "from.",
         "zone_idle": "No line uses these choices.",
@@ -455,6 +483,67 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     "evidence": MappingProxyType({
         "outside": "Not on the page. The file is outside the project.",
         "not_copied": "Not on the page. The site build gives the reason.",
+    }),
+    # A recorded result in the drawer (`result_facts(register="site")`): its
+    # heading, who recorded it, and why it does not count, in the branches of
+    # the CLI's `HUMAN["physical"]`, `["not_counted"]` and `["recorded"]`.
+    # What slipped through (follow-up after phase 3b): the page baked the
+    # CLI's own words here ("the result on article 3f2a… was recorded on a
+    # design that has since moved — a new article is needed, not a rerun"),
+    # exempt from the style scan as a shared producer.
+    "result": MappingProxyType({
+        "heading_test": "Test on a built part",
+        "heading_judgment": "Expert judgment",
+        "recorded": "Recorded by {who}.",
+        "recorded_agent": "Recorded by {who} from an agent session.",
+        "recorded_pipe": "Recorded by {who} from a pipe or a script.",
+        "recorded_none": "No person is named for this result.",
+        "superseded": "A pass on part {article} replaces this fail, because the design "
+                      "changed. The fail counts again if the design changes back.",
+        "moved": "The design changed after part {article} was built. These values "
+                 "changed: {moves}. Build a new part and test it.",
+        "moved_bare": "The design changed after part {article} was built. Build a new part "
+                      "and test it.",
+        "claim_moved": "The claim changed after the test on part {article}. Test it again.",
+        "unjudged": "The model does not load, so part {article} cannot be compared with the "
+                    "design.",
+        "judgment_moved": "{authority} judged an earlier design. {authority} judges it "
+                          "again.",
+        "judgment_claim_moved": "The claim changed after {authority} judged it. {authority} "
+                                "judges it again.",
+        "judgment_unjudged": "The model does not load, so the judgment of {authority} cannot "
+                             "be compared with the design.",
+        "not_counted": MappingProxyType({
+            "agent-session": "A pass recorded from an agent session does not count.",
+            "non-interactive": "A pass recorded from a pipe or a script does not count. The "
+                               "person who did the test records it in their own shell.",
+            "legacy": "A pass recorded before results were tied to a built part does not "
+                      "count. Record it again in your own shell.",
+            "who": "A pass that names no person does not count.",
+            "measured": "A pass at a value that does not meet the acceptance condition does "
+                        "not count.",
+            "evidence": "The evidence file {path} changed or is missing since the pass was "
+                        "recorded. The pass does not count. Record it again.",
+            "beside": "An evaluator settles this claim, so a pass on a built part settles "
+                      "nothing here.",
+            "none": "A pass does not settle an assumption. Its owner records it.",
+            "authority": "A judgment that {authority} did not record does not count.",
+            "export-missing": "No export record holds the built part of this pass, so the "
+                              "pass does not count. Restore the export record from git, or "
+                              "record the result again.",
+        }),
+        "judgment_not_counted": MappingProxyType({
+            "agent-session": "A judgment recorded from an agent session does not count.",
+            "non-interactive": "A judgment recorded from a pipe or a script does not count.",
+            "legacy": "A judgment recorded before results were tied to the design does not "
+                      "count.",
+            "who": "A judgment that names no person does not count.",
+            "authority": "A judgment that {authority} did not record does not count.",
+            "evidence": "The evidence file {path} changed since the judgment was recorded. "
+                        "The judgment does not count. {authority} records it again.",
+            "measured": "A judgment at a value that does not meet the acceptance condition "
+                        "does not count.",
+        }),
     }),
 })
 
@@ -3363,13 +3452,34 @@ def _section_requirements(ledger: Ledger, composed: Mapping[str, Any],
     return out
 
 
-def result_facts(claim: Claim, entry: Any) -> dict[str, Any]:
+#: A recorded result's token (follow-up after phase 3b): its outcome as the
+#: judge counts it. ``pass`` is a pass that counts; ``fail`` a fail that counts,
+#: which is every fail but one a pass on another exported article superseded
+#: (R-3, P2.5b-D14); ``not-counted`` any other. Both pages colour and word a
+#: recorded result from this token alone, through one table (format.js
+#: `outcomeLook`). What slipped through: the front page's drawer coloured the
+#: block on ``counts`` alone, so a counted fail read green beside its Failing
+#: chip, and the technical record kept a second tone rule of its own.
+#: *Rejected:* the bare outcome, ``pass`` or ``fail`` (a pass that does not count
+#: would then read green, critique 3 of the P2.5a design); two flags the browser
+#: combines (the page computes no tone, SPEC 32).
+RESULT_TOKENS = ("pass", "fail", "not-counted")
+
+
+def result_facts(claim: Claim, entry: Any, *, register: str = "cli") -> dict[str, Any]:
     """What a renderer may show about one recorded result (critique 3 of the
     P2.5a design): ``counts`` — the judge counted it (a pass that settles the
-    claim now, or any fail: R-3); ``why`` — why not, in words; ``recorded`` —
-    who and from where. The page paints the ok tone only on ``counts`` and a
-    pass, never on ``passed`` (site.py's rule for verdict rows, now for results
-    too)."""
+    claim now, or any fail: R-3); ``token`` — its `RESULT_TOKENS` entry, the one
+    key a page colours it by; ``why`` — why not, in words; ``recorded`` — who
+    and from where. The page paints the ok tone only on a pass that counts,
+    never on ``passed`` (site.py's rule for verdict rows, now for results too).
+
+    ``register="site"`` (follow-up after phase 3b): the same branches, the same
+    ``counts`` and ``token``, worded by ``HUMAN["site"]["result"]`` for the
+    front page's drawer, with ``word``, the token's site word; `state.json`, the
+    technical record, keeps the CLI's words. One function, so the two pages
+    never disagree on whether a result counts, or on how it looks."""
+    site = register == "site"
     standing = getattr(claim, "standing", None)
     results = list(getattr(claim, "results", ()) or ())
     index = max((i for i, item in enumerate(results) if item == entry), default=None)
@@ -3384,17 +3494,28 @@ def result_facts(claim: Claim, entry: Any) -> dict[str, Any]:
         passing = (_entry(claim, standing.counted)
                    if getattr(standing, "counted", None) is not None else None)
         counts = False
-        why = HUMAN["physical"]["superseded_by"].format(
+        why = (HUMAN["site"]["result"]["superseded"] if site
+               else HUMAN["physical"]["superseded_by"]).format(
             article=article12(getattr(passing, "article", None) or {}))
     elif getattr(entry, "passed", None) is not True:
         counts, why = True, ""
     elif found is None:
-        counts, why = False, HUMAN["not_counted"]["legacy"] if standing is None else ""
+        counts = False
+        why = "" if standing is not None else (_site_not_counted(claim, "legacy") if site
+                                               else HUMAN["not_counted"]["legacy"])
     else:
         counts = bool(found.counts)
-        why = "" if counts else _why_words(claim, found)
+        why = "" if counts else (_site_why_words(claim, found) if site
+                                 else _why_words(claim, found))
+    token = (("pass" if getattr(entry, "passed", None) is True else "fail") if counts
+             else "not-counted")
+    if site:
+        said = HUMAN["site"]["result"]
+        return {"counts": counts, "token": token, "word": HUMAN["site"]["outcome"][token],
+                "why": why, "recorded": _site_recorded(entry),
+                "heading": said["heading_judgment" if _judgment(claim) else "heading_test"]}
     said = HUMAN["physical"]
-    return {"counts": counts, "why": why, "recorded": recorded_words(entry),
+    return {"counts": counts, "token": token, "why": why, "recorded": recorded_words(entry),
             # The block's heading in the page's words (review of P2.5a: a
             # judgment read "A physical result was recorded").
             "heading": said["judgment_recorded" if _judgment(claim) else "result_recorded"]}
@@ -3423,6 +3544,56 @@ def _why_words(claim: Claim, found: Any) -> str:
         return HUMAN["lead"][ClaimCause.ARTICLE_UNJUDGED].format(
             article=article12(found.article))
     return _not_counted(claim, why)
+
+
+def _site_why_words(claim: Claim, found: Any) -> str:
+    """`_why_words`, branch for branch, in the site's words."""
+    said = HUMAN["site"]["result"]
+    why = str(found.why or "")
+    authority = _one(getattr(claim, "authority", ""))
+    article = article12(found.article)
+    if why == "article-moved":
+        if found.moved:
+            return said["moved"].format(article=article,
+                                        moves=verdict_logic._stale_text(found.moved))
+        return said["moved_bare"].format(article=article)
+    if why == "judgment-moved":
+        return said["judgment_moved"].format(authority=authority)
+    if why == "claim-moved" and _judgment(claim):
+        return said["judgment_claim_moved"].format(authority=authority)
+    if why == "claim-moved":
+        return said["claim_moved"].format(article=article)
+    if why == "article-unjudged" and _judgment(claim):
+        return said["judgment_unjudged"].format(authority=authority)
+    if why == "article-unjudged":
+        return said["unjudged"].format(article=article)
+    return _site_not_counted(claim, why)
+
+
+def _site_not_counted(claim: Claim, why: str) -> str:
+    """`_not_counted` in the site's words: the judgment table for an expert
+    judgment, the pass table's key otherwise, the token itself when no table
+    knows it (as the CLI's)."""
+    said = HUMAN["site"]["result"]
+    table = said["judgment_not_counted"] if _judgment(claim) else said["not_counted"]
+    key, _sep, rest = why.partition(":")
+    template = table.get(key) or said["not_counted"].get(key) or why
+    return template.format(path=rest, authority=_one(getattr(claim, "authority", "")))
+
+
+def _site_recorded(entry: Any) -> str:
+    """`recorded_words` in the site's words: who recorded a result, and from
+    where when that is not their own shell."""
+    said = HUMAN["site"]["result"]
+    name = _one(getattr(entry, "who", "")) if entry is not None else ""
+    channel = str(getattr(entry, "channel", "") or "") if entry is not None else ""
+    if not name:
+        return said["recorded_none"]
+    if channel.startswith("agent-session"):
+        return said["recorded_agent"].format(who=name)
+    if channel == "non-interactive":
+        return said["recorded_pipe"].format(who=name)
+    return said["recorded"].format(who=name)
 
 
 def status_view(composed: Any, ledger: Ledger, claim: Claim, *,
@@ -3879,7 +4050,8 @@ def milestone_line(ledger: Ledger, composed: Mapping[str, Any], milestone: Any) 
         stale_ids=f" ({_ids(stale)})" if stale else "", rest=tail)
 
 
-def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
+def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any], *,
+                     register: str = "cli") -> list[str]:
     """The readiness sentence's hardware clause (W13), in EVERY branch, ready
     included: `Pending build: N claims need an article (ids)` when any does —
     naming apart those with a pass that does not count — then one `Rebuild
@@ -3891,22 +4063,35 @@ def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
     a design change had made obsolete — they were a heading below. *Rejected:*
     dropping the clause where no physical claim exists (that design is the one
     most easily read as built); "It is unverified in physical hardware"
-    (GLOSSARY §9: *unverified* is Pending build's Never-say)."""
+    (GLOSSARY §9: *unverified* is Pending build's Never-say).
+
+    ``register="site"`` (follow-up after phase 3b): the same three clauses,
+    from the same lists, in ``HUMAN["site"]["readiness"]``'s words: a built
+    part where the CLI says an article. What slipped through: phase 5 left
+    this clause shared, since it passed the style scan, and the page said "1
+    claim needs an article" to a reader who had never met the word."""
     status_of = {cid: c.status for cid, c in composed.items()}
+    site = register == "site"
+    said = HUMAN["site"]["readiness"] if site else HUMAN["readiness"]
     parts: list[str] = []
     pending = [c for c in ledger.claims if status_of.get(c.id) is ClaimStatus.UNVERIFIED]
     if pending:
         recorded = [c for c in pending if composed[c.id].cause is ClaimCause.PHYSICAL_PASS]
-        text = (f"{words(ClaimStatus.UNVERIFIED).term}: {len(pending)}"
-                f" {_plural(len(pending), 'claim')}"
-                f" {_plural(len(pending), 'needs', 'need')} an article ({_ids(pending)})")
+        if site:
+            text = said["pending"].format(Pending=words(ClaimStatus.UNVERIFIED).term,
+                                          n=len(pending), claims=_plural(len(pending), "claim"),
+                                          need=_plural(len(pending), "needs", "need"),
+                                          ids=_ids(pending))
+        else:
+            text = (f"{words(ClaimStatus.UNVERIFIED).term}: {len(pending)}"
+                    f" {_plural(len(pending), 'claim')}"
+                    f" {_plural(len(pending), 'needs', 'need')} an article ({_ids(pending)})")
         if recorded:
             text += "; " + HUMAN["physical"]["unbound"].format(
                 ids=_ids(recorded), has=_plural(len(recorded), "has", "have"))
         parts.append(text + ".")
-    said = HUMAN["readiness"]
     for found in claim_logic.rebuild(ledger):
-        parts.append(said["rebuild"].format(
+        parts.append(site_rebuild_text(found) if site else said["rebuild"].format(
             article=article12(found.article), claims=", ".join(found.claims),
             moves=verdict_logic._stale_text(found.moved) if found.moved
             else "the design moved"))
@@ -3917,6 +4102,17 @@ def _hardware_clause(ledger: Ledger, composed: Mapping[str, Any]) -> list[str]:
                  if on_article else said["none_on_article"].format(
                      checked=word(ClaimStatus.PASS)))
     return parts
+
+
+def site_rebuild_text(found: Any) -> str:
+    """One part to build again, in the site's words (`claims.rebuild`'s row):
+    the readiness sentence's clause and next steps' row both say this, so the
+    page never names one part two ways."""
+    said = HUMAN["site"]
+    values = {"article": article12(found.article), "claims": ", ".join(found.claims)}
+    if found.moved:
+        return said["rebuild"].format(moves=verdict_logic._stale_text(found.moved), **values)
+    return said["rebuild_bare"].format(**values)
 
 
 def limits_line(ledger: Ledger, register: str = "cli") -> str:
@@ -4139,11 +4335,12 @@ def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *
     total = len(ledger.claims)
     checked = word(ClaimStatus.PASS)
     if total == 0:
-        return " ".join([said["no_claims"].format(rev=rev), *_hardware_clause(ledger, composed)])
+        return " ".join([said["no_claims"].format(rev=rev),
+                         *_hardware_clause(ledger, composed, register="site")])
     if milestone is not None:
         return " ".join([_milestone_sentence(ledger, composed, milestone, rev, lambda t: t,
                                              boundary=boundary, register="site"),
-                         *_hardware_clause(ledger, composed)])
+                         *_hardware_clause(ledger, composed, register="site")])
     found = readiness(ledger, composed)
     status_of = {cid: c.status for cid, c in composed.items()}
     n_checked = sum(1 for st in status_of.values()
@@ -4176,7 +4373,7 @@ def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *
     if unrun and ledger.verdicts:
         parts.append(said["unrun"].format(n=len(unrun),
                                           evaluators=_plural(len(unrun), "evaluator")))
-    parts += _hardware_clause(ledger, composed)
+    parts += _hardware_clause(ledger, composed, register="site")
     return " ".join(parts)
 
 
@@ -5803,6 +6000,7 @@ __all__ = [
     "StatusWords",
     "STATUS_TAG",
     "SECTION_PROVEN",
+    "RESULT_TOKENS",
     "JUNIT_DEFAULT",
     "RATIONALE_UNKNOWN",
     "words",
