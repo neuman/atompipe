@@ -1,40 +1,30 @@
 # nopekit
 
-<img src="docs/img/nopey.png" width="360" alt="Nopey the honey badger, nopekit's mascot: goggles, a tool belt, a wrench and a red toolbox">
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/nopey.png">
+  <img src="docs/img/nopey-transparent.png" width="360" alt="Nopey the honey badger, nopekit's mascot: goggles, a tool belt, a wrench and a red toolbox">
+</picture>
+</p>
 
-A framework for **grounding by falsification**: propose candidates as fast as you
-like, and keep an honest account of which claims about them have survived an
-evaluator that could have rejected them — and which have not.
+**A Claude Code plugin for building real things with an AI agent, without fooling yourself.**
 
-nopekit implements the grounded design state described in the paper
-[*Grounding by Falsification*](grounding_by_falsification.pdf): the claims a candidate
-must satisfy, the evaluators that can falsify them, and the provenance and current
-validity of every verdict. A generator, human or model, can propose anything, but it
-cannot settle a claim by asserting it. A claim is checked only when an evaluator that
-has shown it can fail has run against the current inputs, and a change to those inputs
-makes exactly the verdicts that read them stale.
+You say what you want to make. The agent asks you about it, designs it, and checks
+every claim about the design with a test that has shown it can fail. A live page shows
+what is checked, what fails and what is still only assumed, and why.
 
-It works in any domain where a claim can be stated and an evaluator can be written: an
-analysis, a model, a process, a codebase, a physical product. Physical design is where
-it was first proven, and where its bundled packs live today: a product taken from a
-napkin sketch to manufacturable outputs, working firmware and a published readiness
-report, across dozens of revisions ([origins](docs/ORIGINS.md)). That is where
-evaluators are slowest and most expensive, and where an honest line between evidence
-and assumption pays the most.
+<p align="center">
+<img src="docs/img/site-example.png" width="900" alt="A page nopekit built for a 3D-printed drone: a 3D model with an explode slider, the verdict, and the grounding map below it">
+</p>
 
-The hard part is never the domain. It is knowing which of your claims have actually
-been checked.
+*A page nopekit built for a 3D-printed drone. The design is at the top, then the
+grounding map: each line is one claim, and it runs from the choices it depends on,
+through the values they feed, to the check that settles it. An amber line passes only
+if an estimate holds.*
 
-```
-requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
-```
-
-A **requirement** is what the person asked for, in their words; each claim names the
-requirements it serves. A **claim** is something that must be true for a candidate to
-be accepted. A **gate**
-is an evaluator that settles a claim *and is capable of failing*. A **pack** supplies
-gates for one domain. The **readiness report** is the claims and their verdicts
-rendered: what is checked, what is not, and why.
+> **Early preview.** It works today for small physical projects: 3D printing, simple
+> mechanics, heat, fluids and parts lists. Windows is untested. Installing packs from
+> other people's repositories, and sending pack scores back, come next.
 
 ## Install
 
@@ -44,6 +34,9 @@ rendered: what is checked, what is not, and why.
 /plugin marketplace add neuman/nopekit
 /plugin install nopekit
 ```
+
+It needs Python 3.10 or newer on your PATH as `python3`; nothing else installs. For
+the mesh checks (3D printing, solid parts), also run `pip install trimesh numpy`.
 
 ### Your first session
 
@@ -95,6 +88,42 @@ from the cache and reads the same answer the author saw.
 Nothing heavy installs until a claim needs it and you have said yes. The two packs
 that want `trimesh` report their claims as **Skipped** — visibly — when it is absent,
 rather than quietly passing.
+
+## The idea
+
+A framework for **grounding by falsification**: propose candidates as fast as you
+like, and keep an honest account of which claims about them have survived an
+evaluator that could have rejected them — and which have not.
+
+nopekit implements the grounded design state described in the paper
+[*Grounding by Falsification*](grounding_by_falsification.pdf): the claims a candidate
+must satisfy, the evaluators that can falsify them, and the provenance and current
+validity of every verdict. A generator, human or model, can propose anything, but it
+cannot settle a claim by asserting it. A claim is checked only when an evaluator that
+has shown it can fail has run against the current inputs, and a change to those inputs
+makes exactly the verdicts that read them stale.
+
+It works in any domain where a claim can be stated and an evaluator can be written: an
+analysis, a model, a process, a codebase, a physical product. Physical design is where
+it was first proven, and where its bundled packs live today: a product taken from a
+napkin sketch to manufacturable outputs, working firmware and a published readiness
+report, across dozens of revisions ([origins](docs/ORIGINS.md)). That is where
+evaluators are slowest and most expensive, and where an honest line between evidence
+and assumption pays the most.
+
+The hard part is never the domain. It is knowing which of your claims have actually
+been checked.
+
+```
+requirements  ->  claims  ->  gates  ->  packs  ->  readiness report
+```
+
+A **requirement** is what the person asked for, in their words; each claim names the
+requirements it serves. A **claim** is something that must be true for a candidate to
+be accepted. A **gate**
+is an evaluator that settles a claim *and is capable of failing*. A **pack** supplies
+gates for one domain. The **readiness report** is the claims and their verdicts
+rendered: what is checked, what is not, and why.
 
 ## What using it looks like
 
