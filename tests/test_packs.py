@@ -828,15 +828,19 @@ EDGES: dict[str, list[tuple[str, str]]] = {
     "openmodelica": [("modelica.result_claim", "modelica.solution_valid"),
                      ("modelica.mirror_agrees", "modelica.solution_valid"),
                      ("modelica.simulates", "modelica.compiles")],
+    # The reader's guard before the two gates that read the board with it; KiCad's
+    # own gates read the file themselves and need none.
+    "pcb-kicad": [(d, "pcb.board_readable") for d in ("pcb.pin_names", "pcb.net_width")],
 }
 BRACKET_EDGES = [("bracket.deflection", "bracket.model_validity"),
                  ("bracket.bending_stress", "bracket.model_validity")]
 
 #: Edges whose pair needs no third-party tool: the floor the isolation test
 #: checks on any machine, CI without trimesh or omc included — beam 7, fdm 6,
-#: fluids 2, sourcing 2 (20 until the review of P2.2 dropped three of
-#: sourcing's: ``AGuardFailureNeverHidesAnIndependentFail``).
-_EDGE_FLOOR = 17
+#: fluids 2, sourcing 2, pcb 2 (20 until the review of P2.2 dropped three of
+#: sourcing's: ``AGuardFailureNeverHidesAnIndependentFail``; pcb-kicad's two
+#: tier-0 edges joined with the pack).
+_EDGE_FLOOR = 19
 
 #: A pair that is NOT isolated, measured (P2.2's isolation probe): beam's
 #: ``shear_governed`` control is L/h 6.0, where Euler-Bernoulli omits about 32%
@@ -1243,7 +1247,7 @@ class ControlsAreIsolated(unittest.TestCase):
             if edges:
                 declared[name] = sorted(edges)
         self.assertEqual(declared, {name: sorted(e) for name, e in EDGES.items()})
-        self.assertEqual(sum(len(e) for e in declared.values()), 23)
+        self.assertEqual(sum(len(e) for e in declared.values()), 25)
         registry = gates_mod.Registry()
         gates_mod.load_project_gates(os.path.join(REPO, "examples", "bracket"), registry)
         self.assertEqual(sorted(_declared_edges(registry)), sorted(BRACKET_EDGES))

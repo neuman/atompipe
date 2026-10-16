@@ -1630,6 +1630,37 @@ person's request; three findings), decided while fixing them:
   and is the full suite's. One pair at load 0.9-1.3: 121.6 s wall against 123.5 s for
   a6c5f22 (`tests/fast.py`).
 
+**The pcb-kicad pack** (2026-10-16, the eighth bundled pack), decided while building
+it:
+
+- **Bases**: `pcb.drc` and `pcb.unconnected` `established` (the verdict is
+  `kicad-cli pcb drc`'s exit code and its report's count); `pcb.pin_names` and
+  `pcb.net_width` `sourced` (KiCad's library pin names, copied onto the board's pads as
+  `pinfunction`; IPC-2221's heating fit); `pcb.board_readable` `model-only` (the pack's
+  own reader judging its own reach).
+- **The tier-0 half reads KiCad's files with a standard-library reader**
+  (`gates/_kicad.py`), not with KiCad's `pcbnew` module: `pcbnew` opens the board in
+  C++, where the trace sees no read, so a verdict would be keyed on nothing. Its gates
+  run in CI. *Rejected:* `pcb.net_width` as a `.kicad_dru` width rule that DRC
+  enforces (established, but opaque, tier 1 and absent from CI).
+- **The tier-1 half is opaque** (`subprocess:kicad-cli`): it runs on a copy staged under
+  the gate's out directory, so kicad-cli writes nothing in the project and the copy
+  keys the board, its `.kicad_pro` and its `.kicad_dru`. `pcb.drc` runs every severity
+  by default; a waiver is KiCad's own exclusion in the `.kicad_pro`. An exit code that
+  disagrees with the report is an error.
+- **`pcb.board_readable` is the guard** of the two tier-0 analyses: a file older than
+  KiCad 6 or newer than KiCad 9's format, or a track naming a net code the table does
+  not define, is a board whose nets the reader may misattribute. `test_packs.EDGES`
+  gains the two edges (25), and the tool-free floor rises to 19.
+- **The known-bad boards are generated at fixture time** from the committed baseline,
+  one change each, by the pack's own reader, under the caller's `out_dir`;
+  `narrow_power` derives its width from the baseline's own limit. The baseline board
+  itself is committed, with `selftest/assets/make_baseline.py` recording how `pcbnew`
+  made it from KiCad's stock libraries.
+- **The bundled mutation walk** gains five gates (59): `pcb.net_width` with a conclusive
+  mutation (35 in all), and the four that report 0 against 0, or no value, with no
+  boundary (21). No mutation passes any of them.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

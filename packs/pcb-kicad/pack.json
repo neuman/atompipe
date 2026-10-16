@@ -1,0 +1,64 @@
+{
+  "name": "pcb-kicad",
+  "version": "0.1.0",
+  "description": "Checks a KiCad printed circuit board: KiCad's own design rule check and connectivity, library pin names against nets, and trace heating per IPC-2221.",
+  "settles": [
+    "design rule violations",
+    "pcb design rule check",
+    "drc",
+    "clearance violation",
+    "silkscreen clipped by the board edge",
+    "unconnected items",
+    "unrouted net",
+    "open net",
+    "library pin-name agreement",
+    "pin map",
+    "pins shorted through a part",
+    "esd array wiring",
+    "trace temperature rise",
+    "trace width for current",
+    "current capacity of a track",
+    "board file readability"
+  ],
+  "claim_classes": [
+    "pcb",
+    "printed-circuit-board",
+    "electronics",
+    "design-rules",
+    "connectivity",
+    "netlist",
+    "pin-map",
+    "short-circuit",
+    "trace-width",
+    "current-capacity",
+    "power-integrity",
+    "manufacturability",
+    "clearance"
+  ],
+  "provides_gates": [
+    "pcb.board_readable",
+    "pcb.pin_names",
+    "pcb.net_width",
+    "pcb.drc",
+    "pcb.unconnected"
+  ],
+  "provides_generators": [],
+  "requires_tools": [
+    "kicad-cli"
+  ],
+  "requires_python": [],
+  "max_tier": 1,
+  "lenses": [
+    "what a design rule check cannot see",
+    "pins the part joins inside",
+    "a width nobody asked for",
+    "warnings the gate never read",
+    "the waiver nobody named",
+    "a connector that fits the wrong cable",
+    "parts not in the library"
+  ],
+  "authors": [],
+  "licence": "Apache-2.0",
+  "origin": "extracted from an autonomous board pipeline that generated, routed and DRC-checked two 4-layer boards headlessly; its chat logs and history showed which checks caught real defects and which passed defects a person later found. The KiCad knowledge is generic (file format, kicad-cli, the stock libraries); no project's design came with it.",
+  "basis": "established"
+}

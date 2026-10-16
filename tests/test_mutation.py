@@ -2323,9 +2323,9 @@ class MutationIsSealed(_env.EnvCase):
 class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     """(C12, R-4's detector for the mutation clause) The restated aimed walk
     over every bundled pack gate on its own baseline: no conclusive mutation
-    passes an honest bundled gate — measured 34 gates with a conclusive
-    mutation, 3 walked with none, 17 with no boundary (a value exactly at its
-    limit, mostly a defect count 0 against 0) where trimesh, numpy and omc are
+    passes an honest bundled gate — measured 35 gates with a conclusive
+    mutation, 3 walked with none, 21 with no boundary (a value exactly at its
+    limit, mostly a defect count 0 against 0) where trimesh, numpy, omc and kicad-cli are
     present — and the planted drifted-limit gate is one hit. Full suite only
     (~12 s): the refusal it licenses is held in the fast tier by V2."""
 
@@ -2356,10 +2356,10 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
                     if run[0] == "pass":
                         passes.append(f"{spec.id}: {w.key} -> {after!r}")
         self.assertEqual(passes, [])
-        self.assertEqual(sum(kinds.values()) + unavailable, 54, kinds)
+        self.assertEqual(sum(kinds.values()) + unavailable, 59, kinds)
         if not unavailable:
-            self.assertEqual(dict(kinds), {"conclusive": 34, "none-conclusive": 3,
-                                           "no-boundary": 17})
+            self.assertEqual(dict(kinds), {"conclusive": 35, "none-conclusive": 3,
+                                           "no-boundary": 21})
 
     def test_the_planted_drifted_limit_is_one_hit(self):
         spec = GateSpec(id="beam.drifted", claims=["x"], tier=Tier.INSTANT,

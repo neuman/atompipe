@@ -215,7 +215,7 @@ The example includes a deliberately failing check. That's intentional: a useful 
 
 ## Packs and how far to trust them
 
-A **pack** adds checks for one domain. Nopekit ships seven. A pack can hold two kinds of tool:
+A **pack** adds checks for one domain. Nopekit ships eight. A pack can hold two kinds of tool:
 
 - **Gates** (falsifiers) evaluate a claim and can say "nope". Every bundled gate is **qualified**: it passes a known-good input and fails a known-bad one, and CI re-runs both controls on every change, so a gate that cannot fail does not ship. A gate from anywhere else, such as one the agent writes for your project, must also fail each time one of its inputs is pushed past its limit.
 - **Proposers** suggest options or evidence, such as a parts search or a slicer's estimate. A proposal settles nothing; it becomes an input that a gate can then check. No bundled pack ships a proposer yet. The [pack format](docs/PACK_FORMAT.md#proposers) describes how to add one.
@@ -237,6 +237,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 | `fdm-print` | Validates that a part is printable on a filament machine: bed fit with brim, wall thickness, overhang, bridge span, layer-direction loading and print time. | 7 | 7 model-only | trimesh, numpy (mesh gates) |
 | `fluids-analytic` | Closed-form hydrostatics, stability, drag and pipe flow: the analytic answer for boats, floats, ducts and piping, before anyone installs a CFD solver. | 7 | 7 sourced | nothing |
 | `openmodelica` | Validates a Modelica model and the runs recorded from it: parameter units, claim/variable drift, result validity, extracted values, mirror agreement, and equation balance under omc. | 8 | 4 established, 4 model-only | OpenModelica (`omc`) for its three solver gates |
+| `pcb-kicad` | Checks a KiCad printed circuit board: KiCad's own design rule check and connectivity, library pin names against nets, and trace heating per IPC-2221. | 5 | 2 established, 2 sourced, 1 model-only | KiCad 9 (`kicad-cli`) for its two DRC gates |
 | `sourcing` | Checks a project's BOM offline: every line orderable and priced in one convertible currency, rolled-up cost vs budget, lead times, MOQ overbuy, vendor process rules, single-source risk. | 7 | 1 sourced, 6 model-only | nothing |
 | `thermal-analytic` | Closed-form heat transfer and solar: conduction networks, convection correlations, radiation, fins, steady-state and lumped transient temperature, flat-plate collectors, clear-sky irradiance. | 10 | 9 sourced, 1 model-only | nothing |
 
@@ -314,6 +315,19 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 | `modelica.simulates` | simulate() runs to stopTime, fires no assert, and writes a result (needs omc) | established |
 | `modelica.solution_valid` | The recorded run finished, stayed finite, and produced the variables claimed | model-only |
 | `modelica.source_hygiene` | Every parameter declaration carries a description, and a physical one a unit | model-only |
+
+</details>
+
+<details>
+<summary><code>pcb-kicad</code>: 5 gates</summary>
+
+| Gate | What it checks | Basis |
+|---|---|---|
+| `pcb.board_readable` | The board is a KiCad file this pack's reader knows | model-only |
+| `pcb.drc` | KiCad's design rule check finds nothing, at every severity (needs kicad-cli) | established |
+| `pcb.net_width` | Each current-carrying net's narrowest track stays inside its heating limit | sourced |
+| `pcb.pin_names` | Pins the library gives one name carry one net | sourced |
+| `pcb.unconnected` | Every connection the netlist asks for is made in copper (needs kicad-cli) | established |
 
 </details>
 
