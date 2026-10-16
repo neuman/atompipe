@@ -157,6 +157,7 @@ import fnmatch
 import importlib
 import importlib.machinery
 import importlib.util
+import inspect
 import numbers
 import copy
 import os
@@ -1555,7 +1556,10 @@ def gate(
             f"needs=[{needs!r}]")
 
     def decorate(fn: Callable[[GateContext], Any]) -> Callable[[GateContext], Any]:
-        doc = (fn.__doc__ or "").strip()
+        # cleandoc, not strip: from 3.13 the compiler dedents a docstring itself,
+        # so the raw text had one shape per Python. What slipped through (CI on
+        # 3.13, 2026-10-16): `gate show` printed the body flush left there.
+        doc = inspect.cleandoc(fn.__doc__ or "")
         doc_title, _, doc_rest = doc.partition("\n")
 
         module = sys.modules.get(getattr(fn, "__module__", "") or "")

@@ -94,9 +94,12 @@ def milestone_cls() -> Any:
 
 def captured(argv: list[str], *, stdin: str | None = None) -> tuple[int, str, str]:
     """``nopekit <argv>`` in THIS process (so a test can patch the spine):
-    ``(exit code, stdout, stderr)``."""
+    ``(exit code, stdout, stderr)``. With ``_env.IDENTITY``, as ``P.run`` gives
+    a child by default: `export` refuses without one, and these rows test
+    something else."""
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+            mock.patch.dict(os.environ, _env.IDENTITY):
         if stdin is not None:
             with mock.patch.object(sys, "stdin", io.StringIO(stdin)):
                 code = cli_mod.main(argv)

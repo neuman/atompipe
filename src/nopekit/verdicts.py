@@ -2750,6 +2750,19 @@ def _install_stat_probes() -> None:
             if isinstance(known, set) and original in known:
                 known.add(probe)
         setattr(os, name, probe)
+    # Python 3.10's pathlib asks through ``_NormalAccessor``, whose ``stat`` and
+    # ``lstat`` are class attributes bound to the originals when pathlib was
+    # imported — before the spine. What slipped through (CI on 3.10, 2026-10-16):
+    # ``Path.exists``/``is_file``/``is_dir``/``stat`` recorded nothing, so a PASS
+    # that decided on ``Path(p).exists()`` stayed Fresh after ``p`` appeared.
+    # 3.11 dropped the accessor and looks ``os.stat`` up at call time.
+    accessor = getattr(sys.modules.get("pathlib"), "_NormalAccessor", None)
+    for name in _STAT_FUNCTIONS if accessor is not None else ():
+        original = accessor.__dict__.get(name)
+        if original is not None and not getattr(original, "__nopekit_probe__", False):
+            # staticmethod: a probe is a Python function, and on a class it would
+            # bind the accessor as the path.
+            setattr(accessor, name, staticmethod(getattr(os, name)))
     for name in _STAT_PREDICATES:
         original = getattr(os.path, name, None)
         if (original is None or not isinstance(original, type(len))

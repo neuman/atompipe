@@ -4960,7 +4960,7 @@ def cmd_gate_show(args: argparse.Namespace) -> int:
 
     _say(gates.describe(spec))
     if spec.description:
-        _say(f"  {spec.description}")
+        _say(textwrap.indent(spec.description, "  "))
     _say(f"  tier {int(spec.tier)}  pack {spec.pack or '(project)'}  "
          f"basis {gates.basis_of(spec)}  entry {spec.entry}")
     _say(f"  claims: {', '.join(spec.claims) or '(none — this gate settles nothing)'}")

@@ -44,6 +44,12 @@ What a child gets, and why each line:
   this process too, at import, for the in-process `cli.main` rows; a test that
   wants the background start passes ``env={"NOPEKIT_TRACE_BACKGROUND": None}``.
 
+* The git lines above hold in this process too, at import: every ``GIT_*`` and
+  ``EMAIL`` stripped, ``GIT_CONFIG_GLOBAL=/dev/null``, ``GIT_CONFIG_NOSYSTEM=1``.
+  What slipped through: the in-process `cli.main` rows read the developer's
+  ``~/.gitconfig``, so four `export` rows that never asked for an identity had
+  one here and none on the runner — green on this box, red on CI for 11 days.
+
 Anything in ``env=`` is applied last and wins, so a test that WANTS one of the
 stripped variables passes it explicitly; a value of ``None`` removes a key.
 
@@ -67,6 +73,10 @@ from typing import Any, Mapping, Sequence
 #: nopekit's: "0" keeps `round` from starting a detached trace in any test.
 TRACE_BACKGROUND = "NOPEKIT_TRACE_BACKGROUND"
 os.environ.setdefault(TRACE_BACKGROUND, "0")
+for _key in [k for k in os.environ if k.startswith("GIT_") or k == "EMAIL"]:
+    del os.environ[_key]
+os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(REPO, "src")

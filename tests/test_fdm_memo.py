@@ -87,7 +87,12 @@ class FdmReadsAreRecorded(_env.EnvCase):
             # The CI-like run hides trimesh: the outcome to assert is the
             # availability skip, never a quiet pass and never a skipped test.
             verdicts, _traces, memo = self._sweep({})
-            self.assertEqual(sorted(verdicts), sorted(MESH_GATES))
+            # The sweep runs each gate's prerequisites too (P2.2): this branch
+            # still asserted the pre-P2.2 set, and only a machine with no trimesh
+            # takes it — so it went red on CI alone.
+            needs = {need for gate_id in MESH_GATES
+                     for need in self.registry.get(gate_id)[0].needs}
+            self.assertEqual(sorted(verdicts), sorted({*MESH_GATES, *needs}))
             for gate_id in MESH_GATES:
                 verdict = verdicts[gate_id]
                 self.assertTrue(verdict.skipped and not verdict.passed, verdict.render())
