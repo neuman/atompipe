@@ -1245,15 +1245,17 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
                                        _read(SITE_CONTRACT)), [])
 
 
-def readme_layout_problems(readme: str) -> list[str]:
-    """Every record directory (`store.RECORD_DIRS`) README's "Where the facts
-    live" layout does not name as `<dir>/`. What slipped through (review of
+def layout_problems(doc: str) -> list[str]:
+    """Every record directory (`store.RECORD_DIRS`) CLAUDE.md's "Where facts
+    live" does not name as `<dir>/`. What slipped through (review of
     architecture phase 1): README opened its chain with requirements, and its
-    layout named no `requirements/`."""
+    layout named no `requirements/`. README has kept no layout since its
+    rewrite for a first-time reader (2026-10-16); the layout a contributor
+    reads is CLAUDE.md's, so the check follows it there."""
     from nopekit import store
-    block = readme.split("## Where the facts live", 1)[1].split("```", 2)[1]
-    named = set(re.findall(r"(?<![\w./-])([a-z_]+)/", block))
-    return [f"README's layout names no {d}/" for d in store.RECORD_DIRS if d not in named]
+    section = doc.split("## Where facts live", 1)[1].split("\n## ", 1)[0]
+    named = set(re.findall(r"(?<![\w./-])([a-z_]+)/", section))
+    return [f"the layout names no {d}/" for d in store.RECORD_DIRS if d not in named]
 
 
 def terminal_problems(contract: str) -> list[str]:
@@ -1271,15 +1273,15 @@ def terminal_problems(contract: str) -> list[str]:
 
 
 class TheLayoutAndTheRowsAgree(unittest.TestCase):
-    """README's record layout names every record directory, and SITE_CONTRACT's
+    """CLAUDE.md's record layout names every record directory, and SITE_CONTRACT's
     claim row shows `terminal` and `mechanism.by` as the one field they are."""
 
-    def test_the_readme_names_every_record_directory(self):
-        readme = _read(os.path.join(REPO, "README.md"))
-        self.assertEqual(readme_layout_problems(readme), [])
-        planted = readme.replace("requirements/R1.json", "claims/R1.json")
-        self.assertEqual(readme_layout_problems(planted),
-                         ["README's layout names no requirements/"])
+    def test_the_layout_names_every_record_directory(self):
+        doc = _read(os.path.join(REPO, "CLAUDE.md"))
+        self.assertEqual(layout_problems(doc), [])
+        planted = doc.replace("`requirements/<id>.json`", "`claims/<id>.json`")
+        self.assertNotEqual(planted, doc)
+        self.assertEqual(layout_problems(planted), ["the layout names no requirements/"])
 
     def test_the_contract_shows_one_terminal(self):
         contract = _read(SITE_CONTRACT)

@@ -409,11 +409,12 @@ def scan(channel: str, lines: list[str], banned: set[str], masks: list[str],
 
 
 def readme_status_lines() -> list[str]:
-    """README's "Why you should believe the output", line by line: where it
-    defines the statuses for a reader."""
+    """README's status table ("Run checks and read the results"), line by line:
+    where it defines the statuses for a reader. (It was "Why you should believe
+    the output" until README's rewrite on 2026-10-16.)"""
     with open(os.path.join(_env.REPO, "README.md"), encoding="utf-8") as fh:
         text = fh.read()
-    section = text.split("## Why you should believe the output", 1)[1].split("\n## ", 1)[0]
+    section = text.split("### 4. Run checks and read the results", 1)[1].split("\n### ", 1)[0]
     return [ln for ln in section.splitlines() if ln.strip()]
 
 
