@@ -401,12 +401,18 @@ def _helps() -> dict[str, str]:
 
 
 def _tables() -> dict[str, str]:
+    """Each command table's row for `gap` and `why`: a code-block row (the
+    command, then its words after two spaces or a `#`) or a markdown row
+    (`` | `nopekit gap` | words | ``). What slipped through (README's rewrite,
+    2026-10-16): only the code-block form was read, so the new markdown table
+    went unread and a bare example line (`nopekit why thickness`) stood in."""
     out = {}
     for rel in ("README.md", "skills/nopekit/SKILL.md"):
         with open(os.path.join(_env.REPO, *rel.split("/")), encoding="utf-8") as fh:
             for line in fh:
                 for cmd in ("gap", "why"):
-                    if re.match(rf"^nopekit {cmd}\b", line):
+                    if (re.match(rf"^\| `nopekit {cmd}\b", line)
+                            or re.match(rf"^nopekit {cmd}\b.*?(\s{{2,}}|#)\S", line)):
                         out[f"{rel} {cmd}"] = line.strip()
     return out
 
