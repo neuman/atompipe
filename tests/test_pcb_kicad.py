@@ -185,7 +185,7 @@ class TheFabCountsOnlyItsOwnFindings(unittest.TestCase):
         self.registry = _registry()
         self.params = _baseline()
 
-    def _fab(self, violations: list, board: str = BOARD):
+    def _fab(self, violations: list, board: str = BOARD, *, runs: int = 1):
         report = os.path.join(self.dir, "report.json")
         with open(report, "w", encoding="utf-8") as fh:
             json.dump({"$schema": "https://schemas.kicad.org/drc.v1.json",
@@ -204,11 +204,15 @@ class TheFabCountsOnlyItsOwnFindings(unittest.TestCase):
         params = dict(self.params, pcb_board=board)
         with mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + os.environ["PATH"]}):
             verdict = _run(self.registry, "pcb.fab_rules", self.dir, params)
-        with open(self.calls, encoding="utf-8") as fh:
-            # A stand-in that never ran (a noexec temp dir) skips the gate for the
-            # wrong reason; the count keeps that from reading as the fix working.
-            self.assertEqual(len(fh.read()), 1, "the stand-in kicad-cli was not the one launched")
-        os.remove(self.calls)
+        # A stand-in that never ran (a noexec temp dir) skips the gate for the
+        # wrong reason; the count keeps that from reading as the fix working.
+        ran = 0
+        if os.path.exists(self.calls):
+            with open(self.calls, encoding="utf-8") as fh:
+                ran = len(fh.read())
+            os.remove(self.calls)
+        self.assertEqual(ran, runs, "the stand-in kicad-cli was not launched as many times "
+                                    "as the case expects")
         return verdict
 
     def test_silk_on_silk_is_pcb_drcs(self):
@@ -375,8 +379,11 @@ class TheFabCountsOnlyItsOwnFindings(unittest.TestCase):
                 with open(os.path.join(self.dir, name + ".kicad_pro"), "w",
                           encoding="utf-8") as fh:
                     fh.write(written)
-                verdict = _run(self.registry, "pcb.fab_rules", self.dir,
-                               dict(self.params, pcb_board=board))
+                # Through the stand-in, which must never be launched: the gate
+                # errors before kicad-cli runs. (What slipped through: called
+                # without it, this case skipped for the missing tool on CI, where
+                # no kicad-cli is installed, and passed only where one was.)
+                verdict = self._fab([], board=board, runs=0)
                 self.assertEqual(verdict.outcome, "error", verdict.render())
                 self.assertIn("a value KiCad cannot read", verdict.error)
 
