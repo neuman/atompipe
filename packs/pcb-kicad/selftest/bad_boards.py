@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Known-bad fixtures for pcb-kicad. One physical change each, to the baseline board.
+"""Known-bad fixtures for pcb-kicad. One change each, to the baseline board or to
+its schematic.
 
 `nopekit gate selftest` requires every gate to FAIL here. A gate that passes its
 own fixture is broken, and a green verdict from it means nothing.
 
 **Sealed.** Every fixture starts from this pack's own ``selftest/baseline.json``
-and ``selftest/assets/esd_guard.kicad_pcb``, never from the host's projection or
-the host's board, and hands the gate an empty ledger. A control whose severity
+and ``selftest/assets/esd_guard.*``, never from the host's projection or the
+host's board, and hands the gate an empty ledger. A control whose severity
 depended on the host's board would fire in some projects and not in others.
 
-**Generated, from the limit the gate judges by.** Each bad board is the baseline
-board parsed by the pack's own reader, one thing changed, and written back under
-the CALLER's ``out_dir`` (``<out_dir>/pcb-kicad/known-bad/<fixture>/``), with the
-baseline's project file beside it so KiCad applies the same rules. Never into this
+**Generated, from the limit the gate judges by.** Each bad project is the baseline
+board or schematic parsed by the pack's own reader, one thing changed, and written
+back under the CALLER's ``out_dir`` (``<out_dir>/pcb-kicad/known-bad/<fixture>/``),
+with the baseline's other files beside it so KiCad applies the same rules. Never into this
 directory: a fixture that writes into the pack it is proving makes the proof
 depend on whether the pack is writable. ``narrow_power`` derives its width from
 the baseline's own rise limit and current with the gate's own formula, so lifting
@@ -37,7 +38,7 @@ K = load_path(os.path.join(_PACK_DIR, "gates", "_kicad.py"))
 #: pass uses, so the control does not sit on the rounding of the verdict.
 MARGIN = 1.15
 
-_PATH_KEYS = ("pcb_board",)
+_PATH_KEYS = ("pcb_board", "pcb_spice_deck", "pcb_enclosure_step")
 
 
 def _baseline() -> dict:
@@ -51,19 +52,34 @@ def _baseline() -> dict:
     return params
 
 
-def _variant(ctx, name: str, edit) -> object:
-    """A context whose board is the baseline board after ``edit(tree)``."""
+#: The baseline project's library tables, copied beside every variant with its
+#: project file, so KiCad reads the same rules, exclusions and libraries.
+_DIR_FILES = ("sym-lib-table", "fp-lib-table")
+
+
+def _variant(ctx, name: str, edit=None, *, schematic=None) -> object:
+    """A context whose project is the baseline's with ``edit(tree, params)``
+    applied to its board and ``schematic(tree, params)`` to its schematic; every
+    file neither touches is copied as it is."""
     params = _baseline()
     src = params["pcb_board"]
-    tree = K.load_tree(src)
-    edit(tree, params)
-    stem = os.path.basename(src)[:-len(".kicad_pcb")]
+    src_stem = src[:-len(".kicad_pcb")]
+    stem = os.path.basename(src_stem)
     board = ctx.out_path("pcb-kicad", "known-bad", name, stem + ".kicad_pcb")
     stage = os.path.dirname(board)
-    with open(board, "w", encoding="utf-8") as fh:
-        fh.write(K.dump(tree) + "\n")
-    shutil.copyfile(src[:-len(".kicad_pcb")] + ".kicad_pro",
-                    os.path.join(stage, stem + ".kicad_pro"))
+    for ext, change in ((".kicad_pcb", edit), (".kicad_sch", schematic)):
+        if change is None:
+            shutil.copyfile(src_stem + ext, os.path.join(stage, stem + ext))
+            continue
+        tree = K.load_tree(src_stem + ext)
+        change(tree, params)
+        with open(os.path.join(stage, stem + ext), "w", encoding="utf-8") as fh:
+            fh.write(K.dump(tree) + "\n")
+    for rel in [stem + ".kicad_pro", *_DIR_FILES]:
+        shutil.copyfile(os.path.join(os.path.dirname(src), rel), os.path.join(stage, rel))
+    models = os.path.join(stage, "3d")
+    if not os.path.isdir(models):
+        shutil.copytree(os.path.join(os.path.dirname(src), "3d"), models)
     params["pcb_board"] = board
     return dataclasses.replace(ctx, params=params, ledger=Ledger())
 
@@ -101,6 +117,20 @@ def _segment_from(tree, net: str, x: float, y: float):
 
 #: Header J1's pin 1 (D+) and pin 3 (D-), mm: make_baseline.py's PARTS and NETS.
 J1_DP, J1_DM = (4.0, 4.0), (4.0, 9.08)
+
+#: Where U1 pin 6's connection point sits on the baseline schematic, mm:
+#: make_schematic.py's U1 at (127, 88.9), its pin 6 at (5.08, 0) in the symbol.
+U1_PIN6_SCH = (132.08, 88.9)
+
+
+def _label_at(tree, x: float, y: float):
+    """The global label whose connection point is (x, y) on the sheet: picked by
+    where it is, never by its place in the file."""
+    for label in K.children(tree, "global_label"):
+        at = K.child(label, "at")
+        if abs(float(at[1]) - x) < 1e-6 and abs(float(at[2]) - y) < 1e-6:
+            return label
+    raise KeyError(f"no global label at ({x}, {y})")
 
 
 def split_pin_pair(ctx):
@@ -162,3 +192,76 @@ def orphaned_net(ctx):
                 tree.remove(n)
                 break
     return _variant(ctx, "orphaned_net", edit)
+
+
+def label_typo(ctx):
+    """pcb.erc — U1 pin 6's label spelled ``D+`` where every other D+ label says
+    ``DP``: one net under two names, the slip of a schematic typed by hand or by
+    a script. The new name joins nothing, so ERC finds a label connected to
+    nothing else. The board is untouched."""
+    def edit(tree, _params):
+        _label_at(tree, *U1_PIN6_SCH)[1] = K.Q("D+")
+    return _variant(ctx, "label_typo", schematic=edit)
+
+
+def schematic_drift(ctx):
+    """pcb.parity — U1 pin 6 moved from D+ to D- on the schematic, and the board
+    not updated from it: the schematic is self-consistent (ERC passes it), the
+    board is legal copper, and the two disagree about one pad."""
+    def edit(tree, _params):
+        _label_at(tree, *U1_PIN6_SCH)[1] = K.Q("DM")
+    return _variant(ctx, "schematic_drift", schematic=edit)
+
+
+def under_fab_width(ctx):
+    """pcb.fab_rules — the D+ track from J1 to U1 pin 1 narrowed to 85% of the
+    fab's minimum track width for the baseline's layer count and copper, read
+    from the same fab file the gate reads. KiCad's default rules have no minimum
+    width, so ``pcb.drc`` passes this board; the fab cannot etch it."""
+    def edit(tree, params):
+        with open(os.path.join(_PACK_DIR, "gates", "fab", f"{params['pcb_fab']}.json"),
+                  encoding="utf-8") as fh:
+            fab = json.load(fh)
+        table = K.fab_table(fab, K.copper_layer_count(tree),
+                            float(params.get("pcb_copper_oz_outer", 1.0)))
+        width = round(K.fab_rule_min(table, "track_width") * 0.85, 4)
+        K.child(_segment_from(tree, "DP", *J1_DP), "width")[1] = f"{width:g}"
+    return _variant(ctx, "under_fab_width", edit)
+
+
+#: A 2 m cable of 28 AWG power pair, out and back: 4 m x 0.213 ohm/m.
+THIN_CABLE_OHM = 0.85
+
+
+def long_thin_cable(ctx):
+    """pcb.spice — the baseline VBUS deck with the cable's out-and-back
+    resistance raised from 0.25 to 0.85 ohm: 0.5 A then drops 0.47 V in the cable
+    and the board, and VBUS at J2 dips to about 4.53 V, past USB 2.0's 4.75 V. The
+    deck's every other line is the baseline's."""
+    params = _baseline()
+    with open(params["pcb_spice_deck"], encoding="utf-8") as fh:
+        text = fh.read()
+    if "rcable=0.25" not in text:
+        raise AssertionError("long_thin_cable: the baseline deck no longer sets rcable=0.25")
+    deck = ctx.out_path("pcb-kicad", "known-bad", "long_thin_cable", "vbus_droop.cir")
+    with open(deck, "w", encoding="utf-8") as fh:
+        fh.write(text.replace("rcable=0.25", f"rcable={THIN_CABLE_OHM:g}"))
+    params["pcb_spice_deck"] = deck
+    return dataclasses.replace(ctx, params=params, ledger=Ledger())
+
+
+#: How much higher ``raised_board`` sets the board: the baseline headers' pin
+#: tips are 2.365 mm under the lid, so 3 mm puts them 0.635 mm into it.
+RAISE_MM = 3.0
+
+
+def raised_board(ctx):
+    """pcb.enclosure_fit — the baseline board placed 3 mm higher in the baseline
+    enclosure, as taller standoffs would set it: both headers' pin tips run
+    0.635 mm into the lid. Board and enclosure are the baseline's, unchanged; the
+    part that collides is one whose 3D model came from KiCad's library."""
+    params = _baseline()
+    place = dict(params["pcb_board_placement"])
+    place["z"] = float(place.get("z", 0.0)) + RAISE_MM
+    params["pcb_board_placement"] = place
+    return dataclasses.replace(ctx, params=params, ledger=Ledger())

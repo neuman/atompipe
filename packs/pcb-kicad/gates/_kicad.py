@@ -25,6 +25,7 @@ cited in ``references/ipc-2221.md`` with the range it was fitted over.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------- #
@@ -214,7 +215,7 @@ def _xy(item) -> tuple[float, float]:
     return float(item[1]), float(item[2])
 
 
-def _footprint_ref(fp: list) -> tuple[str, str]:
+def footprint_ref(fp: list) -> tuple[str, str]:
     ref = val = ""
     for prop in children(fp, "property"):          # KiCad 7 and later
         if len(prop) >= 3 and prop[1] == "Reference":
@@ -241,7 +242,7 @@ def board_from_tree(tree: list) -> Board:
                 pass
     footprints = []
     for fp in children(tree, "footprint"):
-        ref, val = _footprint_ref(fp)
+        ref, val = footprint_ref(fp)
         pads = [Pad(number=str(p[1]) if len(p) > 1 else "",
                     net=_net_name(child(p, "net"), nets),
                     pinfunction=str(value(p, "pinfunction", default="") or ""),
@@ -279,6 +280,39 @@ def load_board(path: str) -> Board:
 def load_tree(path: str) -> list:
     with open(path, "r", encoding="utf-8") as fh:
         return parse(fh.read())
+
+
+#: The property a hierarchical sheet names its file with: ``Sheetfile`` from
+#: KiCad 7, ``Sheet file`` in KiCad 6.
+SHEET_FILE_PROPERTIES = ("Sheetfile", "Sheet file")
+
+
+def sheet_files(root_sch: str) -> list[str]:
+    """Every sub-sheet file under the root schematic ``root_sch``, as paths
+    relative to its directory, each once, in the order first reached.
+
+    A sheet file used twice (one sheet placed twice) is listed once. A sheet that
+    names a file outside the root's directory, or an absolute path, raises
+    :class:`KicadFormatError`: it cannot be copied beside the root, and a check
+    run on the root without it would read the sheet as empty.
+    """
+    base = os.path.dirname(os.path.abspath(root_sch))
+    found: list[str] = []
+    todo = [root_sch]
+    while todo:
+        tree = load_tree(todo.pop(0))
+        for sheet in children(tree, "sheet"):
+            for prop in children(sheet, "property"):
+                if len(prop) >= 3 and str(prop[1]) in SHEET_FILE_PROPERTIES:
+                    rel = str(prop[2]).replace("\\", "/")
+                    norm = os.path.normpath(rel)
+                    if os.path.isabs(rel) or norm.startswith(".."):
+                        raise KicadFormatError(f"sheet file {rel!r} is outside the "
+                                               f"schematic's directory")
+                    if norm not in found:
+                        found.append(norm)
+                        todo.append(os.path.join(base, norm))
+    return found
 
 
 # --------------------------------------------------------------------------- #
@@ -365,3 +399,70 @@ def width_for_rise_mm(current_a: float, temp_rise: float, copper_oz: float, oute
     k = K_EXTERNAL if outer else K_INTERNAL
     area_mil2 = (abs(current_a) / (k * temp_rise ** EXP_DT)) ** (1.0 / EXP_AREA)
     return area_mil2 / (copper_oz * MIL_PER_OZ) * MM_PER_MIL
+
+
+# --------------------------------------------------------------------------- #
+# A fab's published limits, as KiCad custom rules
+# --------------------------------------------------------------------------- #
+
+def copper_layer_count(tree: list) -> int:
+    """How many copper layers the board's layer table declares (``*.Cu``)."""
+    layers = child(tree, "layers") or []
+    return sum(1 for item in layers if isinstance(item, list) and len(item) >= 2
+               and str(item[1]).endswith(".Cu"))
+
+
+#: The DRC violation type each custom-rule constraint reports under, read off
+#: kicad-cli 9.0.9's JSON reports (one deliberate breach of each). A finding of
+#: any other type in the fab run is not the fab's: it is ``pcb.drc``'s.
+CONSTRAINT_TYPES = {
+    "track_width": "track_width",
+    "clearance": "clearance",
+    "edge_clearance": "copper_edge_clearance",
+    "hole_size": "drill_out_of_range",
+    "via_diameter": "via_diameter",
+    "annular_width": "annular_width",
+    "hole_to_hole": "hole_to_hole",
+    "text_height": "text_height",
+    "text_thickness": "text_thickness",
+    "silk_clearance": "silk_overlap",
+}
+
+
+def fab_table(fab: dict, layers: int, oz: float) -> dict | None:
+    """The row of a fab file (``gates/fab/<name>.json``) for a board of
+    ``layers`` copper layers at ``oz`` ounces outer copper, with the file's
+    common rules prepended, or None when the fab publishes no row for it. A
+    row's ``layers`` is inclusive both ends; its ``oz`` is ``(lo, hi]``."""
+    for row in fab.get("tables", []):
+        lo_l, hi_l = row["layers"]
+        lo_oz, hi_oz = row["oz"]
+        if lo_l <= layers <= hi_l and lo_oz < oz <= hi_oz:
+            return {"name": row["name"], "rules": list(fab.get("common", [])) + list(row["rules"])}
+    return None
+
+
+def fab_rule_min(table: dict, name: str) -> float:
+    """The ``min_mm`` of the rule called ``name`` in a chosen row."""
+    for rule in table["rules"]:
+        if rule["name"] == name:
+            return float(rule["min_mm"])
+    raise KeyError(name)
+
+
+def dru_text(table: dict, prefix: str) -> str:
+    """A KiCad custom-rules file (``.kicad_dru``) holding exactly ``table``'s
+    rules, each named ``<prefix>_<rule>``. Later rules win in KiCad, so a rule
+    with a condition follows the general one it narrows (the common rules are
+    written in that order)."""
+    lines = ["(version 1)"]
+    for rule in table["rules"]:
+        if rule["constraint"] not in CONSTRAINT_TYPES:
+            raise ValueError(f"unknown constraint {rule['constraint']!r} in rule {rule['name']!r}")
+        lines.append(f'(rule "{prefix}_{rule["name"]}"')
+        if rule.get("layer"):
+            lines.append(f'\t(layer "{rule["layer"]}")')
+        if rule.get("condition"):
+            lines.append(f'\t(condition "{rule["condition"]}")')
+        lines.append(f'\t(constraint {rule["constraint"]} (min {float(rule["min_mm"]):g}mm)))')
+    return "\n".join(lines) + "\n"

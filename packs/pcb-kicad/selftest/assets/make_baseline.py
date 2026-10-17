@@ -42,6 +42,9 @@ sys.dont_write_bytecode = True        # never leave a __pycache__ in the pack it
 sys.path.insert(0, os.path.join(PACK, "gates"))
 import _kicad as K                                                 # noqa: E402
 
+sys.path.insert(0, HERE)
+import make_schematic as S                                         # noqa: E402
+
 FOOTPRINTS = "/usr/share/kicad/footprints"
 SYMBOLS = "/usr/share/kicad/symbols"
 OUT = os.path.join(HERE, "esd_guard.kicad_pcb")
@@ -113,11 +116,33 @@ def library_pin_names(lib: str, symbol: str) -> dict[str, tuple[str, str]]:
     return pins
 
 
+#: The project's own library tables: the stock libraries this board and its
+#: schematic use, through KiCad's own path variable. Without them a host whose
+#: KiCad was never configured (no global table) reads every symbol as from an
+#: unknown library, and ERC's warnings would depend on the machine.
+SYM_LIBS = ("power", "Connector_Generic", "Power_Protection")
+FP_LIBS = ("Connector_PinHeader_2.54mm", "Package_TO_SOT_SMD")
+
+
+def write_lib_tables() -> None:
+    rows = {"sym-lib-table": ("sym_lib_table", "KICAD9_SYMBOL_DIR", SYM_LIBS, ".kicad_sym"),
+            "fp-lib-table": ("fp_lib_table", "KICAD9_FOOTPRINT_DIR", FP_LIBS, ".pretty")}
+    for name, (head, var, libs, ext) in rows.items():
+        lines = [f"({head}", "\t(version 7)"]
+        lines += [f'\t(lib (name "{lib}")(type "KiCad")(uri "${{{var}}}/{lib}{ext}")'
+                  f'(options "")(descr ""))' for lib in libs]
+        with open(os.path.join(HERE, name), "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n)\n")
+
+
 def mm(v: float) -> int:
     return pcbnew.FromMM(v)
 
 
 def main() -> int:
+    S.write()
+    write_lib_tables()
+    sym_uuids = S.symbol_uuids()
     board = pcbnew.BOARD()
     board.SetCopperLayerCount(2)
     nets = {}
@@ -129,6 +154,20 @@ def main() -> int:
     placed = {}
     for ref, val, slib, sym, flib, fpname, (x, y) in PARTS:
         fp = pcbnew.FootprintLoad(os.path.join(FOOTPRINTS, flib + ".pretty"), fpname)
+        fp.SetFPID(pcbnew.LIB_ID(flib, fpname))
+        models = fp.Models()
+        for i in range(len(models)):
+            # KiCad's own STEP model for the footprint, kept beside the board
+            # (selftest/assets/3d/) so pcb.enclosure_fit sees the same parts on
+            # every host, KiCad's 3D library installed or not. By index: iterating
+            # the vector yields copies, and a copy's new name is never saved.
+            step = os.path.splitext(os.path.basename(models[i].m_Filename))[0] + ".step"
+            if not os.path.isfile(os.path.join(HERE, "3d", step)):
+                raise SystemExit(f"no 3d/{step}: fetch it from kicad-packages3D (3d/README.md)")
+            models[i].m_Filename = "${KIPRJMOD}/3d/" + step
+        fp.SetPath(pcbnew.KIID_PATH("/" + sym_uuids[ref]))
+        fp.SetSheetname("/")
+        fp.SetSheetfile(os.path.basename(S.OUT))
         fp.SetReference(ref)
         fp.SetValue(val)
         fp.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
@@ -183,17 +222,33 @@ def main() -> int:
 
     report = os.path.abspath(os.path.join(os.environ.get("TMPDIR", "/tmp"), "esd_guard_drc.json"))
     proc = subprocess.run(["kicad-cli", "pcb", "drc", "--severity-all", "--exit-code-violations",
+                           "--schematic-parity",
                            "--format", "json", "-o", report, OUT],
                           capture_output=True, text=True)
     with open(report, encoding="utf-8") as fh:
         doc = json.load(fh)
     print(f"wrote {OUT}")
     print(f"drc exit {proc.returncode}: {len(doc['violations'])} violation(s), "
-          f"{len(doc['unconnected_items'])} unconnected")
-    for v in doc["violations"] + doc["unconnected_items"]:
+          f"{len(doc['unconnected_items'])} unconnected, "
+          f"{len(doc['schematic_parity'])} schematic parity")
+    for v in doc["violations"] + doc["unconnected_items"] + doc["schematic_parity"]:
         print(f"  {v['severity']:8} {v['type']}: {v['description']} — "
               + "; ".join(i["description"] for i in v["items"]))
-    return 0 if proc.returncode == 0 else 1
+    erc = os.path.abspath(os.path.join(os.environ.get("TMPDIR", "/tmp"), "esd_guard_erc.json"))
+    sch = subprocess.run(["kicad-cli", "sch", "erc", "--severity-all", "--exit-code-violations",
+                          "--format", "json", "-o", erc, S.OUT], capture_output=True, text=True)
+    with open(erc, encoding="utf-8") as fh:
+        found = [v for sheet in json.load(fh)["sheets"] for v in sheet["violations"]]
+    print(f"erc exit {sch.returncode}: {len(found)} violation(s)")
+    for v in found:
+        print(f"  {v['severity']:8} {v['type']}: {v['description']}")
+    # kicad-cli leaves the board's local settings (.kicad_prl) beside a board it
+    # opened: per-user view state, never part of the fixture.
+    prl = OUT[:-len(".kicad_pcb")] + ".kicad_prl"
+    if os.path.exists(prl):
+        os.remove(prl)
+    clean = proc.returncode == 0 and not doc["schematic_parity"] and sch.returncode == 0
+    return 0 if clean else 1
 
 
 if __name__ == "__main__":

@@ -6,12 +6,19 @@
     pcb.net_width        tier 0  each current-carrying net's narrowest track, IPC-2221
     pcb.drc              tier 1  KiCad's design rule check, every severity
     pcb.unconnected      tier 1  KiCad's count of connections the copper never makes
+    pcb.erc              tier 1  KiCad's electrical rules check of the schematic
+    pcb.parity           tier 1  KiCad's comparison of the board with its schematic
+    pcb.fab_rules        tier 1  KiCad's DRC with a fab's published minimums as its rules
+    pcb.spice            tier 1  one .meas of ngspice on the project's deck, against a band
+    pcb.enclosure_fit    tier 1  the populated board's 3D models against the enclosure
 
-**Where each verdict comes from.** The two tier-1 gates are KiCad's own answer:
-``kicad-cli pcb drc``'s exit code and its report's count (basis established), on a
-copy of the board staged under the gate's out directory. They read inside a
-subprocess the trace cannot see into, so they are opaque and re-run on every check
-where ``kicad-cli`` exists, as openmodelica's ``omc`` gates do. The tier-0 gates read
+**Where each verdict comes from.** The tier-1 gates are a tool's own answer:
+``kicad-cli pcb drc``'s or ``sch erc``'s exit code and its report's count (basis
+established; ``pcb.fab_rules`` sourced, for the fab's numbers it hands KiCad),
+ngspice's ``.meas`` value, OpenCascade's shared volume and distance, each on a copy
+staged under the gate's out directory. They read inside a subprocess the trace
+cannot see into, so they are opaque and re-run on every check where their tool
+exists, as openmodelica's ``omc`` gates do. The tier-0 gates read
 the board with the pack's own reader (``_kicad.py``), so they run where KiCad is not
 installed and every file they decide on is keyed. ``pcb.pin_names`` judges against
 the library's pin names that KiCad copied onto the board from the schematic, and
@@ -34,16 +41,22 @@ pipeline this pack was extracted from; references/what-slipped-through.md):
 - ``pcb.pin_names``: an ESD array's flow-through pins were wired D+ to pin 1 and D- to
   pin 6, which the part joins inside. The copper was legal; a person reading the
   datasheet found it.
+- ``pcb.enclosure_fit``: a joystick routed onto both boards stood 6 mm proud of the
+  face, found by a person on sight. And kicad-cli's STEP export drops a part whose
+  3D model it cannot find, with exit 0: a part the fit cannot see is a skip here.
 
 **Missing inputs skip; they never default.** Which board, which nets carry how much
-current, and how hot a trace may run are the project's to say.
+current, how hot a trace may run, which fab, which deck and limit, which enclosure
+and where the board sits in it are the project's to say.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 from collections import Counter
 
 from nopekit.gates import gate, GateContext
@@ -351,52 +364,132 @@ def net_width(ctx: GateContext) -> Verdict:
 # --------------------------------------------------------------------------- #
 # KiCad's own checks
 # --------------------------------------------------------------------------- #
-def _drc(ctx: GateContext, gid: str, path: str, severity: str):
-    """Run ``kicad-cli pcb drc`` on a staged copy; ``(code, report, evidence)`` or a
-    skip/error Verdict.
+#: What kicad-cli reads beside a board or a schematic. By the project's name: its
+#: project file (design rules, net classes, ERC and DRC exclusions, which is where
+#: a waiver lives) and custom rules. By fixed name: the project's own library
+#: tables, without which a symbol reads as from an unknown library on any host
+#: whose KiCad was never configured.
+STEM_FILES = (".kicad_pro", ".kicad_dru")
+DIR_FILES = ("sym-lib-table", "fp-lib-table")
 
-    Staged under the gate's out directory, the board, its project file and its
-    custom rules beside it: kicad-cli then writes nothing in the project, and the
-    copy (a Python read) keys the three files even though the subprocess's own
-    reads are invisible. The project file holds KiCad's DRC exclusions, which is
-    where a waiver lives: a named, reviewable record, never a severity filter.
+
+def _stem(path: str) -> str:
+    for ext in (".kicad_pcb", ".kicad_sch", ".kicad_pro"):
+        if path.endswith(ext):
+            return path[:-len(ext)]
+    return path
+
+
+def _stage(ctx: GateContext, gid: str, path: str, *, board: bool, schematic: bool):
+    """Copy what kicad-cli will read into ``<out>/pcb-kicad/<gate>/``: the board
+    and/or the root schematic with every sheet under it, and the project files
+    beside them. Returns ``(staged stem, stage dir)`` or an error Verdict.
+
+    Staged so kicad-cli writes nothing in the project (it saves a .kicad_prl and
+    rewrites the .kicad_pro beside any board it opens), and so the copy, a Python
+    read, keys every file even though the subprocess's own reads are invisible.
+    A file left behind by an earlier run is removed first: a run must never read
+    a sheet the project no longer has.
     """
-    stem = path[:-len(".kicad_pcb")] if path.endswith(".kicad_pcb") else path
+    stem = _stem(path)
     name = os.path.basename(stem)
-    staged = ctx.out_path("pcb-kicad", gid.replace(".", "_"), name + ".kicad_pcb")
-    stage = os.path.dirname(staged)
-    if not os.path.isfile(path):
-        return Verdict(gate=gid, passed=False, detail=f"no board at {path}")
-    shutil.copyfile(path, staged)
-    for ext in (".kicad_pro", ".kicad_dru"):
-        if os.path.isfile(stem + ext):
-            shutil.copyfile(stem + ext, os.path.join(stage, name + ext))
-    report = os.path.join(stage, "drc.json")
-    if os.path.exists(report):
-        os.remove(report)
+    src_dir = os.path.dirname(stem)
+    marker = ctx.out_path("pcb-kicad", gid.replace(".", "_"), ".stage")
+    stage = os.path.dirname(marker)
+    for old in os.listdir(stage):
+        old_path = os.path.join(stage, old)
+        if os.path.isdir(old_path):
+            shutil.rmtree(old_path)
+        else:
+            os.remove(old_path)
+    wanted = []
+    if board:
+        wanted.append(name + ".kicad_pcb")
+    if schematic:
+        sch = name + ".kicad_sch"
+        if not os.path.isfile(os.path.join(src_dir, sch)):
+            return None
+        try:
+            sheets = K.sheet_files(os.path.join(src_dir, sch))
+        except (K.KicadFormatError, UnicodeDecodeError) as exc:
+            return Verdict(gate=gid, passed=False, error=f"the schematic does not parse: {exc}")
+        except FileNotFoundError as exc:
+            return Verdict(gate=gid, passed=False,
+                           error=f"a sheet the schematic names is missing: {exc.filename}")
+        wanted += [sch, *sheets]
+    for rel in wanted:
+        src = os.path.join(src_dir, rel)
+        if not os.path.isfile(src):
+            return Verdict(gate=gid, passed=False, detail=f"no file at {src}")
+        dst = os.path.join(stage, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+    for rel in [name + ext for ext in STEM_FILES] + list(DIR_FILES):
+        if os.path.isfile(os.path.join(src_dir, rel)):
+            shutil.copyfile(os.path.join(src_dir, rel), os.path.join(stage, rel))
+    return os.path.join(stage, name), stage
+
+
+def _kicad_cli(ctx: GateContext, gid: str, stage: str, argv: list[str], report: str):
+    """Run ``kicad-cli argv`` writing its JSON report to ``<stage>/<report>``;
+    ``(exit code, report, evidence)`` or a skip/error Verdict.
+
+    Any exit but 0 (nothing found) or 5 (something found, with
+    ``--exit-code-violations``) is kicad-cli failing to run, and errors. So does a
+    run that wrote no report: the report must be this run's, never an old one.
+    """
+    out = os.path.join(stage, report)
+    if os.path.exists(out):
+        os.remove(out)
     timeout = float(ctx.param("pcb_drc_timeout_s", DEFAULT_DRC_TIMEOUT_S) or
                     DEFAULT_DRC_TIMEOUT_S)
-    argv = ["kicad-cli", "pcb", "drc", SEVERITY_FLAGS[severity], "--exit-code-violations",
-            "--format", "json", "--units", "mm", "-o", report, staged]
+    argv = ["kicad-cli", *argv[:-1], "--exit-code-violations", "--format", "json",
+            "--units", "mm", "-o", out, argv[-1]]
+    what = " ".join(argv[1:3])
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
-                              stdin=subprocess.DEVNULL)
+                              stdin=subprocess.DEVNULL, cwd=stage)
     except FileNotFoundError as exc:
         return _skip(gid, f"could not launch kicad-cli: {exc}")
     except subprocess.TimeoutExpired:
-        return _skip(gid, f"kicad-cli pcb drc exceeded {timeout:g} s (pcb_drc_timeout_s) "
+        return _skip(gid, f"kicad-cli {what} exceeded {timeout:g} s (pcb_drc_timeout_s) "
                           f"and was killed: nothing was shown")
     log = os.path.join(stage, "kicad-cli.log")
     with open(log, "w", encoding="utf-8") as fh:
         fh.write(" ".join(argv) + f"\nexit {proc.returncode}\n{proc.stdout}\n{proc.stderr}")
-    if proc.returncode not in (EXIT_CLEAN, EXIT_VIOLATIONS) or not os.path.isfile(report):
+    if proc.returncode not in (EXIT_CLEAN, EXIT_VIOLATIONS) or not os.path.isfile(out):
         return Verdict(gate=gid, passed=False,
-                       error=f"kicad-cli pcb drc exited {proc.returncode} without a "
+                       error=f"kicad-cli {what} exited {proc.returncode} without a "
                              f"report: {(proc.stderr or proc.stdout).strip()[:200]}",
                        evidence=[log])
-    with open(report, encoding="utf-8") as fh:
+    with open(out, encoding="utf-8") as fh:
         doc = json.load(fh)
-    return proc.returncode, doc, [report, log]
+    return proc.returncode, doc, [out, log]
+
+
+def _drc(ctx: GateContext, gid: str, path: str, severity: str, *, parity: bool = False):
+    """``kicad-cli pcb drc`` on a staged copy of the board (and, for parity, its
+    schematic): ``(code, report, evidence)`` or a skip/error Verdict."""
+    if not os.path.isfile(path):
+        return Verdict(gate=gid, passed=False, detail=f"no board at {path}")
+    staged = _stage(ctx, gid, path, board=True, schematic=parity)
+    if staged is None:
+        return _skip(gid, f"no schematic beside the board ({os.path.basename(_stem(path))}"
+                          f".kicad_sch): KiCad compares a board only with the root "
+                          f"schematic of the same name, and this board has none")
+    if isinstance(staged, Verdict):
+        return staged
+    stem, stage = staged
+    argv = ["pcb", "drc", SEVERITY_FLAGS[severity]]
+    if parity:
+        argv.append("--schematic-parity")
+    return _kicad_cli(ctx, gid, stage, argv + [stem + ".kicad_pcb"], "drc.json")
+
+
+def _found(doc: dict) -> list:
+    """Every item a DRC report lists, of every kind."""
+    return (list(doc.get("violations", [])) + list(doc.get("unconnected_items", []))
+            + list(doc.get("schematic_parity", [])))
 
 
 def _kinds(items) -> str:
@@ -441,8 +534,7 @@ def drc(ctx: GateContext) -> Verdict:
     if isinstance(run, Verdict):
         return run
     code, doc, ev = run
-    found = (list(doc.get("violations", [])) + list(doc.get("unconnected_items", []))
-             + list(doc.get("schematic_parity", [])))
+    found = _found(doc)
     if (code == EXIT_CLEAN) != (not found):
         return Verdict(gate=gid, passed=False, evidence=ev,
                        error=f"kicad-cli exited {code} but its report lists "
@@ -487,3 +579,574 @@ def unconnected(ctx: GateContext) -> Verdict:
               if items else "every connection the netlist asks for is made")
     return Verdict(gate=gid, passed=not items, measured=len(items), limit=0,
                    comparator="<=", units="items", detail=detail, evidence=ev)
+
+
+# --------------------------------------------------------------------------- #
+# the schematic
+# --------------------------------------------------------------------------- #
+def _schematic_path(ctx: GateContext) -> str | None:
+    """``pcb_schematic`` when the project names one, else the root schematic of
+    the board's project (KiCad's own rule: the board's name, ``.kicad_sch``)."""
+    rel = ctx.param("pcb_schematic")
+    if rel:
+        rel = str(rel)
+        return rel if os.path.isabs(rel) else os.path.join(ctx.root, rel)
+    board = _board_path(ctx)
+    return None if board is None else _stem(board) + ".kicad_sch"
+
+
+@gate(
+    id="pcb.erc",
+    basis="established",
+    title="KiCad's electrical rules check finds nothing in the schematic, at every severity",
+    claims=["pcb", "schematic", "electrical-rules", "netlist"],
+    tier=Tier.BUILD,
+    settles="electrical rule violations",
+    requires_tools=["kicad-cli"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_boards.py:label_typo",
+        note="the baseline schematic with U1 pin 6's D+ label spelled 'D+' instead "
+             "of 'DP': one net under two names, so pin 6 joins nothing",
+    ),
+)
+def erc(ctx: GateContext) -> Verdict:
+    """``kicad-cli sch erc --severity-all --exit-code-violations`` on a staged copy of
+    the root schematic, every sheet under it and the project files: the verdict is
+    KiCad's exit code, and an exit code that disagrees with the report is an error.
+
+    ERC reads the schematic alone: pins left open, a label no other label shares
+    (one net under two spellings), a power input nothing drives, two outputs
+    tied together, a symbol whose library copy has moved. A board can be
+    perfect copper for a wrong schematic, so a claim about the circuit binds
+    here as well as to ``pcb.parity``. ``pcb_erc_severity`` narrows it
+    (``error``, ``warning``); a waiver is KiCad's own ERC exclusion, saved in the
+    project file.
+    """
+    gid = "pcb.erc"
+    path = _schematic_path(ctx)
+    if path is None:
+        return _skip(gid, _NO_BOARD)
+    if not os.path.isfile(path):
+        return _skip(gid, f"no schematic at {path}: set pcb_schematic, or keep the root "
+                          f"schematic beside the board under the board's name")
+    severity = str(ctx.param("pcb_erc_severity", "all") or "all")
+    if severity not in SEVERITY_FLAGS:
+        return Verdict(gate=gid, passed=False,
+                       error=f"pcb_erc_severity {severity!r} is not one of "
+                             f"{sorted(SEVERITY_FLAGS)}")
+    staged = _stage(ctx, gid, path, board=False, schematic=True)
+    if isinstance(staged, Verdict):
+        return staged
+    stem, stage = staged
+    run = _kicad_cli(ctx, gid, stage, ["sch", "erc", SEVERITY_FLAGS[severity],
+                                       stem + ".kicad_sch"], "erc.json")
+    if isinstance(run, Verdict):
+        return run
+    code, doc, ev = run
+    found = [v for sheet in doc.get("sheets", []) for v in sheet.get("violations", [])]
+    if (code == EXIT_CLEAN) != (not found):
+        return Verdict(gate=gid, passed=False, evidence=ev,
+                       error=f"kicad-cli exited {code} but its report lists "
+                             f"{len(found)} item(s): the two disagree")
+    where = "; ".join(f"{v.get('type', '?')}: "
+                      + ", ".join(i.get("description", "?") for i in v.get("items", [])[:2])
+                      for v in found[:3])
+    detail = (f"KiCad ERC at {severity} severities over {len(doc.get('sheets', []))} "
+              f"sheet(s): " + (f"{len(found)} finding(s): {_kinds(found)} ({where})"
+                               if found else "nothing found"))
+    return Verdict(gate=gid, passed=code == EXIT_CLEAN, measured=len(found), limit=0,
+                   comparator="<=", units="findings", detail=detail, evidence=ev)
+
+
+@gate(
+    id="pcb.parity",
+    basis="established",
+    title="The board and its schematic agree: every part, value, footprint and net",
+    claims=["pcb", "schematic-parity", "netlist", "connectivity"],
+    tier=Tier.BUILD,
+    settles="schematic to board parity",
+    requires_tools=["kicad-cli"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_boards.py:schematic_drift",
+        note="the baseline schematic with U1 pin 6 moved to D-, and the board not "
+             "updated: the board still routes D+ there",
+    ),
+)
+def parity(ctx: GateContext) -> Verdict:
+    """``kicad-cli pcb drc --schematic-parity --severity-all``: KiCad's comparison of
+    the board with the root schematic of its project, the board's name with
+    ``.kicad_sch``. The verdict is the report's schematic-parity count: a part on
+    one and not the other, a value or footprint that differs, a pad on a net the
+    schematic does not give it. The run's exit code must agree that something was
+    found whenever the report lists anything, or it errors.
+
+    Copper findings in the same run are ``pcb.drc``'s, not this gate's: a board
+    that matches its schematic exactly can still fail its design rules.
+    Parity items are warnings in KiCad, so the run is at every severity always.
+    """
+    gid = "pcb.parity"
+    path = _board_path(ctx)
+    if path is None:
+        return _skip(gid, _NO_BOARD)
+    run = _drc(ctx, gid, path, "all", parity=True)
+    if isinstance(run, Verdict):
+        return run
+    code, doc, ev = run
+    items = list(doc.get("schematic_parity", []))
+    if (code == EXIT_CLEAN) != (not _found(doc)):
+        return Verdict(gate=gid, passed=False, evidence=ev,
+                       error=f"kicad-cli exited {code} but its report lists "
+                             f"{len(_found(doc))} item(s): the two disagree")
+    where = "; ".join(f"{v.get('description', '?')}" for v in items[:3])
+    detail = (f"{len(items)} difference(s) between board and schematic: {where}"
+              if items else "the board matches its schematic: every part, value, "
+                            "footprint and pad net")
+    return Verdict(gate=gid, passed=not items, measured=len(items), limit=0,
+                   comparator="<=", units="differences", detail=detail, evidence=ev)
+
+
+# --------------------------------------------------------------------------- #
+# the fab's limits
+# --------------------------------------------------------------------------- #
+FAB_DIR = os.path.join(_HERE, "fab")
+
+
+def _load_json(path: str) -> dict:
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _zeroed_project(src: str | None, dst: str) -> None:
+    """The project file with every board-setup minimum set to 0, so each finding
+    of a constrained type in the fab run is the fab rule's and never the
+    project's own floor (which ``pcb.drc`` already judges). Exclusions, net
+    classes and everything else stay as they are."""
+    doc = _load_json(src) if src and os.path.isfile(src) else {"meta": {"version": 1}}
+    rules = doc.setdefault("board", {}).setdefault("design_settings", {}).setdefault("rules", {})
+    for key, val in list(rules.items()):
+        if key.startswith("min_") and key != "min_resolved_spokes" \
+                and isinstance(val, (int, float)) and not isinstance(val, bool):
+            rules[key] = 0.0
+    with open(dst, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2)
+
+
+@gate(
+    id="pcb.fab_rules",
+    basis="sourced",
+    title="The board stays inside its fab's published limits",
+    claims=["pcb", "manufacturability", "fab-limits"],
+    tier=Tier.BUILD,
+    settles="fab capability limits",
+    requires_tools=["kicad-cli"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_boards.py:under_fab_width",
+        note="the baseline board with U1's D+ track from J1 narrowed to 85% of the "
+             "fab's minimum width for its layer count and copper: legal by KiCad's "
+             "default rules, unbuildable at that fab",
+    ),
+)
+def fab_rules(ctx: GateContext) -> Verdict:
+    """KiCad's DRC run with the fab's published minimums as the only custom rules:
+    track width and spacing, via and plated-hole drills, via pad, annular ring,
+    hole-to-hole, copper to the routed edge, silkscreen text and pad clearance.
+
+    ``pcb_fab`` names the fab: ``jlcpcb`` (``gates/fab/jlcpcb.json``, each number
+    quoted from the fab's capability page with the day it was read), or a path,
+    from the project root, to a file of the same shape. The row is picked by the
+    board's copper layer count and ``pcb_copper_oz_outer``. The rules are written
+    as the staged board's ``.kicad_dru`` and the staged project's own minimums are
+    zeroed, so a finding of a constrained type is the fab's. Every other finding
+    in the run (a silk overlap, an unconnected item) is ``pcb.drc``'s, and counted
+    there, not here. The project's own custom rules are left out of this run: one
+    written to relax a constraint must not relax the fab.
+    """
+    gid = "pcb.fab_rules"
+    path = _board_path(ctx)
+    if path is None:
+        return _skip(gid, _NO_BOARD)
+    fab_name = ctx.param("pcb_fab")
+    if not fab_name:
+        return _skip(gid, "no pcb_fab: which fab builds this board (jlcpcb, or a path to "
+                          "a fab file) is a purchasing decision this pack will not invent")
+    fab_name = str(fab_name)
+    if fab_name.endswith(".json"):
+        fab_path = fab_name if os.path.isabs(fab_name) else os.path.join(ctx.root, fab_name)
+    else:
+        fab_path = os.path.join(FAB_DIR, fab_name + ".json")
+    if not os.path.isfile(fab_path):
+        known = sorted(n[:-5] for n in os.listdir(FAB_DIR) if n.endswith(".json"))
+        return Verdict(gate=gid, passed=False,
+                       error=f"pcb_fab {fab_name!r}: no fab file at {fab_path} "
+                             f"(bundled: {', '.join(known)})")
+    fab = ctx.load_file(fab_path, loader=_load_json)
+    if not os.path.isfile(path):
+        return Verdict(gate=gid, passed=False, detail=f"no board at {path}")
+    tree = ctx.load_file(path, loader=K.load_tree)
+    layers = K.copper_layer_count(tree)
+    oz = ctx.param("pcb_copper_oz_outer")
+    oz_note = "" if oz is not None else " [pack default]"
+    oz = DEFAULT_OZ_OUTER if oz is None else float(oz)
+    table = K.fab_table(fab, layers, oz)
+    if table is None:
+        return _skip(gid, f"{fab.get('fab', fab_name)} publishes no limits for a "
+                          f"{layers}-layer board at {oz:g} oz in {fab_path}")
+    staged = _stage(ctx, gid, path, board=True, schematic=False)
+    if isinstance(staged, Verdict):
+        return staged
+    stem, stage = staged
+    with open(stem + ".kicad_dru", "w", encoding="utf-8") as fh:
+        fh.write(K.dru_text(table, "fab"))
+    _zeroed_project(_stem(path) + ".kicad_pro", stem + ".kicad_pro")
+    run = _kicad_cli(ctx, gid, stage, ["pcb", "drc", "--severity-all", stem + ".kicad_pcb"],
+                     "drc.json")
+    if isinstance(run, Verdict):
+        return run
+    code, doc, ev = run
+    if (code == EXIT_CLEAN) != (not _found(doc)):
+        return Verdict(gate=gid, passed=False, evidence=ev,
+                       error=f"kicad-cli exited {code} but its report lists "
+                             f"{len(_found(doc))} item(s): the two disagree")
+    types = {K.CONSTRAINT_TYPES[r["constraint"]] for r in table["rules"]}
+    fab_found = [v for v in doc.get("violations", []) if v.get("type") in types]
+    others = len(_found(doc)) - len(fab_found)
+    where = "; ".join(v.get("description", "?") for v in fab_found[:3])
+    detail = (f"{fab.get('fab', fab_name)} ({table['name']}{oz_note}, read "
+              f"{fab.get('read', '?')}): "
+              + (f"{len(fab_found)} finding(s) past its limits: {where}" if fab_found
+                 else f"inside every limit of {len(table['rules'])} rule(s)"))
+    if others:
+        detail += f"; {others} other finding(s) in the same run are pcb.drc's"
+    return Verdict(gate=gid, passed=not fab_found, measured=len(fab_found), limit=0,
+                   comparator="<=", units="findings", detail=detail, evidence=ev)
+
+
+# --------------------------------------------------------------------------- #
+# a circuit simulation
+# --------------------------------------------------------------------------- #
+#: ``.include`` and ``.lib`` lines, whose path the staged deck must name
+#: absolutely: the deck runs from the stage, and a relative include would then
+#: read nothing, or a file of the same name the stage happens to hold.
+_INCLUDE = re.compile(r"^(\s*\.(?:include|inc|lib)\s+)(\"[^\"]+\"|'[^']+'|\S+)(.*)$",
+                      re.IGNORECASE)
+
+#: One minute for one batch run: the baseline deck solves in 0.01 s. A timeout is
+#: a skip (nothing was shown), never a fail.
+DEFAULT_SPICE_TIMEOUT_S = 60.0
+
+
+def _read_text(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
+def _staged_deck(text: str, deck_dir: str) -> str:
+    out = []
+    for line in text.splitlines():
+        m = _INCLUDE.match(line)
+        if m:
+            target = m.group(2).strip("\"'")
+            if not os.path.isabs(target):
+                target = os.path.join(deck_dir, target)
+            line = f'{m.group(1)}"{target}"{m.group(3)}'
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+@gate(
+    id="pcb.spice",
+    basis="established",
+    title="A measurement ngspice makes on the project's circuit deck stays inside its limits",
+    claims=["pcb", "circuit-simulation", "power-integrity"],
+    tier=Tier.BUILD,
+    settles="simulated circuit measurement",
+    requires_tools=["ngspice"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_boards.py:long_thin_cable",
+        note="the baseline VBUS deck with the cable's out-and-back resistance raised "
+             "from 0.25 to 0.85 ohm (2 m of 28 AWG): the header's VBUS dips below "
+             "USB's 4.75 V under the 0.5 A step",
+    ),
+)
+def spice(ctx: GateContext) -> Verdict:
+    """``ngspice -b`` on the project's deck; the verdict is the ``.meas`` result
+    ``pcb_spice_measure`` names, against ``pcb_spice_min`` and/or
+    ``pcb_spice_max`` in ``pcb_spice_units``.
+
+    ngspice solves the deck; it does not know whether the deck is the circuit.
+    The deck is the project's model, written by someone, and a claim that rests
+    on it rests on that (PACK.md, "cannot settle"). So the gate refuses to read a
+    run that dropped a line: ngspice warns that it ignored an instance it could
+    not parse and goes on, solving a different circuit, and that is an error
+    here, as is any ``Error:`` line. A measurement ngspice could not make
+    (``... failed!``) is an error, never a fail: no value was shown.
+    """
+    gid = "pcb.spice"
+    rel = ctx.param("pcb_spice_deck")
+    if not rel:
+        return _skip(gid, "no pcb_spice_deck: the SPICE deck (.cir) that models the "
+                          "circuit is the project's to write; this pack will not invent one")
+    deck = str(rel) if os.path.isabs(str(rel)) else os.path.join(ctx.root, str(rel))
+    measure = str(ctx.param("pcb_spice_measure") or "").strip()
+    lo, hi = ctx.param("pcb_spice_min"), ctx.param("pcb_spice_max")
+    if not measure:
+        return _skip(gid, "no pcb_spice_measure: name the deck's .meas result to judge")
+    if lo is None and hi is None:
+        return _skip(gid, "no pcb_spice_min or pcb_spice_max: the limit is the "
+                          "project's decision, not this pack's")
+    units = str(ctx.param("pcb_spice_units", "") or "")
+    if not os.path.isfile(deck):
+        return Verdict(gate=gid, passed=False, detail=f"no deck at {deck}")
+    text = ctx.load_file(deck, loader=_read_text)
+    marker = ctx.out_path("pcb-kicad", "pcb_spice", ".stage")
+    stage = os.path.dirname(marker)
+    staged = os.path.join(stage, os.path.basename(deck))
+    with open(staged, "w", encoding="utf-8") as fh:
+        fh.write(_staged_deck(text, os.path.dirname(os.path.abspath(deck))))
+    timeout = float(ctx.param("pcb_spice_timeout_s", DEFAULT_SPICE_TIMEOUT_S) or
+                    DEFAULT_SPICE_TIMEOUT_S)
+    argv = ["ngspice", "-b", staged]
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL, cwd=stage)
+    except FileNotFoundError as exc:
+        return _skip(gid, f"could not launch ngspice: {exc}")
+    except subprocess.TimeoutExpired:
+        return _skip(gid, f"ngspice exceeded {timeout:g} s (pcb_spice_timeout_s) and was "
+                          f"killed: nothing was shown")
+    log = os.path.join(stage, "ngspice.log")
+    output = proc.stdout + "\n" + proc.stderr
+    with open(log, "w", encoding="utf-8") as fh:
+        fh.write(" ".join(argv) + f"\nexit {proc.returncode}\n{output}")
+    ev = [staged, log]
+    dropped = [ln.strip() for ln in output.splitlines()
+               if ln.lower().startswith("warning") and "ignored" in ln.lower()]
+    errors = [ln.strip() for ln in output.splitlines()
+              if ln.strip().lower().startswith("error")]
+    if proc.returncode != 0 or dropped or errors:
+        why = (dropped or errors or [f"exit {proc.returncode}"])[0]
+        return Verdict(gate=gid, passed=False, evidence=ev,
+                       error=f"ngspice did not solve the deck as written: {why[:200]}")
+    found = re.search(rf"^\s*{re.escape(measure.lower())}\s*=\s*([-+0-9.eE]+)",
+                      proc.stdout, re.MULTILINE)
+    if found is None:
+        failed = [ln.strip() for ln in output.splitlines() if "failed" in ln.lower()]
+        return Verdict(gate=gid, passed=False, evidence=ev,
+                       error=f"no .meas result {measure!r} in ngspice's output"
+                             + (f": {failed[0][:160]}" if failed else ""))
+    value = float(found.group(1))
+    lo = None if lo is None else float(lo)
+    hi = None if hi is None else float(hi)
+    passed = (lo is None or value >= lo) and (hi is None or value <= hi)
+    # The side the verdict reports: the one crossed, else the nearer, so the
+    # margin a reader sees is the one that binds.
+    if hi is None or (lo is not None and abs(value - lo) <= abs(hi - value)):
+        limit, comparator = lo, ">="
+    else:
+        limit, comparator = hi, "<="
+    band = " and ".join(s for s in ((f">= {lo:g}" if lo is not None else ""),
+                                    (f"<= {hi:g}" if hi is not None else "")) if s)
+    detail = (f"{measure} = {value:.6g} {units}".rstrip() + f" (ngspice, "
+              f"{os.path.basename(deck)}), limit {band} {units}".rstrip())
+    return Verdict(gate=gid, passed=passed, measured=value, limit=limit,
+                   comparator=comparator, units=units, detail=detail, evidence=ev)
+
+
+# --------------------------------------------------------------------------- #
+# the board in its enclosure
+# --------------------------------------------------------------------------- #
+FIT_HELPER = os.path.join(_HERE, "_fit.py")
+
+#: A shared volume below this is OpenCascade's boolean noise on two faces that
+#: touch, not a collision: 0.001 mm^3 is a 0.1 mm cube. The baseline's raised
+#: headers share 0.93 mm^3 with the lid, three orders above it.
+INTERFERENCE_TOL_MM3 = 1e-3
+
+#: Two minutes for the export and the geometry together, each: the baseline takes
+#: about 1 s to export and 3 s to measure.
+DEFAULT_FIT_TIMEOUT_S = 120.0
+
+PLACEMENT_KEYS = ("x", "y", "z", "rot_z_deg")
+
+#: A footprint attribute that makes it a placed part with a body: what KiCad's
+#: pick-and-place file lists. Mounting holes, fiducials and test pads carry
+#: neither, and the fit does not ask for their bodies.
+_PART_ATTRS = ("smd", "through_hole")
+
+
+def _parts_and_models(tree: list) -> tuple[list[str], dict[str, list[str]]]:
+    """``(refs of placed parts, {ref: [visible 3D model paths]})``: the parts
+    the fit must see, and what the board says each one's body is. A part marked
+    do-not-populate or board-only is not placed, and not asked for."""
+    parts, models = [], {}
+    for fp in K.children(tree, "footprint"):
+        ref = K.footprint_ref(fp)[0]
+        attr = [str(a) for a in (K.child(fp, "attr") or [])[1:]]
+        if not any(a in _PART_ATTRS for a in attr) or "dnp" in attr or "board_only" in attr:
+            continue
+        parts.append(ref)
+        shown = []
+        for model in K.children(fp, "model"):
+            hide = K.child(model, "hide")
+            if (hide is not None and (len(hide) == 1 or str(hide[1]) == "yes")) or "hide" in model:
+                continue
+            shown.append(str(model[1]))
+        models[ref] = shown
+    return parts, models
+
+
+@gate(
+    id="pcb.enclosure_fit",
+    basis="established",
+    title="The populated board fits its enclosure: nothing collides, every part keeps its clearance",
+    claims=["pcb", "enclosure-fit", "packaging", "interference"],
+    tier=Tier.BUILD,
+    settles="board fit in its enclosure",
+    requires_tools=["kicad-cli"],
+    requires_python=["cadquery"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_boards.py:raised_board",
+        note="the baseline board placed 3 mm higher in the baseline enclosure, on "
+             "taller standoffs: both headers' pin tips run 0.64 mm into the lid",
+    ),
+)
+def enclosure_fit(ctx: GateContext) -> Verdict:
+    """The board as KiCad exports it, every part's 3D model in place, against
+    the enclosure's solid: OpenCascade's shared volume (nothing may collide, the
+    board body included) and its distance from each part (each must keep
+    ``pcb_enclosure_clearance_mm``; the board body may touch, as it does on its
+    standoffs).
+
+    The board's STEP comes from ``kicad-cli pcb export step --subst-models
+    --no-dnp --user-origin 0x0mm``: the board file's (0, 0) at the origin, x
+    right, y up (KiCad's y negated), z up from the board's bottom face.
+    ``pcb_board_placement`` (``{"x", "y", "z", "rot_z_deg"}``, mm and degrees)
+    turns it about z, then moves it, into the enclosure's frame.
+
+    **A part the fit cannot see is a skip, never a pass.** kicad-cli leaves out,
+    silently and with exit 0, every part whose 3D model it cannot find (KiCad's
+    3D library is a separate install on most hosts), and a fit run without the
+    part reads clear. So every placed part (SMD or through-hole, not DNP) must
+    name a model and arrive in the export under its reference, or the gate skips
+    naming it. A part that truly has no body above the board (an antenna drawn
+    in copper) goes in ``pcb_enclosure_bodiless``, by reference, a recorded
+    statement.
+    """
+    gid = "pcb.enclosure_fit"
+    path = _board_path(ctx)
+    if path is None:
+        return _skip(gid, _NO_BOARD)
+    rel = ctx.param("pcb_enclosure_step")
+    if not rel:
+        return _skip(gid, "no pcb_enclosure_step: the enclosure's solid, as a STEP file, "
+                          "is the project's; this pack will not invent one")
+    enclosure = str(rel) if os.path.isabs(str(rel)) else os.path.join(ctx.root, str(rel))
+    clearance = ctx.param("pcb_enclosure_clearance_mm")
+    if clearance is None:
+        return _skip(gid, "no pcb_enclosure_clearance_mm: how close a part may come to "
+                          "the enclosure is a design decision this pack will not invent")
+    clearance = float(clearance)
+    place = ctx.param("pcb_board_placement")
+    if not isinstance(place, dict):
+        return _skip(gid, "no pcb_board_placement: where the board sits in the enclosure "
+                          "({\"x\", \"y\", \"z\", \"rot_z_deg\"}) is the project's to say")
+    unknown = sorted(set(place) - set(PLACEMENT_KEYS))
+    if unknown:
+        return Verdict(gate=gid, passed=False,
+                       error=f"pcb_board_placement has unknown key(s) {unknown}: it takes "
+                             f"{list(PLACEMENT_KEYS)}")
+    place = {k: float(place.get(k, 0.0)) for k in PLACEMENT_KEYS}
+    bodiless = {str(r) for r in (ctx.param("pcb_enclosure_bodiless") or [])}
+    if not os.path.isfile(path):
+        return Verdict(gate=gid, passed=False, detail=f"no board at {path}")
+    if not os.path.isfile(enclosure):
+        return Verdict(gate=gid, passed=False, detail=f"no enclosure at {enclosure}")
+    ctx.load_file(enclosure)
+    tree = ctx.load_file(path, loader=K.load_tree)
+    parts, models = _parts_and_models(tree)
+    parts = [r for r in parts if r not in bodiless]
+    unmodelled = sorted(r for r in parts if not models.get(r))
+    if unmodelled:
+        return _skip(gid, f"{len(unmodelled)} placed part(s) name no 3D model: "
+                          f"{', '.join(unmodelled[:8])}. The fit cannot see a body the "
+                          f"board does not describe: give each a model, or list a part "
+                          f"with no body in pcb_enclosure_bodiless")
+
+    staged = _stage(ctx, gid, path, board=True, schematic=False)
+    if isinstance(staged, Verdict):
+        return staged
+    stem, stage = staged
+    src_dir = os.path.dirname(os.path.abspath(path))
+    for ref in parts:
+        for model in models[ref]:
+            if model.startswith("${KIPRJMOD}/"):
+                rel_model = model[len("${KIPRJMOD}/"):]
+                src = os.path.join(src_dir, rel_model)
+                if os.path.isfile(src):
+                    dst = os.path.join(stage, rel_model)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+    step = os.path.join(stage, "board.step")
+    timeout = float(ctx.param("pcb_fit_timeout_s", DEFAULT_FIT_TIMEOUT_S) or
+                    DEFAULT_FIT_TIMEOUT_S)
+    argv = ["kicad-cli", "pcb", "export", "step", "--subst-models", "--no-dnp",
+            "--user-origin", "0x0mm", "-f", "-o", step, stem + ".kicad_pcb"]
+    log = os.path.join(stage, "fit.log")
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                              stdin=subprocess.DEVNULL, cwd=stage)
+    except FileNotFoundError as exc:
+        return _skip(gid, f"could not launch kicad-cli: {exc}")
+    except subprocess.TimeoutExpired:
+        return _skip(gid, f"kicad-cli pcb export step exceeded {timeout:g} s and was killed")
+    with open(log, "w", encoding="utf-8") as fh:
+        fh.write(" ".join(argv) + f"\nexit {proc.returncode}\n{proc.stdout}\n{proc.stderr}\n")
+    if proc.returncode != 0 or not os.path.isfile(step):
+        return Verdict(gate=gid, passed=False, evidence=[log],
+                       error=f"kicad-cli pcb export step exited {proc.returncode} without "
+                             f"a STEP: {(proc.stderr or proc.stdout).strip()[-200:]}")
+    request = os.path.join(stage, "fit_request.json")
+    with open(request, "w", encoding="utf-8") as fh:
+        json.dump({"board_step": step, "enclosure_step": os.path.abspath(enclosure),
+                   "placement": place, "refs": parts}, fh, indent=2)
+    try:
+        geo = subprocess.run([sys.executable, FIT_HELPER, request], capture_output=True,
+                             text=True, timeout=timeout, stdin=subprocess.DEVNULL, cwd=stage)
+    except subprocess.TimeoutExpired:
+        return _skip(gid, f"the fit geometry exceeded {timeout:g} s (pcb_fit_timeout_s) "
+                          f"and was killed: nothing was shown")
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write(f"\n_fit.py exit {geo.returncode}\n{geo.stdout}\n{geo.stderr}\n")
+    lines = [ln for ln in geo.stdout.splitlines() if ln.startswith("{")]
+    if geo.returncode != 0 or not lines:
+        tail = (geo.stderr or geo.stdout).strip().splitlines()[-1:] or ["no output"]
+        return Verdict(gate=gid, passed=False, evidence=[log],
+                       error=f"the fit geometry failed (exit {geo.returncode}): {tail[0][:200]}")
+    result = json.loads(lines[-1])
+    report = os.path.join(stage, "fit.json")
+    with open(report, "w", encoding="utf-8") as fh:
+        json.dump(result, fh, indent=2, sort_keys=True)
+    ev = [report, log, step]
+    measured_parts = result["parts"]
+    missing = sorted(r for r in parts if r not in measured_parts)
+    if missing:
+        return _skip(gid, f"kicad-cli exported no body for {', '.join(missing[:8])}: "
+                          f"their 3D models were not found (it leaves a missing model out "
+                          f"with exit 0). Install KiCad's 3D library, or keep the models "
+                          f"beside the board as ${{KIPRJMOD}}/...")
+    hits = sorted(((v["interference_mm3"], n) for n, v in measured_parts.items()
+                   if v["interference_mm3"] > INTERFERENCE_TOL_MM3), reverse=True)
+    judged = {n: v for n, v in measured_parts.items() if n != "board"} or measured_parts
+    nearest = min(judged, key=lambda n: judged[n]["clearance_mm"])
+    gap = round(judged[nearest]["clearance_mm"], 3)
+    passed = not hits and gap >= clearance
+    if hits:
+        detail = (f"{len(hits)} shape(s) collide with the enclosure: "
+                  + ", ".join(f"{n} shares {v:.3g} mm^3" for v, n in hits[:4]))
+    else:
+        detail = (f"nothing collides; nearest part {nearest} is {gap:g} mm from the "
+                  f"enclosure vs {clearance:g} mm required")
+    detail += (f" ({len(parts)} part(s) placed at x {place['x']:g}, y {place['y']:g}, "
+               f"z {place['z']:g} mm, {place['rot_z_deg']:g} deg)")
+    return Verdict(gate=gid, passed=passed, measured=gap, limit=clearance, comparator=">=",
+                   units="mm", detail=detail, evidence=ev)

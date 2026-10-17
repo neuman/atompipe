@@ -1,7 +1,7 @@
 {
   "name": "pcb-kicad",
   "version": "0.1.0",
-  "description": "Checks a KiCad printed circuit board: KiCad's own design rule check and connectivity, library pin names against nets, and trace heating per IPC-2221.",
+  "description": "Checks a KiCad board and its schematic: DRC, ERC, schematic parity, connectivity, pin names, IPC-2221 trace heating, a fab's limits, ngspice measurements, and fit in its enclosure.",
   "settles": [
     "design rule violations",
     "pcb design rule check",
@@ -18,7 +18,32 @@
     "trace temperature rise",
     "trace width for current",
     "current capacity of a track",
-    "board file readability"
+    "board file readability",
+    "electrical rule violations",
+    "electrical rules check",
+    "erc",
+    "schematic errors",
+    "dangling label",
+    "unconnected pin",
+    "schematic to board parity",
+    "board matches schematic",
+    "netlist out of sync",
+    "footprint mismatch",
+    "fab capability limits",
+    "fab minimum track width",
+    "minimum drill size",
+    "annular ring",
+    "silkscreen text height",
+    "manufacturable at jlcpcb",
+    "simulated circuit measurement",
+    "spice simulation",
+    "supply droop",
+    "voltage at the connector",
+    "board fit in its enclosure",
+    "enclosure fit",
+    "part taller than its cavity",
+    "component collides with the lid",
+    "board to case clearance"
   ],
   "claim_classes": [
     "pcb",
@@ -33,20 +58,44 @@
     "current-capacity",
     "power-integrity",
     "manufacturability",
-    "clearance"
+    "clearance",
+    "schematic",
+    "electrical-rules",
+    "schematic-parity",
+    "fab-limits",
+    "circuit-simulation",
+    "enclosure-fit",
+    "packaging",
+    "interference"
   ],
   "provides_gates": [
     "pcb.board_readable",
     "pcb.pin_names",
     "pcb.net_width",
     "pcb.drc",
-    "pcb.unconnected"
+    "pcb.unconnected",
+    "pcb.erc",
+    "pcb.parity",
+    "pcb.fab_rules",
+    "pcb.spice",
+    "pcb.enclosure_fit"
   ],
   "provides_generators": [],
-  "requires_tools": [
-    "kicad-cli"
+  "provides_proposers": [
+    {
+      "id": "pcb.autoroute",
+      "basis": "established",
+      "description": "Routes a KiCad board with Freerouting (headless, one thread) and proposes the routed copy; the DRC gates judge it once adopted.",
+      "run": "proposers/autoroute.py"
+    }
   ],
-  "requires_python": [],
+  "requires_tools": [
+    "kicad-cli",
+    "ngspice"
+  ],
+  "requires_python": [
+    "cadquery"
+  ],
   "max_tier": 1,
   "lenses": [
     "what a design rule check cannot see",
@@ -55,7 +104,9 @@
     "warnings the gate never read",
     "the waiver nobody named",
     "a connector that fits the wrong cable",
-    "parts not in the library"
+    "parts not in the library",
+    "a part taller than its cavity",
+    "a simulation of a different circuit"
   ],
   "authors": [],
   "licence": "Apache-2.0",

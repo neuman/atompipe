@@ -1660,6 +1660,48 @@ it:
 - **The bundled mutation walk** gains five gates (59): `pcb.net_width` with a conclusive
   mutation (35 in all), and the four that report 0 against 0, or no value, with no
   boundary (21). No mutation passes any of them.
+- **Phase 2, the schematic** (2026-10-17): `pcb.erc` (`kicad-cli sch erc`, its exit code)
+  and `pcb.parity` (`pcb drc --schematic-parity`, the report's parity count; the exit
+  code must agree) are `established` and opaque, staged with every sheet the root
+  names, the `.kicad_pro` and the project's `sym-lib-table` and `fp-lib-table`. The
+  baseline gains its schematic, written by `make_schematic.py` from the stock symbols
+  with fixed UUIDs, and the board's footprints link to it. Neither needs the guard:
+  KiCad reads both files itself. *What slipped through while building it:* ERC on a
+  host whose KiCad was never configured warned about every symbol's library, so the
+  baseline would have passed on one machine and failed on another; the project's
+  own library tables seal it. And `pcbnew.FootprintLoad` leaves a footprint with no
+  library name, which parity reads as a footprint the symbol did not ask for. The
+  walk gains two no-boundary gates (61; 23).
+- **Phase 3, the router** (2026-10-17): `pcb.autoroute`, the first bundled proposer,
+  basis `established` (Freerouting's routes, KiCad's DSN export and session import).
+  It runs `pcbnew` in a separate Python that has it (`_pcbnew_steps.py`), never in
+  nopekit's, on a copy outside the project, and writes only the routed board and a
+  summary into the proposal directory: `pcbnew.SaveBoard` writes a `.kicad_pro` and a
+  `.kicad_prl` beside what it saves, and the first run recorded both as inputs. One
+  thread; two runs on the baseline drew the same copper in a different file order.
+  Freerouting's analytics are off; its update check cannot be. *Rejected:* routing
+  as an evaluator (copper drawn by the thing judging it), and a gap closer after the
+  router (the source pipeline's drew shorts). `test_proposers` holds its refusal
+  without its tools, which is every CI host.
+- **Phase 4, beyond the copper** (2026-10-17): three opaque tier-1 gates.
+  `pcb.fab_rules` (`sourced`): a fab's published minimums (`gates/fab/jlcpcb.json`,
+  each number quoted with the day it was read) written as the staged board's only
+  custom rules, the project's own minimums zeroed in the staged project file, and
+  findings counted by the types those rules raise. *What slipped through while
+  building it:* KiCad 9.0.9 reported the fab rule's 0.1 mm as "board setup
+  constraints", so a count by rule name would have read zero; and an unconditioned
+  silkscreen clearance flagged silk over every track. `pcb.spice` (`established`):
+  `ngspice -b` on the project's deck, one `.meas` against a band; a line ngspice
+  ignored (it warns and solves the rest) is an error, as is a measurement it could
+  not make. `pcb.enclosure_fit` (`established`): kicad-cli's STEP export against the
+  enclosure's solid, OpenCascade's shared volume and distance, in a child process.
+  *What slipped through while building it:* `kicad-cli pcb export step` drops a part
+  whose 3D model it cannot find, silently and with exit 0, and this machine has no
+  3D library; a fit read from that export would have read clear with no parts. So
+  every placed part must name a model and arrive in the export under its
+  reference, or the gate skips, and the baseline keeps KiCad's two models beside
+  it (CC-BY-SA 4.0 with the library exception, `selftest/assets/3d/README.md`).
+  The walk gains the three (64): two conclusive (37), one with no boundary (24).
 
 ## 9. Retired
 

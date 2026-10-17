@@ -27,7 +27,7 @@ the agent's own clearance shortcut (288 violations, reverted). These are what
 | The fab export ignored kicad-cli's exit code and read a report another script also wrote, so a failed run could pass on a stale report | review of the pipeline | `pcb.drc` reads the exit code and the report this run wrote, and errors when they disagree |
 | A custom rule meant for one connector's shield pads that relaxed edge clearance for every ground pad | review of the rule file | not a gate: `references/kicad-cli.md`, "Waivers", and `lenses.md` |
 | A narrower ribbon fits the wider connector with 4 mm of slop and can put the cell on ground | an agent's safety lens | not a gate: an expert-judgment claim (PACK.md, "cannot settle") |
-| A joystick routed to 0/0 on both boards whose body stood 6 mm proud of the face | the person, on sight | not yet: a STEP-against-enclosure gate (planned) |
+| A joystick routed to 0/0 on both boards whose body stood 6 mm proud of the face | the person, on sight | `pcb.enclosure_fit` (needs the part's 3D model; one with none skips) |
 
 ## What the autorouter showed
 

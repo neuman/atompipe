@@ -9,7 +9,11 @@ take to close it. A green DRC answers none of them.
   pins did someone type by number? A pin map typed by hand is a claim nobody
   checked; a symbol from KiCad's library is one KiCad's librarians checked.
 - Where is the netlist from? A schematic run through ERC, or a dictionary in a
-  script? A script's netlist has no electrical-rule check at all.
+  script? A script's netlist has no electrical-rule check at all, and `pcb.erc` and
+  `pcb.parity` skip on a board without a schematic.
+- Was the board updated after the schematic's last edit? `pcb.parity` says where
+  the two disagree; the fix is "Update PCB from Schematic", never editing the board
+  to match by hand.
 - Which nets carry power, and does each have a current in `pcb_net_currents_a`?
   A net that is not named is not judged.
 
@@ -56,8 +60,25 @@ take to close it. A green DRC answers none of them.
 - Is the courtyard real? An optimistic courtyard hides a collision DRC would have
   found.
 
+## A part taller than its cavity
+
+- Does every placed part have a 3D model, and is it the part you will buy? A
+  generic model of the wrong height fits on screen. `pcb.enclosure_fit` sees only
+  the models.
+- What moves after assembly: a plug pushed in, a button pressed, a battery that
+  swells, a lid that flexes? The fit is one placement of rigid solids.
+
+## A simulation of a different circuit
+
+- Is the SPICE deck the schematic? Compare each element's nodes and value with the
+  part it stands for. A deck that solves is not a deck that matches.
+- Where did each value come from: a datasheet, a measurement, a guess? A cable's
+  resistance and a regulator's output impedance are the usual guesses.
+
 ## Before the money is spent
 
+- Is `pcb_fab` the fab you will order from, and was its file read recently? A
+  fab's capability page changes; the file says the day it was read.
 - Has the fab's own DFM preview been read, rotations included? KiCad's rotation is
   not every fab's.
 - Is any part's stock thin enough that the order can fail after the boards ship?

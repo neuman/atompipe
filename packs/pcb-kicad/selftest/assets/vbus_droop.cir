@@ -1,0 +1,19 @@
+* VBUS at the output header (J2) of the esd_guard board under a 0.5 A load step.
+* pcb-kicad's known-good SPICE deck: pcb.spice measures vbus_min against 4.75 V.
+*
+* host    the USB host's 5.0 V supply (an ideal source: USB 2.0 allows 4.75-5.25 V)
+* rcable  the cable's power and ground conductors, out and back: 0.25 ohm, about
+*         0.6 m of 28 AWG power pair (0.213 ohm/m per conductor)
+* rtrack  the board's VBUS and GND copper, J1 to J2, out and back: about 22 mm each
+*         way of 0.25 mm track in 1 oz copper at 1.94 ohm/m, so 0.085 ohm
+* cbulk   the downstream device's bulk capacitor at J2: 10 uF, USB 2.0's ceiling
+* iload   a 0.5 A step at 1 ms, a high-power USB 2.0 device's whole budget
+.param rcable=0.25 rtrack=0.085 cbulk=10u iload=0.5
+V1 host 0 5.0
+Rc host j1 {rcable}
+Rt j1 j2 {rtrack}
+C1 j2 0 {cbulk}
+Iload j2 0 PULSE(0 {iload} 1m 1u 1u 5m 10m)
+.tran 1u 4m
+.meas tran vbus_min MIN v(j2) from=0.5m to=4m
+.end

@@ -1,6 +1,7 @@
-# Driving kicad-cli: what `pcb.drc` and `pcb.unconnected` run
+# Driving kicad-cli: what the tier-1 gates run
 
-Both gates run, on a copy of the board staged under the gate's out directory:
+`pcb.drc` and `pcb.unconnected` run, on a copy of the board staged under the gate's
+out directory:
 
     kicad-cli pcb drc <--severity-all|--severity-error|--severity-warning> \
         --exit-code-violations --format json --units mm -o drc.json <board>.kicad_pcb
@@ -29,15 +30,49 @@ and a warning elsewhere on the board is not its business.
 Each item: `type` (`clearance`, `shorting_items`, `silk_edge_clearance`,
 `courtyards_overlap`, `unconnected_items`, ...), `severity`, `description`, and the
 `items` it names, each with a position and a description such as `Track [DM] on
-F.Cu`. `schematic_parity` is filled only with `--schematic-parity` (a later gate).
+F.Cu`. `schematic_parity` is filled only with `--schematic-parity` (`pcb.parity`).
+
+## ERC: what `pcb.erc` runs
+
+    kicad-cli sch erc --severity-all --exit-code-violations --format json \
+        --units mm -o erc.json <project>.kicad_sch
+
+On a staged copy of the root schematic, every sheet it names (followed through
+each sheet's `Sheetfile` property, which must stay inside the schematic's
+directory), the `.kicad_pro` and the project's library tables. Exit codes as for
+DRC: 0 nothing, 5 something, anything else an error. The report:
+
+    {"sheets": [{"path": "/", "uuid_path": "/...", "violations": [...]}], ...}
+
+Each violation has `type` (`pin_not_connected`, `global_label_dangling`,
+`power_pin_not_driven`, `pin_to_pin`, `lib_symbol_issues`, ...), `severity`,
+`description` and `items`. `lib_symbol_issues` ("the current configuration does not
+include the symbol library") depends on the machine unless the project carries its
+own `sym-lib-table`: keep one. With the libraries found, ERC also compares each
+symbol's copy in the schematic with the library's (`lib_symbol_mismatch`).
+
+## Parity: what `pcb.parity` runs
+
+    kicad-cli pcb drc --schematic-parity --severity-all --exit-code-violations ...
+
+KiCad loads the root schematic of the board's project, the board's name with
+`.kicad_sch`, beside it; there is no flag to name another. It matches footprints to
+symbols and lists, under `schematic_parity`: `missing_footprint`, `extra_footprint`,
+`footprint_symbol_mismatch` (the footprint the symbol names is not the one on the
+board; a board whose footprints carry no library name, as `pcbnew.FootprintLoad`
+leaves them, fails here), `net_conflict` (a pad on a net the schematic does not
+give it), and value differences. They are warnings, so the run is at every
+severity. The gate counts `schematic_parity` only: the same run's copper findings
+are `pcb.drc`'s. `--exit-code-violations` counts parity items too (exit 5).
 
 ## Waivers
 
-KiCad stores DRC exclusions in the `.kicad_pro` (`board.design_settings.drc_exclusions`),
-each naming the violation and the items. `kicad-cli` honours them unless
-`--severity-exclusions` is given. That makes a waiver a reviewable line in a
-tracked file. The gate copies the `.kicad_pro` and any `.kicad_dru` beside the board
-into its stage, so the rules and exclusions it ran under are the project's.
+KiCad stores DRC exclusions in the `.kicad_pro` (`board.design_settings.drc_exclusions`)
+and ERC exclusions beside them (`erc.erc_exclusions`), each naming the violation and
+the items. `kicad-cli` honours them unless `--severity-exclusions` is given. That
+makes a waiver a reviewable line in a tracked file. The gates copy the `.kicad_pro`,
+any `.kicad_dru` and the library tables beside the board into their stage, so the
+rules, exclusions and libraries they ran under are the project's.
 
 A `.kicad_dru` rule can also relax a constraint. Read its `condition` before you
 trust it: a rule written for one connector's shield pads with the condition
