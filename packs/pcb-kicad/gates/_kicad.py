@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import math
 import os
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------------- #
@@ -182,8 +184,12 @@ class Track:
     net: str
     width_mm: float
     layer: str
-    length_mm: float
+    length_mm: float            # along the copper: an arc's arc, never its chord
     kind: str                   # "segment" | "arc"
+    #: Where the copper runs: the unordered ends (and an arc's mid), rounded to
+    #: 0.1 um, so the same copper written twice is counted once in a length.
+    #: (What slipped through: a script-generated board wrote 6 segments twice.)
+    shape: tuple = ()
 
 
 @dataclass
@@ -213,6 +219,32 @@ def _net_name(item, nets: dict[int, str]) -> str:
 
 def _xy(item) -> tuple[float, float]:
     return float(item[1]), float(item[2])
+
+
+def arc_length(start, mid, end) -> float:
+    """The length along a KiCad arc, from its start, mid and end points (mm).
+
+    KiCad writes ``mid`` at the arc's midpoint, so each half spans at most 180
+    degrees and is ``2 r asin(chord / 2r)`` on the circle through the three
+    points. Three points in a line are a straight track. (What slipped through:
+    the reader took an arc's chord as its length, and nothing read the length
+    until ``pcb.net_width`` printed it.)"""
+    a = math.dist(start, mid)
+    b = math.dist(mid, end)
+    c = math.dist(start, end)
+    twice_area = abs((mid[0] - start[0]) * (end[1] - start[1])
+                     - (end[0] - start[0]) * (mid[1] - start[1]))
+    if twice_area < 1e-12:
+        return a + b
+    r = a * b * c / (2.0 * twice_area)
+    return 2.0 * r * (math.asin(min(1.0, a / (2.0 * r))) + math.asin(min(1.0, b / (2.0 * r))))
+
+
+def _shape(*points) -> tuple:
+    """A track's place, for counting the same copper once: the ends unordered,
+    then any mid, each rounded to 0.1 um."""
+    rounded = [(round(x, 4), round(y, 4)) for x, y in points]
+    return tuple(sorted(rounded[:2])) + tuple(rounded[2:])
 
 
 def footprint_ref(fp: list) -> tuple[str, str]:
@@ -256,13 +288,18 @@ def board_from_tree(tree: list) -> Board:
         tracks.append(Track(net=_net_name(child(seg, "net"), nets),
                             width_mm=float(value(seg, "width")),
                             layer=str(value(seg, "layer")),
-                            length_mm=math.hypot(x1 - x0, y1 - y0), kind="segment"))
+                            length_mm=math.hypot(x1 - x0, y1 - y0), kind="segment",
+                            shape=_shape((x0, y0), (x1, y1))))
     for arc in children(tree, "arc"):
-        (x0, y0), (x1, y1) = _xy(child(arc, "start")), _xy(child(arc, "end"))
+        start, end = _xy(child(arc, "start")), _xy(child(arc, "end"))
+        mid = _xy(child(arc, "mid")) if child(arc, "mid") is not None else None
         tracks.append(Track(net=_net_name(child(arc, "net"), nets),
                             width_mm=float(value(arc, "width")),
                             layer=str(value(arc, "layer")),
-                            length_mm=math.hypot(x1 - x0, y1 - y0), kind="arc"))
+                            length_mm=(arc_length(start, mid, end) if mid is not None
+                                       else math.dist(start, end)),
+                            kind="arc",
+                            shape=_shape(start, end, *([mid] if mid is not None else []))))
     zone_nets = [_net_name(child(z, "net"), nets) or str(value(z, "net_name", default=""))
                  for z in children(tree, "zone")]
     return Board(version=str(value(tree, "version", default="")), nets=nets,
@@ -428,6 +465,128 @@ CONSTRAINT_TYPES = {
     "silk_clearance": "silk_overlap",
 }
 
+#: The other types a constraint reports under, by the item or the case. KiCad
+#: 9.0.9 reports a ``hole_size`` breach on a microvia as
+#: ``microvia_drill_out_of_range``, even when the breach is of the fab's own
+#: via-hole rule; and two holes on one centre as ``holes_co_located``, never
+#: testing ``hole_to_hole`` at all. (What slipped through, in review: neither type
+#: was the fab's, so a 0.12 mm microvia drill passed JLCPCB's 0.15 mm via hole, and
+#: a via on top of another passed where two 0.3 mm apart failed; ``pcb.drc``, under
+#: the project's own floors and severities, could pass both.)
+ALSO_REPORTED_AS = {"hole_size": ("microvia_drill_out_of_range",),
+                    "hole_to_hole": ("holes_co_located",)}
+
+
+def reported_as(constraint: str) -> tuple[str, ...]:
+    """Every DRC violation type a breach of ``constraint`` can be reported under."""
+    return (CONSTRAINT_TYPES[constraint],) + ALSO_REPORTED_AS.get(constraint, ())
+
+#: The condition every fab file's ``silk_clearance`` rule must carry: a fab
+#: publishes silkscreen to pad, and :func:`dru_text` refuses any other silk rule.
+#: KiCad reports silk on silk as ``silk_overlap`` too, from the board's own
+#: silk minimum (zeroed in the fab run, so only real overlaps remain), and that
+#: finding is ``pcb.drc``'s. So :func:`fab_findings` leaves a ``silk_overlap`` to
+#: ``pcb.drc`` only when it can show that no item is a pad. (What slipped through:
+#: on a real 4-layer board the fab run counted 18 silk-on-silk overlaps, the same
+#: 18 ``pcb.drc`` reported, as past JLCPCB's limits: 190 findings where 172 were
+#: the fab's. The baseline has no silk on silk, so its selftest could not see it.)
+SILK_TO_PAD = "A.Type == 'Pad' || B.Type == 'Pad'"
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def kiid(text) -> str | None:
+    """A pad's id as kicad-cli writes it in a report, or None where KiCad gives
+    the pad a fresh random one, which no report can be matched to.
+
+    Read off kicad-cli 9.0.9, in KiCad's own order: a bare legacy stamp of up to
+    8 hex digits comes back zero-filled as ``00000000-0000-0000-0000-0000`` and the
+    stamp; otherwise an uppercase, undashed or braced UUID comes back lowercase
+    and dashed. No id, a padded one, a braced stamp or any other text gets a
+    random one. (In review: a braced id or a short stamp read as unknown, a padded
+    one as kept, and a braced stamp as kept.)"""
+    if text is None:
+        return None
+    s = str(text).lower()
+    if re.fullmatch(r"[0-9a-f]{1,8}", s):
+        return "00000000-0000-0000-0000-0000" + s.zfill(8)
+    if len(s) >= 2 and s[0] == "{" and s[-1] == "}":
+        s = s[1:-1]
+    if re.fullmatch(r"[0-9a-f]{32}", s):
+        s = f"{s[:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:]}"
+    return s if _UUID.fullmatch(s) else None
+
+
+def pad_ids(tree: list) -> tuple[set[str], int]:
+    """The id of every footprint pad on the board as a DRC report's items carry
+    it (:func:`kiid` of its ``uuid``, KiCad 8 and later, or ``tstamp``, KiCad 6
+    and 7), and how many pads KiCad gives a random id. Matched by id, not by
+    an item's description, because kicad-cli translates descriptions ("Pad 1
+    [GND] of U4") into the host's language.
+
+    (What slipped through, in review: matched on the file's text alone, a pad
+    with no id, an uppercase one or a legacy stamp never matched the report, and
+    the fab's silk-to-pad finding was handed to ``pcb.drc``: the fab gate passed
+    a silk line drawn across a pad, which the count before this one had failed.)"""
+    ids, unknown = set(), 0
+    for fp in children(tree, "footprint"):
+        for pad in children(fp, "pad"):
+            found = None
+            for key in ("uuid", "tstamp"):
+                found = found or kiid(value(pad, key))
+            if found is None:
+                unknown += 1
+            else:
+                ids.add(found)
+    return ids, unknown
+
+
+def fab_findings(doc: dict, table: dict, pads: tuple[set[str], int],
+                 prefix: str = "fab") -> tuple[list, int]:
+    """The violations in a fab run's report that are the fab's, and how many of
+    them are counted only because the board's pads could not be told apart.
+
+    A violation of a type one of ``table``'s rules constrains is the fab's. A
+    ``silk_overlap`` is left to ``pcb.drc`` only when it is shown to be silk on
+    silk: no item's id is a pad's (``pads``, from :func:`pad_ids`), its words do
+    not name the run's own silk rule (``<prefix>_<name>``, the file's string,
+    never translated), and no pad on the board has an id KiCad replaces with a
+    random one. Where one does, every ``silk_overlap`` is counted: a pass must
+    never rest on a pad the count could not see."""
+    ids, unknown = pads
+    types = {t for r in table["rules"] for t in reported_as(r["constraint"])}
+    silk = CONSTRAINT_TYPES["silk_clearance"]
+    names = [re.compile(rf"(?<!\w){re.escape(prefix)}_{re.escape(r['name'])}(?!\w)")
+             for r in table["rules"] if r["constraint"] == "silk_clearance"]
+    found, guessed = [], 0
+    for v in doc.get("violations", []):
+        kind = v.get("type")
+        if kind not in types:
+            continue
+        if kind == silk:
+            on_pad = any(kiid(item.get("uuid")) in ids for item in v.get("items", []))
+            named = any(n.search(str(v.get("description", ""))) for n in names)
+            if not (on_pad or named):
+                if not unknown:
+                    continue
+                guessed += 1
+        found.append(v)
+    return found, guessed
+
+
+def fab_kinds(found: list, table: dict) -> str:
+    """``found`` grouped by type, most first, each with the names of the fab
+    rules that constrain it: ``144x silk_overlap (silk_to_pad), 14x text_height
+    (silk_text_height)``. Every type is named: a person reads from this line
+    whether anything past the fab's limits is copper."""
+    names: dict[str, list[str]] = {}
+    for rule in table["rules"]:
+        for kind in reported_as(rule["constraint"]):
+            names.setdefault(kind, []).append(rule["name"])
+    counts = Counter(v.get("type", "?") for v in found)
+    return ", ".join(f"{n}x {kind} ({'/'.join(names.get(kind, ['?']))})"
+                     for kind, n in counts.most_common())
+
 
 def fab_table(fab: dict, layers: int, oz: float) -> dict | None:
     """The row of a fab file (``gates/fab/<name>.json``) for a board of
@@ -440,6 +599,17 @@ def fab_table(fab: dict, layers: int, oz: float) -> dict | None:
         if lo_l <= layers <= hi_l and lo_oz < oz <= hi_oz:
             return {"name": row["name"], "rules": list(fab.get("common", [])) + list(row["rules"])}
     return None
+
+
+def fab_clearance_floor(table: dict) -> float | None:
+    """The copper clearance the fab publishes, or None when its row has none: the
+    floor the fab run sets as the board's own minimum clearance. KiCad lets a
+    pad's, a footprint's or a zone's local clearance override every custom rule,
+    and holds it only at the board minimum. (What slipped through, in review: the
+    fab run zeroed that minimum, so ``(clearance 0.01)`` on one pad passed a
+    0.047 mm gap under JLCPCB's 0.1 mm, and ``pcb.drc`` passed it too.)"""
+    mins = [float(r["min_mm"]) for r in table["rules"] if r["constraint"] == "clearance"]
+    return min(mins) if mins else None
 
 
 def fab_rule_min(table: dict, name: str) -> float:
@@ -456,9 +626,23 @@ def dru_text(table: dict, prefix: str) -> str:
     with a condition follows the general one it narrows (the common rules are
     written in that order)."""
     lines = ["(version 1)"]
+    clearances = [r for r in table["rules"] if r["constraint"] == "clearance"]
+    if len(clearances) > 1 or any(r.get("condition") for r in clearances):
+        raise ValueError("a fab row holds one clearance rule, with no condition: the fab "
+                         "run floors every local clearance override at it "
+                         "(fab_clearance_floor), and a second or narrower rule would sit "
+                         "above that floor, where an override could relax it")
     for rule in table["rules"]:
         if rule["constraint"] not in CONSTRAINT_TYPES:
             raise ValueError(f"unknown constraint {rule['constraint']!r} in rule {rule['name']!r}")
+        if rule["constraint"] == "silk_clearance" and rule.get("condition") != SILK_TO_PAD:
+            raise ValueError(f"rule {rule['name']!r}: a silk_clearance rule is silkscreen to "
+                             f"pad, with the condition {SILK_TO_PAD!r}; any other silk rule "
+                             f"would put silk on silk, which is pcb.drc's, into the fab count")
+        if rule["constraint"] == "silk_clearance" and float(rule["min_mm"]) <= 0:
+            raise ValueError(f"rule {rule['name']!r}: a silk_clearance rule's minimum must be "
+                             f"above 0: at 0 KiCad leaves the rule's name out of the finding, "
+                             f"and the fab count reads that name")
         lines.append(f'(rule "{prefix}_{rule["name"]}"')
         if rule.get("layer"):
             lines.append(f'\t(layer "{rule["layer"]}")')

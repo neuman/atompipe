@@ -1702,6 +1702,39 @@ it:
   reference, or the gate skips, and the baseline keeps KiCad's two models beside
   it (CC-BY-SA 4.0 with the library exception, `selftest/assets/3d/README.md`).
   The walk gains the three (64): two conclusive (37), one with no boundary (24).
+- **Follow-up after two real boards** (2026-10-17, GitHub #9 to #11): the pack's
+  first run on real boards (script-generated, 4 layers, no schematic) found three
+  faults its baseline could not show, and two rounds of review of their fixes
+  found more, three of them false passes older than the fixes. (a) `pcb.fab_rules` counts findings by the types its rules raise *except
+  silk on silk*, which KiCad reports as `silk_overlap` too: such a finding is left
+  to `pcb.drc` only when it is shown to be silk on silk (no item is a pad by id,
+  its words do not name the run's `fab_silk_to_pad` rule, and every pad on the
+  board has an id KiCad keeps; otherwise every silk overlap counts), and a fab
+  file's silk rule must be silk to pad. In the fab run, a constrained type the
+  project set to "ignore" is raised to "error", the board's minimum clearance is
+  the fab's own (the only floor KiCad holds a local clearance override to, so a
+  fab row has one unconditioned clearance rule; an override above the fab's
+  minimum still binds, a false fail filed as GitHub #13), and a microvia's hole
+  breach (`microvia_drill_out_of_range`) and two holes on one centre
+  (`holes_co_located`) are the fab's. A project file KiCad could not read, which
+  it would drop with the floor, is an error. The detail line groups
+  findings by type with the fab rule behind each. *What slipped through:* the 18
+  silk-on-silk overlaps `pcb.drc` found were counted as past JLCPCB's limits (190
+  findings where 172 were the fab's); the first fix matched pads on the file's
+  text alone, and in review a silk line across a pad with no id, an uppercase id
+  or a legacy stamp passed; and, older than these fixes, an "ignore" severity hid
+  the fab's own rule, a pad's `(clearance 0.01)` passed a 0.047 mm gap under the
+  fab's 0.1 mm, a 0.12 mm microvia drill passed its 0.15 mm via hole, and a via
+  on top of another passed.
+  (b) `copper-connectivity` binds `pcb.unconnected` alone. *What slipped
+  through:* `connectivity` also binds `pcb.parity`, which skips with no
+  schematic, so "every connection is made" read Skipped beside a pass.
+  (c) `pcb.net_width`'s line names the hottest stretch (a net's tracks at that
+  width on that side of the stack, their layers and length, the same copper once,
+  an arc along its arc), up to four stretches as hot after it and then how many
+  more, and holds IPC-2221's fitted range over each. *What slipped through:* it
+  called the hottest track "narrowest", named one net of a tie, and the reader
+  took an arc's chord as its length.
 
 ## 9. Retired
 

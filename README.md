@@ -328,7 +328,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 | `pcb.enclosure_fit` | The populated board fits its enclosure: nothing collides, every part keeps its clearance (needs kicad-cli, cadquery) | established |
 | `pcb.erc` | KiCad's electrical rules check finds nothing in the schematic, at every severity (needs kicad-cli) | established |
 | `pcb.fab_rules` | The board stays inside its fab's published limits (needs kicad-cli) | sourced |
-| `pcb.net_width` | Each current-carrying net's narrowest track stays inside its heating limit | sourced |
+| `pcb.net_width` | Every track of each current-carrying net stays inside its heating limit | sourced |
 | `pcb.parity` | The board and its schematic agree: every part, value, footprint and net (needs kicad-cli) | established |
 | `pcb.pin_names` | Pins the library gives one name carry one net | sourced |
 | `pcb.spice` | A measurement ngspice makes on the project's circuit deck stays inside its limits (needs ngspice) | established |

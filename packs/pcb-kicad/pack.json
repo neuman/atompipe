@@ -51,6 +51,7 @@
     "electronics",
     "design-rules",
     "connectivity",
+    "copper-connectivity",
     "netlist",
     "pin-map",
     "short-circuit",

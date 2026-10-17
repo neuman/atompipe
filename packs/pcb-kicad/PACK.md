@@ -20,7 +20,7 @@ circuit that works. Nothing here has seen the board powered.
 |---|---|---|---|
 | `pcb.board_readable` | 0 | model-only | the board is a KiCad 6-9 file whose every track names a defined net (the guard) |
 | `pcb.pin_names` | 0 | sourced | pins the library gives one name (an ESD array's `I/O1`, a part's several `GND`) carry one net |
-| `pcb.net_width` | 0 | sourced | the narrowest track of each named net stays inside its temperature-rise limit, IPC-2221 |
+| `pcb.net_width` | 0 | sourced | every track of each named net stays inside its temperature-rise limit, IPC-2221; the detail names the hottest stretch |
 | `pcb.drc` | 1 | established | `kicad-cli pcb drc` finds nothing, at every severity by default |
 | `pcb.unconnected` | 1 | established | KiCad finds no connection the netlist asks for and the copper does not make |
 | `pcb.erc` | 1 | established | `kicad-cli sch erc` finds nothing in the schematic, at every severity by default |
@@ -81,7 +81,8 @@ Read this before you write a claim. Every one of these has passed a "0 violation
   only for parts whose library symbol names those pins alike.
 - **A board with no schematic.** A netlist built in a script has no ERC and no
   parity to check: `pcb.erc` and `pcb.parity` skip, and the script's dictionary is
-  the only record of what connects to what.
+  the only record of what connects to what. Tag a claim that every connection is
+  made `copper-connectivity`, not `connectivity`, or `pcb.parity`'s skip holds it.
 - **Parts that are not in a library.** A footprint drawn without a schematic carries
   no pin names, and `pcb.pin_names` skips. Its pin map is a claim for a person (an
   expert judgment) or for a pin table recorded from the datasheet.
@@ -102,8 +103,9 @@ Read this before you write a claim. Every one of these has passed a "0 violation
   The deck is someone's model, typed by hand; `pcb.spice` refuses a run that
   dropped a line, and nothing more. Read the deck against the schematic.
 - **Everything the fab checks.** `pcb.fab_rules` holds the minimums the fab
-  publishes and KiCad can test: widths, spacing, drills, annular rings, edge
-  clearance, silkscreen text. Board size, mask webs, panelisation and the fab's
+  publishes and KiCad can test: widths, spacing, drills, via pads, annular rings,
+  edge clearance, silkscreen text, and silkscreen to pad (silk on silk is
+  `pcb.drc`'s). Board size, mask webs, panelisation and the fab's
   own DFM review are not in it, and a fab's page changes: the file says the day
   it was read.
 - **Anything about a built board.** Assembly, solder, first power-up: physical
@@ -123,6 +125,7 @@ what it asserts.
 | `circuit-simulation` | `pcb.spice` |
 | `enclosure-fit`, `packaging`, `interference` | `pcb.enclosure_fit` |
 | `connectivity` | `pcb.unconnected`, `pcb.parity` |
+| `copper-connectivity` | `pcb.unconnected` |
 | `netlist` | `pcb.unconnected`, `pcb.pin_names`, `pcb.erc`, `pcb.parity` |
 | `schematic`, `electrical-rules` | `pcb.erc` |
 | `schematic-parity` | `pcb.parity` |
@@ -132,7 +135,9 @@ what it asserts.
 | `pcb-model-validity` | `pcb.board_readable` |
 
 A claim "every connection is made" tagged `connectivity` stays Checked through a
-silkscreen warning; tagged `pcb`, it would read Failing on it.
+silkscreen warning; tagged `pcb`, it would read Failing on it. On a board with no
+schematic, tag it `copper-connectivity`: `connectivity` brings in `pcb.parity`,
+which skips there, so the claim would read Skipped beside a pass.
 
 ## Units and frames
 

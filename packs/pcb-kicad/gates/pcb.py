@@ -3,7 +3,7 @@
 
     pcb.board_readable   tier 0  the board is a KiCad file this reader knows (the guard)
     pcb.pin_names        tier 0  pins the library gives one name carry one net
-    pcb.net_width        tier 0  each current-carrying net's narrowest track, IPC-2221
+    pcb.net_width        tier 0  every track of each current-carrying net, IPC-2221
     pcb.drc              tier 1  KiCad's design rule check, every severity
     pcb.unconnected      tier 1  KiCad's count of connections the copper never makes
     pcb.erc              tier 1  KiCad's electrical rules check of the schematic
@@ -95,6 +95,12 @@ DEFAULT_DRC_TIMEOUT_S = 120.0
 #: fab quotes without being asked. The verdict says "[pack default]" when used.
 DEFAULT_OZ_OUTER = 1.0
 DEFAULT_OZ_INNER = 0.5
+
+#: How many other stretches as hot as the worst ``pcb.net_width`` names in its
+#: line; past that it says how many more, and its evidence (``as_hot``) lists
+#: every one. Four keeps a power board's VBUS / VBAT / GND ties readable; naming
+#: every one (a matrix of 20 equal signal nets) was rejected as a line nobody reads.
+TIES_NAMED = 4
 
 
 def _skip(gid: str, reason: str) -> Verdict:
@@ -265,10 +271,21 @@ def pin_names(ctx: GateContext) -> Verdict:
 # --------------------------------------------------------------------------- #
 # trace heating
 # --------------------------------------------------------------------------- #
+def _length_once(rows: list) -> float:
+    """The length of a stretch's rows, each piece of copper (its layer and its
+    ``Track.shape``) counted once."""
+    seen, length = set(), 0.0
+    for r in rows:
+        if (r[4], r[7]) not in seen:
+            seen.add((r[4], r[7]))
+            length += r[6]
+    return length
+
+
 @gate(
     id="pcb.net_width",
     basis="sourced",
-    title="Each current-carrying net's narrowest track stays inside its heating limit",
+    title="Every track of each current-carrying net stays inside its heating limit",
     claims=["pcb", "trace-width", "current-capacity", "power-integrity"],
     tier=Tier.INSTANT,
     settles="trace temperature rise",
@@ -284,7 +301,7 @@ def pin_names(ctx: GateContext) -> Verdict:
     ),
 )
 def net_width(ctx: GateContext) -> Verdict:
-    """IPC-2221's temperature rise of each named net's narrowest track.
+    """IPC-2221's temperature rise of every track of each named net; the hottest decides.
 
     dT = (I / (k * A^0.725))^(1/0.44), A the track's cross-section in square mils
     (width x copper thickness), k 0.048 outside the stack and 0.024 inside
@@ -326,33 +343,74 @@ def net_width(ctx: GateContext) -> Verdict:
         for t in tracks:
             outer = t.layer in K.OUTER_LAYERS
             rise = K.temp_rise_c(float(amps), t.width_mm, oz_out if outer else oz_in, outer)
-            rows.append((rise, net, float(amps), t.width_mm, t.layer, outer))
+            rows.append((rise, net, float(amps), t.width_mm, t.layer, outer, t.length_mm,
+                         t.shape))
     if not rows:
         return _skip(gid, f"none of {sorted(currents)} has a track on this board "
                           f"(carried by pours or pads alone?): nothing this gate can judge")
-    rise, net, amps, width, layer, outer = max(rows)
+    rise, net, amps, width, _layer, outer, _length, _shape = max(rows)
     reported = round(rise, 1)
+    # The hottest stretches: a net's tracks at one width on one side of the stack
+    # heat alike, so each is named with the layers it runs on and its length, the
+    # same copper counted once; and every other stretch that reads as hot at the
+    # precision the line prints (another net's, or the same net's at another width
+    # or side) is named after it, up to TIES_NAMED. (What slipped through:
+    # on a real 4-layer board the line read "VBUS: narrowest 0.2 mm on In2.Cu
+    # rises 61.2 C", but 48 mm of VBUS on B.Cu is 0.2 mm too and runs cooler, so
+    # the word gave a reader cause to widen the outer stretches, which would not
+    # lower the rise; a 0.25 mm inner track can be the hottest beside a 0.2 mm
+    # outer one, where "narrowest" is false; and in a tie, as on the baseline's
+    # VBUS and GND, the line named one net and not the other.)
+    stretches: dict[tuple, list] = {}
+    for r in rows:
+        if round(r[0], 1) == reported:
+            stretches.setdefault((r[1], r[3], r[5], r[2]), []).append(r)
+    first = (net, width, outer, amps)
+    order = [first] + sorted(k for k in stretches if k != first)
     passed = reported <= limit
     lo, hi = K.FIT_RANGE["temp_rise_c"]
+    # The fitted range is held over every stretch the line says reaches its rise,
+    # each value named with its net. (What slipped through, in review: it read
+    # only the first, so a tie at 36 A was named as hot with no caveat.)
     outside = []
     if not lo <= limit <= hi:
         outside.append(f"a {limit:g} C limit")
-    if width / K.MM_PER_MIL > K.FIT_RANGE["width_mil"][1]:
-        outside.append(f"a {width:g} mm track")
-    if amps > K.FIT_RANGE["current_a"][1]:
-        outside.append(f"{amps:g} A")
+    for key in order:
+        if key[1] / K.MM_PER_MIL > K.FIT_RANGE["width_mil"][1]:
+            outside.append(f"a {key[1]:g} mm track ({key[0]})")
+        if key[3] > K.FIT_RANGE["current_a"][1]:
+            outside.append(f"{key[3]:g} A ({key[0]})")
+    outside = list(dict.fromkeys(outside))
     ev = _evidence(ctx, "net_width", {
         "formula": "dT = (I / (k * A^0.725))^(1/0.44), A = width_mil * 1.378 * oz",
         "source": "IPC-2221 (2012) section 6.2; references/ipc-2221.md",
         "copper_oz": {"outer": oz_out, "inner": oz_in, "defaulted": defaulted},
         "limit_c": limit, "unrouted_nets": unrouted,
         "worst_per_net": {n: max((r for r in rows if r[1] == n), default=None)
-                          for n in sorted({r[1] for r in rows})}})
-    oz = oz_out if outer else oz_in
-    detail = (f"{net}: narrowest {width:g} mm on {layer} rises {reported:g} C at "
-              f"{amps:g} A (IPC-2221 {'external' if outer else 'internal'}, {oz:g} oz"
-              f"{' [pack default]' if ('outer' if outer else 'inner') in defaulted else ''}) "
+                          for n in sorted({r[1] for r in rows})},
+        "as_hot": [{"net": k[0], "width_mm": k[1], "side": "outer" if k[2] else "inner",
+                    "current_a": k[3], "layers": sorted({r[4] for r in stretches[k]}),
+                    "length_mm": round(_length_once(stretches[k]), 3)} for k in order]})
+
+    def oz_of(is_outer: bool) -> str:
+        side = "outer" if is_outer else "inner"
+        return (f"{oz_out if is_outer else oz_in:g} oz"
+                f"{' [pack default]' if side in defaulted else ''}")
+
+    def where(key: tuple) -> str:
+        layers = ", ".join(sorted({r[4] for r in stretches[key]}))
+        return f"{key[1]:g} mm on {layers} ({_length_once(stretches[key]):.1f} mm)"
+
+    detail = (f"{net}: hottest track {where(first)} rises {reported:g} C at {amps:g} A "
+              f"(IPC-2221 {'external' if outer else 'internal'}, {oz_of(outer)}) "
               f"vs {limit:g} C")
+    ties = order[1:]
+    for key in ties[:TIES_NAMED]:
+        detail += (f"; as hot: {key[0]} {where(key)} at {key[3]:g} A, "
+                   f"{'external' if key[2] else 'internal'} {oz_of(key[2])}")
+    if len(ties) > TIES_NAMED:
+        detail += (f"; and {len(ties) - TIES_NAMED} more stretch(es) as hot "
+                   f"(evidence: as_hot)")
     if unrouted:
         detail += f"; no tracks on {', '.join(unrouted)} (not judged)"
     if outside:
@@ -549,7 +607,11 @@ def drc(ctx: GateContext) -> Verdict:
     id="pcb.unconnected",
     basis="established",
     title="Every connection the netlist asks for is made in copper",
-    claims=["pcb", "connectivity", "netlist"],
+    # `copper-connectivity` is this gate's alone. What slipped through: on a board a
+    # script generated, with no schematic, `connectivity` also binds pcb.parity,
+    # which skips there, so a claim "every connection is made" read Skipped beside
+    # this gate's pass, and no tag let a person claim what the board supports.
+    claims=["pcb", "connectivity", "netlist", "copper-connectivity"],
     tier=Tier.BUILD,
     settles="unconnected items",
     requires_tools=["kicad-cli"],
@@ -563,7 +625,8 @@ def unconnected(ctx: GateContext) -> Verdict:
     """KiCad's own count of unconnected items, from a DRC run at error severity
     (an unconnected item is always an error). Narrower than ``pcb.drc``: a claim
     that every net is complete binds here, and stays Checked through a silk
-    warning that ``pcb.drc`` fails on."""
+    warning that ``pcb.drc`` fails on. Tagged ``copper-connectivity``, it binds
+    here alone, so it holds on a board with no schematic too."""
     gid = "pcb.unconnected"
     path = _board_path(ctx)
     if path is None:
@@ -716,19 +779,59 @@ def _load_json(path: str) -> dict:
         return json.load(fh)
 
 
-def _zeroed_project(src: str | None, dst: str) -> None:
-    """The project file with every board-setup minimum set to 0, so each finding
-    of a constrained type in the fab run is the fab rule's and never the
-    project's own floor (which ``pcb.drc`` already judges). Exclusions, net
-    classes and everything else stay as they are."""
+def _zeroed_project(src: str | None, dst: str, table: dict) -> set[str]:
+    """The project file for the fab run, and the types it raised from "ignore".
+
+    Every board-setup minimum is set to 0, so each finding of a constrained type
+    in the fab run is the fab rule's and never the project's own floor (which
+    ``pcb.drc`` already judges), except silk on silk, which KiCad still reports
+    as ``silk_overlap`` at a floor of 0 and ``_kicad.fab_findings`` leaves to
+    ``pcb.drc``. The one exception is the minimum clearance, set to the fab's own
+    (``_kicad.fab_clearance_floor``): it is the only floor KiCad holds a pad's,
+    footprint's or zone's local clearance override to, so an override below the
+    fab's number is raised to it. An override above it still binds in this run,
+    and copper inside it is counted as the fab's: a false fail, never a false
+    pass (GitHub #13). A constrained type the project set to
+    "ignore" is raised to "error": KiCad does not test an ignored type, even with
+    ``--severity-all``. Exclusions (each a person's waiver of one finding), net
+    classes and everything else stay as they are.
+
+    (What slipped through, in review: a project that set ``track_width`` or
+    ``silk_overlap`` to "ignore" hid the fab's own rule of that type, and a pad's
+    ``(clearance 0.01)`` overrode the fab's clearance rule; the fab gate passed a
+    track under the fab's minimum and a 0.047 mm gap under its 0.1 mm, and
+    ``pcb.drc``, under the project's own settings, passed both.)"""
     doc = _load_json(src) if src and os.path.isfile(src) else {"meta": {"version": 1}}
-    rules = doc.setdefault("board", {}).setdefault("design_settings", {}).setdefault("rules", {})
+    settings = doc.setdefault("board", {}).setdefault("design_settings", {})
+    rules = settings.setdefault("rules", {})
     for key, val in list(rules.items()):
         if key.startswith("min_") and key != "min_resolved_spokes" \
                 and isinstance(val, (int, float)) and not isinstance(val, bool):
             rules[key] = 0.0
+    floor = K.fab_clearance_floor(table)
+    if floor is not None:
+        rules["min_clearance"] = floor
+    severities = settings.setdefault("rule_severities", {})
+    raised = set()
+    for kind in {t for c in K.CONSTRAINT_TYPES for t in K.reported_as(c)}:
+        if severities.get(kind) == "ignore":
+            severities[kind] = "error"
+            raised.add(kind)
+    # Refused, never written: KiCad drops a project file it cannot parse without
+    # a word and runs on defaults, the clearance floor gone with it. (What slipped
+    # through, in review: a NaN or a 1e999 in the project, which Python reads and
+    # writes back as NaN or Infinity, did exactly that, and a pad's override
+    # relaxed the fab again.)
+    try:
+        text = json.dumps(doc, indent=2, allow_nan=False, ensure_ascii=False)
+        text.encode("utf-8")
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise ValueError(f"the project file holds a value KiCad cannot read ({exc}): it "
+                         f"would ignore the whole project, and the fab's clearance floor "
+                         f"with it") from None
     with open(dst, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=2)
+        fh.write(text)
+    return raised
 
 
 @gate(
@@ -756,10 +859,20 @@ def fab_rules(ctx: GateContext) -> Verdict:
     from the project root, to a file of the same shape. The row is picked by the
     board's copper layer count and ``pcb_copper_oz_outer``. The rules are written
     as the staged board's ``.kicad_dru`` and the staged project's own minimums are
-    zeroed, so a finding of a constrained type is the fab's. Every other finding
-    in the run (a silk overlap, an unconnected item) is ``pcb.drc``'s, and counted
-    there, not here. The project's own custom rules are left out of this run: one
-    written to relax a constraint must not relax the fab.
+    zeroed (its minimum clearance set to the fab's), so a finding of a
+    constrained type is the fab's, except silk on silk: KiCad reports it as
+    ``silk_overlap`` too, the type the fab's silk-to-pad rule raises, and it is
+    ``pcb.drc``'s (``_kicad.fab_findings``; where the board's pads cannot be told
+    apart, every silk overlap is counted here). Every other finding in the run
+    (silk clipped by the mask, an unconnected item) is ``pcb.drc``'s, judged there
+    under the project's own severities, not here; one of a type the project
+    ignores is said apart, since ``pcb.drc`` does not see it. The project's own
+    custom rules do not apply in this run (and where it has some, the rest are
+    said to be not the fab's, since a rule of its own may waive them in
+    ``pcb.drc``), a constrained type it set to "ignore" is raised to "error", and a
+    local clearance override below the fab's clearance is held at it: one written
+    to relax a constraint must not relax the fab. An override above the fab's
+    clearance still binds and fails copper inside it (GitHub #13).
     """
     gid = "pcb.fab_rules"
     path = _board_path(ctx)
@@ -797,7 +910,10 @@ def fab_rules(ctx: GateContext) -> Verdict:
     stem, stage = staged
     with open(stem + ".kicad_dru", "w", encoding="utf-8") as fh:
         fh.write(K.dru_text(table, "fab"))
-    _zeroed_project(_stem(path) + ".kicad_pro", stem + ".kicad_pro")
+    try:
+        raised = _zeroed_project(_stem(path) + ".kicad_pro", stem + ".kicad_pro", table)
+    except ValueError as exc:
+        return Verdict(gate=gid, passed=False, error=str(exc))
     run = _kicad_cli(ctx, gid, stage, ["pcb", "drc", "--severity-all", stem + ".kicad_pcb"],
                      "drc.json")
     if isinstance(run, Verdict):
@@ -807,16 +923,42 @@ def fab_rules(ctx: GateContext) -> Verdict:
         return Verdict(gate=gid, passed=False, evidence=ev,
                        error=f"kicad-cli exited {code} but its report lists "
                              f"{len(_found(doc))} item(s): the two disagree")
-    types = {K.CONSTRAINT_TYPES[r["constraint"]] for r in table["rules"]}
-    fab_found = [v for v in doc.get("violations", []) if v.get("type") in types]
-    others = len(_found(doc)) - len(fab_found)
-    where = "; ".join(v.get("description", "?") for v in fab_found[:3])
+    pads = K.pad_ids(tree)
+    fab_found, guessed = K.fab_findings(doc, table, pads, "fab")
+    # A finding of a type the project ignores, raised for this run and not the
+    # fab's (silk on silk, when the project ignores silk_overlap), is no finding
+    # pcb.drc sees: it runs under the project's own severities. Said apart, never
+    # called pcb.drc's. (What slipped through, in review: it was.)
+    counted = {id(v) for v in fab_found}
+    rest = [v for v in _found(doc) if id(v) not in counted]
+    waived = Counter(v.get("type", "?") for v in rest if v.get("type") in raised)
+    others = len(rest) - sum(waived.values())
+    # Grouped by type with the fab rule's name, never the first descriptions: on a
+    # real board those were "Silkscreen overlap" three times over, and a person
+    # could not read from the line that nothing past the fab's limits was copper.
     detail = (f"{fab.get('fab', fab_name)} ({table['name']}{oz_note}, read "
               f"{fab.get('read', '?')}): "
-              + (f"{len(fab_found)} finding(s) past its limits: {where}" if fab_found
+              + (f"{len(fab_found)} finding(s) past its limits: "
+                 f"{K.fab_kinds(fab_found, table)}" if fab_found
                  else f"inside every limit of {len(table['rules'])} rule(s)"))
-    if others:
+    if guessed:
+        detail += (f"; {guessed} silk overlap(s) counted although no pad is named in "
+                   f"them: {pads[1]} pad(s) on the board get a random id from "
+                   f"KiCad, so silk on silk cannot be told from silk on a pad")
+    # The project's own custom rules are left out of this run, and one of them
+    # may waive (severity ignore) what pcb.drc then never reports: with such a
+    # file, the rest is said to be not the fab's, never pcb.drc's. (What slipped
+    # through, in review: it was called pcb.drc's.)
+    if others and os.path.isfile(_stem(path) + ".kicad_dru"):
+        detail += (f"; {others} other finding(s) in the same run are not the fab's: "
+                   f"pcb.drc judges them under the project's own rules and severities")
+    elif others:
         detail += f"; {others} other finding(s) in the same run are pcb.drc's"
+    if waived:
+        kinds = ", ".join(f"{n}x {k}" for k, n in waived.most_common())
+        detail += (f"; {sum(waived.values())} other finding(s) of a type the project "
+                   f"ignores ({kinds}), raised for this run only: pcb.drc does not "
+                   f"see them")
     return Verdict(gate=gid, passed=not fab_found, measured=len(fab_found), limit=0,
                    comparator="<=", units="findings", detail=detail, evidence=ev)
 
