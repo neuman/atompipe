@@ -1,0 +1,54 @@
+{
+  "_description": "A USB data-line protector on a 30 x 15 mm two-layer board: J1 (4-pin header in), U1 (USBLC6-2SC6 ESD array, the KiCad library's own symbol and SOT-23-6 footprint), J2 (4-pin header out). Both headers carry D+, GND, D-, VBUS on pins 1-4; U1 flows the data pair through, D+ in on pin 1 and out on pin 6, D- on 3 and 4, which the part joins inside. Tracks 0.25 mm on KiCad's default rules. It passes kicad-cli pcb drc at every severity with nothing unconnected, carries the library's pin names on every pad, and runs VBUS and GND at 0.5 A. Its schematic, esd_guard.kicad_sch, is the same circuit on KiCad's stock symbols, every footprint on the board linked to its symbol: it passes kicad-cli sch erc at every severity and matches the board exactly. The project's own sym-lib-table and fp-lib-table name the stock libraries, so ERC reads the same on a host whose KiCad was never configured. selftest/assets/make_baseline.py made all of it, and says how. vbus_droop.cir models the VBUS path from the host through the cable and the board to J2 under a 0.5 A step, and dips to 4.83 V against USB 2.0's 4.75 V. enclosure.step is a closed 2 mm box around the populated board, its lid 2.365 mm over the header pins; the footprints' 3D models are KiCad's own, kept in selftest/assets/3d/ so the fit sees the same parts on every host.",
+
+  "pcb_board": "selftest/assets/esd_guard.kicad_pcb",
+
+  "pcb_net_currents_a": {"VBUS": 0.5, "GND": 0.5},
+  "pcb_temp_rise_limit_c": 10.0,
+  "pcb_copper_oz_outer": 1.0,
+  "pcb_copper_oz_inner": 0.5,
+
+  "pcb_drc_severity": "all",
+  "pcb_erc_severity": "all",
+  "pcb_fab": "jlcpcb",
+
+  "pcb_spice_deck": "selftest/assets/vbus_droop.cir",
+  "pcb_spice_measure": "vbus_min",
+  "pcb_spice_min": 4.75,
+  "pcb_spice_units": "V",
+  "pcb_spice_timeout_s": 60.0,
+
+  "pcb_enclosure_step": "selftest/assets/enclosure.step",
+  "pcb_board_placement": {"x": 0.0, "y": 0.0, "z": 0.0, "rot_z_deg": 0.0},
+  "pcb_enclosure_clearance_mm": 1.0,
+  "pcb_enclosure_bodiless": [],
+  "pcb_fit_timeout_s": 120.0,
+  "pcb_drc_timeout_s": 120.0,
+  "pcb_pin_names_ignore": ["NC", "DNC", "N.C.", "N/C", "~", ""],
+
+  "_notes": {
+    "_units": "Millimetres for every length (KiCad's file unit), amperes, degrees C of rise above ambient, ounces of copper per square foot (1 oz = 35 um = 1.378 mil).",
+    "_paths": "pcb_board, pcb_spice_deck and pcb_enclosure_step resolve against the PROJECT ROOT (ctx.root). Its project file (.kicad_pro), custom rules (.kicad_dru) and schematic (.kicad_sch, with every sheet under it) when they exist beside it with the same name, and the project's sym-lib-table and fp-lib-table, go with it to kicad-cli: they hold the design rules, KiCad's ERC and DRC exclusions and the libraries.",
+
+    "pcb_board": "The board this pack checks. One board per project projection; a project with two boards scopes the key (pcb.pcb_board) per model, or runs two projects.",
+    "pcb_net_currents_a": "{net: amperes} for every net whose current matters. pcb.net_width judges only the nets named here, because the board does not say what flows where. 0.5 A on VBUS and GND is a USB 2.0 port's budget.",
+    "pcb_temp_rise_limit_c": "How far above ambient a track may run, degrees C. 10 C is the common design choice and the bottom of IPC-2221's fitted range (10-100 C): below it the formula is extrapolation, and the verdict says so.",
+    "pcb_copper_oz_outer": "Copper weight of the outer layers. 1 oz is what a fab quotes without being asked; the gate uses that and says '[pack default]' when this key is absent.",
+    "pcb_copper_oz_inner": "Copper weight of inner layers, 0.5 oz by the same convention. Unused on this two-layer board.",
+    "pcb_drc_severity": "all (the default), error or warning. 'all' because a check at error severity cannot see a warning, and the fab still prints the silk a warning is about. Waive a finding by excluding it in KiCad, which records it in the .kicad_pro: never by narrowing this.",
+    "pcb_drc_timeout_s": "Wall clock for one kicad-cli run. This board takes well under a second, a 4-layer 115-footprint board about 2 s; 120 s is for a hang, which reads as a skip.",
+    "pcb_erc_severity": "all (the default), error or warning, for pcb.erc, by the same reasoning as pcb_drc_severity. The schematic is the board's name with .kicad_sch (KiCad's rule for a project's root schematic) unless pcb_schematic names another for ERC; pcb.parity always compares with the board's own, as KiCad does.",
+    "pcb_fab": "The fab whose published limits pcb.fab_rules holds the board to: jlcpcb (gates/fab/jlcpcb.json, each number quoted from its capability page with the day it was read), or a path from the project root to a fab file of the same shape. The row is chosen by the board's copper layer count and pcb_copper_oz_outer.",
+    "pcb_spice_deck": "The SPICE deck pcb.spice runs with ngspice -b, from the project root. The deck is the project's model of the circuit, not the board: ngspice solves what it says. Relative .include and .lib paths resolve from the deck's directory.",
+    "pcb_spice_measure": "The .meas result the verdict reads (ngspice lowercases names; so does the gate).",
+    "pcb_spice_min": "The lowest value that passes, in pcb_spice_units. 4.75 V is USB 2.0's minimum VBUS at a high-power port's device connector. pcb_spice_max is the highest; give either or both.",
+    "pcb_spice_units": "The measure's units, as ngspice computes it (SI: V, A, s). Stated by the project, because the gate cannot tell which quantity a .meas measures.",
+    "pcb_spice_timeout_s": "Wall clock for one ngspice run. The baseline deck solves in about 0.01 s.",
+    "pcb_enclosure_step": "The enclosure's solid (its walls and lid, the material, not the cavity) as a STEP file in mm, from the project root. The baseline's is a closed box made by selftest/assets/make_enclosure.py around the populated baseline board.",
+    "pcb_board_placement": "Where the board sits in the enclosure's frame: turned rot_z_deg about z, then moved by x, y, z mm. The board's own frame is kicad-cli's STEP export with --user-origin 0x0mm: the board file's (0, 0) at the origin, x right, y up (KiCad's y negated), z up from the board's bottom face.",
+    "pcb_enclosure_clearance_mm": "The smallest gap any part may keep from the enclosure. 1 mm is a common allowance for print and assembly tolerance; the board body itself may touch (it sits on standoffs). The baseline's nearest part, a header, is 2.365 mm under the lid.",
+    "pcb_enclosure_bodiless": "References of placed parts that have no body to fit (an antenna drawn in copper): each listed is a statement that the fit need not see it. Every other SMD or through-hole part must name a 3D model that kicad-cli finds, or pcb.enclosure_fit skips.",
+    "pcb_fit_timeout_s": "Wall clock for the STEP export and for the geometry, each. The baseline takes about 1 s and 3 s.",
+    "pcb_pin_names_ignore": "Pin names pcb.pin_names never compares: unused-pin names, which may sit on any net, and KiCad's hidden-name placeholder. Every other repeated name must carry one net."
+  }
+}

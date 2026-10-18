@@ -351,3 +351,31 @@ class PackValidateChecksProposers(_env.EnvCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheBundledAutorouteRefusesWithoutItsTools(_env.EnvCase):
+    """pcb-kicad's ``pcb.autoroute``, the first bundled proposer, needs three tools
+    nopekit does not ship (a Python with KiCad's ``pcbnew``, Java, the Freerouting
+    jar). Without one it exits 2 naming what to set, and writes nothing: a
+    proposer that half-ran must leave no file for ``propose`` to ingest. Held
+    with the tools absent, so it runs on every host (CI has none of the three)."""
+
+    RUN = os.path.join(_env.REPO, "packs", "pcb-kicad", "proposers", "autoroute.py")
+    BOARD = os.path.join(_env.REPO, "packs", "pcb-kicad", "selftest", "assets",
+                         "esd_guard.kicad_pcb")
+
+    def _run(self, env):
+        return _env.run([sys.executable, self.RUN, "--board", self.BOARD, "--jar",
+                         os.path.join(self.tmp(), "no-such.jar")], cwd=self.tmp(), env=env)
+
+    def test_a_missing_tool_exits_2_naming_what_to_set(self):
+        out = self.tmp()
+        proc = self._run({"NOPEKIT_PROPOSAL_DIR": out})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertRegex(proc.stderr, r"pcb\.autoroute: no .*(KICAD_PYTHON|JAVA|FREEROUTING_JAR)")
+        self.assertEqual(os.listdir(out), [])
+
+    def test_outside_propose_it_refuses(self):
+        proc = self._run({"NOPEKIT_PROPOSAL_DIR": ""})
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("nopekit propose pcb.autoroute", proc.stderr)

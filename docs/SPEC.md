@@ -1630,6 +1630,112 @@ person's request; three findings), decided while fixing them:
   and is the full suite's. One pair at load 0.9-1.3: 121.6 s wall against 123.5 s for
   a6c5f22 (`tests/fast.py`).
 
+**The pcb-kicad pack** (2026-10-16, the eighth bundled pack), decided while building
+it:
+
+- **Bases**: `pcb.drc` and `pcb.unconnected` `established` (the verdict is
+  `kicad-cli pcb drc`'s exit code and its report's count); `pcb.pin_names` and
+  `pcb.net_width` `sourced` (KiCad's library pin names, copied onto the board's pads as
+  `pinfunction`; IPC-2221's heating fit); `pcb.board_readable` `model-only` (the pack's
+  own reader judging its own reach).
+- **The tier-0 half reads KiCad's files with a standard-library reader**
+  (`gates/_kicad.py`), not with KiCad's `pcbnew` module: `pcbnew` opens the board in
+  C++, where the trace sees no read, so a verdict would be keyed on nothing. Its gates
+  run in CI. *Rejected:* `pcb.net_width` as a `.kicad_dru` width rule that DRC
+  enforces (established, but opaque, tier 1 and absent from CI).
+- **The tier-1 half is opaque** (`subprocess:kicad-cli`): it runs on a copy staged under
+  the gate's out directory, so kicad-cli writes nothing in the project and the copy
+  keys the board, its `.kicad_pro` and its `.kicad_dru`. `pcb.drc` runs every severity
+  by default; a waiver is KiCad's own exclusion in the `.kicad_pro`. An exit code that
+  disagrees with the report is an error.
+- **`pcb.board_readable` is the guard** of the two tier-0 analyses: a file older than
+  KiCad 6 or newer than KiCad 9's format, or a track naming a net code the table does
+  not define, is a board whose nets the reader may misattribute. `test_packs.EDGES`
+  gains the two edges (25), and the tool-free floor rises to 19.
+- **The known-bad boards are generated at fixture time** from the committed baseline,
+  one change each, by the pack's own reader, under the caller's `out_dir`;
+  `narrow_power` derives its width from the baseline's own limit. The baseline board
+  itself is committed, with `selftest/assets/make_baseline.py` recording how `pcbnew`
+  made it from KiCad's stock libraries.
+- **The bundled mutation walk** gains five gates (59): `pcb.net_width` with a conclusive
+  mutation (35 in all), and the four that report 0 against 0, or no value, with no
+  boundary (21). No mutation passes any of them.
+- **Phase 2, the schematic** (2026-10-17): `pcb.erc` (`kicad-cli sch erc`, its exit code)
+  and `pcb.parity` (`pcb drc --schematic-parity`, the report's parity count; the exit
+  code must agree) are `established` and opaque, staged with every sheet the root
+  names, the `.kicad_pro` and the project's `sym-lib-table` and `fp-lib-table`. The
+  baseline gains its schematic, written by `make_schematic.py` from the stock symbols
+  with fixed UUIDs, and the board's footprints link to it. Neither needs the guard:
+  KiCad reads both files itself. *What slipped through while building it:* ERC on a
+  host whose KiCad was never configured warned about every symbol's library, so the
+  baseline would have passed on one machine and failed on another; the project's
+  own library tables seal it. And `pcbnew.FootprintLoad` leaves a footprint with no
+  library name, which parity reads as a footprint the symbol did not ask for. The
+  walk gains two no-boundary gates (61; 23).
+- **Phase 3, the router** (2026-10-17): `pcb.autoroute`, the first bundled proposer,
+  basis `established` (Freerouting's routes, KiCad's DSN export and session import).
+  It runs `pcbnew` in a separate Python that has it (`_pcbnew_steps.py`), never in
+  nopekit's, on a copy outside the project, and writes only the routed board and a
+  summary into the proposal directory: `pcbnew.SaveBoard` writes a `.kicad_pro` and a
+  `.kicad_prl` beside what it saves, and the first run recorded both as inputs. One
+  thread; two runs on the baseline drew the same copper in a different file order.
+  Freerouting's analytics are off; its update check cannot be. *Rejected:* routing
+  as an evaluator (copper drawn by the thing judging it), and a gap closer after the
+  router (the source pipeline's drew shorts). `test_proposers` holds its refusal
+  without its tools, which is every CI host.
+- **Phase 4, beyond the copper** (2026-10-17): three opaque tier-1 gates.
+  `pcb.fab_rules` (`sourced`): a fab's published minimums (`gates/fab/jlcpcb.json`,
+  each number quoted with the day it was read) written as the staged board's only
+  custom rules, the project's own minimums zeroed in the staged project file, and
+  findings counted by the types those rules raise. *What slipped through while
+  building it:* KiCad 9.0.9 reported the fab rule's 0.1 mm as "board setup
+  constraints", so a count by rule name would have read zero; and an unconditioned
+  silkscreen clearance flagged silk over every track. `pcb.spice` (`established`):
+  `ngspice -b` on the project's deck, one `.meas` against a band; a line ngspice
+  ignored (it warns and solves the rest) is an error, as is a measurement it could
+  not make. `pcb.enclosure_fit` (`established`): kicad-cli's STEP export against the
+  enclosure's solid, OpenCascade's shared volume and distance, in a child process.
+  *What slipped through while building it:* `kicad-cli pcb export step` drops a part
+  whose 3D model it cannot find, silently and with exit 0, and this machine has no
+  3D library; a fit read from that export would have read clear with no parts. So
+  every placed part must name a model and arrive in the export under its
+  reference, or the gate skips, and the baseline keeps KiCad's two models beside
+  it (CC-BY-SA 4.0 with the library exception, `selftest/assets/3d/README.md`).
+  The walk gains the three (64): two conclusive (37), one with no boundary (24).
+- **Follow-up after two real boards** (2026-10-17, GitHub #9 to #11): the pack's
+  first run on real boards (script-generated, 4 layers, no schematic) found three
+  faults its baseline could not show, and two rounds of review of their fixes
+  found more, three of them false passes older than the fixes. (a) `pcb.fab_rules` counts findings by the types its rules raise *except
+  silk on silk*, which KiCad reports as `silk_overlap` too: such a finding is left
+  to `pcb.drc` only when it is shown to be silk on silk (no item is a pad by id,
+  its words do not name the run's `fab_silk_to_pad` rule, and every pad on the
+  board has an id KiCad keeps; otherwise every silk overlap counts), and a fab
+  file's silk rule must be silk to pad. In the fab run, a constrained type the
+  project set to "ignore" is raised to "error", the board's minimum clearance is
+  the fab's own (the only floor KiCad holds a local clearance override to, so a
+  fab row has one unconditioned clearance rule; an override above the fab's
+  minimum still binds, a false fail filed as GitHub #13), and a microvia's hole
+  breach (`microvia_drill_out_of_range`) and two holes on one centre
+  (`holes_co_located`) are the fab's. A project file KiCad could not read, which
+  it would drop with the floor, is an error. The detail line groups
+  findings by type with the fab rule behind each. *What slipped through:* the 18
+  silk-on-silk overlaps `pcb.drc` found were counted as past JLCPCB's limits (190
+  findings where 172 were the fab's); the first fix matched pads on the file's
+  text alone, and in review a silk line across a pad with no id, an uppercase id
+  or a legacy stamp passed; and, older than these fixes, an "ignore" severity hid
+  the fab's own rule, a pad's `(clearance 0.01)` passed a 0.047 mm gap under the
+  fab's 0.1 mm, a 0.12 mm microvia drill passed its 0.15 mm via hole, and a via
+  on top of another passed.
+  (b) `copper-connectivity` binds `pcb.unconnected` alone. *What slipped
+  through:* `connectivity` also binds `pcb.parity`, which skips with no
+  schematic, so "every connection is made" read Skipped beside a pass.
+  (c) `pcb.net_width`'s line names the hottest stretch (a net's tracks at that
+  width on that side of the stack, their layers and length, the same copper once,
+  an arc along its arc), up to four stretches as hot after it and then how many
+  more, and holds IPC-2221's fitted range over each. *What slipped through:* it
+  called the hottest track "narrowest", named one net of a tie, and the reader
+  took an arc's chord as its length.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,
