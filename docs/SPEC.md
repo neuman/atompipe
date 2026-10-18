@@ -1736,6 +1736,106 @@ it:
   called the hottest track "narrowest", named one net of a tie, and the reader
   took an arc's chord as its length.
 
+**The cfd-openfoam pack** (2026-10-18, the ninth bundled pack, phase 1 of GitHub
+#15), decided while building it:
+
+- **The tool is ESI OpenFOAM v2606, one API, run as an outside tool.** An install is
+  found from the `openfoam2606` wrapper on PATH alone (its `exec "<install>"/etc/openfoam`
+  line), the same thing `requires_tools` asks for, and must carry
+  `META-INFO/api-info` with `api=2606`; another ESI release and every openfoam.org
+  release skip, naming why. *Rejected:* the Foundation's v13 (its own dialect:
+  `foamRun`, no `simpleFoam`); any ESI release (a function-object option that moved
+  between releases turns a reader's miss into a pass); a `simpleFoam` on PATH as a
+  second way in (the first draft's: availability then passed on any release while
+  the gate skipped itself, the pattern PACK_FORMAT forbids); the wrapper per call
+  (0.4 s each; `etc/bashrc` is sourced from a bare environment, cached with
+  functools, which the spine empties before each run).
+- **Every run is the pack's, on a staged copy.** The copy holds the case's `0/`,
+  `constant/` but its mesh, and `system/`. The pack replaces every `functions` entry
+  with two `surfaceFieldValue` planes of its own and `residualControl` with its
+  target. Before the run, OpenFOAM's own reading of the copy (`foamDictionary
+  -expand`) must hold exactly those, and the nu, laminar model, budget and schemes
+  the guard read; simpleFoam's own convergence-criteria block must name the pack's
+  target; checkMesh's direction count must be the case's dimension. Each tool runs
+  with a private HOME whose user controlDict turns off `allowSystemOperations`, and
+  with `FOAM_SIGFPE=true`; a banner without both lines is an error. *What slipped
+  through while building it:* checkMesh exits 0 on `Failed 4 mesh checks.`;
+  simpleFoam exits 0 and prints `End` out of iterations; a user's
+  `~/.OpenFOAM/2606/controlDict` turns trapping off with no warning; the
+  `-info-switch allowSystemOperations=0` option is "unregistered" on v2606; checkMesh's
+  JSON disagrees with its text; the wrapper's quote sits before `/etc`, and the first
+  reader of it found no install.
+- **The guard reads a strict subset of OpenFOAM's cases** (`cfd.case_readable`, tier 0,
+  `model-only`): exactly eight files (and an inert `decomposeParDict`), no other file
+  or directory, no directive but the `#includeEtc "caseDicts/setConstraintTypes"` of ESI's 0/
+  files, macros only in `blockMeshDict` and never a dictionary expanded in place,
+  quoted keywords only under patch and field names, no code, boundary conditions
+  whose value is written in the case, laminar `Stokes`, `momentumPredictor` on,
+  planar 2D or 3D. *What slipped through its first draft,*
+  found by an adversarial review on the real v2606: the reader judged literal text
+  while OpenFOAM expands and MERGES, so a `#sinclude` (or a `$dict;`) merged
+  `scaleFactor 0.5` into the pack's function objects and all six gates passed at half
+  the pressure drop; an `#if` and an in-case include set the nu the solver ran (Re
+  4000 judged as Re 20); an include through a symlinked `$FOAM_CASE` read a file
+  outside the case; `"typ(e)" codedFixedValue` and `type $:bcType` passed as
+  "nothing compiled"; a constant/fvOptions source halved the pressure drop; a
+  power-law laminar model passed as Newtonian; and an isfile probe of a missing
+  snappyHexMeshDict made the tier-0 controls opaque, so their claims read Stale
+  after every check. A second review found `exprFixedValue` and a
+  `uniformFixedValue` table (values evaluated as the run goes) let through, and a
+  refusal of symbolic links decided on `is_symlink()`, which no key holds (a cached
+  pass was served after a file became a link); links are now read through, and no
+  include can follow one out. *Rejected:* a list of files and directives to refuse (each
+  release adds one); evaluating OpenFOAM's directives in the reader.
+- **A guard chain, six edges** (`test_packs.EDGES`, 31): `cfd.case_readable` before
+  `cfd.regime` (tier 0, `sourced`: Re below 2300 on the hydraulic diameter, Mach below
+  0.3, reported as the worse as a fraction of its limit) and `cfd.mesh_quality` (tier
+  1, `established`: checkMesh's `Mesh OK.` and the project's limits, 70 to 90 degrees
+  of non-orthogonality being only a warning to checkMesh); both before
+  `cfd.converged` (tier 2, `established`: the converged line, p and U solved at
+  target, the stated velocity carried within 2% along the upstream normal, and the
+  pressure drop's remaining change under 0.1%: its largest recent movement when it
+  oscillates, a geometric tail's remainder from its step sizes when it is
+  monotone); then `cfd.mesh_independence` (tier 2,
+  `sourced`: Celik et al. 2008) and `cfd.pressure_drop` (tier 2, `established`; a
+  pressure rise is an error). The tool-free floor rises to 20. *What slipped
+  through:* the first stillness test (the change over 10 iterations) passed a run
+  relaxed to U 0.03 at 9.7% from converged; its first rewrite read a 2-iteration
+  oscillation as still; the second review found its rate fooled by an earlier
+  oscillation (a run 0.22% from converged passed) and its round-off floor applied
+  before the rate (a creep relaxed to U 1e-4 passed with 0.2% to come).
+- **Mesh independence refines every cell.** Each level multiplies every block's cell
+  counts by the ratio (1.3 to 3, default 2), half up and at least one cell more than
+  the level below; only a 2D case's one-cell direction, found from the empty
+  patches' geometry, stays one, and Celik's dimension is the mesh's. The GCI is
+  believed only on monotone convergence (classified before the order is, since Eq.
+  (3a) gives diverging data a positive order), a unique order in [0.95, formal +
+  0.05], and an iterative error ten times below eps21. The asymptotic-range ratio is
+  never used: from the same three meshes it equals phi1/phi2. Each plane must fall
+  on a cell face or centre at every level: OpenFOAM's sampled value is about 1% off
+  a quarter of a cell away, and the second review's ladder at r = 1.7 moved the
+  planes through the cells, read that error as convergence at order 1.77 and
+  passed a band 0.34% under the exact pressure drop. `cfd.pressure_drop` judges
+  the top of the band, dp x (1 + GCI). *Rejected:* `refineMesh` (it splits
+  cells without moving them onto an arc edge); a refinement of one region (a
+  wall-only ladder "converged" with a GCI of 0.013% at a drag 0.37% off the
+  benchmark; the first draft froze every count of 1, and a one-cell wall layer
+  passed 3% below the exact answer); patches as measurement stations (a
+  `zeroGradient` inlet's pressure is the first cell's, first order and carrying the
+  entrance loss); a run memo shared between gates (a module-level dict the spine
+  cannot empty, which `doctor` names).
+- **The baseline is plane Poiseuille flow**, with an exact answer (12 nu U dx / h^2):
+  the three meshes read it divided by 1 + 2 / Ny^2 to 3e-6, extrapolate to it within
+  0.003%, and the whole selftest takes about 10 s. Its six controls are one dictionary
+  entry or one stated value each, made by the pack's own writer, and each passes every
+  guard before its gate. `cut_short`'s number is 0.69% high at iteration 5 and 0.001%
+  low at 10: only the converged line can refuse it.
+- **The bundled mutation walk** gains the six (70): four conclusive (41), one walked
+  with none (`cfd.converged`, 4), one with no boundary (`cfd.case_readable`, 25). No
+  mutation passes any of them.
+- **Phases 2 and 3** (external flow with snappyHexMesh and forces; conjugate heat
+  transfer) stay open on #15.
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

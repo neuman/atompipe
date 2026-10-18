@@ -1,0 +1,69 @@
+{
+  "name": "cfd-openfoam",
+  "version": "0.1.0",
+  "description": "Runs a laminar OpenFOAM case (ESI v2606) behind guards: case readable, laminar regime, checkMesh, convergence, mesh independence by GCI, then the pressure drop.",
+  "settles": [
+    "pressure drop from cfd",
+    "cfd pressure drop",
+    "pressure drop through a duct",
+    "pressure drop through a manifold",
+    "pressure loss in a passage",
+    "laminar pressure drop",
+    "cfd mesh quality",
+    "mesh quality",
+    "checkmesh",
+    "non-orthogonality",
+    "cell skewness",
+    "cfd solver convergence",
+    "solver convergence",
+    "residuals converged",
+    "cfd mesh independence",
+    "mesh independence",
+    "grid convergence index",
+    "gci",
+    "grid independence",
+    "discretisation error",
+    "cfd flow regime",
+    "laminar flow check",
+    "reynolds number of a cfd case",
+    "cfd case readability"
+  ],
+  "claim_classes": [
+    "cfd",
+    "computational-fluid-dynamics",
+    "fluid-dynamics",
+    "internal-flow",
+    "pressure-drop",
+    "flow-regime",
+    "mesh-quality",
+    "convergence",
+    "mesh-independence"
+  ],
+  "provides_gates": [
+    "cfd.case_readable",
+    "cfd.regime",
+    "cfd.mesh_quality",
+    "cfd.converged",
+    "cfd.mesh_independence",
+    "cfd.pressure_drop"
+  ],
+  "provides_generators": [],
+  "requires_tools": [
+    "openfoam2606"
+  ],
+  "requires_python": [],
+  "max_tier": 2,
+  "lenses": [
+    "the model nobody chose",
+    "the geometry that was meshed",
+    "boundaries that decide the answer",
+    "convergence that is not",
+    "the mesh that decides the number",
+    "a number for the wrong question",
+    "against something that is not this solver"
+  ],
+  "authors": [],
+  "licence": "Apache-2.0",
+  "origin": "written for nopekit (GitHub issue #15) against ESI OpenFOAM v2606, run as an outside tool as pcb-kicad runs kicad-cli. Every log format, exit code and failure mode the gates rely on was measured on v2606 while the pack was written; the GCI arithmetic reproduces Celik et al. 2008's Table 1 and NASA NPARC's worked example.",
+  "basis": "established"
+}

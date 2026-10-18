@@ -2323,12 +2323,14 @@ class MutationIsSealed(_env.EnvCase):
 class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     """(C12, R-4's detector for the mutation clause) The restated aimed walk
     over every bundled pack gate on its own baseline: no conclusive mutation
-    passes an honest bundled gate — measured 37 gates with a conclusive
-    mutation, 3 walked with none, 24 with no boundary (a value exactly at its
+    passes an honest bundled gate — measured 41 gates with a conclusive
+    mutation, 4 walked with none, 25 with no boundary (a value exactly at its
     limit, mostly a defect count 0 against 0) where trimesh, numpy, omc, kicad-cli,
-    ngspice and cadquery are present — and the planted drifted-limit gate is one
-    hit. Full suite only (~12 s without pcb-kicad's tools, about 3 min with them:
-    its opaque gates re-run kicad-cli, ngspice and OpenCascade for every rung):
+    ngspice, cadquery and OpenFOAM v2606 are present — and the planted
+    drifted-limit gate is one hit. Full suite only (~12 s without pcb-kicad's and
+    cfd-openfoam's tools, about 7.5 min with them: their opaque gates re-run
+    kicad-cli, ngspice, OpenCascade and OpenFOAM for every rung; cfd-openfoam's
+    gates alone take about 4.5 min, each rung solving its own three meshes):
     the refusal it licenses is held in the fast tier by V2."""
 
     def test_no_conclusive_mutation_passes_a_bundled_gate(self):
@@ -2358,10 +2360,10 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
                     if run[0] == "pass":
                         passes.append(f"{spec.id}: {w.key} -> {after!r}")
         self.assertEqual(passes, [])
-        self.assertEqual(sum(kinds.values()) + unavailable, 64, kinds)
+        self.assertEqual(sum(kinds.values()) + unavailable, 70, kinds)
         if not unavailable:
-            self.assertEqual(dict(kinds), {"conclusive": 37, "none-conclusive": 3,
-                                           "no-boundary": 24})
+            self.assertEqual(dict(kinds), {"conclusive": 41, "none-conclusive": 4,
+                                           "no-boundary": 25})
 
     def test_the_planted_drifted_limit_is_one_hit(self):
         spec = GateSpec(id="beam.drifted", claims=["x"], tier=Tier.INSTANT,

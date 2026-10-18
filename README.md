@@ -215,7 +215,7 @@ The example includes a deliberately failing check. That's intentional: a useful 
 
 ## Packs and how far to trust them
 
-A **pack** adds checks for one domain. Nopekit ships eight. A pack can hold two kinds of tool:
+A **pack** adds checks for one domain. Nopekit ships nine. A pack can hold two kinds of tool:
 
 - **Gates** (falsifiers) evaluate a claim and can say "nope". Every bundled gate is **qualified**: it passes a known-good input and fails a known-bad one, and CI re-runs both controls on every change, so a gate that cannot fail does not ship. A gate from anywhere else, such as one the agent writes for your project, must also fail each time one of its inputs is pushed past its limit.
 - **Proposers** suggest options or evidence, such as a parts search or a slicer's estimate. A proposal settles nothing; it becomes an input that a gate can then check. `pcb-kicad` ships one, `pcb.autoroute` (Freerouting); its routed board is checked by the same DRC gates as any other. The [pack format](docs/PACK_FORMAT.md#proposers) describes how to add one.
@@ -234,6 +234,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 |---|---|---|---|---|
 | `beam-analytic` | Closed-form beam checks with zero dependencies: deflection, bending and shear stress, buckling, bearing, a slenderness guard on the theory itself, and a unit/sign guard on the projection. | 8 | 7 sourced, 1 model-only | nothing |
 | `cad-solid` | Validates that exported solids are real solids, that placed parts do not interfere, and that every part is held by something: watertightness, validity, clash, contact coverage, envelope, wall. | 7 | 1 established, 6 model-only | trimesh, numpy |
+| `cfd-openfoam` | Runs a laminar OpenFOAM case (ESI v2606) behind guards: case readable, laminar regime, checkMesh, convergence, mesh independence by GCI, then the pressure drop. | 6 | 3 established, 2 sourced, 1 model-only | ESI OpenFOAM v2606 (`openfoam2606`) for four gates |
 | `fdm-print` | Validates that a part is printable on a filament machine: bed fit with brim, wall thickness, overhang, bridge span, layer-direction loading and print time. | 7 | 7 model-only | trimesh, numpy (mesh gates) |
 | `fluids-analytic` | Closed-form hydrostatics, stability, drag and pipe flow: the analytic answer for boats, floats, ducts and piping, before anyone installs a CFD solver. | 7 | 7 sourced | nothing |
 | `openmodelica` | Validates a Modelica model and the runs recorded from it: parameter units, claim/variable drift, result validity, extracted values, mirror agreement, and equation balance under omc. | 8 | 4 established, 4 model-only | OpenModelica (`omc`) for its three solver gates |
@@ -269,6 +270,20 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 | `cad.is_volume` | Every solid is a volume: closed, consistently wound, positive volume (needs trimesh, numpy) | established |
 | `cad.wall_thickness` | Thinnest wall found by inward ray casting, against the minimum (needs trimesh, numpy) | model-only |
 | `cad.watertight` | Every solid is closed: no open edges, no non-manifold edges (needs trimesh, numpy) | model-only |
+
+</details>
+
+<details>
+<summary><code>cfd-openfoam</code>: 6 gates</summary>
+
+| Gate | What it checks | Basis |
+|---|---|---|
+| `cfd.case_readable` | The OpenFOAM case is one this pack can run and vouch for | model-only |
+| `cfd.converged` | simpleFoam met the pack's residual targets, and the pressure drop settled (needs OpenFOAM) | established |
+| `cfd.mesh_independence` | Three meshes agree: the grid convergence index (Celik et al. 2008) is inside its limit (needs OpenFOAM) | sourced |
+| `cfd.mesh_quality` | checkMesh finds the case's mesh sound, inside stated limits (needs OpenFOAM) | established |
+| `cfd.pressure_drop` | The static pressure drop between two planes, with its GCI band, is under the limit (needs OpenFOAM) | established |
+| `cfd.regime` | The flow is laminar and incompressible: Reynolds and Mach numbers | sourced |
 
 </details>
 

@@ -1,0 +1,68 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | written by nopekit's cfd-openfoam pack
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// A 2D channel 100 mm long and 10 mm high, one cell thick: 50 cells along it
+// and 10 across. cfd.mesh_independence multiplies the counts below by
+// cfd_refinement_ratio, twice; the one-cell direction stays one cell.
+scale   1;
+
+vertices
+(
+    (0   0    0)
+    (0.1 0    0)
+    (0   0.01 0)
+    (0.1 0.01 0)
+    (0   0    0.001)
+    (0.1 0    0.001)
+    (0   0.01 0.001)
+    (0.1 0.01 0.001)
+);
+
+blocks
+(
+    hex (0 1 3 2 4 5 7 6) (50 10 1) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    inlet
+    {
+        type patch;
+        faces ((0 4 6 2));
+    }
+    outlet
+    {
+        type patch;
+        faces ((1 3 7 5));
+    }
+    walls
+    {
+        type wall;
+        faces ((0 1 5 4) (2 6 7 3));
+    }
+    frontAndBack
+    {
+        type empty;
+        faces ((0 2 3 1) (4 5 7 6));
+    }
+);
+
+// ************************************************************************* //

@@ -1,0 +1,43 @@
+{
+  "_description": "Plane Poiseuille flow: a 2D channel 100 mm long and 10 mm high (selftest/assets/channel), laminar, a light hydraulic oil (10 cSt, 870 kg/m^3) entering at a uniform 10 mm/s. Reynolds number 20 on the hydraulic diameter (20 mm). The static pressure drop between planes at x = 25 mm and 75 mm has an exact answer, 12 nu U dx / h^2 = 6.0e-4 m^2/s^2, 0.522 Pa; the entrance length is about one channel height, so both planes sit in developed flow. On the 50 x 10 mesh and its two doublings, simpleFoam converges at a 1e-6 residual target in 91, 82 and 80 iterations, the pressure drop converges monotonically at observed order 2, and the finest mesh reads 0.1% under the exact answer with a GCI of about 0.16%. checkMesh calls the mesh perfect (all right angles, aspect ratio 2).",
+
+  "cfd_case": "selftest/assets/channel",
+  "cfd_dp_planes": [
+    {"point": [0.025, 0.005, 0.0005], "normal": [1, 0, 0]},
+    {"point": [0.075, 0.005, 0.0005], "normal": [1, 0, 0]}
+  ],
+
+  "cfd_velocity_m_s": 0.01,
+  "cfd_length_m": 0.02,
+  "cfd_sound_speed_m_s": 1400.0,
+  "cfd_density_kg_m3": 870.0,
+
+  "cfd_max_non_ortho_deg": 65.0,
+  "cfd_max_skewness": 4.0,
+  "cfd_max_aspect_ratio": 1000.0,
+
+  "cfd_residual_target": 1e-6,
+  "cfd_refinement_ratio": 2.0,
+  "cfd_gci_max_pct": 1.0,
+  "cfd_dp_max_pa": 0.6,
+  "cfd_timeout_s": 600.0,
+
+  "_notes": {
+    "_units": "SI throughout: metres, m/s, kg/m^3, Pa, seconds. OpenFOAM's incompressible p is kinematic (m^2/s^2); cfd.pressure_drop multiplies it by cfd_density_kg_m3.",
+    "_paths": "cfd_case resolves against the PROJECT ROOT (ctx.root). Each gate copies the case's 0/, constant/ (not constant/polyMesh) and system/ under its out directory and runs there; the project's directory is never written.",
+    "cfd_case": "the OpenFOAM case directory: system/blockMeshDict, controlDict, fvSchemes, fvSolution; constant/transportProperties and turbulenceProperties; 0/U and 0/p. simpleFoam, laminar, Newtonian only (phase 1 of issue #15).",
+    "cfd_dp_planes": "two planes, upstream first, each {point, normal} in metres: the static pressure drop is the area average of p on the first minus that on the second. Each plane cuts the WHOLE mesh; in a passage that branches, it averages every branch it crosses. The upstream plane also carries the mean velocity cfd.converged compares with cfd_velocity_m_s.",
+    "cfd_velocity_m_s": "the mean velocity through the upstream plane, m/s: cfd.regime's Reynolds and Mach numbers use it, and cfd.converged errors when the run carried another (2% tolerance).",
+    "cfd_length_m": "the hydraulic diameter of the passage, m: 4 x flow area / wetted perimeter; a pipe's diameter; twice the height of a 2D channel. The Reynolds number's length.",
+    "cfd_sound_speed_m_s": "the speed of sound in the fluid, m/s (air about 343, water about 1480, mineral oil about 1400): the Mach number's.",
+    "cfd_density_kg_m3": "the fluid's density, kg/m^3: turns the kinematic pressure into Pa.",
+    "cfd_max_non_ortho_deg": "the largest non-orthogonality cfd.mesh_quality allows, degrees (pack default 65, OpenFOAM's meshQualityDict default).",
+    "cfd_max_skewness": "the largest skewness cfd.mesh_quality allows (pack default 4, checkMesh's).",
+    "cfd_max_aspect_ratio": "the largest cell aspect ratio cfd.mesh_quality allows (pack default 1000, checkMesh's).",
+    "cfd_residual_target": "the initial residual simpleFoam must reach for p and U, written by the pack into the copy it runs (pack default 1e-6; refused above 1e-4).",
+    "cfd_refinement_ratio": "how much finer each level of cfd.mesh_independence's ladder is along every refined direction (pack default 2; 1.3 to 3). Each plane must fall on a cell face or centre at every level: with 2 or 3, one on a face or centre of the first mesh stays on one.",
+    "cfd_gci_max_pct": "the largest fine-grid GCI (Celik et al. 2008) the claim tolerates, percent of the pressure drop. No default: no source sets one for every case.",
+    "cfd_dp_max_pa": "the largest static pressure drop between the planes the claim allows, Pa. cfd.pressure_drop judges the top of the GCI band against it.",
+    "cfd_timeout_s": "seconds each OpenFOAM tool may run before it is killed and the gate skips (pack default 600)."
+  }
+}
