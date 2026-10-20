@@ -356,6 +356,35 @@ class TheSiteSaysABuiltPart(_env.EnvCase):
 _TEMPLATE_STRINGS: list[tuple[str, str]] = []
 
 
+#: The words a marketing-page script must never say itself (the two pages):
+#: each status word, *ready*, *verified*, *not current*, *article* and the
+#: limits sentence come from the bake.
+_MARKETING_BANNED = re.compile(
+    r"\b(?:ready|checked|open|gap|stale|verified|not current|article|does not mean true)\b",
+    re.I)
+
+
+def marketing_word_problems(sources: dict) -> list[str]:
+    """``name: string`` for each string of ``sources`` that says *ready* (any
+    string literal, a class name too), or that a reader sees and says a banned
+    word (`_MARKETING_BANNED`)."""
+    import _template
+    out = []
+    shown = re.compile(r"(?:\btext|\blabel|\btitle|aria-label|\balt|textContent)\W{0,3}"
+                       r"\s*[:=,]\s*\(?\s*$")
+    for name, text in sources.items():
+        for piece in _template._lex(text):
+            if piece[0] != "string":
+                continue
+            if re.search(r"\bready\b", piece[1], re.I) or (
+                    shown.search(piece[2]) and _MARKETING_BANNED.search(piece[1])):
+                out.append(f"{name}: {piece[1]!r}")
+        for said in _template.prose_literals(text):
+            if _MARKETING_BANNED.search(said):
+                out.append(f"{name}: {said!r}")
+    return out
+
+
 def template_strings() -> list[tuple[str, str]]:
     """Every human-facing string the site template ships: HTML text and its
     `alt`/`title`/`aria-label`, and the JavaScript literals that read as words."""
@@ -379,19 +408,47 @@ class TemplateWordsFollowTheStyle(unittest.TestCase):
         self.assertGreater(len(found), 150, "the scan reads the template's words")
         names = {name for name, _ in found}
         for name in ("index.html", "technical.html", "page.js", "lib/map.js", "lib/drawer.js",
-                     "lib/sections.js", "lib/panels.js", "app.js"):
+                     "lib/sections.js", "lib/panels.js", "app.js",
+                     # The two pages: both shells and the marketing page's script.
+                     "engineering/index.html", "marketing/index.html", "marketing.js"):
             self.assertIn(name, names)
         self.assertEqual(style_problems(found), [])
 
     def test_checked_does_not_mean_true_is_the_bakes_alone(self):
-        """The front page says it once, from `verdict.limits`: the template
-        never says it."""
+        """Each page says it once, from `verdict.limits`: the template never
+        says it, in the root, either page's shell, their scripts or a module."""
         import _template
+        scanned = []
         for name, text in {**_template.template_files(".html"),
                            **_template.template_files(".js")}.items():
-            if name in ("index.html", "page.js") or name.startswith("lib/"):
+            if name in ("index.html", "engineering/index.html", "marketing/index.html",
+                        "page.js", "marketing.js") or name.startswith("lib/"):
+                scanned.append(name)
                 with self.subTest(name):
                     self.assertNotIn("does not mean true", text.lower())
+        for name in ("engineering/index.html", "marketing/index.html", "marketing.js",
+                     "lib/verdict.js"):
+            self.assertIn(name, scanned)
+
+    def test_the_marketing_page_says_no_status_word_of_its_own(self):
+        """(the two pages) The marketing page's script and the modules the two
+        pages share say no status word, no *ready* and no *article* in any
+        string: each comes from a baked word (`verdict.headline`, a chip's
+        `word`). A literal "ready" in any string at all, class names included;
+        the other words in the strings a reader sees. A planted one is caught."""
+        import _template
+        files = _template.template_files(".js")
+        names = ("marketing.js", "lib/verdict.js", "lib/theme.js", "lib/banner.js")
+        self.assertEqual(marketing_word_problems({n: files[n] for n in names}), [])
+        for planted in ('el("p", { text: "The bracket is ready to print." });',
+                        'const cls = "mk-ready";',
+                        'el("span", { text: "3 checked" });',
+                        'el("p", { text: "Built on the article you printed." });',
+                        'el("p", { text: "Checked does not mean true." });',
+                        'el("p", { text: "Some results are stale." });'):
+            with self.subTest(planted):
+                source = {"marketing.js": files["marketing.js"] + "\n" + planted + "\n"}
+                self.assertTrue(marketing_word_problems(source), planted)
 
     def test_the_heuristic_reads_words_and_skips_names(self):
         import _template

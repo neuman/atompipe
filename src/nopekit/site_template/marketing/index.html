@@ -1,0 +1,125 @@
+<!doctype html>
+<!--
+  The marketing page, at /marketing/. HACKABLE, YOURS, NEVER REGENERATED.
+
+  `nopekit site init` and `nopekit site build` write this file only when it
+  is absent; neither replaces it after that (only `site init --force` does,
+  and `site init`'s refusal says so). What slipped through (review of SPEC
+  40): this comment said `site build` never touches it, while a build
+  writes a missing shell. Change the copy, add a logo, add a section: a
+  later nopekit upgrade does not put any of it at risk.
+  (marketing.js, marketing.css, page.css and lib/ ARE refreshed by
+  `site build`: they are the renderer, and they get fixes.)
+
+  The outline, top to bottom: the page menu; the design in a viewer you can
+  turn, explode and colour, with its name, its summary and its verdict beside
+  it; the story (site/content/story.md, else intro.md); what it must do (the
+  requirements, each with its status); the choices behind it (the decisions,
+  newest first, and what lost to each); and Made with nopekit.
+
+  The verdict stays in the first screen at every width: the headline, the
+  count of each status, and the line that says what a check does not show.
+  A page that leads with a render and hides a failing claim is what the
+  doctrine forbids (docs/SITE_CONTRACT.md, "What the page must show"). Every
+  status, word and count on this page is in site/data/page.json; the browser
+  computes none of them. Each claim and its evidence is one link away, on the
+  engineering page.
+
+  The page sits one folder down, and its base element (pointing one folder
+  up) comes first in the head, before the first address, as on the
+  engineering page. A same-page link is written `marketing/#x`.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <base href="../">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Marketing page</title>
+    <link rel="stylesheet" href="page.css" />
+    <link rel="stylesheet" href="marketing.css" />
+
+    <script>
+      // THE IMPORT MAP, chosen at load time: a vendored three.js when
+      // `nopekit site vendor` has been run, the CDN otherwise (technical.html
+      // carries the same probe, and says why it is a synchronous request).
+      (function () {
+        var CDN = "https://cdn.jsdelivr.net/npm/three@0.169.0/";
+        var vendored = false;
+        try {
+          var probe = new XMLHttpRequest();
+          probe.open("HEAD", "vendor/three.module.js", false);
+          probe.send(null);
+          vendored = probe.status >= 200 && probe.status < 400;
+        } catch (err) {
+          vendored = false;
+        }
+        var imports = vendored
+          ? { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" }
+          : { "three": CDN + "build/three.module.js", "three/addons/": CDN + "examples/jsm/" };
+        var tag = document.createElement("script");
+        tag.type = "importmap";
+        tag.textContent = JSON.stringify({ imports: imports });
+        document.head.appendChild(tag);
+        document.documentElement.dataset.three = vendored ? "vendor" : "cdn";
+      })();
+    </script>
+  </head>
+
+  <body class="mk">
+    <nav class="viewnav" aria-label="Pages">
+      <a class="viewnav-name" id="viewnav-name" href="engineering/">nopekit project</a>
+      <div class="viewnav-links">
+        <a href="engineering/">Engineering</a>
+        <a href="marketing/" aria-current="page">Marketing</a>
+      </div>
+      <button class="themebtn" id="themebtn" type="button" aria-label="Change between the dark and the light theme"><span class="themebtn-glyph" aria-hidden="true">◐</span><span class="themebtn-text">Dark or light</span></button>
+    </nav>
+    <p class="build-banner" id="build-banner" role="status" hidden></p>
+
+    <!-- 1: the design in the viewer, with its name, summary and verdict -->
+    <header class="mk-hero" id="top">
+      <div class="mk-stage" id="mk-stage"></div>
+      <div class="mk-copy" id="mk-copy">
+        <div class="mk-copy-top">
+          <p class="mk-eyebrow" id="mk-eyebrow"></p>
+          <h1 class="mk-title" id="name">nopekit project</h1>
+        </div>
+        <p class="mk-tagline" id="mk-tagline"></p>
+        <div class="mk-verdict" id="verdict"><p class="muted">Reading the data.</p></div>
+        <div class="mk-copy-rest" id="mk-copy-rest"></div>
+      </div>
+    </header>
+
+    <main class="mk-main">
+      <!-- 2: the story -->
+      <section class="mk-sec" id="story" hidden></section>
+      <!-- 3: what it must do -->
+      <section class="mk-sec" id="asked" hidden></section>
+      <!-- 4: the choices behind it -->
+      <section class="mk-sec" id="choices" hidden></section>
+    </main>
+
+    <!-- 5: Made with nopekit, the last section of every nopekit site. The
+         badge ships with the template (img/made-with-nopekit.png); keep it. -->
+    <section class="mk-main madewith mk-madewith" id="made-with-nopekit">
+      <a href="https://github.com/neuman/nopekit"><img src="img/made-with-nopekit.png" width="200" height="200" loading="lazy" alt="Made with nopekit: a honey badger with goggles, a tool belt and a red toolbox"></a>
+      <div>
+        <h2>Made with nopekit</h2>
+        <p class="lede">nopekit is the check tool for this design. It runs the checks, records the evidence and builds this site.</p>
+        <p><a href="https://github.com/neuman/nopekit">github.com/neuman/nopekit</a></p>
+      </div>
+    </section>
+
+    <footer class="mk-main mk-footer">
+      <p>Each claim, its status and its evidence are on the <a href="engineering/">engineering page</a>. Each check and its history are in the <a href="technical.html">technical record</a>.</p>
+      <p class="muted" id="built"></p>
+    </footer>
+
+    <noscript>
+      <p class="noscript">This page needs JavaScript to draw the data. The data is in data/page.json. It is plain JSON.</p>
+    </noscript>
+
+    <script type="module" src="marketing.js"></script>
+  </body>
+</html>

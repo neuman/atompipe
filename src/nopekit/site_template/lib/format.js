@@ -234,18 +234,38 @@ export function lookOf(token, { errored = false } = {}) {
  *  status and evidence disagree never reads as a plain chip. Every caller that
  *  draws a token passes its marks (`test_site_truth` reads the calls). What
  *  slipped through (review of phase 5): the phone list and a board's heading
- *  drew a disagreeing claim as a plain green chip. */
-export function tokenChip(token, word, { errored = false, small = false, title = "", marks = [], notices = {} } = {}) {
+ *  drew a disagreeing claim as a plain green chip.
+ *
+ *  ``amber`` (a Checked pass that a ±10% move of an unconfirmed assumption's
+ *  choice flips) shows as a "◆" in the chip, the map's amber diamond, with
+ *  ``trace.amber_flips`` (the bake's `words.trace`, the word the map's own
+ *  amber note reads, `amber_word("flips")`) as its label. It sits beside the
+ *  status and never replaces it: the word and the tone stay the token's
+ *  (invariant 12). Every caller passes ``trace`` beside ``notices``. What
+ *  slipped through (review of SPEC 40): this chip drew `disagree` alone, so on
+ *  the marketing page, which has no map and no drawer, a requirement or a
+ *  decision's claim whose pass the trace flips read as a plain green chip, the
+ *  same as a pass at 80% margin: phase 3b's slip again, on the page that
+ *  persuades. A row that stands for several claims (a requirement, a board)
+ *  passes ``group``: its amber is one of its claims' (`page._group_marks`), so
+ *  its label is ``trace.amber_group``, never the claim's "This pass…" beside a
+ *  group that fails (review of SPEC 40). */
+export function tokenChip(token, word, { errored = false, small = false, title = "", marks = [], notices = {},
+  trace = {}, group = false } = {}) {
   const look = lookOf(token, { errored });
   const disagree = (marks || []).includes("disagree");
+  const amber = (marks || []).includes("amber");
   const label = (notices && notices.disagree) || "";
+  const amberLabel = (trace && (group ? trace.amber_group : trace.amber_flips)) || "";
   return el("span", {
-    class: `nk-chip tone-${look.tone}${small ? " nk-chip-sm" : ""}${disagree ? " has-mark" : ""}`,
-    title: title || (disagree ? label : "") || null,
+    class: `nk-chip tone-${look.tone}${small ? " nk-chip-sm" : ""}${disagree ? " has-mark" : ""}` +
+      `${amber ? " has-amber" : ""}`,
+    title: title || [disagree ? label : "", amber ? amberLabel : ""].filter(Boolean).join(" ") || null,
   },
     el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }),
     el("span", { class: "nk-word", text: String(word || token || "") }),
-    disagree ? el("span", { class: "nk-mark", role: "img", "aria-label": label || null, text: "!" }) : null);
+    disagree ? el("span", { class: "nk-mark", role: "img", "aria-label": label || null, text: "!" }) : null,
+    amber ? el("span", { class: "nk-amber", role: "img", "aria-label": amberLabel || null, text: "◆" }) : null);
 }
 
 /** A plain labelled tag with no status semantics (tier, pack, kind, count). */

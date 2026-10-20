@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* page.css: the front page (architecture phase 5). The type scale and the hero
+/* page.css: the engineering page (architecture phase 5), and the tokens, the
+   chips, the page menu and Made with nopekit that the marketing page builds on
+   (marketing.css adds its own). The type scale and the hero
    follow the PETGasus front page; the status tokens follow the author's
    grounding map (its base.css). A status is never colour alone: each chip and
    each line also carries a glyph and a word. Map styles are in map.css. */
@@ -105,6 +107,12 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
 .nk-mark { display: inline-grid; place-items: center; width: 1.25em; height: 1.25em; margin-left: 2px;
   border-radius: 50%; background: var(--fail); color: var(--surface); font-weight: 800; font-size: 0.8em; line-height: 1; }
 .nk-chip.has-mark { border-color: var(--fail); }
+/* `amber` beside a pass: the map's diamond in the map's amber, in the chip.
+   The tone stays the token's; only the border and the diamond say amber, and
+   `disagree`'s red border wins over it (review of SPEC 40: the chip drew
+   `disagree` alone, so the marketing page said amber nowhere). */
+.nk-amber { margin-left: 2px; color: var(--amber-strong); font-weight: 800; font-size: 0.9em; line-height: 1; }
+.nk-chip.has-amber:not(.has-mark) { border-color: var(--amber-strong); }
 .nk-notice { display: flex; gap: 8px; align-items: baseline; border-left: 3px solid var(--amber-strong);
   background: var(--amber-soft); color: var(--ink); padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 14.5px; }
 .nk-notice.tone-bad { border-left-color: var(--fail); background: var(--fail-soft); }
@@ -122,7 +130,10 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
     grid-template-areas: "name rep" "verdict rep" "desc rep"; padding-top: 36px; }
   .hero-rep { align-self: center; }
 }
-.hero-name .rev { font: 600 14px/1 var(--mono); color: var(--muted); margin-left: 12px; vertical-align: 8px;
+/* The revision is an atomic inline, so it can wrap under a long name: as plain
+   inline text with no space before it, it ran past a 320 px screen. */
+.hero-name { overflow-wrap: anywhere; }
+.hero-name .rev { display: inline-block; font: 600 14px/1 var(--mono); color: var(--muted); margin-left: 12px; vertical-align: 8px;
   padding: 3px 7px; border-radius: 6px; background: var(--surface-2); letter-spacing: 0; }
 .verdict { font-size: 20px; line-height: 1.4; margin: 6px 0 14px; }
 .verdict b { font-weight: 700; color: var(--tone-ink, var(--ink)); }
@@ -247,12 +258,57 @@ details.floor > summary { cursor: pointer; font-size: 14px; font-weight: 600; co
 .madewith img { display: block; width: 200px; height: auto; flex: none; }
 .madewith h2 { margin-top: 0; }
 footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--grid); font-size: 14px; color: var(--ink-2); }
+/* The theme button is fixed at the top right by default: a front page from
+   before the two pages has it as a child of <body>, and it gets this file on
+   every build. In the page menu it sits in the row (`.viewnav .themebtn`). */
 .themebtn { position: fixed; top: 12px; right: 12px; z-index: 5; border: 0; border-radius: 999px; padding: 6px 12px;
   background: var(--surface); color: var(--ink-2); box-shadow: 0 0 0 1px var(--ring); cursor: pointer; font-size: 13px; }
+.themebtn-glyph { display: none; }
 .build-banner { position: sticky; top: 0; z-index: 6; margin: 0; padding: 8px 16px; display: flex; gap: 10px;
   align-items: baseline; background: var(--fail-soft); border-bottom: 1px solid var(--fail); font-size: 14px; }
 .build-banner[hidden] { display: none; }
 .noscript { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+.redirect { max-width: 46rem; padding-top: 18vh; font-size: 17px; }
+
+/* ---- the page menu: the two pages, the name and the theme ------------------ */
+/* Sticky and frosted, on both pages, in both themes; at 320 px the name gives
+   way first (an ellipsis), then the theme button drops its words for a glyph.
+   The links are the two pages' own (`engineering/`, `marketing/`); the one a
+   reader is on carries aria-current. */
+:root { --viewnav-h: 52px; }
+html:has(.viewnav) { scroll-padding-top: calc(var(--viewnav-h) + 8px); }
+.viewnav { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px;
+  height: var(--viewnav-h); padding: 0 max(16px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--page) 78%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.viewnav-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 750; font-size: 15px; letter-spacing: -0.01em; color: var(--ink); text-decoration: none; }
+.viewnav-links { display: flex; flex: none; gap: 2px; padding: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent); box-shadow: inset 0 0 0 1px var(--ring); }
+.viewnav-links a { display: inline-flex; align-items: center; height: 30px; padding: 0 13px; border-radius: 999px;
+  font: 600 12.5px/1 var(--sans); color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+.viewnav-links a:hover { color: var(--ink); }
+.viewnav-links a[aria-current="page"] { background: var(--surface); color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ring), 0 1px 3px rgba(0, 0, 0, 0.08); }
+.viewnav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.viewnav .themebtn { position: static; flex: none; height: 32px; display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; }
+.viewnav .themebtn:hover { color: var(--ink); background: var(--surface); }
+.viewnav ~ .build-banner { top: var(--viewnav-h); }
+/* The hero's top room was for the fixed theme button; under the menu it is not needed. */
+.viewnav ~ main .hero { padding-top: 28px; }
+@media (max-width: 560px) {
+  .viewnav { gap: 8px; }
+  .viewnav .themebtn { width: 32px; padding: 0; justify-content: center; }
+  .viewnav .themebtn-text { display: none; }
+  .viewnav .themebtn-glyph { display: inline; font-size: 16px; line-height: 1; }
+  .viewnav-links a { padding: 0 10px; }
+}
+@media (max-width: 360px) {
+  .viewnav-name { font-size: 14px; }
+  .viewnav-links a { padding: 0 8px; font-size: 12px; }
+}
 
 /* ---- the drawer ------------------------------------------------------------ */
 #nk-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: var(--drawer-w); max-width: 100vw; z-index: 40;
@@ -287,3 +343,4 @@ footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--grid);
   .madewith { flex-direction: column; align-items: flex-start; gap: 12px; }
   .hero { padding-top: 52px; }
 }
+@media (max-width: 360px) { h1 { font-size: 30px; } }

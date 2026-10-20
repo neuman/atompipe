@@ -311,7 +311,8 @@ part of it.
     made with nopekit. Today's panels (every claim, every verdict with its locators,
     parameters with what lost, evidence, gaps, decisions) move to `technical.html`.
     `index.html` stays the project's own; `site build` warns when it predates the
-    outline.
+    outline. From decision 40 the outline is the engineering page's
+    (`engineering/index.html`), and the root `index.html` sends a browser there.
 29. **The map follows the author's transit pattern** (`PETGasus Grounding Map.html`):
     zones of choices on the left, claim lines riding shared stations, ending on
     boards; green for a pass, red for a fail, amber for a pass the trace can flip,
@@ -331,8 +332,8 @@ part of it.
     missing `as_of` reads stale. Every number in prose must match a baked number at
     the prose's precision; a scan enforces it. The agent judges what is compelling,
     as for a conference poster; a figure made in the figuring-out is best, a figure
-    made to explain is allowed when cheap. This is the one place the site persuades,
-    so the stamp matters most here.
+    made to explain is allowed when cheap. This is where the site persuades, with the
+    marketing page's story (decision 40), so the stamp matters most here and there.
 31. **History is rare and outside the daily build.** `site build` reads the
     checkout. A history walk (stills, frames, a video beside the representation) is
     one on-demand tool that reads each commit's round record with `git show`. It is
@@ -349,6 +350,41 @@ part of it.
     records, the model, the verdict cache, the trace and `site/content/`, rebuilds,
     and the page polls `data/build.json`. Published: Pages serves `site/` as
     committed, or CI builds it. Same baked files either way.
+40. **Two pages: `/engineering/` (the default) and `/marketing/`** (decided
+    2026-10-20, from the author's request). Each is a directory with an `index.html`
+    whose `<head>` opens with `<base href="../">`, so both read the same baked files at
+    the same paths; the root `index.html` is a redirect to `engineering/` that keeps
+    the query and the fragment (so a `#claim=` link still opens its drawer), and that
+    names `engineering/index.html` in full when opened from the disk, where a folder
+    address lists the folder (review of this decision). The
+    engineering page is the outline (28). The marketing page follows a reference
+    product page: the product in a viewer the person can colour, explode, spin and
+    isolate at the top, then the story behind it (`site/content/story.md`, stamped
+    like an intro), what it must do (each requirement with its chip), and the choices
+    that went into it (each decision with its claims' chips and what lost, newest
+    first). A menu near the top of each page links to the other, and each ends with
+    the Made-with-nopekit section. Every rule of the site holds on both: the verdict
+    headline, the tally, the stale notice and the limits line sit above the fold at
+    every width, the viewer under them on a phone (invariant 12), every chip carries
+    its claims' marks (`amber` and `disagree`), a preference reads "Preferred against, not recorded by <name>"
+    until the person records it (invariant 13), and every word, chip and order is
+    baked by `page.bake_page` and held by `page.status_problems` (invariant 14). The
+    customizer changes how the page shows the design, never the design: a colour is
+    the person's browser's alone, and the page says so. *Rejected:* flat
+    `engineering.html` and `marketing.html` (Pages serves `/engineering` from
+    `engineering.html`, and `python3 -m http.server`, what `site serve` runs, does
+    not, so the addresses the author asked for would answer 404 on the person's own
+    machine); the engineering page at `/` with `/engineering` sending a browser back
+    to it (the author asked for the page to live at `/engineering`); one page with a
+    script router (a reload at `/marketing` is a 404 on a static host with no rewrite
+    rules); a `../` baked into every path for the pages in a directory (it breaks
+    every baked path and the evidence links, and a shell at the root would need a
+    second set); the reference page's build (Vite and TypeScript are a build step,
+    which the site may not have, 32); a free-form marketing shell with words of its
+    own (words no scan holds, and a status no checker sees); a what-if customizer that
+    moves a choice in the browser (29: it computes in the browser, and the verdict
+    covers one candidate, 16); decisions oldest first (the page would open on tooling
+    and superseded history before the design as it stands).
 
 ### Style
 
@@ -402,8 +438,10 @@ my-project/
     packs/                  packs copied into this project
     ledger.json cache/ obs/ out/     ignored, rebuilt
   site/
-    index.html              the project's own, never regenerated
-    content/<board>.md      agent prose per board, stamped as_of
+    index.html              a redirect to engineering/; the project's own, never regenerated
+    engineering/index.html  the outline (28); the project's own
+    marketing/index.html    the product, its story and its choices (40); the project's own
+    content/<board>.md      agent prose per board, stamped as_of (and intro, next, story)
     annotations.json        authored pins on the representation
     img/made-with-nopekit.png
     data/  assets/          baked by `site build`; data/build.json ignored
@@ -1835,6 +1873,49 @@ it:
   mutation passes any of them.
 - **Phases 2 and 3** (external flow with snappyHexMesh and forces; conjugate heat
   transfer) stay open on #15.
+
+**The two pages** (2026-10-20, decision 40), decided while specifying it, after three
+critics read the plan against the code:
+
+- **One `page.json`, no third document.** Every new key (`story`,
+  `verdict.headline`, `representation.alternates`, `requirements`, `decisions`,
+  `decisions_more`, `losers`) is baked inside `page.bake_page`, so the seal, the
+  number pool, `status_problems` and the style scans see it with no new path.
+  *Rejected:* building the rows in `site.build` after `bake_page` (they would land
+  after the checker ran); reading `state.json`'s params in the browser (filtering
+  and ordering what lost is a judgment, and the browser makes none).
+- **`site.scaffolded` stays the root `site/index.html`.** `init` always writes the
+  root redirect, and an old project already has a root page, so invariant 8's "when
+  `site/index.html` exists" keeps its meaning. *Rejected:* "or
+  `engineering/index.html`" (it would widen what `round` writes).
+- **An old project's root page is never moved or replaced by a build.** `site build`
+  writes `engineering/` and `marketing/` beside it and warns, naming the steps (move
+  it aside, then `site init`). *Rejected:* `site init --force` in the warning (it
+  replaces the engineering, marketing and technical shells too); moving the page
+  aside automatically (a site file the person wrote, moved by a build).
+- **The two are "pages" in site strings,** labelled Engineering and Marketing (the
+  author's words). A *view* is a view kind (`views/*.json`). Whether a visitor-facing
+  label should read "Product" or "Overview" is the author's call, left open.
+- **The story is a prose subject, `story`, stamped against intro's tokens** (every
+  claim's, the readiness and each milestone's), because a story names the whole
+  product. `story` joins the reserved group ids. With no story the page shows the
+  intro, and with neither it leaves the section out: author notices are build
+  warnings, never text on the marketing page.
+- **Decisions newest first, five featured on show.** A decision is featured when it
+  changed a claim or a value; the first five featured are shown and the rest sit in
+  one closed block. Both are filters on the record's structure, never on a status.
+- **A rejection's words are the site register's, from the one producer.** `type_word`
+  for a preference is the CLI's invariant-13 phrase with a capital, pinned equal by a
+  test; `returns_word` carries no record text (the record's `why` has an em-dash in
+  the bracket's PLA row), and the record's text goes under `reason` and
+  `returns_text`, record keys the style scan leaves alone.
+- **What lost to a value is text** (`value_text`), so a losing number never joins the
+  number pool and the story cannot quote a loser as if it were a result.
+- **The tally chips stay as `page.js` draws them** (a tally item has no marks), moved
+  with the verdict block into `lib/verdict.js`, so both pages read the verdict through
+  one renderer.
+- **The meshopt decoder is vendored** with three.js (`site.vendor_urls`), so a
+  compressed GLB loads offline too.
 
 ## 9. Retired
 

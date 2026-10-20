@@ -6758,6 +6758,20 @@ def _view_registry(root: str, ledger: Ledger, *,
     return registry, problems
 
 
+def _vendor_words(info: Mapping[str, Any]) -> str:
+    """Where the page loads three.js from, in `site status`'s and `doctor`'s
+    words: ``vendored``; a ``site/vendor/`` that holds only some of
+    `site.vendor_urls`, each missing path named (the page finds vendor/ and
+    loads from it, so it is never "from the CDN"); or the CDN."""
+    if info.get("vendored"):
+        return "vendored"
+    missing = list(info.get("vendor_missing") or ())
+    if info.get("vendor_files") and missing:
+        return (f"partly vendored: site/vendor/ is missing "
+                f"{', '.join(p.split('/', 1)[1] for p in missing)} (`nopekit site vendor`)")
+    return "from the CDN (`nopekit site vendor`)"
+
+
 def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
     """What is on disk under `site/`, read-only, running no gate, fixture or
     viewgen.
@@ -6816,6 +6830,7 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         "asset_bytes": 0,
         "vendored": False,
         "vendor_files": 0,
+        "vendor_missing": [],
         "three_version": site.THREE_VERSION,
         "edited": [],
         "outline": None,
@@ -6827,6 +6842,10 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         info["stale_reason"] = "no site/index.html — `nopekit site init`"
         return info
     info["outline"] = site.outline_of(root)
+    # The two pages: the file the outline was read from, and whether the root
+    # is a front page from before them (`site.old_layout`).
+    info["outline_file"] = site.outline_file(root)
+    info["old_layout"] = site.old_layout(root)
 
     total = size = 0
     for walk_dir, _dirnames, filenames in os.walk(assets_dir):
@@ -6845,6 +6864,12 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         # Partially vendored is NOT vendored: a vendor/ holding three of four
         # files shadows the CDN import map and 404s on the fourth.
         info["vendored"] = len(vendored) == len(site.vendor_urls())
+        # And it is not "from the CDN" either: the page's probe finds vendor/
+        # and loads from it. What slipped through (review of SPEC 40): the
+        # meshopt decoder joined `vendor_urls`, so every site vendored before
+        # it read "three.js from the CDN" in `site status` while the page
+        # loaded vendor/ and, offline, 404'd on the one file nothing named.
+        info["vendor_missing"] = [p for p in site.vendor_urls() if p not in vendored]
 
     if not os.path.isfile(state_path):
         info["stale_reason"] = "never built — `nopekit site build`"
@@ -7028,8 +7053,10 @@ def _site_brief(info: dict) -> dict:
         "present": info["present"], "built": info["built"],
         "built_at": info["built_at"], "stale": info["stale"],
         "views": len(info["views"]), "dangling_locators": len(info["locator_problems"]),
-        "vendored": info["vendored"], "error": info["error"],
-        "outline": info.get("outline"), "edited": list(info.get("edited") or ()),
+        "vendored": info["vendored"], "vendor_missing": list(info.get("vendor_missing") or ()),
+        "error": info["error"],
+        "outline": info.get("outline"), "old_layout": bool(info.get("old_layout")),
+        "edited": list(info.get("edited") or ()),
         "prose_behind": list(info.get("prose_behind") or ()),
     }
 
@@ -7075,10 +7102,12 @@ def cmd_site_init(args: argparse.Namespace) -> int:
     `index.html` is the one file this will not replace without `--force`: the
     contract calls it *hackable, yours, never regenerated after init*, and
     someone who spent an afternoon on their project's page must not lose it to
-    the command they ran to pick up a renderer fix. Everything else in the
-    template IS refreshed, because `app.js` and `style.css` are ours and a
-    project that could never receive a fix would be stuck with the bugs of the
-    day it was created.
+    the command they ran to pick up a renderer fix. From the two pages it is a
+    redirect to `engineering/`, and the engineering and marketing pages are
+    shells of their own (`site.SHELLS`): written when absent, kept when present,
+    replaced only with `--force`. Everything else in the template IS refreshed,
+    because `app.js` and `style.css` are ours and a project that could never
+    receive a fix would be stuck with the bugs of the day it was created.
     """
     root = _root(args)
     with _lock(root):
@@ -7087,6 +7116,8 @@ def cmd_site_init(args: argparse.Namespace) -> int:
 
     if args.json:
         _dump({"root": root, "site": site.SITE_DIR, "wrote": written, "launch": launch,
+               "pages": {name: posixpath.join(site.SITE_DIR, path, "index.html")
+                         for name, path in site.PAGES},
                "next": ["nopekit site build", "nopekit site serve"]})
         return 0
     _say(f"scaffolded {site.SITE_DIR}/ in {root}")
@@ -7095,8 +7126,10 @@ def cmd_site_init(args: argparse.Namespace) -> int:
     if launch:
         _say(f"  {launch}   (Run and Debug: builds and opens this site)")
     _say("")
-    _say(f"  {site.SITE_DIR}/index.html is yours — edit it; "
-         f"`site init` will not overwrite it again")
+    _say(f"  two pages: {site.SITE_DIR}/engineering/index.html (the claims, the map and the "
+         f"evidence; {site.SITE_DIR}/index.html opens it) and "
+         f"{site.SITE_DIR}/marketing/index.html (the model, the story and the choices)")
+    _say(f"  they are yours — edit them; `site init` will not overwrite them again")
     _say("next: nopekit site build   (writes data/ and assets/), then "
          "nopekit site serve")
     return 0
@@ -7144,7 +7177,8 @@ def cmd_site_build(args: argparse.Namespace) -> int:
     the one artifact whose entire job is to be trusted when a gate says
     something is wrong.
 
-    It also refreshes the renderer — every template file but `index.html` —
+    It also refreshes the renderer — every template file but the shells
+    (`site.SHELLS`), and writes a shell that is absent, the root's excepted —
     when this nopekit's differs (`site.refresh_renderer`), so a page scaffolded
     by an older spine never reads new data with old words.
 
@@ -7196,6 +7230,8 @@ def cmd_site_build(args: argparse.Namespace) -> int:
         # collisions and every dangling locator, in one place. Never filtered:
         # the whole failure mode this list covers is silence.
         _say(f"{_tag('warn')} {warning}")
+    for notice in summary.get("notices") or ():
+        _say(f"{_tag('none')} {notice}")
 
     if not summary["views"]:
         if not summary["viewgens"]:
@@ -7228,13 +7264,17 @@ def cmd_site_build(args: argparse.Namespace) -> int:
              f"{prose_counts.get('stale', 0)} stale, {prose_counts.get('unstamped', 0)} "
              f"unstamped; {prose_counts.get('unmatched', 0)} unmatched number(s)")
     else:
-        _say("prose: none (write site/content/intro.md and one file per board)")
+        _say("prose: none (write site/content/intro.md, story.md and one file per board)")
     found = summary.get("evidence") or {}
     _say(f"evidence: {found.get('copied', 0)} file(s) copied, {found.get('kept', 0)} kept from "
          f"an earlier build, {found.get('missing', 0)} not on the page")
     if summary.get("refreshed"):
         _say(f"refreshed the renderer to this nopekit's template: "
              f"{', '.join(summary['refreshed'])}")
+    # A shell the build wrote because it was absent is a page, never the
+    # renderer (review of SPEC 40: it was listed as "refreshed the renderer").
+    if summary.get("pages"):
+        _say(f"wrote the missing pages: {', '.join(summary['pages'])}")
     _say(f"wrote {len(summary['wrote'])} file(s), removed {len(summary['removed'])} "
          f"stale file(s) -> {summary['state']}")
     if summary.get("launch"):
@@ -7571,9 +7611,13 @@ def cmd_site_serve(args: argparse.Namespace) -> int:
 
         if args.json:
             _dump({"url": url, "host": host, "port": port, "root": root,
-                   "serving": rel(site_dir, root), "built": built})
+                   "serving": rel(site_dir, root), "built": built,
+                   "pages": site.page_urls(url)})
         else:
             _say(site.SERVE_READY_LINE.format(served=rel(site_dir, root), url=url))
+            # The two pages' addresses, after the ready line and never matching
+            # its pattern: the editor opens the root, which redirects.
+            _say(site.pages_line(url))
             if watch:
                 _say(f"watching {len(site.watch_snapshot(root))} path(s); a change rebuilds "
                      f"site/ (no evaluator runs: `nopekit check` does that)")
@@ -7666,9 +7710,12 @@ def _serve_said(root: str, args: argparse.Namespace, found: Served, *,
     if args.json:
         _dump({"url": found.url, "pid": found.pid, "watch": found.watch,
                "started": found.started, "log": SERVE_LOG_REL, "already": already,
-               "root": root, "serving": served, "detached": True})
+               "root": root, "serving": served, "detached": True,
+               "pages": site.page_urls(found.url) if found.url else {}})
         return 0
     _say(site.SERVE_READY_LINE.format(served=served, url=found.url))
+    if found.url:
+        _say(site.pages_line(found.url))
     if already:
         _say(f"already running ({_serve_words(found)}): nothing new was started — "
              f"`nopekit site serve --stop` stops it, to start it with other options")
@@ -7855,7 +7902,8 @@ def cmd_site_stamp(args: argparse.Namespace) -> int:
     """Write the ``as_of`` stamp into ``site/content/`` prose (SPEC 30): the
     digest of the status tokens of the claims the text is about, now — a
     board's claims for ``<board>.md``, every claim, the readiness and each
-    milestone for ``intro.md`` and ``next.md``. It writes only the ``as_of``
+    milestone for ``intro.md``, ``next.md`` and ``story.md``
+    (`page.PROSE_SUBJECTS`). It writes only the ``as_of``
     line (`prose.stamp_text`), never a record (invariant 8), and needs no
     ``site/index.html``: the bracket tracks its text without a built page.
 
@@ -7866,7 +7914,8 @@ def cmd_site_stamp(args: argparse.Namespace) -> int:
     claim passes after it failed."""
     root = _root(args)
     if not getattr(args, "all", False) and not getattr(args, "subject", None):
-        raise NopekitError("site stamp needs a board name, intro, next or --all")
+        raise NopekitError(f"site stamp needs a board name, {', '.join(page.PROSE_SUBJECTS)} "
+                           f"or --all")
     with _lock(root):
         folder = page.content_dir(root)
         if not os.path.isdir(folder) and getattr(args, "all", False):
@@ -7904,7 +7953,8 @@ def cmd_site_stamp(args: argparse.Namespace) -> int:
             if subject not in known:
                 raise NopekitError(
                     f"no board named {subject!r}: boards are "
-                    f"{', '.join(b.id for b in boards) or 'none'} (and intro, next)")
+                    f"{', '.join(b.id for b in boards) or 'none'} "
+                    f"(and {', '.join(page.PROSE_SUBJECTS)})")
             path = os.path.join(folder, f"{subject}.md")
             if not os.path.isfile(path):
                 raise NopekitError(f"site/content/{subject}.md does not exist: write the text "
@@ -8120,8 +8170,9 @@ def cmd_site_vendor(args: argparse.Namespace) -> int:
     _say(f"vendored three.js {site.THREE_VERSION} ({human_bytes(total)})")
     for row in fetched:
         _say(f"  {row['path']:<44} {human_bytes(row['bytes']):>10}")
-    _say(f"the import map in {site.SITE_DIR}/index.html now resolves against these "
-         f"files instead of the CDN; delete {site.SITE_DIR}/{site.VENDOR_DIR}/ to go back")
+    _say(f"the import map in each page ({site.SITE_DIR}/engineering/, "
+         f"{site.SITE_DIR}/marketing/, {site.SITE_DIR}/technical.html) now resolves against "
+         f"these files instead of the CDN; delete {site.SITE_DIR}/{site.VENDOR_DIR}/ to go back")
     return 0
 
 
@@ -8243,9 +8294,14 @@ def cmd_site_status(args: argparse.Namespace) -> int:
     for row in info.get("prose") or ():
         if not row.get("subject"):
             _say(f"{_tag('warn')} {row['file']} names no board: it is not on the page")
-    if info.get("outline") is None or info["outline"] < page.OUTLINE:
-        _say(f"{_tag('warn')} {site.SITE_DIR}/index.html predates the page outline (no "
-             f"nopekit-outline marker): `nopekit site init --force` after keeping a copy")
+    # One sentence each with `site build` and `doctor` (`site.outline_problem`,
+    # `site.OLD_LAYOUT_WARNING`): the outline is the engineering page's, and a
+    # root page from before the two pages is said apart.
+    older = site.outline_problem(root)
+    if older:
+        _say(f"{_tag('warn')} {older}")
+    if info.get("old_layout"):
+        _say(f"{_tag('warn')} {site.OLD_LAYOUT_WARNING}")
     if info["verdicts_stale"]:
         _say(f"{_tag('warn')} the verdicts on the page are stale: "
              f"{info['verdicts_stale_reason']} — `nopekit check`, then rebuild")
@@ -8258,8 +8314,7 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         if len(info["locator_problems"]) > 6:
             _say(f"    (+{len(info['locator_problems']) - 6} more — `--json` for all)")
     _say(f"assets: {info['assets']} file(s), {human_bytes(info['asset_bytes'])}; "
-         f"three.js {site.THREE_VERSION} "
-         f"{'vendored' if info['vendored'] else 'from the CDN (`nopekit site vendor`)'}")
+         f"three.js {site.THREE_VERSION} {_vendor_words(info)}")
     for problem in problems:
         _say(f"{_tag('FAIL')} {problem}")
     return 0
@@ -9929,9 +9984,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             # drawing and is not looks exactly like a gate that found nothing.
             outline = site_info.get("outline")
             old_shell = outline is None or outline < page.OUTLINE
+            # The two pages: a root page from before them is a warning too, in
+            # `site build`'s and `site status`'s words.
+            old_layout = bool(site_info.get("old_layout"))
             # The text written before the latest results is the `site text` row's,
             # so a stale piece of prose is one warning, never two.
-            status = "warn" if (site_info["stale"] or dangling or old_shell) else "ok"
+            status = "warn" if (site_info["stale"] or dangling or old_shell
+                                or old_layout) else "ok"
             detail = (f"{len(site_info['views'])} view(s), built "
                       f"{site_info['built_at'] or '(time unknown)'}"
                       f"{' (' + site_info['age'] + ')' if site_info['age'] else ''}, "
@@ -9940,8 +9999,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 detail += (f" — {dangling} locator(s) point at a view or node that does "
                            f"not exist (`nopekit site status`)")
             if old_shell:
-                detail += (" — site/index.html predates the page outline: `nopekit site init "
-                           "--force` after keeping a copy")
+                detail += f" — {site.outline_problem(root)}"
+            if old_layout:
+                detail += f" — {site.OLD_LAYOUT_WARNING}"
+            # A vendor/ that lacks a file the page imports (review of SPEC 40).
+            if site_info.get("vendor_missing") and not site_info["vendored"] \
+                    and site_info.get("vendor_files"):
+                status = "warn"
+                detail += f" — three.js {_vendor_words(site_info)}"
             served = _serve_state(root)
             if served.state == "running":
                 detail += f" — live at {served.url} (pid {served.pid})"
@@ -10373,7 +10438,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = site_sub.add_parser("init", parents=[common],
                             help="scaffold site/ (refuses to clobber index.html)")
     p.add_argument("--force", action="store_true",
-                   help="replace index.html too — your edits to it are not recoverable")
+                   help="replace the shells too (index.html, engineering/, marketing/, "
+                        "technical.html) — your edits to them are not recoverable")
     p.set_defaults(func=cmd_site_init)
 
     p = site_sub.add_parser("build", parents=[common],
@@ -10414,9 +10480,10 @@ def build_parser() -> argparse.ArgumentParser:
                                  "its board's claims had when you wrote it")
     which = p.add_mutually_exclusive_group()
     which.add_argument("subject", nargs="?", default=None,
-                       help="a board's id, intro or next (site/content/<subject>.md)")
+                       help="a board's id, intro, next or story (site/content/<subject>.md)")
     which.add_argument("--all", action="store_true",
-                       help="stamp every file in site/content/ that names a board, intro or next")
+                       help="stamp every file in site/content/ that names a board, intro, next "
+                            "or story")
     p.set_defaults(func=cmd_site_stamp)
 
     p = site_sub.add_parser("badge", parents=[common],

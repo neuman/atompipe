@@ -362,14 +362,16 @@ person's. Enforced in `tests/test_preferences.py`:
     `docs/SPINE_CONTRACT.md`.)
 
 One more came with architecture phase 5, when the site gained a map and the agent's
-prose: the one place the site persuades. Enforced in `tests/test_site_truth.py`:
+prose: where the site persuades, with the marketing page beside it from SPEC 40.
+Enforced in `tests/test_site_truth.py`:
 
 14. **The site never says more than the resolution, and stamped prose is flagged when
     behind.** Every status, word, count, order, margin and *ready* that `site build` bakes
     into `site/data/` comes from `claims.compose` through `graph.tokens`,
     `claims.unresolved` and `claims.margin`, on the resolution every reader uses: a
-    claim's token on the map, on its board and in next steps is its composition's, a
-    board's is the worst of its claims', a milestone's steps are `claims.unresolved`'s.
+    claim's token on the map, on its board, in next steps and on the marketing page is
+    its composition's, a board's is the worst of its claims', a milestone's steps are
+    `claims.unresolved`'s.
     The build refuses to write a page whose token, word or mark for a claim, a
     requirement, a board, a milestone or the project differs, or whose words put a value
     inside a limit its claim's condition rejects (`page.status_problems`), and the browser
@@ -546,10 +548,10 @@ layout in full, with each writer.
 | `src/nopekit/vcs.py` | the only git edge: a read half (argv form, a clean environment, a timeout, never raises) and a writing half (`init_repo`, `add`, `commit`) under its own contract |
 | `src/nopekit/derivation.py` | the trace: each choice moved ±10% in copies, what moved, the order it infers, amber, the background start (non-spine, clock-free) |
 | `src/nopekit/graph.py` | the typed falsification graph (SPEC 19): nodes and typed edges from the records, the registry and the served verdict entries, and the status tokens beside it — what the round record holds and the site's map draws |
-| `src/nopekit/page.py` | the front page's baked data (SPEC 28-33): the map's layout from the graph and the groups, `map.json` and `page.json`, the floor, next steps, the evidence plan, the stamps, and invariant 14's checker |
+| `src/nopekit/page.py` | the two pages' baked data (SPEC 28-33, 40): the map's layout from the graph and the groups, `map.json` and `page.json`, the floor, next steps, the evidence plan, the stamps, and invariant 14's checker |
 | `src/nopekit/prose.py` | the agent's text on the site: front matter and the stamp, the markdown subset, the number scan, and the style scans (SPEC 30, 34, 35) |
 | `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
-| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (the outline: the representation, the verdict, the map, a section per board, next steps) and `technical.html` (today's panels), both the project's own; `content/` the agent's prose, stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
+| `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (a redirect to `engineering/`), `engineering/index.html` (the outline: the representation, the verdict, the map, a section per board, next steps), `marketing/index.html` (the product in a viewer, its story, what it must do, the choices behind it; SPEC 40) and `technical.html` (today's panels), all four the project's own; `content/` the agent's prose (`story.md` the marketing page's), stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
 | `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |

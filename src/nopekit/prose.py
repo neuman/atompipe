@@ -71,8 +71,11 @@ BANNED_WORDS = ("delve", "robust", "seamless", "crucial", "honest")
 #: index, a row, a column, a tier or a list index is not a result, so prose that
 #: says "1" must not match it. What slipped through (review of phase 5): `row`,
 #: `index` and `tier` were pooled, so every small integer in prose matched one.
+#: `bytes` (the two pages: a model file's size, the marketing viewer's loading
+#: bar) is a file's size, never a result: "6,481,920" in a story is no value of
+#: the design.
 POOL_EXCLUDED_KEYS = frozenset({"schema", "outline", "order", "column", "columns", "severity",
-                                "rank", "row", "index", "tier"})
+                                "rank", "row", "index", "tier", "bytes"})
 
 #: Keys whose numbers (and every number under them) are counts: how many claims,
 #: gaps or evaluators. A count matches only a number written with no unit, so

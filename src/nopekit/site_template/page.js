@@ -7,6 +7,13 @@
 // design learns what it is and what holds, and a designer gets from a red line
 // to its evidence in two clicks.
 //
+// It is the engineering page (`engineering/index.html`, whose `<base href="../">`
+// makes every address below resolve against the site's root), and it still
+// draws a front page from before the two pages at the root. It needs no page
+// menu: `#viewnav-name` is filled when the shell has one. The marketing page is
+// marketing.js; the verdict, the theme and the build banner are in lib/, one
+// copy for both pages.
+//
 // It reads `data/page.json` and `data/map.json` (the bake), `data/state.json`
 // for the views alone (the representation), and `data/build.json` when it is
 // there (the build time, and live mode). Every number, status, word and order
@@ -22,11 +29,14 @@
 // technical.html, drawn by app.js from state.json.
 
 import { el, mount, $ } from "./lib/dom.js";
-import { lookOf, stamp } from "./lib/format.js";
+import { lookOf } from "./lib/format.js";
 import { renderMap, mapList } from "./lib/map.js";
 import { createDrawer } from "./lib/drawer.js";
 import { renderSections, renderNext, renderProse } from "./lib/sections.js";
 import { readBuild, watchBuild } from "./lib/live.js";
+import { verdictBlock } from "./lib/verdict.js";
+import { themeButton, menuName } from "./lib/theme.js";
+import { paintBuild } from "./lib/banner.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
 
@@ -91,7 +101,10 @@ function render({ again = false } = {}) {
   const words = doc.words || {};
   const headings = words.headings || {};
   const meta = doc.meta || {};
-  document.title = meta.name || document.title;
+  // The tab says which page it is when the shell has the page menu; a front
+  // page from before the two pages keeps the name alone.
+  if (meta.name) document.title = $(".viewnav") ? `${meta.name} · Engineering` : meta.name;
+  menuName(meta);
 
   if (!page.drawer) {
     page.drawer = createDrawer(doc, page.map, { onChange: (kind, key) => {
@@ -134,35 +147,6 @@ function render({ again = false } = {}) {
   mount($("#technical-link"), headings.technical || "technical.html");
   showBuild(page.build);
   if (!again) applyHash();
-}
-
-/** The sentence, with its lead in bold up to the first full stop, then the
- *  count strip (the bake's tally, glyph and word on each chip), the limits line,
- *  and the notice when a result is older than the design. */
-function verdictBlock(verdict, words) {
-  const sentence = String(verdict.sentence || "");
-  const cut = sentence.search(/\.(\s|$)/);
-  const lead = cut >= 0 ? sentence.slice(0, cut + 1) : sentence;
-  const rest = cut >= 0 ? sentence.slice(cut + 1) : "";
-  const look = lookOf(verdict.token);
-  return [
-    el("p", { class: `verdict tone-${look.tone}` },
-      el("span", { class: "verdict-glyph", "aria-hidden": "true", text: look.glyph }),
-      el("b", { text: lead }), rest),
-    (verdict.tally || []).length
-      ? el("ul", { class: "tally" }, ...verdict.tally.map((t) => {
-          const tl = lookOf(t.key, { errored: t.errored > 0 });
-          return el("li", { class: `nk-chip tone-${tl.tone}` },
-            el("span", { class: "nk-glyph", "aria-hidden": "true", text: tl.glyph }),
-            el("span", { class: "nk-word", text: t.label }));
-        }))
-      : null,
-    verdict.stale && verdict.notice
-      ? el("p", { class: "nk-notice", role: "status" },
-          el("span", { class: "nk-glyph", "aria-hidden": "true", text: "≈" }), verdict.notice)
-      : null,
-    verdict.limits ? el("p", { class: "limits small", text: verdict.limits }) : null,
-  ];
 }
 
 function description(doc, openClaim) {
@@ -342,46 +326,13 @@ $("#map-fit") && $("#map-fit").addEventListener("click", () => page.mapApi && pa
 // --------------------------------------------------------------------------- //
 function showBuild(build) {
   const words = (page.doc && page.doc.words) || {};
-  const notices = words.notices || {};
-  const banner = $("#build-banner");
-  if (banner) {
-    if (build && build.ok === false) {
-      const message = String(build.error || "");     // the failed build's last line
-      mount(banner, el("span", { class: "nk-glyph", "aria-hidden": "true", text: "!" }),
-        el("span", { text: notices.build_failed || "" }),
-        message ? el("code", { class: "mono", text: message }) : null);
-      banner.hidden = false;
-    } else {
-      banner.hidden = true;
-    }
-  }
+  paintBuild(build, words);
   if (page.map && page.doc) mapCaption(page.map, words);
-  const built = $("#built");
-  if (built) {
-    mount(built, build && build.built
-      ? `Built ${stamp(build.built)}${build.live ? ". This page follows the build." : "."}` : "");
-  }
 }
 
 // --------------------------------------------------------------------------- //
 // chrome
 // --------------------------------------------------------------------------- //
-function themeButton() {
-  const button = $("#themebtn");
-  let saved = null;
-  try { saved = window.localStorage.getItem("nopekit-theme"); } catch (err) { saved = null; }
-  if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
-  if (!button) return;
-  button.addEventListener("click", () => {
-    const dark = document.documentElement.dataset.theme
-      ? document.documentElement.dataset.theme === "dark"
-      : window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { window.localStorage.setItem("nopekit-theme", next); } catch (err) { /* private window */ }
-  });
-}
-
 /** `#claim=C1` (or `#C1`) opens that claim's drawer; `#board-<id>` scrolls. */
 function applyHash() {
   const raw = decodeURIComponent((location.hash || "").replace(/^#/, ""));

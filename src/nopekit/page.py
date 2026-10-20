@@ -92,8 +92,32 @@ EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
 #: Where the evidence lands, under ``site/``.
 EVIDENCE_DIR = "assets/evidence"
 
-#: The prose subjects that are not boards.
-PROSE_SUBJECTS = ("intro", "next")
+#: The prose subjects that are not boards: the description, the next steps and,
+#: from the two pages, the marketing page's story. Every list of them (the
+#: stamp's argument, the reserved group ids, the build's messages, the pool's
+#: bare page) derives from this tuple. `story` is stamped against what `intro`
+#: is (every claim's token, the readiness, each milestone): a story names the
+#: whole product. *Rejected:* a story stamped against nothing (it is the one
+#: piece of the site written to persuade, so the flag matters most there); a
+#: story per board (the boards' own prose is that).
+PROSE_SUBJECTS = ("intro", "next", "story")
+
+# Every prose subject is a reserved group id (`store.RESERVED_GROUP_IDS`), or a
+# board of that name would take its file. Held here at import, because `store`
+# cannot import this module: a subject added to one tuple and not the other
+# fails every command at once, never one project later.
+if not set(PROSE_SUBJECTS) <= set(store.RESERVED_GROUP_IDS):      # pragma: no cover
+    raise RuntimeError(f"page.PROSE_SUBJECTS {PROSE_SUBJECTS} are not all in "
+                       f"store.RESERVED_GROUP_IDS")
+
+#: How many decisions the marketing page shows in full, newest first; the rest
+#: sit in one collapsed block. Only a decision that changed a claim or a value
+#: is shown (`featured`). Provenance: the reference product page shows four to
+#: six choices before the evidence, and PETGasus has 14 decisions, most of them
+#: long engineering text: all 14 would push the evidence off the page.
+#: *Rejected:* every decision (a wall of text); the first five in record order
+#: (a story reads the latest choice first, and record order is the file names').
+DECISIONS_SHOWN = 5
 
 #: Keys whose string values are words the build writes (scanned for the site's
 #: register, `test_style`) and keys whose strings are record text, ids, tokens,
@@ -102,10 +126,18 @@ PROSE_SUBJECTS = ("intro", "next")
 #: A recorded result's `why`, `recorded` and `heading` are words (follow-up
 #: after phase 3b): they were the CLI's `result_facts`, exempt, and the drawer
 #: said "a new article is needed, not a rerun" under the scan's nose.
+#: The two pages added words (`headline`, `type_word`, `returns_word`,
+#: `lost_label`, `decisions_more`) and record keys (a decision's `when`,
+#: `params`, a rejection's `value`, `reason`, `input`, `returns_text`, the
+#: `preference` and `returns` tokens, a value's `rationale`, `lost`,
+#: `decisions`, `rejected`, `alternates`). A rejection's reason is `reason`,
+#: never `why`: `why` is a word key, and the bracket's PLA reason holds an
+#: em-dash the person wrote, which the scan would read as the build's.
 WORD_KEYS = frozenset({
     "generated", "notice", "sentence", "limits", "label", "word", "value_text", "hint",
     "cause_text", "text", "kind_word", "by_word", "basis_word", "outcome_word", "missing",
-    "term", "why", "recorded", "heading"})
+    "term", "why", "recorded", "heading",
+    "headline", "type_word", "returns_word", "lost_label", "decisions_more"})
 RECORD_KEYS = frozenset({
     "schema", "name", "summary", "revision", "records_digest", "resolution_digest",
     "content_digest", "trace", "view", "kind", "title", "token", "id", "key", "lane",
@@ -122,7 +154,10 @@ RECORD_KEYS = frozenset({
     "stop_kind", "stop_kinds", "taps", "fed_by", "serves", "feeds", "layers", "layer",
     "depth", "head", "ties", "singles", "skipped", "choices", "to", "estimate", "idle",
     "moved", "enters", "amber", "assumption", "choice", "sign", "evaluator", "count",
-    "source", "sources", "state", "rank", "sets", "unmoved", "unmeasured"})
+    "source", "sources", "state", "rank", "sets", "unmoved", "unmeasured",
+    # the two pages: the marketing page's record text and tokens
+    "when", "params", "value", "reason", "rationale", "returns_text", "input",
+    "preference", "returns", "decisions", "rejected", "lost", "alternates"})
 
 
 class Board(NamedTuple):
@@ -1028,8 +1063,8 @@ def subject_tokens(subject: str, boards: Iterable[Board], toks: Any,
     """What a piece of prose is stamped against: a board's ``{claim id:
     token[:marks]}`` for its claims, and ``{"@<id>": token[:marks]}`` for each
     claim its text names that is on another board (``named``, `named_in`);
-    for ``intro`` and ``next``, every claim's, with
-    ``_readiness`` and ``_m:<id>`` for each milestone.
+    for ``intro``, ``next`` and ``story`` (`PROSE_SUBJECTS`), every claim's,
+    with ``_readiness`` and ``_m:<id>`` for each milestone.
 
     A board's prose may name and link a claim on another board; that claim's
     token is in the stamp, so its flip flags the text. What slipped through
@@ -1098,8 +1133,8 @@ def stamp_state(as_of: str | None, current: str) -> str:
 
 def stamp_states(root: str, view: Any, toks: Any) -> list[dict]:
     """Each prose file's stamp now: ``{file, subject, stamp, as_of,
-    current_as_of}``; a file that names no board, intro or next has subject
-    None and stamp ``none``."""
+    current_as_of}``; a file that names no board and no `PROSE_SUBJECTS` entry
+    has subject None and stamp ``none``."""
     boards = boards_of(view)
     known = set(subjects(boards))
     out: list[dict] = []
@@ -1151,18 +1186,68 @@ def seal(doc: Mapping[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 # the bake
 # --------------------------------------------------------------------------- #
-def representation(views: Iterable[Mapping[str, Any]]) -> dict:
+#: The view kinds the marketing page's viewer can switch between: the kinds
+#: page.js draws in its 3D viewer (a ``field`` is a model with values on it).
+VIEWER_KINDS = ("model3d", "field")
+
+
+def alternates(views: Iterable[Mapping[str, Any]], root: str = "",
+               first: str | None = None) -> list[dict]:
+    """The views the marketing page's viewer can show, ``[{view, title,
+    bytes}]``: every ``model3d`` and ``field`` view in the baked views' order,
+    ``first`` (the representation's) moved to the front, and a view whose
+    ``src`` holds the same bytes as one before it left out (first wins).
+    ``bytes`` is the size of the file ``src`` names under ``site/`` (the
+    loading bar's denominator when the response has none), or None.
+
+    What it closes before it could slip through: PETGasus bakes `print_part`
+    and `assembly`, two model3d views whose GLB files hold the same bytes, and
+    a "Views" control with two names for one model says there is a second
+    design to look at. *Rejected:* deduplicating by ``src``
+    (two paths can hold one file, and a viewgen that writes per-view copies
+    would read as two models); listing every view kind (an image or a chart is
+    no model to turn)."""
+    site_dir = os.path.join(root, "site") if root else ""
+    rows = [r for r in views or () if str(r.get("kind") or "") in VIEWER_KINDS]
+    if first is not None:
+        rows = ([r for r in rows if str(r.get("id") or "") == first]
+                + [r for r in rows if str(r.get("id") or "") != first])
+    out: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        vid = str(row.get("id") or "")
+        src = str(row.get("src") or "")
+        size: int | None = None
+        key = f"view:{vid}"
+        if site_dir and src and not src.startswith(("/", "\\")) and ":" not in src:
+            path = os.path.join(site_dir, *src.split("/"))
+            if os.path.isfile(path) and _inside(path, site_dir):
+                with open(path, "rb") as fh:
+                    key = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+                size = os.path.getsize(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"view": vid, "title": str(row.get("title") or ""), "bytes": size})
+    return out
+
+
+def representation(views: Iterable[Mapping[str, Any]], root: str = "") -> dict:
     """The outline's representation: the first ``model3d`` view in the page's
     order, else the first ``image`` or ``diagram``, else a notice saying what
-    view to add."""
+    view to add; with ``alternates`` (`alternates`, the two pages), the model
+    views the marketing page's viewer can switch between, this one first."""
     views = list(views or ())
     for kinds in (("model3d",), ("image", "diagram")):
         for row in views:
             if str(row.get("kind") or "") in kinds:
-                return {"view": str(row.get("id") or ""), "kind": str(row.get("kind")),
-                        "title": str(row.get("title") or ""), "notice": ""}
+                vid = str(row.get("id") or "")
+                return {"view": vid, "kind": str(row.get("kind")),
+                        "title": str(row.get("title") or ""), "notice": "",
+                        "alternates": alternates(views, root, first=vid)}
     return {"view": None, "kind": None, "title": "",
-            "notice": _site_words()["no_representation"]}
+            "notice": _site_words()["no_representation"],
+            "alternates": alternates(views, root)}
 
 
 def _board_token(members: Iterable[str], composed: Mapping[str, Any]) -> tuple[str, bool]:
@@ -1278,6 +1363,143 @@ def _unmeasured(members: Iterable[str], trace: Any, traced: bool) -> list[str]:
     return out
 
 
+def requirement_nodes(view: Any, lay: Layout, toks: Any,
+                      marks: Mapping[str, list[str]]) -> list[dict]:
+    """The map's requirement nodes, in the records' order (``order``; never
+    ``rank``, which is the drawing's): each requirement's statement, its token
+    from `graph.tokens`, its word, its marks (each mark a serving claim carries,
+    ``disagree`` too when the requirement's own status and evidence disagree)
+    and the claims that serve it. The one producer of a requirement row: the
+    map's node and the marketing page's card (`requirement_row`) are both this.
+    *Rejected:* a second loop in `bake_page` (two producers of one token, the
+    drift invariant 12 forbids)."""
+    nodes: list[dict] = []
+    for i, requirement in enumerate(getattr(view, "requirements", None) or ()):
+        nid = f"requirement:{requirement.id}"
+        serving = [line["claim"] for line in lay.lines if requirement.id in line["serves"]]
+        token = toks.requirements.get(requirement.id, "gap")
+        found = _group_marks(serving, marks)
+        if requirement.id in (toks.disagree.get("requirements") or ()) \
+                and "disagree" not in found:
+            found.insert(0, "disagree")
+        nodes.append({"id": nid, "kind": "requirement", "key": requirement.id,
+                      "lane": "requirements", "order": i,
+                      "rank": lay.requirement_rank.get(requirement.id, i),
+                      "title": requirement.statement, "token": token, "word": _word(token),
+                      "errored": token == "errored", "marks": found, "claims": serving})
+    return nodes
+
+
+def requirement_row(node: Mapping[str, Any]) -> dict:
+    """``page.json``'s requirement row: a map requirement node
+    (`requirement_nodes`) renamed for the page, ``{id, statement, token, word,
+    errored, marks, claims}`` — copied, never recomputed."""
+    return {"id": node["key"], "statement": node["title"], "token": node["token"],
+            "word": node["word"], "errored": node["errored"], "marks": list(node["marks"]),
+            "claims": list(node["claims"])}
+
+
+def _value_row(row: Mapping[str, Any]) -> dict | None:
+    """A parameter of ``state.json``'s ``params`` (`modelio.ParamView.to_dict`)
+    as the marketing page lists it: ``{name, value_text, rationale, lost:
+    [{value_text, reason}]}``. A value is text (``0.5 mm``), ``""`` for a
+    structure; a loser's value is text too, as written when it is text (the
+    bracket writes ``4.0 mm``), so a losing value never joins the number pool
+    and prose that quotes it is marked. What lost is the record's ``why``,
+    under ``reason`` (record text)."""
+    name = str(row.get("name") or "")
+    if not name:
+        return None
+    units = str(row.get("units") or "")
+
+    def text(value: Any) -> str:
+        if value is None or isinstance(value, (dict, list, tuple)):
+            return ""
+        if isinstance(value, str):
+            return value
+        return f"{_num(value)} {units}".strip()
+
+    lost = [{"value_text": text(item.get("value")), "reason": str(item.get("why") or "")}
+            for item in row.get("rejected") or () if isinstance(item, Mapping)]
+    return {"name": name, "value_text": text(row.get("value")),
+            "rationale": str(row.get("rationale") or ""), "lost": lost}
+
+
+def decision_rows(view: Any, composed: Mapping[str, Any], claims_out: Mapping[str, Any],
+                  params: Iterable[Mapping[str, Any]]) -> tuple[list[dict], str, list[dict]]:
+    """``(decisions, decisions_more, losers)`` for ``page.json`` (the two
+    pages): every decision record, newest first (``when``, ties by id), with
+    its claims' chips copied from the page's claim rows, the parameters it
+    changed, what lost (`claims.rejection_rows`, the one producer, matched on
+    ``(decision, index)``, in the site's words by `report.rejection_words(...,
+    register="site")`) and how many lost; the label of the decisions past
+    `DECISIONS_SHOWN`; and the parameters with a loser that no decision lists.
+
+    Newest first because a story reads the latest choice first; the order is
+    the records' dates, never a status. *Rejected:* oldest first (the first
+    choice of a long project is its least interesting); sorting by status (the
+    browser would read the order as a verdict, and invariant 14 keeps order
+    out of its hands)."""
+    said = _site_words()["rejection"]
+    rows = {(r.decision, r.index): r for r in claim_logic.rejection_rows(view, composed)}
+    by_name: dict[str, dict] = {}
+    for row in params or ():
+        shaped = _value_row(row) if isinstance(row, Mapping) else None
+        if shaped is not None and shaped["name"] not in by_name:
+            by_name[shaped["name"]] = shaped
+    decisions = sorted(getattr(view, "decisions", None) or (), key=lambda d: _natural(d.id))
+    decisions.sort(key=lambda d: str(getattr(d, "when", "") or ""), reverse=True)
+    out: list[dict] = []
+    attached: set[str] = set()
+    featured_n = 0
+    for decision in decisions:
+        changed_claims = list(getattr(decision, "claims_changed", None) or ())
+        changed_params = list(getattr(decision, "params_changed", None) or ())
+        featured = bool(changed_claims or changed_params)
+        shown = featured and featured_n < DECISIONS_SHOWN
+        featured_n += 1 if featured else 0
+        chips = []
+        for cid in changed_claims:
+            found = claims_out.get(cid)
+            if found is None:
+                continue
+            chips.append({"claim": cid, "token": found["token"], "word": found["word"],
+                          "errored": found["errored"], "marks": list(found["marks"])})
+        rejected = []
+        for i, item in enumerate(getattr(decision, "rejected", None) or ()):
+            row = rows.get((decision.id, i))
+            if row is None:
+                continue
+            type_word, returns_word = report_logic.rejection_words(row, view, register="site")
+            rejected.append({
+                "value": row.value, "reason": str(getattr(item, "why", "") or ""),
+                "type": row.type, "type_word": type_word,
+                "preference": row.preference.state if row.preference is not None else None,
+                "returns": row.returns.state, "returns_word": returns_word,
+                "returns_text": report_logic.condition_text(row.condition),
+                "input": row.input or None})
+        values = []
+        for name in changed_params:
+            if name in by_name:
+                values.append({**by_name[name],
+                               "lost": [dict(x) for x in by_name[name]["lost"]]})
+                attached.add(name)
+        n = len(rejected)
+        out.append({"id": decision.id, "title": str(getattr(decision, "title", "") or ""),
+                    "when": str(getattr(decision, "when", "") or ""),
+                    "summary": str(getattr(decision, "summary", "") or ""),
+                    "featured": featured, "shown": shown, "claims": chips,
+                    "params": changed_params, "rejected": rejected,
+                    "lost_label": ("" if n == 0 else said["lost_one"] if n == 1
+                                   else said["lost"].format(n=n)),
+                    "values": values})
+    more = sum(1 for d in out if not d["shown"])
+    more_label = ("" if more == 0 else said["more_one"] if more == 1
+                  else said["more"].format(n=more))
+    losers = [row for name, row in by_name.items() if row["lost"] and name not in attached]
+    return out, more_label, losers
+
+
 def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[str, Any], *,
              projection: Any, params: Iterable[Any] = (), registry: Any = None,
              payload: Mapping[str, Any] | None = None, name: str = "",
@@ -1305,20 +1527,7 @@ def bake_map(view: Any, lay: Layout, built: Any, toks: Any, composed: Mapping[st
     def units_of(name: str) -> str:
         return _units_of(name, config, derived, params, built, view_verdicts)
 
-    nodes: list[dict] = []
-    for i, requirement in enumerate(getattr(view, "requirements", None) or ()):
-        nid = f"requirement:{requirement.id}"
-        serving = [line["claim"] for line in lay.lines if requirement.id in line["serves"]]
-        token = toks.requirements.get(requirement.id, "gap")
-        found = _group_marks(serving, marks)
-        if requirement.id in (toks.disagree.get("requirements") or ()) \
-                and "disagree" not in found:
-            found.insert(0, "disagree")
-        nodes.append({"id": nid, "kind": "requirement", "key": requirement.id,
-                      "lane": "requirements", "order": i,
-                      "rank": lay.requirement_rank.get(requirement.id, i),
-                      "title": requirement.statement, "token": token, "word": _word(token),
-                      "errored": token == "errored", "marks": found, "claims": serving})
+    nodes: list[dict] = requirement_nodes(view, lay, toks, marks)
     traced_now = lay.traced and getattr(trace, "trace", None) is not None
     unmeasured_of = {f"zone:{z.id}": _unmeasured(z.members, trace, traced_now)
                      for z in lay.zones}
@@ -1767,6 +1976,9 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
     verdict = {"token": toks.readiness, "ready": bool(unresolved.ready),
                "sentence": report_logic._verdict_sentence(view, composed, registry, stale=False,
                                                           markdown=False, register="site"),
+               # The marketing page's large line: the sentence's own first
+               # sentence, from its builder (`report.site_headline`).
+               "headline": report_logic.site_headline(view, composed),
                "limits": report_logic.limits_line(view, register="site"),
                "tally": report_logic.count_bits(composed), "stale": stale,
                "notice": said["notices"]["invalidated"] if stale else ""}
@@ -1820,18 +2032,30 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                for found in claim_logic.rebuild(view)]
 
     summary = str(getattr(meta, "summary", "") or "")
+    # The two pages: the marketing page's rows, each from the producer the
+    # engineering page already reads (the map's requirement node, the claim
+    # rows above, `claims.rejection_rows`), baked here so `status_problems`
+    # and every test that bakes in process see them.
+    decisions, decisions_more, losers = decision_rows(view, composed, claims_out,
+                                                      payload.get("params") or ())
     return {
         "schema": SCHEMA, "outline": OUTLINE, "generated": said["generated"],
         "meta": {"name": str(getattr(meta, "name", "") or ""), "summary": summary,
                  "revision": str(getattr(meta, "revision", "") or ""),
                  "records_digest": records_digest, "resolution_digest": resolution_digest,
                  "content_digest": content_digest(root)},
-        "representation": representation(payload.get("views") or ()),
+        "representation": representation(payload.get("views") or (), root),
         "verdict": verdict,
         "intro": None,
+        "story": None,
         "description": {"summary": summary, "notice": said["notices"]["no_intro"]},
         "sections": sections,
         "claims": claims_out,
+        "requirements": [requirement_row(node)
+                         for node in requirement_nodes(view, lay, toks, marks)],
+        "decisions": decisions,
+        "decisions_more": decisions_more,
+        "losers": losers,
         "next": {"milestones": groups, "project": project, "open": open_steps,
                  "rebuild": rebuild, "prose": None},
         "words": words_block(),
@@ -1856,8 +2080,8 @@ def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> 
         rel = f"content/{subject}.md"
         if subject not in known:
             problem = (f"site/content/{subject}.md names no board: it is not on the page "
-                       f"(boards: {', '.join(b.id for b in lay.boards) or 'none'}; and intro, "
-                       f"next)")
+                       f"(boards: {', '.join(b.id for b in lay.boards) or 'none'}; and "
+                       f"{', '.join(PROSE_SUBJECTS)})")
             page_doc["problems"].append(problem)
             rows.append({"file": f"site/{rel}", "subject": None, "stamp": "none",
                          "unmatched": [], "register": [], "problems": [problem]})
@@ -1885,6 +2109,11 @@ def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> 
             page_doc["description"]["notice"] = ""
         elif subject == "next":
             page_doc["next"]["prose"] = obj
+        elif subject == "story":
+            # The marketing page's story (the two pages). Its own branch: the
+            # board fallback below would look a board named `story` up and
+            # raise, since `story` is a reserved group id.
+            page_doc["story"] = obj
         else:
             sections[subject]["prose"] = obj
         rows.append({"file": f"site/{rel}", "subject": subject, "stamp": state,
@@ -1920,12 +2149,18 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     a hand-edited page with it (invariant 14).
 
     With ``amber`` (architecture phase 3b: the live `derivation.amber_states`)
-    an ``amber`` mark must sit exactly on the claims whose amber flips now,
-    and every baked amber state (a claim node, a line, a page claim) must be
+    an ``amber`` mark must sit exactly on the claims whose amber flips now
+    (and on a board, a requirement, a section, a decision chip or a step
+    exactly when one of its claims flips), and every baked amber state (a claim node, a line, a page claim) must be
     the live one; with ``feeds`` (the live `layout`'s) each baked feed's
     ``estimate`` must be the live one — amber on a pass the trace does not
     flip, or a feed drawn as resting on a confirmed assumption, is the page
     saying more than the resolution.
+
+    From the two pages, the marketing page's rows too (`_two_pages_problems`):
+    a requirement row against its map node and `graph.tokens`, a requirement
+    node's marks, the headline, a decision's claim chips and each rejection's
+    tokens and site words against `claims.rejection_rows`.
 
     What slipped through before the words, the prose and the values were held
     here (review of phase 5): a milestone baked ``ready`` in green beside
@@ -1951,6 +2186,13 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
                 return
             check(f"{where} word", row.get("word"), expected)
 
+    req_disagree = set((getattr(toks, "disagree", None) or {}).get("requirements") or ())
+
+    def requirement_disagree(key: str, row: Mapping[str, Any]) -> bool:
+        # `requirement_nodes`' rule: its own disagreement, or a serving claim's.
+        return key in req_disagree or any(str(c) in disagree for c in row.get("claims") or ())
+
+    map_requirements: dict[str, Mapping[str, Any]] = {}
     for node in (map_doc or {}).get("nodes") or ():
         kind = node.get("kind")
         key = str(node.get("key"))
@@ -1959,8 +2201,13 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
             check(f"claim:{key} disagree", "disagree" in (node.get("marks") or ()),
                   key in disagree)
         elif kind == "requirement":
+            map_requirements[key] = node
             check(f"requirement:{key}", node.get("token"),
                   (getattr(toks, "requirements", None) or {}).get(key))
+            # The two pages: a requirement's marks are held as a claim's are
+            # (they were not: a requirement node could drop its disagree mark).
+            check(f"requirement:{key} disagree", "disagree" in (node.get("marks") or ()),
+                  requirement_disagree(key, node))
         elif kind == "board":
             token, _errored = _board_token(node.get("claims") or (), composed)
             check(f"board:{key}", node.get("token"), token)
@@ -2020,6 +2267,9 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     verdict = page_doc.get("verdict") or {}
     check("verdict ready", verdict.get("ready"), bool(unresolved.ready))
     check("verdict token", verdict.get("token"), getattr(toks, "readiness", None))
+    _two_pages_problems(problems, page_doc, view, composed, toks, map_requirements,
+                        check=check, word_of=word_of, mark_of=mark_of,
+                        requirement_disagree=requirement_disagree)
     nxt = page_doc.get("next") or {}
 
     def ready_group(where: str, group: Mapping[str, Any], ready: bool, token: Any) -> None:
@@ -2059,6 +2309,98 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     return problems
 
 
+def _two_pages_problems(problems: list[str], page_doc: Mapping[str, Any], view: Any,
+                        composed: Mapping[str, Any], toks: Any,
+                        map_requirements: Mapping[str, Mapping[str, Any]], *,
+                        check: Callable[[str, Any, Any], None],
+                        word_of: Callable[[str, Mapping[str, Any]], None],
+                        mark_of: Callable[[str, Mapping[str, Any], bool], None],
+                        requirement_disagree: Callable[[str, Mapping[str, Any]], bool]
+                        ) -> None:
+    """Invariant 14 on the marketing page's rows (the two pages), appended to
+    ``problems``: each requirement row's token, word and marks against
+    `graph.tokens` and against its map node (the one producer); the headline
+    against `report.site_headline` and as the start of the sentence, always
+    (a page without one is named); the tally against `report.count_bits` and
+    the limits line against `report.limits_line(register="site")`; each
+    decision's claim chips against the claims' tokens; each rejection's type,
+    preference and return tokens and its site words against
+    `claims.rejection_rows` and `report.rejection_words(register="site")`,
+    computed here, so the build and every reader of a baked page (`site
+    status`, `status`, `doctor`) hold the same rows. A row the page leaves
+    out says less, never more, so only what is baked is held; a row for no
+    record is named. What it closes before it could slip through: a resealed
+    page.json whose card reads "Preferred against, recorded by Robin Okafor"
+    before Robin ran `nopekit prefer` (invariant 13), or a requirement chip
+    in green over a failing claim."""
+    want = dict(getattr(toks, "claims", None) or {})
+    disagree = set((getattr(toks, "disagree", None) or {}).get("claims") or ())
+    required = dict(getattr(toks, "requirements", None) or {})
+    for row in page_doc.get("requirements") or ():
+        if not isinstance(row, Mapping):
+            continue
+        key = str(row.get("id"))
+        where = f"page requirement {key}"
+        check(where, row.get("token"), required.get(key))
+        word_of(where, row)
+        mark_of(where, row, requirement_disagree(key, row))
+        node = map_requirements.get(key)
+        if node is not None:
+            for mine, theirs in (("token", "token"), ("word", "word"), ("errored", "errored"),
+                                 ("marks", "marks"), ("claims", "claims"),
+                                 ("statement", "title")):
+                check(f"{where} {mine} (its map node)", row.get(mine), node.get(theirs))
+    # The verdict's lines above the fold on the marketing page, each held
+    # against the producer `bake_page` calls, whether or not the key is baked.
+    # What slipped through (review of SPEC 40): the headline was held only
+    # when present, so a resealed page.json with no headline and a sentence
+    # rewritten to "v0.1 is ready, as last evaluated." read current in `site
+    # status`, `status` and `doctor`, and marketing.js drew that sentence's
+    # lead as the hero's large line over a failing claim; a tally cut to one
+    # "7 checked" chip and an empty limits line (the page's only "Checked
+    # does not mean true") read current too.
+    verdict = page_doc.get("verdict") or {}
+    headline = verdict.get("headline")
+    check("verdict headline", headline, report_logic.site_headline(view, composed))
+    if not isinstance(headline, str) or not headline \
+            or not str(verdict.get("sentence") or "").startswith(headline):
+        problems.append("verdict headline is not the start of the verdict sentence")
+    check("verdict tally", verdict.get("tally"), report_logic.count_bits(composed))
+    check("verdict limits", verdict.get("limits"),
+          report_logic.limits_line(view, register="site"))
+    baked = page_doc.get("decisions") or ()
+    if not baked:
+        return
+    records = {d.id: d for d in getattr(view, "decisions", None) or ()}
+    rows = {(r.decision, r.index): r for r in claim_logic.rejection_rows(view, composed)}
+    for decision in baked:
+        if not isinstance(decision, Mapping):
+            continue
+        did = str(decision.get("id"))
+        if did not in records:
+            problems.append(f"decision {did} is on the page and in no record")
+            continue
+        for chip in decision.get("claims") or ():
+            cid = str(chip.get("claim"))
+            where = f"decision {did} claim {cid}"
+            check(where, chip.get("token"), want.get(cid))
+            word_of(where, chip)
+            mark_of(where, chip, cid in disagree)
+        for i, item in enumerate(decision.get("rejected") or ()):
+            where = f"decision {did} rejection {i}"
+            row = rows.get((did, i))
+            if row is None:
+                problems.append(f"{where} is on the page and in no record")
+                continue
+            type_word, returns_word = report_logic.rejection_words(row, view, register="site")
+            check(f"{where} type", item.get("type"), row.type)
+            check(f"{where} type word", item.get("type_word"), type_word)
+            check(f"{where} preference", item.get("preference"),
+                  row.preference.state if row.preference is not None else None)
+            check(f"{where} return", item.get("returns"), row.returns.state)
+            check(f"{where} return word", item.get("returns_word"), returns_word)
+
+
 def _amber_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, Any] | None,
                     amber: Mapping[str, Any] | None,
                     feeds: Iterable[Mapping[str, Any]] | None) -> list[str]:
@@ -2076,13 +2418,51 @@ def _amber_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
                 if baked != live.get(cid):
                     out.append(f"{where} amber reads {baked}, amber now is {live.get(cid)}")
 
+        def group(where: str, members: Iterable[Any], row: Mapping[str, Any]) -> None:
+            # `_group_marks`' rule: a board, a requirement or a chip carries
+            # ``amber`` exactly when one of its claims flips now.
+            if "marks" not in row:
+                return
+            said = "amber" in (row.get("marks") or ())
+            flips = any(live.get(str(c)) == "flips" for c in members or ())
+            if said != flips:
+                out.append(f"{where} amber mark reads {said}, amber now "
+                           f"{'flips' if flips else 'flips on none of its claims'}")
+
         for node in (map_doc or {}).get("nodes") or ():
             if node.get("kind") == "claim":
                 held(f"claim:{node.get('key')}", str(node.get("key")), node)
+            elif node.get("kind") in ("requirement", "board"):
+                group(f"{node.get('kind')}:{node.get('key')}", node.get("claims") or (), node)
         for line in (map_doc or {}).get("lines") or ():
             held(f"line {line.get('claim')}", str(line.get("claim")), line)
         for cid, row in ((page_doc or {}).get("claims") or {}).items():
             held(f"page claim {cid}", str(cid), row)
+        # The marketing page's rows (the two pages). What slipped through
+        # (review of SPEC 40): only claim nodes, lines and page claims were
+        # held, so a requirement card or a decision chip could drop or add
+        # ``amber`` and a resealed page read current, the 0.8%-margin pass on
+        # unconfirmed assumptions as green as one at 80% (phase 3b's slip).
+        for row in (page_doc or {}).get("requirements") or ():
+            if isinstance(row, Mapping):
+                group(f"page requirement {row.get('id')}", row.get("claims") or (), row)
+        for section in (page_doc or {}).get("sections") or ():
+            if isinstance(section, Mapping):
+                group(f"section {section.get('board')}", section.get("claims") or (), section)
+        for decision in (page_doc or {}).get("decisions") or ():
+            if not isinstance(decision, Mapping):
+                continue
+            for chip in decision.get("claims") or ():
+                if isinstance(chip, Mapping):
+                    group(f"decision {decision.get('id')} claim {chip.get('claim')}",
+                          [chip.get("claim")], chip)
+        nxt = (page_doc or {}).get("next") or {}
+        groups = list(nxt.get("milestones") or ()) + ([nxt["project"]]
+                                                      if nxt.get("project") else [])
+        steps = [s for g in groups for s in g.get("steps") or ()] + list(nxt.get("open") or ())
+        for step in steps:
+            if isinstance(step, Mapping):
+                group(f"step {step.get('claim')}", [step.get("claim")], step)
     if feeds is not None and map_doc is not None:
         want = {(f["zone"], f["to"]): list(f.get("estimate") or ()) for f in feeds}
         for feed in map_doc.get("feeds") or ():
@@ -2108,6 +2488,8 @@ def _prose_pieces(page_doc: Mapping[str, Any]) -> list[tuple[str, Mapping[str, A
         pieces.append(("intro", page_doc["intro"]))
     if (page_doc.get("next") or {}).get("prose"):
         pieces.append(("next", page_doc["next"]["prose"]))
+    if page_doc.get("story"):
+        pieces.append(("story", page_doc["story"]))
     return pieces
 
 
@@ -2161,4 +2543,7 @@ __all__ = [
     "subjects", "stamp_state",
     "stamp_states", "content_digest", "seal", "representation", "bake_map", "bake_page",
     "bake_prose", "status_problems",
+    # the two pages: the marketing page's rows
+    "DECISIONS_SHOWN", "VIEWER_KINDS", "alternates", "requirement_nodes", "requirement_row",
+    "decision_rows",
 ]

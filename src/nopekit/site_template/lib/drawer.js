@@ -30,7 +30,8 @@ export function claimBlocks(row, page, { onClaim } = {}) {
   const mech = row.mechanism || {};
   return [
     el("div", { class: "cb-status" },
-      tokenChip(row.token, row.word, { errored: row.errored, marks: row.marks, notices }),
+      tokenChip(row.token, row.word, { errored: row.errored, marks: row.marks, notices,
+        trace: words.trace }),
       row.kind_word ? el("span", { class: "cb-kind", text: row.kind_word }) : null,
       row.critical === false ? el("span", { class: "cb-kind", text: "Not required" }) : null),
     row.cause_text ? el("p", { class: "cb-cause", text: row.cause_text }) : null,
@@ -203,7 +204,7 @@ export function createDrawer(page, map, { onChange } = {}) {
       return el("li", {}, el("button", { class: "dr-claim", type: "button",
         onclick: () => open("claim", key) },
         tokenChip(node.token, node.word, { errored: node.errored, small: true, marks: node.marks,
-          notices: words.notices }),
+          notices: words.notices, trace: words.trace }),
         el("b", { class: "mono", text: ` ${key} ` }),
         el("span", { text: node.title })));
     }));
@@ -251,7 +252,7 @@ export function createDrawer(page, map, { onChange } = {}) {
     if (node.line) head.push(el("p", { class: "dr-line", text: node.line }));
     if (node.token) head.push(el("div", { class: "cb-status" },
       tokenChip(node.token, node.word, { errored: node.errored, marks: node.marks,
-        notices: words.notices })));
+        notices: words.notices, trace: words.trace, group: kind !== "claim" })));
     if ((node.marks || []).includes("disagree") && (words.notices || {}).disagree) {
       head.push(el("p", { class: "nk-notice tone-bad", text: words.notices.disagree }));
     }

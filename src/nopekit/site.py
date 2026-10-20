@@ -152,6 +152,9 @@ __all__ = [
     "scaffolded", "outline_of", "ensure_site_ignore", "prose_pool", "baked_pool", "ages",
     "write_build_json",
     "watch_snapshot", "refresh_renderer",
+    # the two pages: the engineering and marketing pages
+    "PAGES", "VIEWS_MARKER", "VIEWS_MARKER_RE", "OLD_LAYOUT_WARNING", "outline_file",
+    "outline_problem", "old_layout", "page_urls", "pages_line",
 ]
 
 
@@ -159,7 +162,7 @@ __all__ = [
 # layout
 # --------------------------------------------------------------------------- #
 #: The site lives at ``<root>/site/``. Not hidden and not under ``.nopekit/``:
-#: users edit ``index.html``, and a directory people are invited to hack on does
+#: users edit the pages (`SHELLS`), and a directory people are invited to hack on does
 #: not belong in the tool's private state.
 SITE_DIR = "site"
 
@@ -198,17 +201,44 @@ CONTENT_DIR = "content"
 #: link it (`page.evidence_plan`).
 EVIDENCE_DIR = "assets/evidence"
 
-#: The shells: the project's own files, written by `site init` (and
-#: `technical.html` by `site build` when absent), never refreshed. PETGasus ships
-#: its own `technical.html`, a renamed older shell with its own title: a refresh
-#: would erase it. *Rejected:* refreshing `technical.html` as a renderer file.
-SHELLS = ("index.html", "technical.html")
+#: The shells: the project's own files, written by `site init` (and every one
+#: but the root `index.html` by `site build` when absent), never refreshed.
+#: PETGasus ships its own `technical.html`, a renamed older shell with its own
+#: title: a refresh would erase it. *Rejected:* refreshing `technical.html` as a
+#: renderer file.
+#:
+#: The two pages: the root `index.html` is a redirect to `engineering/`, the
+#: engineering page (the outline, SPEC 28) is `engineering/index.html` and the
+#: marketing page `marketing/index.html`, each a directory's index so the
+#: addresses `/engineering` and `/marketing` work on every static host. A
+#: project whose root page predates them keeps it: `build` writes the two pages
+#: beside it and never writes the root (`old_layout`). What slipped through the
+#: plan: the build's shell loop had no `ensure_dir`, so a nested shell would
+#: have raised on every existing project; and a page left out of this tuple is
+#: a renderer file, overwritten on every build. *Rejected:* flat
+#: `engineering.html` / `marketing.html` (the standard library's server, and
+#: `site serve`, answer `/engineering` with a 404); the engineering page at `/`
+#: with `/engineering` a redirect to it (the address the person asked for would
+#: be an alias); a router in one page (a reload at `/marketing` 404s on a static
+#: host with no rewrite rules).
+SHELLS = ("index.html", "engineering/index.html", "marketing/index.html", "technical.html")
+
+#: The two pages, ``(name, path under site/)``, in the menu's order, the
+#: engineering page first: the default the root redirects to.
+PAGES: tuple[tuple[str, str], ...] = (("engineering", "engineering/"),
+                                      ("marketing", "marketing/"))
 
 #: The outline marker the new shell carries (SPEC 28): `site build` warns when
-#: `index.html` lacks it, or carries an older outline. A meta tag, so a page
-#: written by hand can carry it too.
+#: the engineering page (`outline_file`) lacks it, or carries an older outline.
+#: A meta tag, so a page written by hand can carry it too.
 OUTLINE_MARKER = '<meta name="nopekit-outline" content="1">'
 OUTLINE_MARKER_RE = r'<meta\s+name=["\']nopekit-outline["\']\s+content=["\'](\d+)["\']'
+
+#: The marker the root redirect carries (the two pages): a root `index.html`
+#: without it is a front page from before them, and the build, `site status` and
+#: `doctor` say so (`old_layout`). A meta tag for the outline marker's reason.
+VIEWS_MARKER = '<meta name="nopekit-views" content="1">'
+VIEWS_MARKER_RE = r'<meta\s+name=["\']nopekit-views["\']\s+content=["\'](\d+)["\']'
 
 #: A verdict this old is *aged* on the page (`build.json`'s ``aged``), and an
 #: oldest result past it beside one four times newer raises the mixed-age
@@ -1505,10 +1535,12 @@ def scaffold(root: str, *, force: bool = False) -> list:
     renderer, and a scaffold that silently rewrote it would be the same class of
     mistake as hand-editing a generated file — in the opposite direction.
 
-    Everything else in the template (``app.js``, ``style.css``, and anything a
-    later template adds) IS refreshed. Those are the renderer: they are ours,
+    The other shells (`SHELLS`: the engineering and marketing pages, from the
+    two pages, and ``technical.html``) are written when absent and kept when
+    present. Everything else in the template (``app.js``, ``style.css``, and
+    anything a later template adds) IS refreshed. Those are the renderer: they are ours,
     they get fixes, and a project that could never receive one would be stuck
-    with the bugs of the day it was created. ``force`` replaces the shell too.
+    with the bugs of the day it was created. ``force`` replaces every shell, the four of them.
 
     ``data/`` and ``assets/`` are created empty so a freshly scaffolded site
     serves without a build, and ``.gitignore`` is written only when absent —
@@ -1518,12 +1550,18 @@ def scaffold(root: str, *, force: bool = False) -> list:
     site = os.path.join(root, SITE_DIR)
     index = os.path.join(site, "index.html")
     if os.path.exists(index) and not force:
+        # The refusal names every shell `force` replaces, and leads with `site
+        # build`. What slipped through (review of SPEC 40): it still said
+        # "--force to replace it" after `force` came to replace the four
+        # shells, so a person who wanted a renderer fix read it as losing only
+        # the root redirect and lost their engineering and marketing pages.
+        shells = ", ".join(posixpath.join(SITE_DIR, s) for s in SHELLS)
         raise NopekitError(
-            f"{posixpath.join(SITE_DIR, 'index.html')} already exists and it is "
-            f"yours — the shell is meant to be edited and is never regenerated. "
-            f"Re-run with --force to replace it (your edits are not recoverable "
-            f"afterwards), or delete the file first. `nopekit site build` "
-            f"refreshes the data without touching it."
+            f"{posixpath.join(SITE_DIR, 'index.html')} already exists: this project "
+            f"has a site, and its shells are yours. `nopekit site build` refreshes "
+            f"the renderer and the data and writes a missing page, without touching "
+            f"a shell. `--force` replaces the four shells ({shells}); your edits to "
+            f"them are not recoverable afterwards."
         )
     if not os.path.isdir(TEMPLATE_DIR):             # pragma: no cover - packaging
         raise NopekitError(
@@ -1534,9 +1572,12 @@ def scaffold(root: str, *, force: bool = False) -> list:
 
     written: list[str] = []
     for source, relative in _template_files():
-        target = os.path.join(site, relative)
-        # `technical.html` is a shell too (architecture phase 5): written when
-        # absent, or with `force`; a project's own copy is never replaced.
+        target = os.path.join(site, *relative.split("/"))
+        # `technical.html` is a shell too (architecture phase 5), and from the
+        # two pages `engineering/index.html` and `marketing/index.html`: each
+        # written when absent, or with `force`; a project's own copy is never
+        # replaced. The root `index.html` (the redirect) is written here always:
+        # the refusal above has already kept a project's own.
         if relative in SHELLS and relative != "index.html" and os.path.exists(target) \
                 and not force:
             continue
@@ -1561,21 +1602,100 @@ def scaffolded(root: str) -> bool:
     """Whether ``root`` has a site: ``site/index.html`` is a file. The one
     predicate `round`, `status`, `doctor`, `site build` and `site serve` ask
     (architecture phase 5): a project that tracks only ``site/content/`` (the
-    bracket) has text for a page and no page, so it has no site."""
+    bracket) has text for a page and no page, so it has no site. From the two
+    pages the root is a redirect `site init` always writes, and a project from
+    before them has its own front page there, so the root alone still decides.
+    *Rejected:* the root or ``engineering/index.html`` (invariant 8 says
+    `round` writes what `site build` writes when ``site/index.html`` exists:
+    widening the predicate would widen `round`'s writes)."""
     return os.path.isfile(os.path.join(root, SITE_DIR, "index.html"))
 
 
-def outline_of(root: str) -> int | None:
-    """The outline ``site/index.html`` carries (`OUTLINE_MARKER`), or None when
-    it carries none (a shell older than the outline, or the project's own)."""
+def outline_file(root: str) -> str:
+    """The page that carries the outline, relative to ``root``: the engineering
+    page (``site/engineering/index.html``) when it exists, else the root
+    ``site/index.html`` (a project from before the two pages, not yet built
+    again). What every outline reader reads and names."""
+    engineering = posixpath.join(SITE_DIR, "engineering", "index.html")
+    if os.path.isfile(os.path.join(root, *engineering.split("/"))):
+        return engineering
+    return posixpath.join(SITE_DIR, "index.html")
+
+
+def _marker(path: str, pattern: str) -> int | None:
     import re
     try:
-        with open(os.path.join(root, SITE_DIR, "index.html"), "r", encoding="utf-8",
-                  errors="replace") as fh:
-            found = re.search(OUTLINE_MARKER_RE, fh.read())
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            found = re.search(pattern, fh.read())
     except OSError:
         return None
     return int(found.group(1)) if found else None
+
+
+def outline_of(root: str) -> int | None:
+    """The outline the engineering page carries (`OUTLINE_MARKER`, read from
+    `outline_file`), or None when it carries none (a shell older than the
+    outline, or the project's own)."""
+    return _marker(os.path.join(root, *outline_file(root).split("/")), OUTLINE_MARKER_RE)
+
+
+def outline_problem(root: str) -> str:
+    """The warning for an engineering page older than the outline, or ``""``:
+    one sentence for `site build`, `site status` and `doctor`, naming the file
+    it read (`outline_file`). The way out writes only that page: delete it and
+    build, which writes an absent shell; `site init --force` would replace all
+    four shells, the person's `technical.html` too."""
+    marker = outline_of(root)
+    if marker is not None and marker >= page_logic.OUTLINE:
+        return ""
+    shown = outline_file(root)
+    if shown == posixpath.join(SITE_DIR, "index.html"):
+        how = "run `nopekit site build`, which writes engineering/ with the outline"
+    else:
+        how = f"keep a copy of {shown}, delete it, then run `nopekit site build`"
+    return (f"{shown} predates the page outline (no nopekit-outline marker): "
+            f"data/{PAGE_NAME} and data/{MAP_NAME} are written, and no page shows them. "
+            f"To show them, {how}.")
+
+
+def old_layout(root: str) -> bool:
+    """Whether the root ``site/index.html`` is a front page from before the two
+    pages: it exists and does not carry `VIEWS_MARKER`. Its address then opens
+    that page, not the engineering page; nothing here replaces it."""
+    path = os.path.join(root, SITE_DIR, "index.html")
+    return os.path.isfile(path) and _marker(path, VIEWS_MARKER_RE) is None
+
+
+#: The old-layout warning, one sentence set for `site build`, `site status` and
+#: `doctor`. It says to move the page aside and run `site init`, never `--force`:
+#: `init` without it writes the absent root and keeps every shell that exists,
+#: where `--force` replaces the engineering, marketing and technical pages too
+#: (the critics' review of the plan: the first wording destroyed the work it
+#: was warning about). It says what `site build` does, never what it did:
+#: `site status` and `doctor` print it before any build too. What slipped
+#: through (review of SPEC 40): "The site build wrote engineering/ and
+#: marketing/ beside it", printed by both on a project that had just upgraded,
+#: where neither directory existed.
+OLD_LAYOUT_WARNING = (f"{SITE_DIR}/index.html is a front page from before the engineering and "
+                      f"marketing pages. `nopekit site build` writes engineering/ and "
+                      f"marketing/ beside it, when absent. To make the address / open the engineering page, move "
+                      f"{SITE_DIR}/index.html aside, then run nopekit site init.")
+
+
+def page_urls(url: str) -> dict:
+    """``{name: address}`` of the two pages under a served root ``url`` (which
+    ends in ``/``): what `site serve` prints after its ready line and puts in
+    its JSON."""
+    base = url if url.endswith("/") else url + "/"
+    return {name: base + path for name, path in PAGES}
+
+
+def pages_line(url: str) -> str:
+    """`site serve`'s line after the ready line: the two pages' addresses. It
+    never matches `SERVE_READY_RE` (the editor's launch entry opens the first
+    address that matches), so the ready line stays the one the editor reads."""
+    found = page_urls(url)
+    return "pages: " + " and ".join(f"{found[name]} ({name})" for name, _path in PAGES)
 
 
 def ensure_site_ignore(root: str) -> bool:
@@ -1672,9 +1792,12 @@ def baked_pool(root: str, map_doc: Mapping[str, Any], page_doc: Mapping[str, Any
     bare = json.loads(json.dumps(page_doc))
     for section in bare.get("sections") or ():
         section["prose"] = None
-    bare["intro"] = None
-    if isinstance(bare.get("next"), dict):
-        bare["next"]["prose"] = None
+    for subject in page_logic.PROSE_SUBJECTS:
+        if subject == "next":
+            if isinstance(bare.get("next"), dict):
+                bare["next"]["prose"] = None
+        else:
+            bare[subject] = None
     assets: list[str] = []
     for directory, _dirs, names in os.walk(os.path.join(site, ASSETS_DIR)):
         for name in sorted(names):
@@ -1787,7 +1910,7 @@ def watch_snapshot(root: str) -> dict:
 
 def refresh_renderer(root: str) -> list:
     """Bring every renderer file under ``<root>/site/`` up to the installed
-    template — everything but ``index.html``, the shell that is yours — and
+    template — everything but the `SHELLS`, which are yours — and
     return the site paths it rewrote (``[]`` when each already matched).
 
     ``scaffold``'s docstring always said the renderer "IS refreshed"; nothing
@@ -1913,11 +2036,20 @@ def build(
     for directory in (data_dir, views_dir, assets_dir):
         ensure_dir(directory)
     refreshed = refresh_renderer(root)
+    pages_written: list[str] = []
     for source, relative in _template_files():
-        if relative in SHELLS and relative != "index.html" \
-                and not os.path.exists(os.path.join(site, relative)):
-            shutil.copyfile(source, os.path.join(site, relative))
-            refreshed.append(posixpath.join(SITE_DIR, relative))
+        target = os.path.join(site, *relative.split("/"))
+        # Every absent shell but the root: an existing project gains the two
+        # pages here (`site init` refuses while its root page exists), and its
+        # root page stays its own. A shell written here is listed apart from
+        # the renderer (``pages``). What slipped through (review of SPEC 40):
+        # it was appended to ``refreshed``, so the build said it "refreshed
+        # the renderer" with a page the project never had, written new, among
+        # the renderer's files, and a person read their own shell as replaced.
+        if relative in SHELLS and relative != "index.html" and not os.path.exists(target):
+            ensure_dir(os.path.dirname(target))
+            shutil.copyfile(source, target)
+            pages_written.append(posixpath.join(SITE_DIR, relative))
     ignore_written = ensure_site_ignore(root)
 
     warnings: list[str] = []
@@ -2120,12 +2252,28 @@ def build(
                         f"{problem['problem']}")
 
     marker = outline_of(root)
-    if marker is None or marker < page_logic.OUTLINE:
-        warnings.append(
-            f"{SITE_DIR}/index.html predates the page outline (no nopekit-outline marker): "
-            f"data/{PAGE_NAME} and data/{MAP_NAME} are written, and no page shows them. Keep "
-            f"a copy of your index.html, then run `nopekit site init --force`; "
-            f"technical.html keeps today's panels.")
+    older = outline_problem(root)
+    if older:
+        warnings.append(older)
+    if old_layout(root):
+        warnings.append(OLD_LAYOUT_WARNING)
+    # What the build says that is no fault (``notices``): printed, never
+    # counted as a warning by `round` or `status`.
+    notices: list[str] = []
+    # The marketing page's story (the two pages): a warning, never a refusal,
+    # because the page omits the section and still says nothing false. No test
+    # holds a build of a project without story.md to zero warnings. It says
+    # "has no story" only when there is neither story.md nor intro.md: with
+    # intro.md the page shows it as the story (the addendum's rule: story,
+    # else intro, else none), and the build says that instead. What slipped
+    # through (review of SPEC 40): "the marketing page has no story" on every
+    # build and every round of a project with intro.md, whose page had one.
+    if page_doc.get("story") is None and page_doc.get("intro") is None:
+        warnings.append(f"{SITE_DIR}/{CONTENT_DIR}/story.md is missing: the marketing page "
+                        f"has no story")
+    elif page_doc.get("story") is None:
+        notices.append(f"{SITE_DIR}/{CONTENT_DIR}/story.md is missing: the marketing page "
+                         f"shows intro.md as its story until story.md is written")
 
     verdict_ages = ages(resolution, now)
     build_json = write_build_json(root, now=now, id=_baked_id(site), ok=True, live=live,
@@ -2146,11 +2294,13 @@ def build(
                    "pack": v.get("pack", ""), "data_url": v.get("data_url", "")}
                   for v in payload["views"]],
         "viewgens": notes,
-        "wrote": sorted(set(written + refreshed
+        "wrote": sorted(set(written + refreshed + pages_written
                             + ([posixpath.join(SITE_DIR, ".gitignore")] if ignore_written
                                else [])
                             + [posixpath.join(SITE_DIR, p) for p in ctx.written])),
         "refreshed": refreshed,
+        "pages": pages_written,
+        "notices": notices,
         "removed": sorted(removed),
         "locator_problems": problems,
         "counts": {
@@ -3038,8 +3188,9 @@ def vendor_urls() -> dict:
     imported by the page, it is imported by the loader, and a vendor step that
     copies only what the page names leaves a dangling dependency.
 
-    The import map in ``index.html`` is what chooses between these files and the
-    CDN; this function only says what to fetch and where to put it. The mapping
+    The import map in each page (``engineering/index.html``,
+    ``marketing/index.html``, ``technical.html``) is what chooses between these
+    files and the CDN; this function only says what to fetch and where to put it. The mapping
     the template declares is::
 
         "three"      -> vendor/three.module.js       (or the CDN build)
@@ -3057,4 +3208,11 @@ def vendor_urls() -> dict:
             f"{_THREE_BASE}/examples/jsm/controls/OrbitControls.js",
         posixpath.join(VENDOR_DIR, "jsm/utils/BufferGeometryUtils.js"):
             f"{_THREE_BASE}/examples/jsm/utils/BufferGeometryUtils.js",
+        # The two pages: the viewer decodes a GLB written with
+        # EXT_meshopt_compression (a large model, compressed). The decoder
+        # imports nothing, so it sits where the addon path names it, and a
+        # vendored site loads such a model offline too. *Rejected:* the CDN
+        # copy alone (the one situation vendoring exists for would 404 on it).
+        posixpath.join(VENDOR_DIR, "jsm/libs/meshopt_decoder.module.js"):
+            f"{_THREE_BASE}/examples/jsm/libs/meshopt_decoder.module.js",
     }

@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
   The technical record: every claim, every verdict with its locators, the
-  parameters with what lost, the evidence, the gaps and the decisions. A shell,
-  like index.html: `nopekit site init` writes it once, `nopekit site build`
+  parameters with what lost, the evidence, the gaps and the decisions. It stays
+  at the site's root, beside the redirect in index.html; its back link goes to
+  the engineering page. A shell, like engineering/index.html: `nopekit site init` writes it once, `nopekit site build`
   writes it only when it is absent, and neither replaces it after that. Edit it
   freely. app.js and the files in lib/ are the renderer and `site build`
   refreshes them; keep your edits here, or rename what you fork.
@@ -54,7 +55,7 @@
   </head>
 
   <body>
-    <p class="back-link"><a href="index.html">Back to the front page</a></p>
+    <p class="back-link"><a href="engineering/">Back to the engineering page</a></p>
     <div id="app">
       <p class="booting">Reading the data.</p>
     </div>

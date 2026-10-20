@@ -1,0 +1,308 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* marketing.css: the marketing page, on page.css's tokens, chips and menu.
+
+   A full-width viewer under the menu, with the copy at its left on a wide
+   screen: a mono eyebrow, a large display name, the summary, then the verdict
+   (headline, chips, limits) in the first screen at every width. A frosted pill
+   of controls floats at the bottom of the viewer, its popovers above it. Under
+   the viewer, one 46rem column: the story, what it must do, the choices behind
+   it, Made with nopekit. Both themes come from page.css's tokens; nothing here
+   says a status in colour alone (every chip is page.css's, glyph and word).
+
+   Below 980px the copy and the viewer stack, and the order is the name, the
+   verdict (headline, chips, the stale notice, the limits line), then the
+   viewer, then the rest: the verdict stays above the fold on a phone too.
+   *Rejected:* the copy under a 70svh viewer on a phone (the verdict fell below
+   the fold); a full-screen hero with the copy over the model on a phone (the
+   text sat on the parts); the limits line and the stale notice in the rest,
+   under the viewer (review of SPEC 40: at 390x844 the limits line started at
+   y=906, off the first screen, while the docs said above the fold). */
+
+/* ---- the hero ------------------------------------------------------------- */
+.mk { --mk-copy-w: min(40rem, 47vw); --mk-pad: clamp(24px, 3.6vw, 56px);
+  --mk-title-room: calc(var(--mk-copy-w) - 2 * var(--mk-pad)); --mk-name-len: 12; }
+.mk-hero { position: relative; isolation: isolate; height: min(86svh, 820px); min-height: 520px; overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 70% at 68% 46%, var(--surface) 0%, transparent 70%),
+    linear-gradient(180deg, var(--page) 0%, var(--surface-2) 100%); }
+.mk-hero::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--page) 86%, transparent) 0%,
+    color-mix(in srgb, var(--page) 62%, transparent) calc(var(--mk-copy-w) * 0.7),
+    transparent calc(var(--mk-copy-w) * 1.12)); }
+.mk-stage { position: absolute; inset: 0; z-index: 0; }
+.mk-copy { position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; width: var(--mk-copy-w);
+  padding: var(--mk-pad); display: flex; flex-direction: column; justify-content: center; pointer-events: none; }
+.mk-copy > * { pointer-events: auto; }
+.mk-copy-top { order: 1; }
+.mk-tagline { order: 2; }
+.mk-verdict { order: 3; }
+.mk-copy-rest { order: 4; }
+
+.mk-eyebrow { font: 600 0.72rem/1.2 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 0.7rem; }
+/* The name is one word as often as not (a repository's name), so it is sized to
+   fit its room: `--mk-name-len` is its length in characters (marketing.js sets
+   it), at 0.72 em a character: a heavy sans runs 0.6 to 0.7 em, and the
+   fallback fonts of a bare Linux run widest (0.62 measured too narrow there). *Rejected:* a break inside
+   the word (it split "Drone" into "Dron" and "e"); one size for every name (a
+   long name ran past the copy into the model). */
+.mk-title { font-size: clamp(1.9rem, min(4.6vw, calc(var(--mk-title-room) / (var(--mk-name-len) * 0.72))), 4.4rem);
+  line-height: 0.98; font-weight: 800; letter-spacing: -0.025em; margin: 0; overflow-wrap: anywhere;
+  text-wrap: balance; }
+.mk-tagline { font-size: clamp(1rem, 1.3vw, 1.15rem); line-height: 1.5; font-weight: 450; color: var(--ink-2);
+  margin: 0.9rem 0 0; max-width: 34rem; }
+.mk-headline { display: flex; align-items: center; gap: 12px; margin: 1.5rem 0 0.7rem;
+  font-size: clamp(1.2rem, 1.9vw, 1.55rem); line-height: 1.25; font-weight: 750; letter-spacing: -0.01em;
+  color: var(--tone-ink, var(--ink)); }
+.mk-headline .verdict-glyph { flex: none; margin: 0; vertical-align: 0; }
+.mk-tally { margin: 0 0 0.6rem; }
+.mk-tally .nk-chip { font-size: 13px; padding: 2px 10px 2px 8px;
+  background: color-mix(in srgb, var(--tone-soft, var(--surface-2)) 100%, var(--surface) 60%); }
+.mk-copy-rest > * { margin-top: 0.6rem; }
+.mk-stale { font-size: 13.5px; padding: 6px 10px; margin: 0.6rem 0 0; }
+.mk-limits { font-size: 12.5px; line-height: 1.5; max-width: 50ch; margin: 0.6rem 0 0; }
+.mk-cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 1.2rem 0 0 !important; }
+
+/* buttons, the reference page's: a solid one and a frosted one */
+.mk-btn { display: inline-flex; align-items: center; justify-content: center; height: 42px; padding: 0 18px;
+  border-radius: 10px; border: 1px solid transparent; font: 600 0.92rem/1 var(--sans); text-decoration: none;
+  cursor: pointer; white-space: nowrap; }
+.mk-btn-primary { background: var(--ink); color: var(--page); }
+.mk-btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--accent)); }
+.mk-btn-ghost { color: var(--ink); background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-color: var(--border); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.mk-btn-ghost:hover { border-color: var(--accent); }
+.mk-btn:focus-visible, .mk-ctl:focus-visible, .mk-swatch:focus-visible, .mk-only:focus-visible, .mk-view:focus-visible,
+.mk-pop-close:focus-visible, .mk-claim:focus-visible, .mk-more:focus-visible, details > summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* the folds: a summary in the mono label voice, with a plus that turns to a minus */
+.mk details > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  font: 600 0.7rem/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.mk details > summary::-webkit-details-marker { display: none; }
+.mk details > summary::before { content: "+"; display: inline-grid; place-items: center; width: 18px; height: 18px;
+  border-radius: 6px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); font-size: 13px;
+  letter-spacing: 0; }
+.mk details[open] > summary::before { content: "\2212"; }
+.mk-unsettled p { font-size: 14px; color: var(--ink-2); margin: 8px 0 0; max-width: 58ch; }
+
+/* ---- the viewer and its loading state -------------------------------------- */
+/* No clip on the viewer box: a popover over a short phone viewer reaches up past
+   it (the canvas clips itself). */
+.mk-viewer { position: absolute; inset: 0; height: auto; border-radius: 0; box-shadow: none; background: none;
+  overflow: visible; }
+.mk-canvas { overflow: hidden; }
+.mk-canvas { position: absolute; inset: 0; }
+.mk-canvas .viewer-canvas { position: absolute; inset: 0; }
+.mk-loading { position: absolute; z-index: 3; top: 0; bottom: 0; right: 0; left: var(--mk-copy-w);
+  display: grid; place-items: center; pointer-events: none; }
+.mk-loading > * { pointer-events: auto; }
+.mk-loading-card { display: grid; justify-items: center; gap: 8px; padding: 18px 22px 16px; border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: 0 0 0 1px var(--ring), var(--shadow);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); min-width: 200px; }
+.mk-spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--grid);
+  border-top-color: var(--accent); animation: mk-turn 0.9s linear infinite; }
+@keyframes mk-turn { to { transform: rotate(360deg); } }
+.mk-loading-text { font: 600 0.68rem/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.mk-loading-size { font: 500 12px/1 var(--mono); color: var(--muted); }
+.mk-bar { display: block; width: 160px; height: 4px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.mk-bar-fill { display: block; width: 0; height: 100%; background: var(--accent); transition: width 0.2s linear; }
+.mk-hint { position: absolute; z-index: 3; right: 18px; top: 14px; margin: 0; font: 500 11px/1.2 var(--mono);
+  color: var(--muted); pointer-events: none; }
+.mk-viewer .rep-empty { left: var(--mk-copy-w); }
+
+/* ---- the control pill and its popovers --------------------------------------- */
+/* The pill is centred in the viewer's column (right of the copy) and bounded
+   by that column, not by the whole hero; it wraps before it runs past the
+   edge. Its width is its content's (`max-content`): a box placed by `left`
+   shrinks to the room right of its left edge, before the transform, and
+   wrapped at half the column. From 980px to 1399px the column is too narrow
+   for the labels, so the controls show their icons alone there (each keeps
+   its name as its title) and the slider loses its two words, as on a phone.
+   What slipped through (review of SPEC 40): bounded by the hero, the pill ran
+   past the right edge from 980px to about 1350px (its right edge at 1053 on a
+   980px screen), and the hero's clip hid Full screen and Reset. *Rejected:*
+   the pill anchored at the right (it sat off centre under the model); the
+   labels hidden at every width (on a wide screen there is room, and a word
+   reads faster than an icon). */
+.mk-pill { position: absolute; z-index: 4; bottom: max(18px, env(safe-area-inset-bottom));
+  left: calc(var(--mk-copy-w) + (100% - var(--mk-copy-w)) / 2); transform: translateX(-50%);
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px; padding: 5px 6px;
+  border-radius: 999px; width: max-content; max-width: calc(100% - var(--mk-copy-w) - 24px);
+  background: color-mix(in srgb, var(--surface) 82%, transparent); border: 1px solid var(--border);
+  box-shadow: var(--shadow); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.mk-explode { padding: 0 12px 0 10px; margin-right: 4px; border-right: 1px solid var(--grid); }
+.mk-explode .explode-cap { font: 600 0.6rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  min-width: 0; color: var(--muted); }
+.mk-slider { width: clamp(90px, 12vw, 150px); }
+.mk-ctl { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 54px; height: 48px; padding: 4px 6px; border: 0; border-radius: 16px; background: transparent;
+  color: var(--ink-2); cursor: pointer; }
+.mk-ctl:hover { background: color-mix(in srgb, var(--surface-2) 90%, transparent); color: var(--ink); }
+.mk-ctl[aria-pressed="true"], .mk-ctl[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); }
+.mk-ctl-label { font: 600 0.58rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.mk-icon { display: block; }
+.mk-pop-anchor { position: static; display: inline-flex; }
+.mk-pop { position: absolute; z-index: 5; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  width: min(360px, calc(100vw - 24px)); max-height: min(58svh, 460px); display: flex; flex-direction: column;
+  border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+  background: color-mix(in srgb, var(--surface) 96%, transparent); text-align: left; }
+.mk-pop:focus { outline: none; }
+.mk-pop-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px 16px; }
+.mk-pop-title { font: 600 0.68rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.mk-pop-close { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; cursor: pointer;
+  font-size: 18px; line-height: 1; color: var(--ink-2); }
+.mk-pop-close:hover { background: var(--surface-2); }
+.mk-pop-body { overflow: auto; overscroll-behavior: contain; padding: 0 8px 4px; }
+.mk-note { margin: 0; padding: 10px 16px 12px; font-size: 12px; line-height: 1.45; color: var(--muted);
+  border-top: 1px solid var(--grid); }
+.mk-parts, .mk-views { list-style: none; margin: 0; padding: 0; }
+.mk-part { padding: 9px 8px; border-top: 1px solid var(--grid); }
+.mk-part:first-child { border-top: 0; }
+.mk-part-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.mk-part-name { font-weight: 650; font-size: 14px; text-transform: capitalize; }
+.mk-only { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; height: 26px;
+  padding: 0 10px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--ink-2); white-space: nowrap; }
+.mk-only[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.mk-swatches { display: flex; flex-wrap: wrap; gap: 7px; }
+.mk-swatch { width: 24px; height: 24px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent); box-shadow: inset 0 0 0 2px var(--surface); }
+.mk-swatch[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 1px; }
+.mk-swatch-orig { background: conic-gradient(from 45deg, var(--surface-2) 0 50%, var(--axis) 50% 100%); }
+.mk-view { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 10px; padding: 10px 10px;
+  border: 0; border-radius: 10px; background: transparent; cursor: pointer; font-size: 14px; font-weight: 600; text-align: left; }
+.mk-view:hover { background: var(--surface-2); }
+.mk-view[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.mk-view-size { font: 500 11.5px var(--mono); color: var(--muted); }
+
+/* ---- a picture or a diagram in place of the viewer ---------------------------- */
+.mk-hero--flat .mk-stage { left: var(--mk-copy-w); display: grid; place-items: center; padding: 40px 48px 32px; }
+.mk-flat { margin: 0; max-width: 100%; max-height: 100%; display: grid; justify-items: center; gap: 8px; }
+.mk-flat img, .mk-flat svg { display: block; max-width: 100%; max-height: calc(min(86svh, 820px) - 110px);
+  width: auto; height: auto; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--ring), var(--shadow); }
+.mk-caption { font: 500 12px var(--mono); color: var(--muted); }
+
+/* ---- a hero of text alone: no representation ------------------------------- */
+.mk-hero--text { height: auto; min-height: 0; background: linear-gradient(180deg, var(--page) 0%, var(--surface-2) 100%); }
+.mk-hero--text::before, .mk-hero--text .mk-stage { display: none; }
+.mk-hero--text .mk-copy { position: static; width: auto; max-width: calc(46rem + 32px); margin: 0 auto;
+  padding: clamp(56px, 12vh, 128px) 16px clamp(40px, 7vh, 72px); }
+
+/* ---- full screen: the model alone ---------------------------------------------- */
+.mk-hero:fullscreen { height: 100vh; min-height: 0; }
+.mk-hero:fullscreen::before, .mk-hero:fullscreen .mk-copy { display: none; }
+.mk-hero:fullscreen .mk-pill { left: 50%; max-width: calc(100% - 24px); }
+.mk-hero:fullscreen .mk-loading { left: 0; }
+
+/* ---- the column under the hero ---------------------------------------------- */
+/* The gutters are margins, so a rule across the column (a section's, the
+   footer's) is as wide as the text under it. */
+.mk-main { width: calc(100% - 32px); max-width: 46rem; margin-left: auto; margin-right: auto; padding: 0; }
+.mk-sec { padding: clamp(40px, 7vw, 72px) 0 clamp(8px, 2vw, 16px); }
+.mk-sec:not([hidden]) ~ .mk-sec { border-top: 1px solid var(--grid); }
+.mk-sec h2 { font-size: clamp(1.6rem, 3.4vw, 2.2rem); letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 20px; }
+.mk-sec .nk-prose { max-width: none; margin-top: 0; }
+.mk-sec .nk-prose p, .mk-sec .nk-prose li { font-size: 17.5px; line-height: 1.68; }
+.mk-sec .nk-prose h3 { font-size: 21px; letter-spacing: -0.01em; margin-top: 30px; }
+.mk-sec .nk-figure img { border-radius: 12px; }
+
+.mk-card { background: var(--surface); border-radius: 14px; box-shadow: 0 0 0 1px var(--ring); padding: 18px 20px; }
+.mk-asked { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.mk-req-text { font-size: 16.5px; line-height: 1.5; font-weight: 550; margin: 0 0 12px; }
+.mk-req-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.mk-more { font: 600 0.68rem/1.3 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; text-decoration: none; }
+.mk-more::after { content: " \2192"; }
+.mk-more:hover { text-decoration: underline; }
+
+.mk-decisions { display: grid; gap: 14px; }
+.mk-decision h3 { font-size: 19px; line-height: 1.3; letter-spacing: -0.01em; margin: 0 0 10px; }
+.mk-date { margin: 0 0 6px; font: 600 0.66rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.mk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.mk-claim { display: inline-flex; align-items: center; gap: 6px; padding: 2px 3px 2px 9px; border-radius: 999px;
+  text-decoration: none; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ring); }
+.mk-claim:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.mk-claim-id { font-size: 12px; font-weight: 600; }
+.mk-clamp { margin: 0 0 10px; color: var(--ink-2); font-size: 15.5px; line-height: 1.6; display: -webkit-box;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.mk-decision:has(.mk-whole[open]) .mk-clamp { display: none; }
+.mk-whole { margin: 0 0 6px; }
+.mk-whole > p { margin: 10px 0 4px; color: var(--ink-2); font-size: 15.5px; line-height: 1.6; }
+.mk-lost { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--grid); }
+.mk-rejected { list-style: none; margin: 6px 0 0; padding: 0; }
+.mk-reject { padding: 10px 0; border-top: 1px solid var(--grid); }
+.mk-reject:first-child { border-top: 0; }
+.mk-reject p { margin: 0 0 4px; }
+.mk-reject-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.mk-reject-value { font-size: 15px; }
+.mk-mark { font-size: 11.5px; line-height: 1.5; color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 8px; }
+.mk-pref-not-recorded { border-style: dashed; }
+.mk-reason { font-size: 14.5px; color: var(--ink-2); line-height: 1.55; }
+.mk-returns { font-size: 13px; color: var(--muted); }
+.mk-returns code { margin-left: 6px; }
+/* a requirement card's marks in words (the chip carries them as a label only) */
+.mk-req .nk-notice { margin: 12px 0 0; font-size: 13.5px; }
+.mk-amber-note { margin: 10px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--amber-ink); }
+
+.mk-values { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 0; }
+.mk-value { padding: 10px 0; border-top: 1px solid var(--grid); }
+.mk-value p { margin: 0 0 4px; }
+.mk-value-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.mk-value-now { font-size: 15px; }
+.mk-value-why { font-size: 13.5px; color: var(--muted); line-height: 1.5; display: -webkit-box;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.mk-value-lost { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13.5px; color: var(--ink-2); }
+.mk-value-lost li { padding: 2px 0; }
+.mk-lost-value { color: var(--muted); text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent); }
+.mk-fold { margin-top: 16px; padding: 14px 18px; border-radius: 14px; box-shadow: 0 0 0 1px var(--ring);
+  background: color-mix(in srgb, var(--surface) 60%, transparent); }
+.mk-fold > .mk-decisions { margin-top: 14px; }
+.mk-fold > .mk-values { margin-top: 10px; }
+
+.mk-madewith { margin-top: 24px; padding-top: 56px; border-top: 1px solid var(--grid); }
+.mk-footer { margin-top: 48px; padding-bottom: 64px; }
+.mk-footer p { margin-bottom: 8px; }
+
+/* ---- below 980px: the copy and the viewer stack --------------------------------- */
+@media (max-width: 979px) {
+  .mk { --mk-copy-w: 0px; --mk-title-room: calc(100vw - 32px); }
+  .mk-hero { display: flex; flex-direction: column; height: auto; min-height: 0; overflow: visible; }
+  .mk-hero::before { display: none; }
+  .mk-copy { display: contents; }
+  .mk-copy-top, .mk-tagline, .mk-verdict, .mk-copy-rest { padding-left: 16px; padding-right: 16px; }
+  .mk-copy-top { order: 1; padding-top: 28px; }
+  .mk-verdict { order: 2; }
+  .mk-stage { order: 3; position: relative; inset: auto; height: min(50svh, 440px); min-height: 280px; z-index: 3; }
+  .mk-tagline { order: 4; margin-top: 18px; }
+  .mk-copy-rest { order: 5; padding-bottom: 28px; }
+  .mk-headline { margin-top: 1rem; }
+  .mk-hint { display: none; }
+  .mk-hero--flat .mk-stage { left: auto; height: auto; min-height: 0; padding: 12px 16px; }
+  .mk-flat img, .mk-flat svg { max-height: 50svh; }
+  .mk-hero--text .mk-copy-top { padding-top: 48px; }
+  .mk-hero:fullscreen .mk-stage { position: absolute; inset: 0; height: auto; }
+}
+@media (min-width: 980px) and (max-width: 1399px) {
+  .mk-hero:not(:fullscreen) .mk-ctl { min-width: 44px; height: 44px; padding: 4px; border-radius: 14px; }
+  .mk-hero:not(:fullscreen) .mk-ctl-label, .mk-hero:not(:fullscreen) .mk-explode .explode-cap { display: none; }
+}
+@media (max-width: 720px) {
+  .mk-ctl { min-width: 40px; height: 40px; padding: 4px; border-radius: 12px; }
+  .mk-ctl-label { display: none; }
+  .mk-explode .explode-cap { display: none; }
+}
+@media (max-width: 560px) {
+  .mk-pill { flex-wrap: wrap; justify-content: center; border-radius: 22px; width: calc(100% - 24px); }
+  .mk-explode { flex: 1 0 100%; justify-content: center; border-right: 0; margin: 2px 0 0; padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--grid); }
+  .mk-explode .explode-cap { display: inline; }
+  .mk-slider { flex: 1 1 auto; width: auto; min-width: 0; max-width: 220px; }
+  .mk-card { padding: 16px; }
+  .mk-sec .nk-prose p, .mk-sec .nk-prose li { font-size: 16.5px; }
+  .mk-madewith img { width: 140px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-spinner { animation-duration: 2.4s; }
+  .mk-bar-fill { transition: none; }
+}

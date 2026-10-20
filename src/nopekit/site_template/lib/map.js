@@ -1353,7 +1353,8 @@ export function mapList(map, page, { onSelect, onBoard } = {}) {
   // disagreeing claim as a plain chip, the desktop drawing alone marked it).
   const notices = words.notices || {};
   const chip = (node) => tokenChip(node.token, node.word,
-    { errored: node.errored, small: true, marks: node.marks, notices });
+    { errored: node.errored, small: true, marks: node.marks, notices, trace: traceWords,
+      group: node.kind !== "claim" });
   const markNote = (node) => ((node.marks || []).includes("disagree") && notices.disagree
     ? el("span", { class: "ml-mark", text: notices.disagree }) : null);
   const amberNote = (node, line) => ((node.marks || []).includes("amber") && line.amber && line.amber.word

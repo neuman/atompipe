@@ -407,11 +407,20 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # same words as an unqualified evaluator's, one thing said one way.
         "not-counted": "does not count",
     }),
+    # The marketing page's headings are here, never literals in its script:
+    # every heading either page prints is a word the build bakes and the style
+    # scan reads (`story` to `whole_decision`, the two pages).
     "headings": MappingProxyType({"map": "Grounding map", "next": "Next steps",
                                   "floor": "Show the data", "technical": "Technical record",
                                   "project": "This revision", "open": "Other open claims",
                                   "rebuild": "Parts to build again",
-                                  "made_with": "Made with nopekit"}),
+                                  "made_with": "Made with nopekit",
+                                  "story": "The story", "asked": "What it must do",
+                                  "decisions": "The choices behind it",
+                                  "losers": "Other values and what lost to them",
+                                  "evidence": "See the evidence",
+                                  "unsettled": "What is not settled",
+                                  "whole_decision": "Read the whole decision"}),
     "notices": MappingProxyType({
         "prose_stale": "This text was written before the latest results. The data below "
                        "shows the results now.",
@@ -421,8 +430,13 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "unmatched_note": "A number with this mark is not in a result on this page.",
         "build_failed": "The last build failed. This page shows the build before it.",
         "no_intro": "Add site/content/intro.md to describe the design.",
+        "no_story": "Add site/content/story.md to tell the story of the design.",
         "invalidated": "Some results are older than the design. Run nopekit check, then "
                        "build the site again.",
+        # The marketing page's stale notice: the fact without the command. A
+        # reader of that page is not the person who runs `nopekit check`, and
+        # the engineering page one link away says what to run.
+        "stale_public": "Some results are older than the design.",
         "reads_all": "This evaluator reads every value of the design.",
         "disagree": "The status and the evidence of this claim disagree. This is a defect "
                     "in nopekit. Report it.",
@@ -452,6 +466,12 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
                    "evaluators read, in the order that the test found. It ends on its board.",
         "amber_legend": "Amber: passes if the assumptions hold.",
         "amber_flips": "This pass changes to a fail if an assumption is wrong by 10%.",
+        # A requirement's or a board's amber (`page._group_marks`: one of its
+        # claims flips). What slipped through (review of SPEC 40): the group's
+        # chip carried the claim's word, so a Failing requirement read "This
+        # pass changes to a fail" beside its own fail.
+        "amber_group": "A pass of one of its claims changes to a fail if an assumption is "
+                       "wrong by 10%.",
         "amber_holds": "This pass stays a pass if an assumption is wrong by 10%.",
         "amber_unclear": "The assumption test for this pass did not give an answer.",
         "amber_not_current": "The assumption test for this pass is out of date.",
@@ -483,6 +503,37 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     "evidence": MappingProxyType({
         "outside": "Not on the page. The file is outside the project.",
         "not_copied": "Not on the page. The site build gives the reason.",
+    }),
+    # A rejected alternative on the marketing page (`rejection_words(register=
+    # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the
+    # state of the return condition with no record text inside it (the
+    # condition as written is baked apart, as record text). A preferred_against
+    # rejection has no entry here: its phrase is `HUMAN["rejection"]`'s own
+    # `recorded` / `not_recorded`, capitalised, so invariant 13's "preferred
+    # against, not recorded by <name>" has one home. What it closes before it
+    # could slip through: the CLI's words (`may_return`'s em-dash, "infeasible",
+    # "dominated") baked under a word key, or a type word "preferred against"
+    # beside a preference word the page could drop.
+    "rejection": MappingProxyType({
+        "types": MappingProxyType({
+            "infeasible": "Not possible", "dominated": "Another option is better on every count",
+            "unevaluated": "Not evaluated", "untyped": ""}),
+        "holds": "The return condition holds: {condition}, now {observed}.",
+        "does_not_hold": "The return condition does not hold: {condition}, now {observed}.",
+        "cannot": "The return condition cannot be evaluated: {claim} is {status}.",
+        "cannot_no_claim": "The return condition cannot be evaluated: {claim} is not a claim.",
+        "cannot_no_value": "The return condition cannot be evaluated: no value of {claim} is "
+                           "compared with its acceptance condition.",
+        "cannot_no_margin": "The return condition cannot be evaluated: {claim} has no margin.",
+        "cannot_no_limit": "The return condition cannot be evaluated: {claim} states no limit.",
+        "cannot_band": "The return condition cannot be evaluated: the acceptance condition of "
+                       "{claim} is a band.",
+        "text": "A person evaluates the return condition.",
+        # Baked counts, so the browser does no plural arithmetic.
+        "lost_one": "1 option lost",
+        "lost": "{n} options lost",
+        "more_one": "1 more decision",
+        "more": "{n} more decisions",
     }),
     # A recorded result in the drawer (`result_facts(register="site")`): its
     # heading, who recorded it, and why it does not count, in the branches of
@@ -3252,24 +3303,48 @@ def round_hook_crash(exc: BaseException) -> str:
                                                line=line or "no message")
 
 
-def return_words(row: Any, ledger: Ledger | None = None) -> str:
+def _site_status_word(token: str) -> str:
+    """A status token's word as the page bakes it (`page._word`'s rule: the
+    status's row, the errored row for a crash's Skipped). Kept here because
+    `page` imports this module; the two are one rule, and `page.status_problems`
+    holds a baked return phrase to this function's."""
+    errored = token == "errored"
+    for status, key in claim_logic.STATUS_KEY.items():
+        if key == ("skipped" if errored else token):
+            return words(status, errored=errored).word
+    return _one(token)
+
+
+def return_words(row: Any, ledger: Ledger | None = None, *, register: str = "cli") -> str:
     """The state of `row`'s return condition now, in words — from its
     `ReturnState`, never computed here. `ledger` gives a value or a limit its
-    claim's units."""
-    said = HUMAN["rejection"]
+    claim's units.
+
+    ``register="site"`` (the marketing page): the same branches in
+    ``HUMAN["site"]["rejection"]``'s words, with no record text inside — a
+    condition a person evaluates says only that (its text is baked apart, as
+    record text, `condition_text`), and no condition says ``""``; a status
+    inside it is the page's word for its token (`_site_status_word`). The CLI
+    branch's bytes are untouched (its transcript is pinned)."""
+    site = register == "site"
+    said = HUMAN["site"]["rejection"] if site else HUMAN["rejection"]
     state = row.returns
     cond = row.condition
     if state.state == "none":
-        return said["none"]
+        return "" if site else said["none"]
     if state.state == "not-machine-checkable":
-        return said["text"].format(text=condition_text(cond))
+        return said["text"] if site else said["text"].format(text=condition_text(cond))
     claim = _one(state.claim or getattr(cond, "claim", ""))
     if state.state == "cannot-evaluate":
         if state.why == "status":
-            return said["cannot"].format(claim=claim, status=_status_token_word(state.status))
+            return said["cannot"].format(
+                claim=claim, status=(_site_status_word(state.status) if site
+                                     else _status_token_word(state.status)))
         if state.why == "no-claim":
             return said["cannot_no_claim"].format(claim=claim)
         if state.why == "no-margin":
+            if site:
+                return said["cannot_no_margin"].format(claim=claim)
             detail = said["margin_why"].get(state.detail, _one(state.detail))
             return said["cannot_no_margin"].format(gate=state.gate or "its evaluator",
                                                    claim=claim, detail=detail)
@@ -3284,14 +3359,34 @@ def return_words(row: Any, ledger: Ledger | None = None) -> str:
         units = str(getattr(getattr(found, "acceptance", None), "units", "") or "") \
             if found is not None else ""
     observed = _num(state.observed) + (f" {_one(units)}" if units else "")
-    gate = f" ({state.gate})" if state.gate else ""
     key = "holds" if state.state == "holds" else "does_not_hold"
+    if site:
+        return said[key].format(condition=condition_text(cond), observed=observed)
+    gate = f" ({state.gate})" if state.gate else ""
     return said[key].format(condition=condition_text(cond), observed=observed, gate=gate)
 
 
-def rejection_words(row: Any, ledger: Ledger | None = None) -> tuple[str, str]:
+def _site_type_phrase(kind: str, preference: Any, by: str = "") -> str:
+    """`_type_phrase` on the page: a preferred_against rejection is the CLI's
+    phrase with a capital, built from the same template (`HUMAN["rejection"]`'s
+    `recorded` / `not_recorded`), so invariant 13's *preferred against, not
+    recorded by <name>* has one home; any other type is the page's word,
+    ``""`` for none (the page then shows nothing, never "None")."""
+    if kind == "preferred_against":
+        phrase = _type_phrase(kind, preference, by)
+        return phrase[:1].upper() + phrase[1:]
+    return HUMAN["site"]["rejection"]["types"].get(kind or "untyped", "")
+
+
+def rejection_words(row: Any, ledger: Ledger | None = None, *,
+                    register: str = "cli") -> tuple[str, str]:
     """`(type phrase, condition phrase)` for one `claims.RejectionRow` — the
-    words every reader of a rejection prints (`why`, `check`'s *may return*)."""
+    words every reader of a rejection prints (`why`, `check`'s *may return*,
+    and with ``register="site"`` the marketing page, which `page.status_problems`
+    holds to this function)."""
+    if register == "site":
+        return (_site_type_phrase(row.type, row.preference, row.by),
+                return_words(row, ledger, register="site"))
     return (_type_phrase(row.type, row.preference, row.by), return_words(row, ledger))
 
 
@@ -4345,19 +4440,41 @@ def _verdict_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any
     return " ".join(parts)
 
 
+def _first_sentence(template: str) -> str:
+    """A branch template's first sentence, cut in the TEMPLATE before it is
+    formatted, so a revision named ``v0.2`` or ``rev. 3`` never moves the cut."""
+    head, dot, _rest = template.partition(". ")
+    return head + "." if dot else template
+
+
+def site_headline(ledger: Ledger, composed: Mapping[str, Any]) -> str:
+    """The readiness sentence's first sentence on the page — `v0.2 is NOT
+    ready.`, `v0.2 is ready, as last evaluated.` — from the one builder
+    (`_site_sentence`'s branch, its template cut by `_first_sentence`), so the
+    marketing page's large line is never a second answer to "is it ready".
+    *Rejected:* splitting the baked sentence at its first ". " (a revision with
+    a dot in it moves the cut); a headline table of its own (two producers)."""
+    return _site_sentence(ledger, composed, None, headline=True)
+
+
 def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *,
-                   milestone: Any = None, boundary: bool = False) -> str:
+                   milestone: Any = None, boundary: bool = False,
+                   headline: bool = False) -> str:
     """`_verdict_sentence`'s site register: branch for branch the CLI's, from
     the same `readiness`, `_groups`, `_unrun_specs` and `_hardware_clause`,
-    worded by ``HUMAN["site"]["readiness"]``."""
+    worded by ``HUMAN["site"]["readiness"]``. ``headline`` returns only the
+    first sentence of the project's branch (`site_headline`); no other part is
+    built, so ``registry`` is not read."""
     said = HUMAN["site"]["readiness"]
     rev = ledger.meta.revision or "this revision"
     total = len(ledger.claims)
     checked = word(ClaimStatus.PASS)
     if total == 0:
+        if headline:
+            return _first_sentence(said["no_claims"]).format(rev=rev)
         return " ".join([said["no_claims"].format(rev=rev),
                          *_hardware_clause(ledger, composed, register="site")])
-    if milestone is not None:
+    if milestone is not None and not headline:
         return " ".join([_milestone_sentence(ledger, composed, milestone, rev, lambda t: t,
                                              boundary=boundary, register="site"),
                          *_hardware_clause(ledger, composed, register="site")])
@@ -4367,15 +4484,24 @@ def _site_sentence(ledger: Ledger, composed: Mapping[str, Any], registry: Any, *
                     if st in (ClaimStatus.PASS, ClaimStatus.VERIFIED))
     tally = said["tally"].format(k=n_checked, n=total, claims=_plural(total, "claim"),
                                  is_=_plural(n_checked, "is", "are"), checked=checked)
-    parts: list[str] = []
     if not [v for v in ledger.verdicts if not verdict_logic.never_run(v)]:
-        parts.append(said["never_ready" if found["ready"] else "never"].format(
-            rev=rev, n=total, claims=_plural(total, "claim")))
+        key = "never_ready" if found["ready"] else "never"
     elif not found["required"]:
+        key = "none_required"
+    elif found["unresolved"]:
+        key = "not_ready"
+    else:
+        key = "ready_last"
+    if headline:
+        return _first_sentence(said[key]).format(rev=rev)
+    parts: list[str] = []
+    if key in ("never_ready", "never"):
+        parts.append(said[key].format(rev=rev, n=total, claims=_plural(total, "claim")))
+    elif key == "none_required":
         parts.append(said["none_required"].format(rev=rev, n=total,
                                                   claims=_plural(total, "claim")))
         parts.append(tally)
-    elif found["unresolved"]:
+    elif key == "not_ready":
         n, req = len(found["unresolved"]), len(found["required"])
         parts.append(said["not_ready"].format(
             rev=rev, k=n, req=req, claims=_plural(req, "claim"), is_=_plural(n, "is", "are"),
@@ -6072,4 +6198,6 @@ __all__ = [
     "round_commit_message",
     "round_hook_message",
     "round_hook_crash",
+    # the two pages: the marketing page's headline
+    "site_headline",
 ]

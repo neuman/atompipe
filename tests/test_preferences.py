@@ -24,7 +24,7 @@ from unittest import mock
 import _decisions as D
 import _env
 
-from nopekit import claims, cli, report, store, util
+from nopekit import claims, cli, page, report, store, util
 from nopekit.models import Decision, PreferenceRecord, Rejection, ReturnCondition
 from nopekit.util import NopekitError
 
@@ -386,6 +386,40 @@ class ANomineeAloneNeverCounts(_env.EnvCase):
         rows = [r for r in state["rejections"] if r["type"] == "preferred_against"
                 and r["decision"] == D.DECISION]
         self.assertEqual(rows[0]["preference"]["state"], "not-recorded")
+        # The marketing page (the two pages): the same phrase, capitalised, from
+        # the same template; a resealed page that says *recorded by* before
+        # `prefer` is refused; after the person's own `prefer`, the recorded one.
+        site_phrase = "Preferred against, not recorded by Robin Okafor"
+        self.assertEqual(site_phrase[:1].lower() + site_phrase[1:], said)
+        self.assertEqual(report.HUMAN["rejection"]["not_recorded"].format(name=D.PERSON), said)
+        for argv in (("site", "init"), ("site", "build")):
+            code, out, err = D.main(root, *argv)
+            self.assertEqual(code, 0, out + err)
+        item = _page_rejection(root)
+        self.assertEqual((item["type_word"], item["preference"]), (site_phrase, "not-recorded"))
+        path = _page_json(root)
+        honest = D.read_json(path)
+        lie = json.loads(json.dumps(honest))
+        planted = next(i for d in lie["decisions"] if d["id"] == D.DECISION
+                       for i in d["rejected"] if i["type"] == "preferred_against")
+        planted.update(type_word="Preferred against, recorded by Robin Okafor "
+                                 "(2026-10-14T16:00:00Z)", preference="recorded")
+        lie["self"] = page.seal(lie)
+        D.write_json(path, lie)
+        _code, out, _err = D.main(root, "site", "status", "--json")
+        edited = json.loads(out)["edited"]
+        self.assertTrue([e for e in edited if "edited by hand" in e], edited)
+        D.write_json(path, honest)
+        code, out, err = _prefer(root)
+        self.assertEqual(code, 0, out + err)
+        code, out, err = D.main(root, "site", "build")
+        self.assertEqual(code, 0, out + err)
+        item = _page_rejection(root)
+        self.assertEqual(item["preference"], "recorded")
+        self.assertTrue(item["type_word"].startswith("Preferred against, recorded by Robin "
+                                                     "Okafor ("), item["type_word"])
+        _code, why, _err = D.main(root, "why", D.DECISION)
+        self.assertIn(item["type_word"][:1].lower() + item["type_word"][1:], why)
 
     def test_a_sealed_entry_from_another_channel_never_counts(self):
         root = D.bracket(os.path.join(self.tmp(), "b"))
@@ -414,6 +448,19 @@ class ANomineeAloneNeverCounts(_env.EnvCase):
         with mock.patch.object(verdicts, "_HIDDEN_FROM_THE_COPY", {}):
             self.assertNotEqual(gate_seen_preferences(root), [],
                                 "a copy that keeps preferences was not caught")
+
+
+def _page_json(root: str) -> str:
+    return os.path.join(root, "site", "data", "page.json")
+
+
+def _page_rejection(root: str) -> dict:
+    """The bracket's preferred_against rejection as the marketing page bakes
+    it (`page.json`'s ``decisions[].rejected[]``)."""
+    doc = D.read_json(_page_json(root))
+    [item] = [i for d in doc["decisions"] if d["id"] == D.DECISION for i in d["rejected"]
+              if i["type"] == "preferred_against"]
+    return item
 
 
 def gate_seen_preferences(root: str) -> list[str]:

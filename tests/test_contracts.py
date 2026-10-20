@@ -1227,6 +1227,15 @@ class SiteStateKeysAreDocumented(unittest.TestCase):
         self.assertIn("nodes", baked_keys(docs["map.json"]))
         self.assertIn("value_text", baked_keys(docs["page.json"]))
         self.assertNotIn("C1", baked_keys(docs["page.json"]))
+        # The two pages' keys reach the walk on the bracket; an alternate view
+        # (the bracket has no model) is planted in its documented shape.
+        for key in ("story", "headline", "requirements", "decisions", "decisions_more",
+                    "losers", "featured", "shown", "lost_label", "type_word", "returns_word",
+                    "returns_text", "reason", "preference", "returns", "lost", "alternates"):
+            self.assertIn(key, baked_keys(docs["page.json"]))
+        docs = json.loads(json.dumps(docs))
+        docs["page.json"]["representation"]["alternates"].append(
+            {"view": "assembly", "title": "Assembly", "bytes": 1024})
         problems = baked_key_problems(docs, _read(SITE_CONTRACT))
         self.assertEqual(problems, [], "\n".join(problems))
         for name in BAKED_SECTIONS:

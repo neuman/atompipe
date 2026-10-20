@@ -3499,6 +3499,11 @@ class GroupsAreRecords(_env.EnvCase):
             "an upper-case stem": ("Strength.json", board, "lower-case letters"),
             "a reserved stem": ("other.json", board, '"other" is reserved'),
             "an intro stem": ("intro.json", board, "site/content/intro.md"),
+            # The two pages: the marketing page's story is prose like the intro,
+            # so no group, of any kind, takes its name.
+            "a story stem": ("story.json", board, "site/content/story.md"),
+            "a story zone": ("story.json", {"kind": "zone", "title": "t", "members": ["arm"]},
+                             '"story" is reserved'),
             "no kind": ("a.json", {"title": "t"}, '"kind" must be "board", "zone" or'),
             "a wrong kind": ("a.json", {**board, "kind": "lane"}, '"kind" must be'),
             "no title": ("a.json", {"kind": "board"}, '"title" must be text'),
@@ -3519,6 +3524,9 @@ class GroupsAreRecords(_env.EnvCase):
             "an unknown key, with its suggestion": ("a.json", {**board, "titel": "t"},
                                                     'did you mean "title"'),
         }
+        from nopekit import page as page_mod
+        self.assertEqual(sorted(set(page_mod.PROSE_SUBJECTS) - set(store.RESERVED_GROUP_IDS)),
+                         [], "a prose subject a group could take")
         for name, (stem, record, needle) in refused.items():
             with self.subTest(name):
                 with self.assertRaises(NopekitError) as caught:

@@ -615,7 +615,7 @@ def grounded_by_problem(where, name, aid, input_ids, claim_kinds) -> str | None
                                         # one grounded_by id: an input, or an assumption the
                                         # value IS; else why not (doctor reads PARAMS' through it)
 GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")   # phase 5: a group's stem
-RESERVED_GROUP_IDS: dict[str, str]      # intro, next, other: the page's own names
+RESERVED_GROUP_IDS: dict[str, str]      # intro, next, story, other: the page's own names
 def groups_in_order(groups, kind) -> list   # (order, natural id): the one order of a kind
 def group_problems(ledger) -> list[str] # phase 5: a board member no claim holds, a claim on
                                         # two boards, a name in two zones or two stations, or
@@ -3050,6 +3050,8 @@ def prerequisite_phrase(verdict) -> str      # "prerequisite failed: <root>" | "
 def readiness(ledger, composed, milestone=None) -> dict   # claims.unresolved's rows, + missing
 def milestone_line(ledger, composed, milestone) -> str     # "<m>: k of n required claims checked · …"
 def limits_line(ledger) -> str               # what Checked does not mean, said where ready is (P2.5b)
+def site_headline(ledger, composed) -> str   # SPEC 40: the readiness sentence's first sentence
+                                             #   ("v0.1 is NOT ready."), from its own builder
 def site_rebuild_text(found) -> str          # a part to build again, in the site's words: the
                                              #   page's readiness clause and next steps' row
 RESULT_TOKENS = ("pass", "fail", "not-counted")  # a recorded result's token: what a page
@@ -3110,9 +3112,14 @@ def requirement_json(requirement, found) -> dict       # the one JSON row: statu
                                              #   errored, claims, worst, disagree}
 # Architecture phase 2 (SPEC 14): a rejection's words, from claims.rejection_rows' tokens
 def condition_text(cond) -> str              # "C3 margin < 0.1", or the text
-def return_words(row, ledger=None) -> str    # the condition's state now: "holds: …, now 0.987
-                                             #   (bracket.bearing)", "cannot be evaluated: C1 is failing"
-def rejection_words(row, ledger=None) -> tuple[str, str]   # (type phrase, condition phrase)
+def return_words(row, ledger=None, *, register="cli") -> str   # the condition's state now:
+                                             #   "holds: …, now 0.987 (bracket.bearing)",
+                                             #   "cannot be evaluated: C1 is failing"; the site
+                                             #   register's sentence holds no record text
+def rejection_words(row, ledger=None, *, register="cli") -> tuple[str, str]   # (type phrase,
+                                             #   condition phrase); with register="site",
+                                             #   "Preferred against, not recorded by <name>"
+                                             #   (the CLI's invariant-13 phrase, capitalised)
 def rejection_facts(row, ledger=None) -> str # why's facts line: "{type} · {condition}[ · source: input …]"
 def may_return_line(row, ledger=None) -> str # check's line for a condition that holds
 def rejection_suffix(rejection) -> str       # decide's row and the log's: static, never a live state
@@ -3468,7 +3475,7 @@ or version digest, so an upgrade is not "behind the records".
 
 ### `site.py`  (deps: models, util, store, claims, decisions, graph, page, prose, report, modelio, gates, verdicts)
 The project site's spine half: viewgens, the technical record's document
-(`state.json`), and the orchestration of a build — the front page's two documents are
+(`state.json`), and the orchestration of a build — the two pages' documents are
 `page`'s, the prose `prose`'s. The page's half is plain HTML, CSS and ES modules in
 `site_template/`, copied by `scaffold`; the data contract between the two is
 `docs/SITE_CONTRACT.md`.
@@ -3476,12 +3483,17 @@ The project site's spine half: viewgens, the technical record's document
 SITE_DIR = "site"; DATA_DIR = "data"; ASSETS_DIR = "assets"; VENDOR_DIR = "vendor"
 VIEWS_DIR = "data/views"                     # per-view payloads too big to inline
 STATE_NAME = "state.json"                    # site/data/state.json: the technical record
-PAGE_NAME = "page.json"; MAP_NAME = "map.json"   # the front page's documents (phase 5)
+PAGE_NAME = "page.json"; MAP_NAME = "map.json"   # the two pages' documents (phase 5, SPEC 40)
 BUILD_NAME = "build.json"                    # the clock: ignored, never tracked (SPEC 32)
 CONTENT_DIR = "content"                      # site/content/: the agent's prose and figures
 EVIDENCE_DIR = "assets/evidence"             # evidence copied from .nopekit/out/
-SHELLS = ("index.html", "technical.html")    # the project's own: never refreshed
+SHELLS = ("index.html", "engineering/index.html", "marketing/index.html",
+          "technical.html")                  # the project's own: never refreshed (SPEC 40)
+PAGES = (("engineering", "engineering/"), ("marketing", "marketing/"))   # the menu's order
 OUTLINE_MARKER = '<meta name="nopekit-outline" content="1">'; OUTLINE_MARKER_RE: str
+VIEWS_MARKER = '<meta name="nopekit-views" content="1">'; VIEWS_MARKER_RE: str   # the root
+                                             #   redirect's: without it, an old front page
+OLD_LAYOUT_WARNING: str                      # move site/index.html aside, then site init
 AGED_SECONDS = 86400                         # a result this old is aged (build.json)
 WATCH_DIRS: tuple[str, ...]                  # what `site serve --watch` polls
 @dataclass
@@ -3505,10 +3517,19 @@ def run_all_viewgens(registry, ctx, *, only=None) -> tuple[list, list]   # (view
 def derive_explode(bounds, *, overrides=None) -> dict      # a FIRST DRAFT explode manifest
 def locator_problems(views, verdicts) -> list[dict]         # every locator that cannot be drawn
 def scaffold(root, *, force=False) -> list                  # copy the template; the shells only
-                                                            #   when absent, or with force
+                                                            #   when absent, or with force (all four)
 def refresh_renderer(root) -> list                          # every template file but SHELLS
-def scaffolded(root) -> bool                                # site/index.html is a file
-def outline_of(root) -> int | None                          # index.html's OUTLINE_MARKER
+def scaffolded(root) -> bool                                # site/index.html is a file (the root,
+                                                            #   never engineering/: invariant 8)
+def outline_file(root) -> str                               # engineering/index.html when it exists,
+                                                            #   else an old project's index.html
+def outline_of(root) -> int | None                          # outline_file's OUTLINE_MARKER
+def outline_problem(root) -> str                            # the older-outline warning, naming the
+                                                            #   file it read; "" when none
+def old_layout(root) -> bool                                # the root index.html lacks VIEWS_MARKER
+def page_urls(url) -> dict                                  # {name: address} of the two pages
+def pages_line(url) -> str                                  # `site serve`'s line after the ready
+                                                            #   line; never matches SERVE_READY_RE
 def ensure_site_ignore(root) -> bool                        # data/build.json in site/.gitignore,
                                                             #   created with it alone when absent
 def prose_pool(docs, assets=()) -> Pool                      # what prose numbers are matched to
@@ -3524,8 +3545,26 @@ def write_build_json(root, *, now, id, ok=True, error="", live=False, verdicts=N
                      mixed_age=None) -> str                 # site/data/build.json, ignored
 def watch_snapshot(root) -> dict                            # {relpath: (size, mtime_ns)} over WATCH_DIRS
 def clean_assets(root, keep) -> list                        # delete unreferenced site/assets/ files
-def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`
+def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`;
+                                                            #   three's meshopt decoder too (SPEC 40)
 ```
+**Two pages** (SPEC 40). `build` writes an absent `engineering/index.html`,
+`marketing/index.html` or `technical.html` (making its directory), and never the root
+`index.html`: an old project's root page is its own front page, so the build writes the
+two pages beside it and warns while it lacks `VIEWS_MARKER` (`old_layout`; `site status` and
+`doctor`'s `site` row say it too) with `OLD_LAYOUT_WARNING`, naming the steps: move it
+aside, then `site init`. The warning says what `build` does ("writes engineering/ and
+marketing/ beside it, when absent"), never what it did: `site status` and `doctor` print
+it before any build (review of SPEC 40). A shell `build` writes is listed under the
+summary's `pages` ("wrote the missing pages"), never under `refreshed`, which is the
+renderer's. *Rejected:* `--force` in that advice (it replaces all four shells);
+moving the page itself (a file the person wrote, moved by a build). It warns, too, when
+`site/content/story.md` and `intro.md` are both missing: the marketing page then has no
+story; with `intro.md` alone the summary's `notices` (printed, never counted as a
+warning) says the page shows it as the story (review of SPEC 40: the warning read on
+every round of a project whose page had a story). `baked_pool`'s
+bare page carries every `page.PROSE_SUBJECTS` subject as null, as `bake_page` does.
+
 **`build` never runs gates**, and never writes the ledger back. It renders a
 `verdicts.Resolution` — the caller's `resolution=`, or, when none is handed, one it
 resolves for itself with the projection it already builds. *Rejected:* a library
@@ -3577,7 +3616,7 @@ that believes it is drawing and is not looks exactly like a gate that found noth
 it can prove is unreferenced, which is why every asset arrives through `write_asset`.
 
 ### `page.py`  (deps: models, util, store, claims, report, graph, prose)
-The front page's baked data (architecture phase 5, SPEC 28-33): `map.json` and
+The two pages' baked data (architecture phase 5, SPEC 28-33, 40): `map.json` and
 `page.json`. Not a spine module (an edit here keys no verdict); clock-free; it reads
 `site/content/` and the presence and size of evidence files, and never imports `site`.
 Every status, word, count, margin and *ready* it bakes is from its one producer:
@@ -3593,7 +3632,9 @@ SOURCES = ("chosen", "datasheet", "estimate", "assumption")
 OTHER = "other"                              # the generated board and zone
 IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
 EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
-EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next")
+EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next", "story")
+DECISIONS_SHOWN = 5                          # the marketing page's featured decisions on show
+VIEWER_KINDS = ("model3d", "field")          # the view kinds an alternate may be
 WORD_KEYS: frozenset; RECORD_KEYS: frozenset # every string key of page.json and map.json:
                                              #   scanned for the register, or exempt
 class Board(NamedTuple): id; title; line; generated; members
@@ -3622,12 +3663,20 @@ def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of 
 def named_in(blocks) -> list                 # the claim ids a piece of prose names
 def prose_named(body, claim_ids) -> list     # named_in over a file's body
 def prose_files(root) -> list                # [(subject, path)] under site/content/
-def subjects(boards) -> list                 # board ids, then intro, next
+def subjects(boards) -> list                 # board ids, then PROSE_SUBJECTS
 def stamp_state(as_of, current) -> str       # current | stale | unstamped
 def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, current_as_of}]
 def content_digest(root) -> str              # a seal over site/content/
 def seal(doc) -> str                         # map.json's and page.json's `self`
 def representation(views) -> dict            # the first model3d, else image or diagram
+def alternates(views, root="", first=None) -> list   # [{view, title, bytes}]: model3d and
+                                             #   field views, first one first, one per asset
+def requirement_nodes(view, lay, toks, marks) -> list   # the map's requirement nodes: the one
+                                             #   producer of a requirement row
+def requirement_row(node) -> dict            # page.json's row: the node renamed, never recomputed
+def decision_rows(view, composed, claims_out, params) -> tuple   # (decisions, decisions_more,
+                                             #   losers): newest first, rejections from
+                                             #   claims.rejection_rows in the site's words
 def source_of(built, name, kinds) -> str     # a value's source category (SOURCES)
 def trace_block(lay, built, amber, trace) -> dict   # map.json's `trace`
 def amber_word(state) -> str                 # amber's site word
@@ -3643,7 +3692,11 @@ def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None
                                              #   words, marks, ready, amber, feeds,
                                              #   a compared value's words, prose stamps;
                                              #   with prose_as_of and pool, each as_of
-                                             #   and each number's match
+                                             #   and each number's match; the two pages'
+                                             #   rows (requirements, decision chips and
+                                             #   rejection words, the headline, required,
+                                             #   the tally, the limits line, and amber on
+                                             #   requirement, section, chip and step rows)
 ```
 **Order is baked, geometry is rendered**: nodes carry a lane, an `order`, a `row` and a
 `column` (greedy interval packing over the rows their lines span), never a position, and
@@ -3662,6 +3715,21 @@ read (of every moved member when none is read), its layer the dense rank, a stat
 nothing moved last; zones, requirements and the stations of a layer carry a `rank`, one
 barycentre pass against the claims' rows. Untraced, the layer is phase 5's column. A
 claim whose amber flips carries the `amber` mark beside its token.
+
+**The two pages** (SPEC 40) read one `page.json`, so every key the marketing page needs
+is baked here, inside `bake_page`, where the seal, the number pool, `status_problems`
+and the style scans already look: `story` (a prose subject stamped against intro's
+tokens), `verdict.headline` (`report.site_headline`, the readiness sentence's own
+first sentence), `representation.alternates`, `requirements` (`requirement_row` over
+the very nodes `bake_map` draws, so the page and the map cannot disagree about a
+requirement), and `decisions`, `decisions_more` and `losers` (`decision_rows`: a
+rejection's words are `report.rejection_words` with the site register, matched to
+`claims.rejection_rows` on decision and index). `status_problems` recomputes the
+rejection rows itself, so both callers (`site.build` and `cli._site_state`) hold a
+forged `type_word` or `returns` token. *What slipped through the plan:* the rows were
+first built in `site.build` after `bake_page`, where the checker had already run; and a
+rejection's reason sat under `why`, a word key, so the scan read record text (the
+bracket's PLA reason has an em-dash). It is `reason` now, a record key.
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure

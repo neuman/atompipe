@@ -142,7 +142,7 @@ function topbar(state) {
         text: `≈ ${phrase("invalidated")}` }) : null,
       el("span", { class: "muted", text: app.build && app.build.built
         ? `Built ${stamp(app.build.built)}` : "No build time" }),
-      el("a", { class: "btn btn-ghost", href: "index.html", text: "Front page" }),
+      el("a", { class: "btn btn-ghost", href: "engineering/", text: "Engineering page" }),
       el("button", { class: "btn btn-ghost", type: "button", text: "Keys",
         onclick: () => document.getElementById("key-dialog").showModal() })));
 }

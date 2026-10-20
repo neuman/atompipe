@@ -918,11 +918,13 @@ class StatusWordsComeFromOneTable(unittest.TestCase):
 def _page_sources() -> dict[str, str]:
     """The page scripts that print words: the technical record's (`app.js`,
     `format.js`, `panels.js`) and, from architecture phase 5, the front
-    page's (`page.js` and the map, drawer, sections and live modules), keyed by
-    base name."""
+    page's (`page.js` and the map, drawer, sections and live modules), and from
+    the two pages the marketing page's (`marketing.js`) and the modules both
+    pages share (`verdict.js`, `theme.js`, `banner.js`), keyed by base name."""
     out = {}
     for name in ("app.js", "lib/format.js", "lib/panels.js", "page.js", "lib/map.js",
-                 "lib/drawer.js", "lib/sections.js", "lib/live.js"):
+                 "lib/drawer.js", "lib/sections.js", "lib/live.js", "marketing.js",
+                 "lib/verdict.js", "lib/theme.js", "lib/banner.js"):
         with open(os.path.join(site_mod.TEMPLATE_DIR, *name.split("/")),
                   encoding="utf-8") as fh:
             out[os.path.basename(name)] = fh.read()

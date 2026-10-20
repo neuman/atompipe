@@ -41,10 +41,10 @@ cost, and what done looks like. Ask three to six questions at a time, never a fo
 
 Ask for evidence by name, early: a sketch (a napkin is fine), photos of the closest
 thing they would buy instead and what it gets right, links to similar things,
-measurements of everything it must fit with the tolerance they care about, datasheets
-or part numbers already chosen, existing CAD. `nopekit ask` lists what is still
-missing. Take each file in with `nopekit ingest`, then `nopekit extract` what was read
-out of it — an artifact nobody extracted from is decoration.
+measurements of everything it must fit with the tolerance they care about, datasheets or
+part numbers already chosen, existing CAD. `nopekit ask` lists what is still missing.
+Take each file in with `nopekit ingest`, then `nopekit extract` what was read out of it
+— an artifact nobody extracted from is decoration.
 
 Run `nopekit init` (it starts a git repository when there is none, and lists the person
 from git's identity in `.nopekit/project.json`'s `people`). Write each thing the person
@@ -55,8 +55,8 @@ asked for as `requirements/R1.json`, `R2.json`, … in their words:
 ```
 
 Show the list back and ask for a yes. The person may say skip; then say which
-requirements are your guesses. Do not stall: ask for the two most valuable artifacts,
-go on, and record what you assumed as assumption claims so it stays visible.
+requirements are your guesses. Do not stall: ask for the two most valuable artifacts, go
+on, and record what you assumed as assumption claims so it stays visible.
 
 ## 2. First light and the live site
 
@@ -73,10 +73,9 @@ nopekit site init
 nopekit site serve --watch --detach   # run again: prints the running URL; --stop stops it
 ```
 
-**Give the person the URL it prints (`serving site at http://…`) in the first few
-minutes**, with one sentence on what the page shows. It rebuilds as the project moves,
-and it is how the person sees your work without reading a transcript. Claims come next,
-beside the first verdicts: most cannot be stated precisely before a model exists.
+**Give the person both URLs it prints in the first few minutes**, a sentence each:
+`<url>engineering/` (each claim, its evidence) and `<url>marketing/` (the product, its
+story, its choices); both show your work as it moves. Claims come next, beside verdicts.
 
 ## 3. Claims and boards
 
@@ -108,6 +107,9 @@ Then draw the map in `groups/<id>.json`, one record each, and run `nopekit site 
 the claims of one thing the person cares about, its text in `site/content/<board>.md`; a
 `zone` the choices of one part as the person names it, never all in one; a `station`
 titles a shared value as the map shows it (`"Allowed stress"`, not `design_stress`).
+`site/content/story.md` is the marketing page's story: what the design is and whom it is
+for, the choices behind it and what lost, then its state in the verdict's words. Under
+400 words, one to three figures, baked numbers only; `nopekit site stamp story`.
 
 ## 4. The loop
 
@@ -154,16 +156,15 @@ When your turn ends, the plugin's Stop hook runs `nopekit round --hook`: a tier-
 the site rebuilt, the round record written, and a commit `round N: <what changed>` of
 every file in the project that git does not ignore (one over 50 MiB or named like a
 secret, such as `.env`, is named instead), only when git's identity is one of `people`.
-It never pushes or blocks. Put scratch, downloads and environments in `.gitignore`. Do not
-commit rounds yourself; change `people` only when the person asks, to the name and email
-they give.
+It never pushes or blocks. Put scratch, downloads and environments in `.gitignore`.
+Never commit rounds yourself; change `people` only when asked, to the name and email given.
 
 **Before your turn ends:**
 
 1. Run `nopekit check`, so the page shows the results the round will commit.
-2. Read each `site/content/<board>.md`, and `intro.md` and `next.md` when they exist,
-   against the page; rewrite what the results no longer support, in ASD-STE100: short
-   sentences, present tense, only baked numbers. `intro` and `next` read every claim.
+2. Read each `site/content/<board>.md`, and `intro.md`, `next.md` and `story.md` when
+   they exist, against both pages; rewrite what the results no longer support, in
+   ASD-STE100 with only baked numbers. `intro`, `next` and `story` read every claim.
 3. Run `nopekit site stamp <board>` for each file you read (`--all` for every one).
 4. Leave no record half-written: the round commits what is there.
 

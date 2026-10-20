@@ -25,10 +25,14 @@ import contextlib
 import io
 import json
 import os
+import posixpath
+import re
 import shutil
 import tempfile
 import unittest
 import unittest.mock
+import urllib.error
+import urllib.request
 
 from nopekit import cli as cli_mod
 from nopekit import gates as gates_mod
@@ -198,6 +202,30 @@ class _SiteCase(unittest.TestCase):
             return json.load(fh)
 
 
+def _uncommented(html_text: str) -> str:
+    """``html_text`` with its comments gone: a shell's comment may name an
+    address it does not use."""
+    return re.sub(r"<!--.*?-->", "", html_text, flags=re.S)
+
+
+def _first_relative_address(html_text: str) -> tuple[str, str]:
+    """``(tag, address)`` of the first ``href``/``src`` in ``html_text`` that a
+    base element moves: not absolute, not a fragment, not a data URL."""
+    for m in re.finditer(r'<(\w+)\b[^>]*?\b(?:href|src)="([^"]*)"', html_text):
+        address = m.group(2)
+        if re.match(r"^(?:[a-z][a-z0-9+.-]*:|//|#|/)", address):
+            continue
+        return m.group(1).lower(), address
+    return "", ""
+
+
+def _menu(html_text: str) -> str:
+    """The page menu (``<nav class="viewnav" ...>...</nav>``) of a shell."""
+    found = re.search(r'<nav\b[^>]*class="viewnav"[^>]*>.*?</nav>', html_text, re.S)
+    assert found, "no page menu"
+    return found.group(0)
+
+
 # --------------------------------------------------------------------------- #
 class Scaffold(_SiteCase):
     """(a) The shell belongs to the project the moment it exists."""
@@ -231,9 +259,11 @@ class Scaffold(_SiteCase):
                          "img/made-with-nopekit.png"):
             self.assertTrue(os.path.isfile(os.path.join(site_dir, *relative.split("/"))),
                             f"site init did not write {relative}")
-        with open(os.path.join(site_dir, "index.html"), encoding="utf-8") as fh:
+        # The two pages: the outline is the engineering page's, one folder down.
+        with open(os.path.join(site_dir, "engineering", "index.html"), encoding="utf-8") as fh:
             index = fh.read()
         self.assertIn(site_mod.OUTLINE_MARKER, index)
+        self.assertEqual(site_mod.outline_file(self.root), "site/engineering/index.html")
         self.assertEqual(site_mod.outline_of(self.root), 1)
         self.assertIn('src="page.js"', index)
         self.assertIn('href="https://github.com/neuman/nopekit"', index)
@@ -241,7 +271,9 @@ class Scaffold(_SiteCase):
         with open(os.path.join(site_dir, "technical.html"), encoding="utf-8") as fh:
             technical = fh.read()
         self.assertIn('src="app.js"', technical)
-        self.assertIn('href="index.html"', technical)
+        # Its way back is the engineering page (the root only redirects there).
+        self.assertIn('href="engineering/"', technical)
+        self.assertNotIn('href="index.html"', technical)
         self.assertNotIn("nopekit-outline", technical)
 
         path = os.path.join(site_dir, "technical.html")
@@ -291,17 +323,20 @@ class Scaffold(_SiteCase):
                          ["data/build.json"])
 
     def test_an_older_shell_is_warned_and_still_built(self):
-        """`site build` warns when `index.html` carries no outline marker or an
-        older one, and still writes the front page's documents; doctor's `site`
-        row warns and names `site init --force`; the scaffolded shell gives no
-        such warning (SPEC 28; review of phase 5: nothing tested it)."""
+        """`site build` warns when the engineering page carries no outline
+        marker or an older one, and still writes the page's documents; doctor's
+        `site` row warns and names the file and the way out (delete it and
+        build: never `site init --force`, which would replace all four shells);
+        the scaffolded shell gives no such warning (SPEC 28; review of phase 5:
+        nothing tested it). The two pages: the outline is read from
+        `engineering/index.html`, not the root redirect."""
         _capture(["site", "init", "-C", self.root])
         code, out = _capture(["site", "build", "--json", "-C", self.root])
         self.assertEqual(code, 0, out)
         summary = json.loads(out)
         self.assertEqual(summary["outline"]["marker"], 1)
         self.assertFalse([w for w in summary["warnings"] if "predates the page outline" in w])
-        index = os.path.join(self.root, site_mod.SITE_DIR, "index.html")
+        index = os.path.join(self.root, site_mod.SITE_DIR, "engineering", "index.html")
         with open(index, encoding="utf-8") as fh:
             shell = fh.read()
         for name, edited, marker in (
@@ -324,7 +359,167 @@ class Scaffold(_SiteCase):
                 code, out = _capture(["doctor", "--json", "-C", self.root])
                 [row] = [r for r in json.loads(out)["checks"] if r["check"] == "site"]
                 self.assertEqual(row["status"], "warn", row)
-                self.assertIn("site init --force", row["detail"])
+                self.assertIn("site/engineering/index.html predates the page outline",
+                              row["detail"])
+                self.assertIn("delete it, then run `nopekit site build`", row["detail"])
+                self.assertNotIn("--force", row["detail"])
+                self.assertFalse(site_mod.old_layout(self.root), "the root redirect is no old page")
+
+    def test_an_old_layout_root_is_kept_byte_for_byte_and_warned(self):
+        """(the two pages) A project from before them has its own front page at
+        `site/index.html` and no engineering/ or marketing/: `site build` writes
+        both pages beside it, leaves the root byte-identical, and warns with the
+        one sentence `site status` and `doctor` say too; the outline is read
+        from the new engineering page; and the warning's way out (move the root
+        aside, then `site init`) writes the redirect and keeps both pages as
+        they are. What it closes before it could slip through: a build that
+        wrote the root would destroy a person's front page, and advice that said
+        `--force` would replace the engineering, marketing and technical pages."""
+        _capture(["site", "init", "-C", self.root])
+        site_dir = os.path.join(self.root, site_mod.SITE_DIR)
+        with open(os.path.join(site_dir, "engineering", "index.html"), encoding="utf-8") as fh:
+            front = fh.read().replace('<base href="../">', "").replace(
+                "</body>", "<!-- an afternoon of somebody's work -->\n</body>")
+        index = os.path.join(site_dir, "index.html")
+        with open(index, "w", encoding="utf-8", newline="") as fh:
+            fh.write(front)
+        for page_dir in ("engineering", "marketing"):
+            shutil.rmtree(os.path.join(site_dir, page_dir))
+        with open(index, "rb") as fh:
+            before = fh.read()
+        mtime = os.stat(index).st_mtime_ns
+        self.assertTrue(site_mod.old_layout(self.root))
+        self.assertEqual(site_mod.outline_file(self.root), "site/index.html")
+        # Before any build `site status` says the warning too, and the warning
+        # says what the build does, never that it wrote the pages: neither
+        # exists yet (review of SPEC 40: "The site build wrote engineering/
+        # and marketing/ beside it", read on a project that had just upgraded).
+        code, out = _capture(["site", "status", "-C", self.root])
+        self.assertIn(site_mod.OLD_LAYOUT_WARNING, out)
+        self.assertFalse(os.path.exists(os.path.join(site_dir, "engineering")))
+        self.assertNotIn("wrote", site_mod.OLD_LAYOUT_WARNING)
+        self.assertIn("`nopekit site build` writes engineering/ and marketing/",
+                      site_mod.OLD_LAYOUT_WARNING)
+        code, out = _capture(["site", "build", "--json", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        summary = json.loads(out)
+        self.assertIn(site_mod.OLD_LAYOUT_WARNING, summary["warnings"])
+        # The two pages the build wrote are pages it wrote, never "refreshed
+        # the renderer" (review of SPEC 40).
+        self.assertEqual(summary["pages"], ["site/engineering/index.html",
+                                            "site/marketing/index.html"])
+        self.assertFalse(set(summary["pages"]) & set(summary["refreshed"]), summary["refreshed"])
+        self.assertTrue(set(summary["pages"]) <= set(summary["wrote"]))
+        self.assertIn("move site/index.html aside, then run nopekit site init",
+                      site_mod.OLD_LAYOUT_WARNING)
+        self.assertNotIn("--force", site_mod.OLD_LAYOUT_WARNING)
+        with open(index, "rb") as fh:
+            self.assertEqual(fh.read(), before, "site build wrote the project's front page")
+        self.assertEqual(os.stat(index).st_mtime_ns, mtime)
+        for shell in ("engineering/index.html", "marketing/index.html"):
+            path = os.path.join(site_dir, *shell.split("/"))
+            with open(path, encoding="utf-8") as fh, \
+                    open(os.path.join(site_mod.TEMPLATE_DIR, *shell.split("/")),
+                         encoding="utf-8") as want:
+                self.assertEqual(fh.read(), want.read(), f"site build did not write {shell}")
+        self.assertEqual(site_mod.outline_file(self.root), "site/engineering/index.html")
+        self.assertEqual(summary["outline"]["marker"], 1)
+        code, out = _capture(["site", "status", "-C", self.root])
+        self.assertIn(site_mod.OLD_LAYOUT_WARNING, out)
+        code, out = _capture(["doctor", "--json", "-C", self.root])
+        [row] = [r for r in json.loads(out)["checks"] if r["check"] == "site"]
+        self.assertEqual(row["status"], "warn", row)
+        self.assertIn(site_mod.OLD_LAYOUT_WARNING, row["detail"])
+        # A second build writes neither page again, and the root stays.
+        snapshot = {shell: os.stat(os.path.join(site_dir, *shell.split("/"))).st_mtime_ns
+                    for shell in site_mod.SHELLS}
+        code, out = _capture(["site", "build", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        self.assertEqual({shell: os.stat(os.path.join(site_dir, *shell.split("/"))).st_mtime_ns
+                          for shell in site_mod.SHELLS}, snapshot)
+        # The way out the warning gives: the redirect, both pages kept.
+        engineering = os.path.join(site_dir, "engineering", "index.html")
+        with open(engineering, "a", encoding="utf-8") as fh:
+            fh.write("<!-- the person's edit -->\n")
+        with open(engineering, "rb") as fh:
+            kept = fh.read()
+        os.replace(index, os.path.join(self.root, "front.html"))
+        code, out = _capture(["site", "init", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        with open(index, encoding="utf-8") as fh:
+            self.assertIn(site_mod.VIEWS_MARKER, fh.read())
+        with open(engineering, "rb") as fh:
+            self.assertEqual(fh.read(), kept, "site init replaced the engineering page")
+        self.assertFalse(site_mod.old_layout(self.root))
+        code, out = _capture(["site", "build", "--json", "-C", self.root])
+        self.assertNotIn(site_mod.OLD_LAYOUT_WARNING, json.loads(out)["warnings"])
+
+    def test_init_writes_the_four_shells(self):
+        """(the two pages) The root is a redirect: its `nopekit-views` marker,
+        the script before the refresh tag (so a `#claim=C1` keeps its
+        fragment), and links to both pages for a browser that follows neither.
+        The engineering page carries the outline, a base element pointing one
+        folder up before its first relative address, page.js and Made with
+        nopekit; the marketing page its base, marketing.js and Made with
+        nopekit. Each menu links both pages, `aria-current` on its own alone."""
+        code, out = _capture(["site", "init", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        site_dir = os.path.join(self.root, site_mod.SITE_DIR)
+        shells = {}
+        for shell in site_mod.SHELLS:
+            path = os.path.join(site_dir, *shell.split("/"))
+            self.assertTrue(os.path.isfile(path), f"site init did not write {shell}")
+            with open(path, encoding="utf-8") as fh:
+                shells[shell] = _uncommented(fh.read())
+        self.assertEqual(len(site_mod.SHELLS), 4)
+
+        root = shells["index.html"]
+        self.assertIn(site_mod.VIEWS_MARKER, root)
+        script = root.index("location.replace(")
+        refresh = root.index('http-equiv="refresh"')
+        self.assertLess(script, refresh, "the refresh tag runs before the script keeps the hash")
+        self.assertIn("location.hash", root[script:refresh])
+        # Opened from the disk, a folder address lists the folder and never
+        # opens its index.html. What slipped through (review of SPEC 40): every
+        # target was `engineering/`, so the root opened from file: showed an
+        # empty listing. The script names the page in full under file: and
+        # the folder over http; the refresh tag and the links name it in full.
+        head = root[:refresh]
+        self.assertIn('location.protocol === "file:"', head)
+        self.assertIn('"engineering/index.html"', head)
+        self.assertIn('"engineering/"', head)
+        self.assertIn('url=engineering/index.html"', root)
+        self.assertIn('href="engineering/index.html"', root)
+        self.assertIn('href="marketing/index.html"', root)
+        self.assertNotIn(site_mod.OUTLINE_MARKER, root)
+
+        for shell, script_src in (("engineering/index.html", "page.js"),
+                                  ("marketing/index.html", "marketing.js")):
+            with self.subTest(shell):
+                text = shells[shell]
+                self.assertEqual(_first_relative_address(text), ("base", "../"),
+                                 "an address resolves before the base element")
+                self.assertIn(f'src="{script_src}"', text)
+                self.assertIn('id="made-with-nopekit"', text)
+                self.assertIn('src="img/made-with-nopekit.png"', text)
+                self.assertIn('href="https://github.com/neuman/nopekit"', text)
+                self.assertNotIn(site_mod.VIEWS_MARKER, text)
+        self.assertIn(site_mod.OUTLINE_MARKER, shells["engineering/index.html"])
+
+        for shell, own in (("engineering/index.html", "engineering/"),
+                           ("marketing/index.html", "marketing/")):
+            with self.subTest(menu=shell):
+                menu = _menu(shells[shell])
+                self.assertIn('aria-label="Pages"', menu)
+                anchors = [(m.group(0), m.group(1)) for m in re.finditer(
+                    r'<a\b[^>]*?href="([^"]+)"[^>]*>', menu)]
+                hrefs = [href for _tag, href in anchors]
+                self.assertIn("engineering/", hrefs)
+                self.assertIn("marketing/", hrefs)
+                current = [href for tag, href in anchors if 'aria-current="page"' in tag]
+                self.assertEqual(current, [own], "aria-current names its own page alone")
+                self.assertIn('href="marketing/"' if own == "engineering/"
+                              else 'href="engineering/"', menu)
 
     def test_second_init_refuses_and_keeps_the_edited_shell(self):
         _capture(["site", "init", "-C", self.root])
@@ -353,6 +548,39 @@ class Scaffold(_SiteCase):
         with self.assertRaises(NopekitError) as caught:
             site_mod.scaffold(self.root)
         self.assertIn("--force", str(caught.exception))
+        # It names every shell `--force` replaces, and leads with `site build`.
+        # What slipped through (review of SPEC 40): "--force to replace it",
+        # read as the root redirect alone, replaced the engineering and
+        # marketing pages and technical.html too.
+        said = str(caught.exception)
+        for shell in site_mod.SHELLS:
+            self.assertIn(f"site/{shell}", said)
+        self.assertLess(said.index("nopekit site build"), said.index("--force"), said)
+        self.assertNotIn("replace it", said)
+
+    def test_a_build_never_overwrites_the_two_pages(self):
+        """(the two pages) The engineering and marketing pages are shells like
+        the root and technical.html: `site build` refreshes the renderer around
+        them and never writes one that exists; a second `site init` refuses
+        whole. What slipped through the plan: a page left out of `SHELLS` is a
+        renderer file, overwritten on every build."""
+        _capture(["site", "init", "-C", self.root])
+        site_dir = os.path.join(self.root, site_mod.SITE_DIR)
+        edited = {}
+        for shell in site_mod.SHELLS:
+            path = os.path.join(site_dir, *shell.split("/"))
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"<!-- the project's own {shell} -->\n")
+            with open(path, "rb") as fh:
+                edited[shell] = fh.read()
+        for argv in (["site", "build"], ["site", "build"], ["site", "init"]):
+            code, out = _capture([*argv, "-C", self.root])
+            self.assertEqual(code, 2 if argv[1] == "init" else 0, out)
+            for shell, data in edited.items():
+                with open(os.path.join(site_dir, *shell.split("/")), "rb") as fh:
+                    self.assertEqual(fh.read(), data, f"{' '.join(argv)} wrote {shell}")
+        self.assertEqual(sorted(edited), sorted(["index.html", "engineering/index.html",
+                                                  "marketing/index.html", "technical.html"]))
 
     def test_build_refreshes_a_renderer_an_older_nopekit_scaffolded(self):
         """A page scaffolded before P2.1 keeps its own `format.js`, which read
@@ -438,6 +666,40 @@ class BuildWithNoViews(_SiteCase):
 
 
 # --------------------------------------------------------------------------- #
+class TheStoryWarningIsTrue(_SiteCase):
+    """The marketing page shows story.md, else intro.md, else no story (the
+    two pages' addendum): `site build` warns "has no story" only when neither
+    exists, and with intro.md alone says, as a notice and never a warning,
+    that intro.md stands in. What slipped through (review of SPEC 40): the
+    warning on every build and every round of a project with intro.md."""
+
+    def _build(self) -> dict:
+        self._ledger(claims=[self._claim("C1", gates=[])])
+        _capture(["site", "init", "-C", self.root])
+        code, out = _capture(["site", "build", "--json", "-C", self.root])
+        self.assertEqual(code, 0, out)
+        return json.loads(out)
+
+    def test_neither_warns(self):
+        summary = self._build()
+        self.assertTrue(any("has no story" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        self.assertEqual(summary["notices"], [])
+
+    def test_intro_alone_is_a_notice(self):
+        content = os.path.join(self.root, site_mod.SITE_DIR, site_mod.CONTENT_DIR)
+        os.makedirs(content, exist_ok=True)
+        with open(os.path.join(content, "intro.md"), "w", encoding="utf-8") as fh:
+            fh.write("The bracket holds a shelf.\n")
+        summary = self._build()
+        self.assertFalse([w for w in summary["warnings"] if "story" in w], summary["warnings"])
+        self.assertTrue(any("shows intro.md as its story" in n for n in summary["notices"]),
+                        summary["notices"])
+        with open(os.path.join(self.root, site_mod.SITE_DIR, site_mod.DATA_DIR,
+                               site_mod.PAGE_NAME), encoding="utf-8") as fh:
+            self.assertIsNotNone(json.load(fh)["intro"])
+
+
 class LocatorsAreReported(_SiteCase):
     """(c) A gate that thinks it is drawing and is not looks exactly like a gate
     that found nothing.
@@ -1266,12 +1528,47 @@ class VendorIsAllOrNothing(_SiteCase):
         leftovers = [n for n in os.listdir(site_dir) if n.startswith(".nopekit-vendor")]
         self.assertEqual(leftovers, [], f"staging directory left behind: {leftovers}")
 
+    def test_a_partial_vendor_names_what_it_is_missing(self):
+        """A `vendor/` that holds every file but one reads neither *vendored*
+        nor *from the CDN* (the page's probe finds vendor/ and loads from it):
+        `site status` and `doctor` name the missing path. What slipped through
+        (review of SPEC 40): the meshopt decoder joined `vendor_urls`, and
+        every site vendored before it read "from the CDN" while it loaded
+        vendor/ and 404'd offline on the one file nothing named."""
+        _capture(["site", "init", "-C", self.root])
+        self.assertEqual(_capture(["site", "build", "-C", self.root])[0], 0)
+        site_dir = os.path.join(self.root, site_mod.SITE_DIR)
+        missing = "vendor/jsm/libs/meshopt_decoder.module.js"
+        for relative in site_mod.vendor_urls():
+            if relative != missing:
+                path = os.path.join(site_dir, *relative.split("/"))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("// vendored\n")
+        code, out = _capture(["site", "status", "-C", self.root])
+        self.assertIn("partly vendored: site/vendor/ is missing "
+                      "jsm/libs/meshopt_decoder.module.js", out)
+        self.assertNotIn("from the CDN", out)
+        code, out = _capture(["site", "status", "--json", "-C", self.root])
+        info = json.loads(out)
+        self.assertFalse(info["vendored"])
+        self.assertEqual(info["vendor_missing"], [missing])
+        code, out = _capture(["doctor", "--json", "-C", self.root])
+        [row] = [r for r in json.loads(out)["checks"] if r["check"] == "site"]
+        self.assertEqual(row["status"], "warn", row)
+        self.assertIn("jsm/libs/meshopt_decoder.module.js", row["detail"])
+
     def test_the_pinned_urls_are_https_and_mirror_the_package_layout(self):
         """`GLTFLoader.js` imports `../utils/BufferGeometryUtils.js` relatively,
         so flattening the files 404s on an import the CDN copy resolves fine."""
         urls = site_mod.vendor_urls()
         self.assertTrue(all(u.startswith("https://") for u in urls.values()))
         self.assertIn("vendor/jsm/utils/BufferGeometryUtils.js", urls)
+        # The two pages: the viewer imports the meshopt decoder (a compressed
+        # GLB), so an offline site must carry it at the path the addon map gives.
+        self.assertIn("vendor/jsm/libs/meshopt_decoder.module.js", urls)
+        self.assertTrue(urls["vendor/jsm/libs/meshopt_decoder.module.js"].endswith(
+            "/examples/jsm/libs/meshopt_decoder.module.js"))
         self.assertTrue(all(site_mod.THREE_VERSION in u for u in urls.values()),
                         "an unpinned CDN URL is a build step somebody else controls")
 
@@ -1299,6 +1596,137 @@ class VendorIsAllOrNothing(_SiteCase):
         with self.assertRaises(NopekitError) as caught:
             cli_mod._fetch_vendor_file("https://cdn.example/three.module.js")
         self.assertIn("HTML", str(caught.exception))
+
+
+# --------------------------------------------------------------------------- #
+def _exports(source: str) -> set[str]:
+    """The names an ES module exports: `export function|const|let|class name`
+    and `export { a, b as c }`."""
+    names = set(re.findall(r"^export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+"
+                           r"([A-Za-z_$][\w$]*)", source, re.M))
+    for block in re.findall(r"^export\s*\{([^}]*)\}", source, re.M):
+        for part in block.split(","):
+            if part.strip():
+                names.add(part.split(" as ")[-1].strip())
+    return names
+
+
+def _viewer_members(source: str) -> set[str]:
+    """The members of the object `createViewer` returns (its `const api = {`
+    block): each `name(`, `get name(`, `name,` or `name:` that opens a line."""
+    body = source[source.index("export function createViewer("):]
+    block = body[body.index("\n  const api = {"):]
+    block = block[:block.index("\n  };")]
+    return set(re.findall(r"^\s{4}(?:get\s+)?([A-Za-z_$][\w$]*)\s*[(,:]", block, re.M))
+
+
+class TheTemplateModulesFit(unittest.TestCase):
+    """(the two pages) Every named import of a template module is something
+    that module exports, and every member a page calls on the 3D viewer is one
+    `createViewer` returns: the marketing page grew the viewer (progress, spin,
+    parts, tints), and the engineering page and the technical stage must still
+    find what they import. A planted rename is caught."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import _template
+        cls.js = _template.template_files(".js")
+
+    def problems(self, js: dict) -> list[str]:
+        out = []
+        for name, source in sorted(js.items()):
+            for names, target in re.findall(
+                    r'^import\s*\{([^}]*)\}\s*from\s*"(\.{1,2}/[^"]+)"', source, re.M):
+                path = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
+                if path not in js:
+                    out.append(f"{name}: imports {target}, which the template does not ship")
+                    continue
+                exported = _exports(js[path])
+                for wanted in (n.split(" as ")[0].strip() for n in names.split(",")):
+                    if wanted and wanted not in exported:
+                        out.append(f"{name}: imports {wanted} from {path}, which exports no "
+                                   f"such name")
+        members = _viewer_members(js["lib/viewer3d.js"])
+        for name in ("marketing.js", "page.js", "lib/stage.js"):
+            for receiver, member in re.findall(
+                    r"\b(api|viewer|mk\.viewer|page\.viewer)\.([A-Za-z_$][\w$]*)", js[name]):
+                if member not in members:
+                    out.append(f"{name}: calls {receiver}.{member}, which the viewer lacks")
+        return out
+
+    def test_every_import_and_viewer_call_resolves(self):
+        members = _viewer_members(self.js["lib/viewer3d.js"])
+        for member in ("setExplode", "isolate", "reset", "dispose", "isolateNodes", "tint",
+                       "clearTints", "setSpin", "pause", "canExplode", "movers"):
+            self.assertIn(member, members)
+        self.assertEqual(self.problems(self.js), [])
+
+    def test_a_planted_rename_is_caught(self):
+        for name, old, new in (
+                ("lib/stage.js", "export async function renderDiagram(", "export async function drawDiagram("),
+                ("lib/viewer3d.js", "    isolateNodes(names) {", "    showOnly(names) {"),
+                ("lib/viewer3d.js", "    setSpin(on) {", "    spin(on) {"),
+                ("lib/verdict.js", "export function verdictBlock(", "export function block(")):
+            with self.subTest(new):
+                self.assertIn(old, self.js[name])
+                planted = dict(self.js, **{name: self.js[name].replace(old, new)})
+                self.assertTrue(self.problems(planted), new)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):           # noqa: D401 - the one thing it does
+        return None
+
+
+def _answer(url: str) -> tuple[int, str]:
+    """``(status, Location)`` of a GET of ``url``, a redirect not followed."""
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(url, timeout=10) as response:
+            return response.status, response.headers.get("Location") or ""
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("Location") or ""
+
+
+class TheTwoPagesAreServed(_env.EnvCase):
+    """(the two pages) `site serve` answers `/engineering` and `/marketing`
+    with a redirect to the page's folder and the folder with the page, and
+    prints both addresses on a line after the ready line that never matches
+    `SERVE_READY_RE`, so the editor's launch entry still opens the one URL it
+    reads. *Rejected:* flat engineering.html and marketing.html, which the
+    standard library's server answers at `/engineering` with a 404."""
+
+    def test_the_pages_line_never_matches_the_ready_pattern(self):
+        url = "http://127.0.0.1:8000/"
+        line = site_mod.pages_line(url)
+        self.assertIsNone(re.search(site_mod.SERVE_READY_RE, line), line)
+        self.assertEqual(site_mod.page_urls(url),
+                         {"engineering": url + "engineering/", "marketing": url + "marketing/"})
+        for address in site_mod.page_urls(url).values():
+            self.assertIn(address, line)
+
+    @unittest.skipUnless(os.name == "posix", "--detach is POSIX only, and says so elsewhere")
+    def test_serve_answers_both_pages(self):
+        root = self.tmp()
+        store_mod.init(root, ProjectMeta(name="site-test", revision="v0.1"))
+        self.assertEqual(_capture(["site", "init", "-C", root])[0], 0)
+        home = self.tmp()
+        proc = _env.nopekit(["site", "serve", "-C", root, "--detach", "-p", "0"], cwd=root,
+                            home=home, timeout=60)
+        self.addCleanup(_env.nopekit, ["site", "serve", "-C", root, "--stop"], cwd=root,
+                        home=home, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        found = re.findall(site_mod.SERVE_READY_RE, proc.stdout)
+        self.assertEqual(len(found), 1, proc.stdout)
+        url = found[0]
+        self.assertIn(site_mod.pages_line(url), proc.stdout.splitlines())
+        for name in ("engineering", "marketing"):
+            with self.subTest(name):
+                status, location = _answer(f"{url}{name}")
+                self.assertEqual(status, 301, location)
+                self.assertTrue(location.endswith(f"/{name}/"), location)
+                self.assertEqual(_answer(f"{url}{name}/")[0], 200)
+        self.assertEqual(_answer(url)[0], 200)
 
 
 if __name__ == "__main__":

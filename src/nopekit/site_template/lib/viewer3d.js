@@ -21,7 +21,15 @@ let cached = null;
 
 /** Load three.js and the two addons, once. The specifiers are bare on purpose —
  *  `three/addons/…` resolves through the import map, which is what lets the same
- *  file work against the CDN and against a vendored copy without an edit. */
+ *  file work against the CDN and against a vendored copy without an edit.
+ *
+ *  The meshopt decoder is a third addon, imported on its own and caught on its
+ *  own: a GLB written with `EXT_meshopt_compression` cannot load without it,
+ *  and every other GLB does not need it. A failure there leaves `MeshoptDecoder`
+ *  null and the plain GLB loads as before. (What it closes: a GLB compressed
+ *  for the web failed in this viewer with the loader's own error, and inside
+ *  the `Promise.all` above a decoder that failed to import would have failed
+ *  every model with it.) */
 export async function loadThree() {
   if (!cached) {
     cached = (async () => {
@@ -30,7 +38,13 @@ export async function loadThree() {
         import("three/addons/controls/OrbitControls.js"),
         import("three/addons/loaders/GLTFLoader.js"),
       ]);
-      return { THREE, OrbitControls, GLTFLoader };
+      let MeshoptDecoder = null;
+      try {
+        ({ MeshoptDecoder } = await import("three/addons/libs/meshopt_decoder.module.js"));
+      } catch (err) {
+        MeshoptDecoder = null;                 // a plain GLB still loads
+      }
+      return { THREE, OrbitControls, GLTFLoader, MeshoptDecoder };
     })().catch((err) => { cached = null; throw err; });
   }
   return cached;
@@ -46,9 +60,17 @@ function sanitise(name) {
   return String(name).replace(/\s/g, "_").replace(/[.:/[\]]/g, "");
 }
 
-export function createViewer({ host, view, onSelect, onReady, onError }) {
+/** ``onProgress(loaded, total)`` follows the GLB's download (``total`` is 0
+ *  when the server sends no length); ``onSpinStop()`` runs when a pointer on
+ *  the model stops the spin that ``setSpin`` started. Both are optional, and a
+ *  caller that passes neither gets the viewer it had before (the front page's
+ *  hero and the technical stage). */
+export function createViewer({ host, view, onSelect, onReady, onError, onProgress, onSpinStop }) {
   const state = {
     explode: 0, isolate: null, wireframe: false,
+    isolateNodes: null,          // Set of Object3D, or null: `isolateNodes`
+    tints: new Map(),            // node name -> CSS colour: `tint`
+    paused: false,
     nodes: new Map(),            // name (and sanitised alias) -> Object3D
     movers: new Map(),           // mover name -> { offset, nodes }
     order: [],                   // mover names, stack order
@@ -65,26 +87,39 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
   let THREE, renderer, scene, camera, controls, root, raycaster, pointer;
   let dirty = true, frameHandle = 0;
   const basePos = new Map();     // Object3D -> original local position
-  const baseMat = new Map();     // Mesh -> original material
+  const baseMat = new Map();     // Mesh -> original material, for EVERY mesh
+  const clones = new Set();      // the materials this viewer cloned, disposed on restore
+  let home = null;               // the first framing's direction: `home()`
+  let shift = 0;                 // the share of the width the model moves right: `setFrameShift`
 
   const invalidate = () => { dirty = true; };
+
+  // A viewer disposed while it loads stops at the next await: it makes no
+  // renderer, fetches no model and calls no ``onError``, and a renderer made
+  // before the dispose is released. What slipped through (review of SPEC 40):
+  // disposed while three.js loaded (a live rebuild changed the view), it went
+  // on to make a WebGL renderer nothing disposed and fetch the whole GLB (6 MB
+  // for a drone), one leaked context each time against a browser cap near 16;
+  // and its late ``onError`` cleared the caller's NEW viewer.
+  const failed = (err) => { if (!state.disposed && onError) onError(err); };
 
   async function start() {
     let mods;
     try {
       mods = await loadThree();
     } catch (err) {
-      onError && onError(new Error(
+      failed(new Error(
         "three.js did not load (" + (err && err.message ? err.message : err) + "). " +
         "The page is offline, or something blocks the CDN. The command `nopekit site vendor` " +
         "puts a copy in site/vendor/, and the import map uses that copy first."));
       return;
     }
+    if (state.disposed) return;
     THREE = mods.THREE;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     } catch (err) {
-      onError && onError(new Error("this browser gave no WebGL context: " + (err && err.message ? err.message : err)));
+      failed(new Error("this browser gave no WebGL context: " + (err && err.message ? err.message : err)));
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -109,38 +144,62 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     pointer = new THREE.Vector2();
 
     try {
-      root = await loadModel(mods.GLTFLoader, view.src);
+      root = await loadModel(mods.GLTFLoader, mods.MeshoptDecoder, view.src);
     } catch (err) {
-      onError && onError(new Error(
+      failed(new Error(
         `the model at ${view.src} did not load (${err && err.message ? err.message : err}). ` +
         "The command `nopekit site build` writes it. When the file is missing, its viewgen " +
         "said that it is not available."));
+      return;
+    }
+    if (state.disposed) {
+      // dispose() ran during the download: release again what it may have
+      // missed, and the model that arrived after it.
+      controls.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
+      root.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
+        for (const m of [].concat(obj.material || [])) m.dispose && m.dispose();
+      });
       return;
     }
     scene.add(root);
     indexNodes();
     readExplodeManifest();
     frameAll();
+    home = camera.position.clone().sub(controls.target).normalize();
     state.ready = true;
     resize();
     loop();
     onReady && onReady(api);
   }
 
-  function loadModel(GLTFLoader, src) {
+  function loadModel(GLTFLoader, MeshoptDecoder, src) {
     return new Promise((resolve, reject) => {
-      new GLTFLoader().load(src, (gltf) => resolve(gltf.scene || gltf.scenes[0]), undefined, reject);
+      const loader = new GLTFLoader();
+      if (MeshoptDecoder) loader.setMeshoptDecoder(MeshoptDecoder);
+      const progress = onProgress
+        ? (ev) => onProgress(ev.loaded || 0, ev.lengthComputable ? ev.total : 0)
+        : undefined;
+      loader.load(src, (gltf) => resolve(gltf.scene || gltf.scenes[0]), progress, reject);
     });
   }
 
+  /** Every named node by name (and its sanitised alias), and the material of
+   *  EVERY mesh. The two walks are apart on purpose: a GLB mesh is often an
+   *  unnamed child of the named node a locator addresses, and when one walk
+   *  skipped the unnamed objects, their cloned highlight was never put back and
+   *  a second colour stacked on the first (review of the two pages). */
   function indexNodes() {
     root.traverse((obj) => {
+      if (obj.isMesh) baseMat.set(obj, obj.material);
       if (!obj.name) return;
       if (!state.nodes.has(obj.name)) state.nodes.set(obj.name, obj);
       const alias = sanitise(obj.name);
       if (alias !== obj.name && !state.nodes.has(alias)) state.nodes.set(alias, obj);
       basePos.set(obj, obj.position.clone());
-      if (obj.isMesh) baseMat.set(obj, obj.material);
     });
   }
 
@@ -219,7 +278,7 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
   // isolate / wireframe / highlight
   // ------------------------------------------------------------------- //
   function applyVisibility() {
-    const keep = state.isolate ? new Set(objectsFor(state.isolate)) : null;
+    const keep = state.isolateNodes || (state.isolate ? new Set(objectsFor(state.isolate)) : null);
     root.traverse((obj) => {
       if (!obj.isMesh) return;
       obj.visible = !keep || inSet(obj, keep);
@@ -237,12 +296,21 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
    *  glTF exporters share one material across many nodes, and writing to the
    *  shared instance lights up every part that happens to be the same plastic —
    *  a highlight that names three parts and colours nine is worse than none,
-   *  because the reader goes and inspects the six that are fine. */
+   *  because the reader goes and inspects the six that are fine.
+   *
+   *  One pass paints both layers from the originals: every mesh gets its own
+   *  material back and every clone of the last pass is disposed, then the
+   *  presentation colours (`tint`), then the highlights. A highlight is painted
+   *  last and from the ORIGINAL material, so a colour a reader chose never
+   *  sits under a verdict's tint, and neither layer stacks on itself. */
   function applyHighlights() {
     for (const [obj, material] of baseMat) {
       obj.material = material;
       material.wireframe = state.wireframe;
     }
+    for (const clone of clones) clone.dispose && clone.dispose();
+    clones.clear();
+    const painted = new Set();
     for (const [name, severity] of state.highlights) {
       for (const obj of objectsFor(name)) {
         obj.traverse((child) => {
@@ -255,10 +323,37 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
           else if (clone.color) clone.color = colour;
           clone.wireframe = state.wireframe;
           child.material = clone;
+          clones.add(clone);
+          painted.add(child);
+        });
+      }
+    }
+    for (const [name, css] of state.tints) {
+      for (const obj of nodesFor([name])) {
+        obj.traverse((child) => {
+          if (!child.isMesh || painted.has(child)) return;
+          const source = baseMat.get(child) || child.material;
+          const clone = source.clone();
+          if (clone.color) clone.color = new THREE.Color(css);
+          clone.wireframe = state.wireframe;
+          child.material = clone;
+          clones.add(clone);
+          painted.add(child);
         });
       }
     }
     invalidate();
+  }
+
+  /** Objects for a list of node names: the node itself when it is there, else
+   *  a mover of that name. What a part row of a view's `meta.parts` names. */
+  function nodesFor(names) {
+    const out = [];
+    for (const name of names || []) {
+      const obj = lookup(name);
+      if (obj) out.push(obj); else out.push(...objectsFor(name));
+    }
+    return out;
   }
 
   // ------------------------------------------------------------------- //
@@ -291,6 +386,25 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
   }
 
   function frameAll() { frameObjects(null); }
+
+  /** Back to the first framing's angle and distance. */
+  function goHome() {
+    if (!state.ready || !home) return;
+    camera.position.copy(controls.target).add(home);
+    frameAll();
+  }
+
+  /** Move the model right on the canvas by ``fraction`` of its width, so copy
+   *  set over the left of a full-width viewer does not cover it. A view offset
+   *  on the camera, so a pick and a pin read the same projection. */
+  function applyShift() {
+    if (!camera) return;
+    const w = canvasHost.clientWidth || 1;
+    const h = canvasHost.clientHeight || 1;
+    if (shift) camera.setViewOffset(w, h, -shift * w, 0, w, h);
+    else camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+  }
 
   // ------------------------------------------------------------------- //
   // pins
@@ -367,7 +481,7 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
   // loop and events
   // ------------------------------------------------------------------- //
   function loop() {
-    if (state.disposed) return;
+    if (state.disposed || state.paused) { frameHandle = 0; return; }
     frameHandle = requestAnimationFrame(loop);
     const moved = controls.update();          // damping: true while it coasts
     if (!dirty && !moved) return;
@@ -383,11 +497,20 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    applyShift();
     invalidate();
   }
 
   const observer = new ResizeObserver(resize);
   observer.observe(canvasHost);
+
+  // A hand on the model stops the spin: a reader who grabs a turning model
+  // means to look at one side of it.
+  canvasHost.addEventListener("pointerdown", () => {
+    if (!controls || !controls.autoRotate) return;
+    controls.autoRotate = false;
+    onSpinStop && onSpinStop();
+  });
 
   canvasHost.addEventListener("pointerdown", (ev) => {
     if (!state.ready || ev.button !== 0) return;
@@ -423,7 +546,7 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     get missing() { return Array.from(state.missing); },
     setExplode(t) { state.explode = Math.max(0, Math.min(1, Number(t) || 0)); applyExplode(); },
     setWireframe(on) { state.wireframe = !!on; applyHighlights(); applyVisibility(); },
-    isolate(name) { state.isolate = name || null; applyVisibility(); if (name) frameObjects(objectsFor(name)); else frameAll(); },
+    isolate(name) { state.isolate = name || null; state.isolateNodes = null; applyVisibility(); if (name) frameObjects(objectsFor(name)); else frameAll(); },
     get isolated() { return state.isolate; },
     highlight(map) { state.highlights = new Map(map || []); applyHighlights(); },
     frame(names) {
@@ -432,8 +555,51 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
     },
     frameAll,
     setPins,
+    /** Show only the objects of ``names`` (node names, or movers), framed;
+     *  null shows every part again. A part or a group of a view's `meta` is
+     *  a list of nodes, which `isolate` (one mover or one node) cannot take. */
+    isolateNodes(names) {
+      const objects = names && names.length ? nodesFor(names) : [];
+      state.isolateNodes = objects.length ? new Set(objects) : null;
+      state.isolate = null;
+      applyVisibility();
+      if (objects.length) frameObjects(objects); else frameAll();
+    },
+    /** A presentation colour on the nodes ``names`` (a CSS colour), or null
+     *  to give them their own colour back. It changes this page and nothing
+     *  else; a highlight always paints over it. */
+    tint(names, colour) {
+      for (const name of names || []) {
+        if (colour) state.tints.set(String(name), String(colour));
+        else state.tints.delete(String(name));
+      }
+      if (state.ready) applyHighlights();
+    },
+    clearTints() { state.tints = new Map(); if (state.ready) applyHighlights(); },
+    /** Turn the model slowly (OrbitControls' own auto-rotate), or stop. */
+    setSpin(on) {
+      if (!controls) return;
+      controls.autoRotate = !!on;
+      controls.autoRotateSpeed = 1.1;
+      invalidate();
+    },
+    get spinning() { return !!(controls && controls.autoRotate); },
+    /** Stop drawing (a viewer out of sight, a hidden tab) or go on. */
+    pause(on) {
+      const was = state.paused;
+      state.paused = !!on;
+      if (was && !state.paused && state.ready && !state.disposed && !frameHandle) { invalidate(); loop(); }
+    },
+    /** The share of the width the model moves right (0 to 0.4). */
+    setFrameShift(fraction) {
+      shift = Math.max(0, Math.min(0.4, Number(fraction) || 0));
+      applyShift();
+      invalidate();
+    },
+    home: goHome,
     reset() {
-      state.explode = 0; state.isolate = null; state.wireframe = false; state.highlights = new Map();
+      state.explode = 0; state.isolate = null; state.isolateNodes = null; state.wireframe = false;
+      state.highlights = new Map(); state.tints = new Map();
       applyExplode(); applyHighlights(); applyVisibility(); frameAll();
     },
     resize,
@@ -443,6 +609,8 @@ export function createViewer({ host, view, onSelect, onReady, onError }) {
       observer.disconnect();
       controls && controls.dispose();
       renderer && renderer.dispose();
+      for (const clone of clones) clone.dispose && clone.dispose();
+      clones.clear();
       for (const [, material] of baseMat) material && material.dispose && material.dispose();
       renderer && renderer.domElement.remove();
     },

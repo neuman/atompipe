@@ -66,8 +66,18 @@ function renderRun(run, notices, onClaim) {
   if (run.code) node = el("code", { class: "mono" }, node);
   if (run.b) node = el("b", {}, node);
   if (run.i) node = el("i", {}, node);
-  if (run.href) node = el("a", { href: run.href }, node);
+  if (run.href) node = el("a", { href: pageHref(run.href) }, node);
   return node;
+}
+
+/** A prose link as the page must write it. Both pages sit one folder down
+ *  under `<base href="../">`, so a bare `#board-x` would resolve against the
+ *  site's root and leave the page (the root is a redirect, or a front page
+ *  from before the two pages). A same-page anchor keeps the page's own path;
+ *  every other link is left as the text wrote it. */
+function pageHref(href) {
+  const text = String(href);
+  return text.startsWith("#") ? `${location.pathname}${text}` : text;
 }
 
 /** One section per board, in the baked order. */
@@ -91,7 +101,7 @@ export function renderSections(page, { onClaim } = {}) {
         el("h2", { text: sec.title || sec.board }),
         el("div", { class: "sec-status" },
           tokenChip(sec.token, sec.word, { errored: sec.errored, marks: sec.marks,
-            notices: words.notices }),
+            notices: words.notices, trace: words.trace, group: true }),
           (sec.tally || []).length
             ? el("span", { class: "sec-tally" }, ...sec.tally.map((t) => el("span", {
                 class: `tally-item tone-${lookOf(t.key, { errored: t.errored > 0 }).tone}` },
@@ -115,12 +125,13 @@ export function renderNext(page, { onClaim } = {}) {
   const headings = ((page && page.words) || {}).headings || {};
   const out = [];
   const notices = ((page && page.words) || {}).notices || {};
-  for (const group of next.milestones || []) out.push(stepGroup(group, onClaim, "", notices));
-  if (next.project) out.push(stepGroup(next.project, onClaim, headings.project, notices));
+  const trace = ((page && page.words) || {}).trace || {};
+  for (const group of next.milestones || []) out.push(stepGroup(group, onClaim, "", notices, trace));
+  if (next.project) out.push(stepGroup(next.project, onClaim, headings.project, notices, trace));
   if ((next.open || []).length) {
     out.push(el("div", { class: "card step-card" },
       el("h3", { text: headings.open || "" }),
-      el("ol", { class: "steps" }, ...next.open.map((step) => stepRow(step, onClaim, notices)))));
+      el("ol", { class: "steps" }, ...next.open.map((step) => stepRow(step, onClaim, notices, trace)))));
   }
   if ((next.rebuild || []).length) {
     out.push(el("div", { class: "card step-card" },
@@ -133,7 +144,7 @@ export function renderNext(page, { onClaim } = {}) {
   return out;
 }
 
-function stepGroup(group, onClaim, title, notices) {
+function stepGroup(group, onClaim, title, notices, trace) {
   const look = lookOf(group.token);
   return el("div", { class: `card step-card${group.next ? " is-next" : ""}` },
     el("div", { class: "step-head" },
@@ -144,7 +155,7 @@ function stepGroup(group, onClaim, title, notices) {
     group.description ? el("p", { class: "muted", text: group.description }) : null,
     group.sentence ? el("p", { class: "step-sentence", text: group.sentence }) : null,
     (group.steps || []).length
-      ? el("ol", { class: "steps" }, ...group.steps.map((step) => stepRow(step, onClaim, notices)))
+      ? el("ol", { class: "steps" }, ...group.steps.map((step) => stepRow(step, onClaim, notices, trace)))
       : null,
     (group.missing || []).length
       ? el("ul", { class: "steps" }, ...group.missing.map((m) => el("li", { class: "step tone-bad" },
@@ -152,11 +163,11 @@ function stepGroup(group, onClaim, title, notices) {
       : null);
 }
 
-function stepRow(step, onClaim, notices) {
+function stepRow(step, onClaim, notices, trace) {
   return el("li", { class: "step" },
     el("div", { class: "step-top" },
       tokenChip(step.token, step.word, { errored: step.errored, small: true, marks: step.marks,
-        notices }),
+        notices, trace }),
       el("button", { class: "linkish mono", type: "button", text: step.claim,
         onclick: () => onClaim && onClaim(step.claim) }),
       el("span", { class: "step-stmt", text: step.statement || "" })),

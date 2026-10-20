@@ -881,6 +881,8 @@ FAST: list[str] = [
     "test_requirements.EveryReaderAgreesOnARequirement.test_a_requirement_reader_that_drops_the_disagreement_is_caught",
     "test_requirements.EveryReaderAgreesOnARequirement.test_a_capped_line_names_the_worst_first",
     "test_requirements.EveryReaderAgreesOnARequirement.test_a_line_cut_in_record_order_is_caught",
+    # The two pages: a planted card producer, baked in process over the small world.
+    "test_requirements.EveryReaderAgreesOnARequirement.test_a_marketing_card_that_says_more_is_caught",
     "test_requirements.ReadinessStaysTheClaims",
     "test_records.RequirementsAreRecords.test_the_strict_reader",
     "test_records.RequirementsAreRecords.test_a_claims_pointers",
@@ -996,6 +998,8 @@ FAST: list[str] = [
     "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_regroup_flags_the_board",
     "test_site_truth.StampedProseIsFlaggedWhenBehind.test_unstamped_text_is_flagged",
     "test_site_truth.StampedProseIsFlaggedWhenBehind.test_a_planted_stamp_state_is_named",
+    # The two pages: the story stamped like the intro, in process on the shared bracket.
+    "test_site_truth.StampedProseIsFlaggedWhenBehind.test_the_story_is_stamped_and_flagged_like_the_intro",
     "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_the_precision_rule",
     "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_what_is_scanned_and_what_is_not",
     "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_the_prose_never_matches_itself",

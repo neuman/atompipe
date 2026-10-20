@@ -260,6 +260,7 @@ def disagreement_problems(ledger: Ledger, registry: Any,
     page = {r["id"]: r.get("disagree") for r in state["requirements"]}
     rows = {r["id"]: r.get("disagree")
             for r in cli_mod._requirement_rows(ledger, composed, registry)}
+    cards, _nodes = _cards(ledger, registry)
     for rid, cids in want.items():
         if said not in items.get(rid, "") or any(c not in items[rid] for c in cids):
             out.append(f"status: {rid} reads {items.get(rid)!r}")
@@ -273,7 +274,21 @@ def disagreement_problems(ledger: Ledger, registry: Any,
         why = decisions_mod.why(ledger, rid, composed=composed)
         if f"{said} on {', '.join(cids)}" not in why:
             out.append(f"why: {rid} names no disagreement")
+        if "disagree" not in cards.get(rid, {}).get("marks", ()):
+            out.append(f"page.json: {rid} marks {cards.get(rid, {}).get('marks')!r}")
     return out
+
+
+def _cards(ledger: Ledger, registry: Any) -> tuple[dict, dict]:
+    """``(cards, nodes)``: the marketing page's requirement cards (`page.json`'s
+    ``requirements``, the two pages) and the map's requirement nodes, each
+    ``{id: row}``, baked in process as `site build` bakes them."""
+    import test_site_truth
+    baked = test_site_truth.bake(ledger, test_site_truth._Res(stale_gates=frozenset()),
+                                 registry)
+    cards = {r["id"]: r for r in baked.page_doc["requirements"]}
+    nodes = {n["key"]: n for n in baked.map_doc["nodes"] if n["kind"] == "requirement"}
+    return cards, nodes
 
 
 def _many_world(*, failing_from: int = 9) -> tuple[Ledger, Any]:
@@ -394,6 +409,20 @@ def agreement_problems(ledger: Ledger, registry: Any) -> list[str]:
         head = decisions_mod.why(ledger, requirement.id, composed=composed).splitlines()[0]
         if not head.endswith(f"[{want[requirement.id]}]"):
             out.append(f"why {requirement.id}: {head!r}")
+    # The marketing page's cards (the two pages): in the records' order, each
+    # the producer's token and its map node's token, word and marks.
+    cards, nodes = _cards(ledger, registry)
+    if list(cards) != [r.id for r in ledger.requirements]:
+        out.append(f"page.json cards {list(cards)}, the records {[r.id for r in ledger.requirements]}")
+    for rid, r in found.items():
+        token = "errored" if r.errored else claims_mod.STATUS_KEY[r.status]
+        card = cards.get(rid) or {}
+        if card.get("token") != token:
+            out.append(f"page.json: {rid} reads {card.get('token')!r}, the producer {token!r}")
+        node = nodes.get(rid) or {}
+        if [card.get(k) for k in ("token", "word", "marks", "errored")] != [
+                node.get(k) for k in ("token", "word", "marks", "errored")]:
+            out.append(f"page.json: {rid} card {card!r} is not its map node {node!r}")
     return out
 
 
@@ -454,6 +483,22 @@ class EveryReaderAgreesOnARequirement(_env.EnvCase):
 
         with mock.patch.object(report_mod, "_section_requirements", first_claim):
             self.assertTrue(agreement_problems(ledger, reg))
+
+    def test_a_marketing_card_that_says_more_is_caught(self):
+        """(the two pages) A page producer whose requirement card says checked
+        over R1's failing claim, or drops its node's marks, is caught by the
+        test's own reading of the card beside the producer and the map node."""
+        from nopekit import page as page_mod
+        ledger, reg = _small_world()
+        real = page_mod.requirement_row
+        for name, lie in (("token", {"token": "checked", "word": "checked"}),
+                          ("marks", {"marks": ["disagree"]})):
+            with self.subTest(name), mock.patch.object(
+                    page_mod, "requirement_row",
+                    lambda node, lie=lie: dict(real(node), **lie) if node["key"] == "R1"
+                    else real(node)):
+                found = agreement_problems(ledger, reg)
+            self.assertTrue([p for p in found if p.startswith("page.json: R1")], found)
 
     def test_a_disagreeing_claim_is_named_under_its_requirement(self):
         """D18 carried up (review of phase 1): a resolver that calls failing C2

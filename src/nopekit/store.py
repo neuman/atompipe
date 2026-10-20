@@ -1468,13 +1468,15 @@ def _check_requirement(label: str, stem: str, data: dict) -> None:
 #: reasons (a shell need not quote it, and two ids never differ by case alone).
 GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
-#: The page owns these names: site/content/intro.md, next.md, and the board of
-#: claims on no board. Refused for every kind, so `site stamp <id>` and an
-#: anchor are never a guess. *Rejected:* reserving them for boards only (a zone
-#: named `intro` would still take the prose file's name in `why`).
+#: The page owns these names: site/content/intro.md, next.md, story.md (the
+#: marketing page's story, from the two pages: `page.PROSE_SUBJECTS`), and the
+#: board of claims on no board. Refused for every kind, so `site stamp <id>` and
+#: an anchor are never a guess. *Rejected:* reserving them for boards only (a
+#: zone named `intro` would still take the prose file's name in `why`).
 RESERVED_GROUP_IDS: dict[str, str] = {
     "intro": "the page's description (site/content/intro.md)",
     "next": "the page's next steps (site/content/next.md)",
+    "story": "the marketing page's story (site/content/story.md)",
     "other": "the board for claims on no board",
 }
 

@@ -22,6 +22,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_site_truth.p
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import dataclasses
 import io
@@ -185,6 +186,8 @@ def disagreements(baked: Baked) -> list[str]:
         elif node["kind"] == "requirement":
             check(f"requirement:{node['key']}", node["token"],
                   toks.requirements.get(node["key"]))
+            check(f"requirement:{node['key']} marks", "disagree" in node["marks"],
+                  _requirement_disagrees(view, toks, node["key"]))
     for line in baked.map_doc["lines"]:
         check(f"line {line['claim']}", line["token"], want[line["claim"]])
     for cid, row in baked.page_doc["claims"].items():
@@ -247,6 +250,86 @@ def disagreements(baked: Baked) -> list[str]:
             check(f"step {step['claim']}", step["token"], want[step["claim"]])
             check(f"step {step['claim']} marks", "disagree" in step["marks"],
                   step["claim"] in disagree)
+    out += _two_pages_disagreements(baked, want, word, check)
+    return out
+
+
+def _requirement_disagrees(view: Any, toks: Any, rid: str) -> bool:
+    """Whether requirement ``rid`` carries the disagree mark, computed here: its
+    own status and evidence disagree, or a claim that serves it does."""
+    disagree = set(toks.disagree.get("claims") or ())
+    serving = {c.id for c in view.claims if rid in (getattr(c, "requirements", None) or ())}
+    return rid in set(toks.disagree.get("requirements") or ()) or bool(serving & disagree)
+
+
+def _two_pages_disagreements(baked: Baked, want: dict, word: dict, check: Any) -> list[str]:
+    """The marketing page's rows (the two pages), computed here: each
+    requirement card in the map's order with the map's token, word and mark;
+    the headline the first sentence of the readiness sentence, saying *NOT
+    ready* exactly when the predicate does; each decision's claim chips the
+    claims' tokens; each rejection's type, preference and return tokens the
+    producer's (`claims.rejection_rows`), and a type word that says *recorded
+    by* only over a recorded preference."""
+    out: list[str] = []
+
+    def mine(where: str, said: Any, expected: Any) -> None:
+        if said != expected:
+            out.append(f"{where}: {said!r}, expected {expected!r}")
+
+    composed, view, toks, page_doc = baked.composed, baked.view, baked.toks, baked.page_doc
+    disagree = set(toks.disagree.get("claims") or ())
+    mine("requirement cards", [r["id"] for r in page_doc["requirements"]],
+         [n["key"] for n in sorted((n for n in baked.map_doc["nodes"]
+                                    if n["kind"] == "requirement"), key=lambda n: n["order"])])
+    for row in page_doc["requirements"]:
+        rid = row["id"]
+        mine(f"requirement card {rid}", row["token"], toks.requirements.get(rid))
+        mine(f"requirement card {rid} word", row["word"], word.get(row["token"]))
+        mine(f"requirement card {rid} marks", "disagree" in row["marks"],
+             _requirement_disagrees(view, toks, rid))
+    verdict = page_doc["verdict"]
+    # The headline is required, the tally counts every claim at its status and
+    # the limits line says what Checked does not mean, computed here (review of
+    # SPEC 40: a page with no headline, a one-chip tally or an empty limits
+    # line read current).
+    headline, sentence = verdict.get("headline") or "", verdict.get("sentence") or ""
+    found = claims_mod.unresolved(view, composed)
+    mine("headline present", bool(headline), True)
+    tally = [t for t in verdict.get("tally") or () if isinstance(t, dict)]
+    mine("tally counts every claim", sum(int(t.get("n") or 0) for t in tally), len(composed))
+    mine("tally's checked", sum(int(t.get("n") or 0) for t in tally if t.get("key") == "checked"),
+         collections.Counter(want.values())["checked"])
+    limits = str(verdict.get("limits") or "")
+    mine("limits says Checked does not mean true", "Checked does not mean true" in limits, True)
+    mine("limits names the claims it covers", f" {len(view.claims)} claim" in limits, True)
+    mine("headline is the sentence's start", sentence.startswith(headline), True)
+    mine("headline ends a sentence", headline.endswith(".")
+         and sentence[len(headline):len(headline) + 1] in ("", " "), True)
+    mine("headline says NOT ready", "NOT ready" in headline, not found.ready)
+    rows = {(r.decision, r.index): r for r in claims_mod.rejection_rows(view, composed)}
+    for decision in page_doc["decisions"]:
+        for chip in decision["claims"]:
+            cid = chip["claim"]
+            mine(f"decision {decision['id']} chip {cid}", chip["token"], want.get(cid))
+            mine(f"decision {decision['id']} chip {cid} word", chip["word"],
+                 word.get(chip["token"]))
+            mine(f"decision {decision['id']} chip {cid} marks", "disagree" in chip["marks"],
+                 cid in disagree)
+        for i, item in enumerate(decision["rejected"]):
+            where = f"decision {decision['id']} rejection {i}"
+            row = rows.get((decision["id"], i))
+            if row is None:
+                out.append(f"{where}: no record")
+                continue
+            recorded = row.preference is not None and row.preference.state == "recorded"
+            mine(f"{where} type", item["type"], row.type)
+            mine(f"{where} preference", item["preference"],
+                 row.preference.state if row.preference is not None else None)
+            mine(f"{where} return", item["returns"], row.returns.state)
+            mine(f"{where} says recorded by", ", recorded by " in (item["type_word"] or ""),
+                 recorded)
+            mine(f"{where} says not recorded by", ", not recorded by " in (item["type_word"] or ""),
+                 row.type == "preferred_against" and not recorded)
     return out
 
 
@@ -287,6 +370,17 @@ def _snapshot(folder: str) -> dict:
             with open(path, "rb") as fh:
                 found[os.path.relpath(path, folder)] = (fh.read(), os.stat(path).st_mtime_ns)
     return found
+
+
+def _card(page_doc: dict, rid: str) -> dict:
+    """The marketing page's requirement card ``rid``."""
+    return next(r for r in page_doc["requirements"] if r["id"] == rid)
+
+
+def _preferred(page_doc: dict) -> dict:
+    """The bracket's preferred_against rejection on the marketing page."""
+    return next(item for d in page_doc["decisions"] for item in d["rejected"]
+                if item["type"] == "preferred_against")
 
 
 # --------------------------------------------------------------------------- #
@@ -441,6 +535,40 @@ class TheSiteNeverSaysMoreThanTheResolution(_env.EnvCase):
             "floor word": lambda m, p: p["claims"]["C1"].update(word="checked"),
             "step mark": lambda m, p: p["next"]["milestones"][0]["steps"][0].update(
                 marks=["disagree"]),
+            # The marketing page's rows (the two pages): a requirement card, a
+            # decision's claim chip, the headline and a rejection, each lying.
+            "requirement mark": lambda m, p: next(n for n in m["nodes"]
+                                                  if n["key"] == "R1").update(marks=["disagree"]),
+            "requirement card token": lambda m, p: _card(p, "R1").update(token="checked"),
+            "requirement card word": lambda m, p: _card(p, "R1").update(word="checked"),
+            "requirement card mark": lambda m, p: _card(p, "R1").update(marks=["disagree"]),
+            "decision chip token": lambda m, p: p["decisions"][0]["claims"][0].update(
+                token="gap"),
+            "decision chip says C1 checked": lambda m, p: p["decisions"][0]["claims"].append(
+                {"claim": "C1", "token": "checked", "word": "checked", "errored": False,
+                 "marks": []}),
+            "decision chip mark": lambda m, p: p["decisions"][0]["claims"][0].update(
+                marks=["disagree"]),
+            "headline says ready": lambda m, p: p["verdict"].update(
+                headline=p["verdict"]["headline"].replace("NOT ready.",
+                                                          "ready, as last evaluated.")),
+            "headline not a prefix": lambda m, p: p["verdict"].update(
+                headline="The bracket is NOT ready."),
+            # Review of SPEC 40: the headline held only when baked, the tally
+            # and the limits line not at all; each read current resealed.
+            "headline dropped, sentence says ready": lambda m, p: (
+                p["verdict"].pop("headline"), p["verdict"].update(
+                    sentence="v0.1 is ready, as last evaluated. Every required claim is "
+                             "checked on the current design.")),
+            "tally one chip": lambda m, p: p["verdict"].update(tally=[
+                {"key": "checked", "status": "pass", "n": 7, "errored": 0,
+                 "label": "7 checked"}]),
+            "limits dropped": lambda m, p: p["verdict"].update(limits=""),
+            "rejection recorded before prefer": lambda m, p: _preferred(p).update(
+                type_word="Preferred against, recorded by Robin Okafor (2026-10-15T00:00:00Z)"),
+            "rejection preference": lambda m, p: _preferred(p).update(preference="recorded"),
+            "rejection return token": lambda m, p: _preferred(p).update(returns="holds"),
+            "rejection type token": lambda m, p: _preferred(p).update(type="infeasible"),
         }
         for name, plant in plants.items():
             with self.subTest(name):
@@ -555,8 +683,12 @@ def stamp_problems(baked: Baked, root: str) -> list[str]:
         pieces.append(("intro", baked.page_doc["intro"]))
     if baked.page_doc["next"]["prose"]:
         pieces.append(("next", baked.page_doc["next"]["prose"]))
+    # The marketing page's story (the two pages) is stamped against the
+    # intro's tokens: every claim, readiness and every milestone.
+    if baked.page_doc["story"]:
+        pieces.append(("story", baked.page_doc["story"]))
     for subject, piece in pieces:
-        if subject in ("intro", "next"):
+        if subject in ("intro", "next", "story"):
             tokens = {cid: tok(cid) for cid in baked.toks.claims}
             tokens["_readiness"] = baked.toks.readiness
             tokens.update({f"_m:{m}": t for m, t in baked.toks.milestones.items()})
@@ -612,7 +744,7 @@ class StampedProseIsFlaggedWhenBehind(_env.EnvCase):
         baked, rows = self._bake()
         self.assertEqual({r["subject"]: r["stamp"] for r in rows},
                          {s: "current" for s in ("intro", "next", "outdoors", "prints",
-                                                  "pump", "strength")},
+                                                  "pump", "story", "strength")},
                          "the bracket's text is stamped: `nopekit site stamp --all`")
         self.assertEqual(stamp_problems(baked, self.root), [])
         self.assertEqual([s["prose"]["notice"] for s in baked.page_doc["sections"]],
@@ -631,6 +763,7 @@ class StampedProseIsFlaggedWhenBehind(_env.EnvCase):
         self.assertEqual(states["strength"], "stale")
         self.assertEqual(states["outdoors"], "current")
         self.assertEqual(states["intro"], "stale", "intro reads every claim's token")
+        self.assertEqual(states["story"], "stale", "the story reads every claim's token")
         section = next(s for s in baked.page_doc["sections"] if s["board"] == "strength")
         self.assertEqual(section["prose"]["notice"],
                          report.HUMAN["site"]["notices"]["prose_stale"])
@@ -691,6 +824,61 @@ class StampedProseIsFlaggedWhenBehind(_env.EnvCase):
         self.assertEqual({r["subject"]: r["stamp"] for r in rows}, {"prints": "stale"})
         self.assertEqual(stamp_problems(baked, folder), [])
 
+    def test_the_story_is_stamped_and_flagged_like_the_intro(self):
+        """(the two pages) The marketing page's story is stamped against the
+        intro's tokens (every claim, readiness, every milestone), computed here:
+        unstamped it reads unstamped, stamped it reads current, and once a claim
+        it never names moves it reads stale with the notice; a baked page that
+        shows that stale story as current is named by the checker. In process,
+        over a content folder of its own beside the shared bracket."""
+        folder = self.tmp()
+        path = os.path.join(folder, "site", "content", "story.md")
+        body = "The bracket holds a pump on a shelf.\n"
+        baked = bake_project(self.root)
+        notices = report.HUMAN["site"]["notices"]
+        _write(path, body)
+        rows = page.bake_prose(folder, baked.page_doc, baked.lay, baked.toks,
+                               prose.number_pool([baked.map_doc]))
+        self.assertEqual({r["subject"]: r["stamp"] for r in rows}, {"story": "unstamped"})
+        self.assertEqual(baked.page_doc["story"]["notice"], notices["prose_unstamped"])
+        self.assertEqual(stamp_problems(baked, folder), [])
+        tokens = {cid: t for cid, t in baked.toks.claims.items()}
+        tokens["_readiness"] = baked.toks.readiness
+        tokens.update({f"_m:{m}": t for m, t in baked.toks.milestones.items()})
+        self.assertEqual(tokens, page.subject_tokens("intro", baked.lay.boards, baked.toks))
+        _write(path, prose.stamp_text(body, prose.stamp_digest("story", tokens)))
+        baked = bake_project(self.root)
+        rows = page.bake_prose(folder, baked.page_doc, baked.lay, baked.toks,
+                               prose.number_pool([baked.map_doc]))
+        self.assertEqual({r["subject"]: r["stamp"] for r in rows}, {"story": "current"})
+        self.assertEqual(baked.page_doc["story"]["notice"], "")
+        real = graph.tokens
+
+        def flipped(*a, **kw):
+            found = real(*a, **kw)
+            return found._replace(claims={**found.claims, "C7": "checked"})
+
+        with mock.patch.object(graph, "tokens", flipped):
+            baked = bake_project(self.root)
+        rows = page.bake_prose(folder, baked.page_doc, baked.lay, baked.toks,
+                               prose.number_pool([baked.map_doc]))
+        self.assertEqual({r["subject"]: r["stamp"] for r in rows}, {"story": "stale"})
+        self.assertEqual(baked.page_doc["story"]["notice"], notices["prose_stale"])
+        self.assertEqual(stamp_problems(baked, folder), [])
+        with open(path, encoding="utf-8") as fh:
+            as_of = {"story": prose.parse_front_matter(fh.read()).as_of}
+
+        def problems(doc: dict) -> list:
+            return [p for p in page.status_problems(
+                baked.map_doc, doc, baked.view, baked.composed, baked.toks,
+                prose_as_of=as_of, pool=prose.number_pool([baked.map_doc]))
+                if p.startswith("prose")]
+
+        self.assertEqual(problems(baked.page_doc), [])
+        planted = json.loads(json.dumps(baked.page_doc))
+        planted["story"].update(stamp="current", notice="")
+        self.assertTrue(problems(planted), "a stale story baked as current was not named")
+
     def test_site_stamp_stamps_a_named_claim_too(self):
         """`site stamp prints` over text that names C1 writes the digest the
         build reads current: the command and the build stamp one set."""
@@ -727,6 +915,7 @@ class StampedProseIsFlaggedWhenBehind(_env.EnvCase):
         for section in bare["sections"]:
             section["prose"] = None
         bare["intro"] = None
+        bare["story"] = None
         bare["next"]["prose"] = None
         pool = prose.number_pool([baked.map_doc, bare])
         with open(os.path.join(self.root, "site", "content", "strength.md"),
@@ -1262,6 +1451,10 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
     def test_the_template_computes_no_truth(self):
         self.assertIn("lib/map.js", self.sources)
         self.assertIn("page.js", self.sources)
+        # The two pages: the marketing page's script and the modules the two
+        # pages share are scanned like the front page's.
+        for name in ("marketing.js", "lib/verdict.js", "lib/theme.js", "lib/banner.js"):
+            self.assertIn(name, self.sources)
         self.assertEqual(browser_truth(self.sources), [])
 
     def test_a_planted_violator_of_each_rule_is_caught(self):
@@ -1337,9 +1530,10 @@ if __name__ == "__main__":
 
 
 # --------------------------------------------------------------------------- #
-def chip_calls_without_marks(sources: dict) -> list[str]:
+def chip_calls_without_marks(sources: dict, name: str = "marks") -> list[str]:
     """Each `tokenChip(` call (in code, comments and strings blanked) whose
-    arguments never name `marks`: a token drawn without the bake's marks."""
+    arguments never name `name`: a token drawn without the bake's marks, or
+    (``name="trace"``) without the words that label its amber mark."""
     import _template
     out = []
     for path, text in sources.items():
@@ -1352,9 +1546,9 @@ def chip_calls_without_marks(sources: dict) -> list[str]:
             while depth and at < len(code):
                 depth += {"(": 1, ")": -1}.get(code[at], 0)
                 at += 1
-            if "marks" not in code[found.end():at]:
+            if not re.search(rf"\b{name}\b", code[found.end():at]):
                 line = code.count("\n", 0, found.start()) + 1
-                out.append(f"{path}:{line}: tokenChip without marks")
+                out.append(f"{path}:{line}: tokenChip without {name}")
     return out
 
 
@@ -1395,6 +1589,28 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertEqual(len(chip_calls_without_marks(planted)), 1)
         format_js = self.js["lib/format.js"]
         self.assertIn('marks || []).includes("disagree")', format_js)
+        # The amber mark, on every chip. What slipped through (review of SPEC
+        # 40): tokenChip drew `disagree` alone, so the marketing page, with no
+        # map and no drawer, drew a requirement or decision whose claim the
+        # trace flips as a plain green chip.
+        self.assertIn('marks || []).includes("amber")', format_js)
+        self.assertIn("trace.amber_flips", format_js)
+        # A row that stands for several claims says the group's amber word, not
+        # the claim's. What slipped through (review of SPEC 40): a Failing
+        # requirement with one flipping pass read "This pass changes to a
+        # fail" beside its fail.
+        self.assertIn("trace.amber_group", format_js)
+        asked = self.js["marketing.js"]
+        asked = asked[asked.index("function askedSection"):asked.index("function markNotes")]
+        self.assertIn("group: true", asked, "a requirement card labels amber as one claim")
+        self.assertIn("group: true", self.js["lib/sections.js"], "a board heading labels amber "
+                      "as one claim")
+        self.assertIn('group: node.kind !== "claim"', self.js["lib/map.js"])
+        self.assertEqual(chip_calls_without_marks(self.js, "trace"), [])
+        unlabelled = dict(self.js)
+        unlabelled["marketing.js"] += ("\nconst d = tokenChip(c.token, c.word, "
+                                       "{ marks: c.marks });\n")
+        self.assertEqual(len(chip_calls_without_marks(unlabelled, "trace")), 1)
         map_js = self.js["lib/map.js"]
         listed = map_js[map_js.index("export function mapList"):]
         self.assertIn("tokenChip(node.token", listed, "the phone list draws its own chip")
@@ -1430,7 +1646,7 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
             self.assertNotRegex(body, r"(?<![-\w])stroke\s*:")
 
     def test_the_phone_caption_names_cards(self):
-        index = self.html["index.html"]
+        index = self.html["engineering/index.html"]
         phone = re.search(r'class="cap cap-phone">([^<]*)<', index)
         self.assertTrue(phone, "no phone caption")
         self.assertNotRegex(phone.group(1), r"\b(?:line|Point)\b")

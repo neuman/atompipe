@@ -19,7 +19,7 @@ import unittest
 import _decisions as D
 import _env
 
-from nopekit import claims, cli, report, store
+from nopekit import claims, cli, page, report, store
 from nopekit.claims import Attribution, ClaimCause, Composed
 from nopekit.models import (Acceptance, Claim, ClaimKind, ClaimStatus, Comparator, Ledger,
                             PhysicalResult, ReturnCondition, Standing, Verdict)
@@ -318,6 +318,31 @@ class EveryReaderAgreesOnAReturnCondition(_env.EnvCase):
         for row in claims.rejection_rows(view, composed):
             if row.decision == D.DECISION:
                 self.assertIn(report.rejection_facts(row, view), why)
+        # The marketing page (the two pages): the same tokens, from the same
+        # producer, and its words `rejection_words(register="site")`'s; a
+        # resealed page whose return token says more is refused.
+        for argv in (("site", "init"), ("site", "build")):
+            code, out, err = D.main(root, *argv)
+            self.assertEqual(code, 0, out + err)
+        path = os.path.join(root, "site", "data", "page.json")
+        doc = D.read_json(path)
+        [decision] = [d for d in doc["decisions"] if d["id"] == D.DECISION]
+        self.assertEqual([(i["type"], i["returns"]) for i in decision["rejected"]], tokens)
+        for row in claims.rejection_rows(view, composed):
+            if row.decision == D.DECISION:
+                item = decision["rejected"][row.index]
+                self.assertEqual(item["returns"], row.returns.state)
+                self.assertEqual((item["type_word"], item["returns_word"]),
+                                 report.rejection_words(row, view, register="site"))
+        held = next(i for i in decision["rejected"] if i["returns"] == "holds")
+        self.assertTrue(held["returns_word"].startswith("The return condition holds: "),
+                        held["returns_word"])
+        held.update(returns="does-not-hold")
+        doc["self"] = page.seal(doc)
+        D.write_json(path, doc)
+        _code, out, _err = D.main(root, "site", "status", "--json")
+        edited = json.loads(out)["edited"]
+        self.assertTrue([e for e in edited if "return reads does-not-hold" in e], edited)
 
 
 if __name__ == "__main__":

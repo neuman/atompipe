@@ -1245,6 +1245,27 @@ class TheMapDrawsWhatTheTraceObserved(_env.EnvCase):
                                                                  self.amber)))
         flipping = dict(self.amber, C2=self.amber["C2"]._replace(state="flips"))
         self.assertTrue(problems(self.baked.map_doc, self.baked.page_doc, flipping))
+        # The marketing page's rows (review of SPEC 40): a requirement card, a
+        # decision chip, a section and a step each carry ``amber`` exactly when
+        # one of their claims flips now — planted where nothing flips, and
+        # dropped where C2 flips.
+        planted = json.loads(json.dumps(self.baked.page_doc))
+        card = next(r for r in planted["requirements"] if "C2" in r["claims"])
+        card["marks"] = card["marks"] + ["amber"]
+        chip = next(c for d in planted["decisions"] for c in d["claims"])
+        chip["marks"] = chip["marks"] + ["amber"]
+        found = problems(self.baked.map_doc, planted, self.amber)
+        self.assertTrue(any(p.startswith(f"page requirement {card['id']} amber mark")
+                            for p in found), found)
+        self.assertTrue(any(p.startswith(f"decision ") and f"claim {chip['claim']} amber mark"
+                            in p for p in found), found)
+        found = problems(self.baked.map_doc, self.baked.page_doc, flipping)
+        self.assertTrue(any(p.startswith(f"page requirement {card['id']} amber mark")
+                            for p in found), found)
+        if any(c["claim"] == "C2" for d in self.baked.page_doc["decisions"]
+               for c in d["claims"]):
+            self.assertTrue(any("claim C2 amber mark" in p and p.startswith("decision ")
+                                for p in found), found)
         stray = json.loads(json.dumps(self.baked.page_doc))
         stray["claims"]["C4"]["amber"] = {"state": "holds", "word": "", "items": []}
         self.assertTrue(any("page claim C4 amber" in p

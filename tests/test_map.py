@@ -412,7 +412,7 @@ class TheBracketShowsTheOutline(_env.EnvCase):
                          ["allowable", "section", "@slenderness"])
         self.assertEqual({p["subject"]: p["stamp"] for p in summary["prose"]},
                          {s: "current" for s in ("intro", "next", "outdoors", "prints",
-                                                  "pump", "strength")},
+                                                  "pump", "story", "strength")},
                          "the bracket's text is behind: read it again, then `nopekit site "
                          "stamp --all` in examples/bracket")
         for piece in summary["prose"]:
