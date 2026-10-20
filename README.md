@@ -64,97 +64,225 @@ Keep talking with the agent, question its conclusions, change your mind, and try
 
 ---
 
-## Built-in engineering packs
+## Proposers and falsifiers
 
-**Nine packs for finding out what holds up.**
+**Something proposes a candidate. Independent checks try to reject it.**
 
-Nopekit comes with checks for several kinds of engineering work. Each pack brings domain-specific ways to evaluate a design. Some checks use established tools, some use sourced analytical methods, and others have a more limited basis. A result is only as trustworthy as the method behind it—and a passing check establishes only what that check actually tests.
+Every Nopekit project has two kinds of work in it, and Nopekit keeps them apart.
 
-The images below should help you recognize the kind of engineering work each pack supports. Where a real project image is available, use it. Where it isn't, leave the `IMAGE TBD` marker until a suitable example exists.
+- A **proposer** makes or changes a candidate design. Most of the time the proposer is the agent itself, editing the project's model. It can also be a tool, such as an autorouter, an optimizer or a parts search. A proposal settles nothing: its output is an input that the checks then judge.
+- A **falsifier** tries to reject that candidate against something outside the proposer: a physical law, a textbook formula, a fabricator's limit, or an established tool's own verdict. Nopekit calls a falsifier a **gate**. A gate must first fail a known-bad input before its passes count.
 
-### Beam analysis — `beam-analytic`
+Nothing that draws a candidate is allowed to judge it. The relationship is many-to-many. One proposer's output usually meets falsifiers from several domains at once, and one falsifier judges every candidate that reaches it, however that candidate was made.
 
-`IMAGE TBD: beam-analytic — beam diagram showing load, deflection, or stress`
+```mermaid
+flowchart LR
+    subgraph P["Proposers: make a candidate"]
+        agent["The agent edits the model<br/>(every project)"]
+        topo["Topology optimizer<br/>(PETGasus's own pack)"]
+        route["pcb.autoroute<br/>(built in: pcb-kicad)"]
+        parts["Parts search<br/>(illustrative, not shipped)"]
+    end
+    subgraph C["Candidates"]
+        part["Printed part"]
+        board["Routed board"]
+        bom["Assembly and its<br/>bill of materials"]
+        heat["Heat and flow system"]
+    end
+    subgraph F["Falsifiers: try to reject it (built in)"]
+        fdm["fdm-print"]
+        cad["cad-solid"]
+        beam["beam-analytic"]
+        pcb["pcb-kicad"]
+        src["sourcing"]
+        thermo["thermal-analytic, fluids-analytic,<br/>cfd-openfoam, openmodelica"]
+    end
+    agent --> part & board & bom & heat
+    topo --> part
+    route --> board
+    parts -.-> bom
+    part --> fdm & cad & beam
+    board --> pcb
+    bom --> src & cad
+    heat --> thermo
+```
 
-**Can this beam carry the load?**
+*Solid arrows are things that exist today. The dashed arrow is an illustration. `pcb.autoroute` is the only proposer a built-in pack ships. The topology optimizer lives in the PETGasus repository, not in Nopekit.*
 
-Check beam deflection, bending stress, shear, buckling, and bearing with closed-form calculations—without installing a simulation suite.
+| Proposer | What it does | Where it comes from |
+|---|---|---|
+| The agent, editing the model | The default proposer in every project. Each change it keeps is recorded as a decision, with the options that lost and why they lost. | Nopekit: the plugin's skill and `nopekit decide` |
+| `pcb.autoroute` | Routes a KiCad board with Freerouting and proposes the routed copy. | Built in: the `pcb-kicad` pack |
+| `fea.topopt3d` | A 3D topology optimizer (SIMP) that proposes where a frame's material goes. | A project's own pack (`solid-fea`, in the [PETGasus repository](https://github.com/neuman/petgasusdrone)). Not part of Nopekit. |
+| A parts search, a thermal sizer, a hull fairer | Illustrations of proposers that a pack could add. | Not shipped. The [pack format](docs/PACK_FORMAT.md#proposers) says how to add one. |
 
-### Solid parts and assemblies — `cad-solid`
+Run a proposer with `nopekit propose <id>`. Each file it writes becomes an input record marked with the proposer that made it. Adopting that input as the design is a decision.
+
+### A worked example: a topology-optimized frame that has to print
+
+[PETGasus](https://neuman.github.io/PETGasusDrone/) is a small quadcopter whose frame is printed in one piece. A topology optimizer proposes where the plastic goes. The model draws that field as a printable surface. Then falsifiers from two built-in packs, and from the project's own gates, try to reject the drawn frame.
 
 <p align="center">
-<img src="docs/img/packs/cad-solid-exploded-assembly.png" width="480" alt="Exploded CAD assembly of a two-grip phone keyboard: shells, PCBs, rubber key pads, springs and lids stacked above the base">
+<img src="docs/img/combos/topology-field-proposal.png" width="700" alt="The topology optimizer's density field for the PETGasus frame, seen from above and from the side; darker cells hold more plastic">
 </p>
 
-**Is it a real solid? Do the parts fit together?**
+*The proposal: the optimizer's density field, from above and from the side. Darker means more plastic. By itself it settles nothing.*
 
-Inspect exported solids, find unintended clashes, check wall thickness, and examine whether an assembly is actually connected.
+<p align="center">
+<img src="docs/img/packs/fdm-print-printed-frame.png" width="900" alt="The PETGasus frame as drawn from the density field: a 17 g PETG frame shown from above, below, the top and the side">
+</p>
 
-### Fluid flow (CFD) — `cfd-openfoam`
+*The candidate that the falsifiers judge: the frame as the model draws it from that field, 17 g of PETG.*
+
+| Falsifier | What it tries to catch | Basis | From |
+|---|---|---|---|
+| `fdm.min_wall` | A section thinner than three printed lines | model-only | `fdm-print` |
+| `fdm.bridge_span`, `fdm.overhang` | Spans and steep faces that the printer cannot make without support | model-only | `fdm-print` |
+| `fdm.bed_fit`, `fdm.print_time_est` | A frame too big for the bed, or too slow to print in one sitting | model-only | `fdm-print` |
+| `cad.is_volume`, `cad.watertight`, `cad.degenerate_faces` | A mesh that is not a closed solid, so that no other number about it means anything | 1 established (trimesh), 2 model-only | `cad-solid` |
+| `cad.wall_thickness` | The thinnest wall, found by casting rays inward | model-only | `cad-solid` |
+| `petgasus.frame_mode`, `petgasus.crash_drop`, `petgasus.crash_wall` | A frame that resonates near the motors' speed, or breaks in a 1 m drop or a 3 m/s wall hit. CalculiX judges the drawn shape, never the optimizer's own score. | established, sourced | the project's own gates |
+| `petgasus.topology_current` | A frame drawn from a field that was solved for a different problem | model-only | the project's own gate |
+
+**What the falsifiers rejected.** The project's decision records keep each rejected option with its reason, from 2026-10-07 to 2026-10-18:
+
+- **Print the optimizer's field directly.** Its spokes were 0.75 mm blades. The 1.6 mm minimum-member clean-up deleted them and cut the motor seats loose. The first vibration mode fell to 7 Hz, against a 200 Hz limit.
+- **Cut the field at its midpoint.** The frame fell into 9 separate pieces, against the claim that it prints as one connected piece.
+- **Draw the field with a 0.7 mm blur.** It erased thin limbs. CalculiX found the drawn motor seat at 1.25 N/mm, where the optimizer's own model said 15.3. The optimizer's number was not evidence for the part.
+- **Open the surface at 0.6 mm.** It left walls of 1.14 to 1.25 mm, under the 1.26 mm minimum of three 0.42 mm lines.
+- **Let thin walls grow freely over the propellers.** The frame's shadow on a propeller went from 14.8 % to 15.06 %, over its 15 % limit.
+
+One rejection shows what a pass does not establish. One field filled the layer over each guard hoop, and the drawn hoops stood 4.8 mm tall against a 4 mm limit. The guard-height gate passed that frame, because it read the height from the parameters instead of the printed shape. The gate now measures the bands as printed. A pass establishes only what its gate actually measures.
+
+<p align="center">
+<img src="docs/img/combos/site-board-printability.png" width="500" alt="One board of the PETGasus project site: the printability claim C6 reads failing, the mesh claim C7 and the topology-field claim C17 read checked, and the support-removal claim P6 reads pending build">
+</p>
+
+*How the results appear on the PETGasus site, as built on 2026-10-18. The printability claim (C6) reads Failing, because `fdm.bridge_span` found a 1.8 mm ceiling with nothing to bridge from. The mesh claim (C7) and the topology-field claim (C17) read Checked. Whether the supports come off by hand (P6) waits on a real print.*
+
+Nopekit does not ship a topology optimizer or a finite-element solver. The optimizer and the CalculiX gates are in PETGasus's own `solid-fea` pack. The built-in falsifiers in this example are `fdm-print` and `cad-solid`. `beam-analytic` is not used here: it reads a span, a section and a load, not a mesh, and its pack says it cannot judge non-prismatic members.
+
+### Combinations the built-in packs support
+
+Each combination below uses only gates that ship with Nopekit. Each proposer is marked **built in**, **project** or **illustrative**. An illustrative proposer is not shipped by any built-in pack: today the agent does that job by editing the model, or a project adds its own.
+
+#### A printed part that carries load
+
+**Proposer:** the agent's parametric model (built in), or an optimizer as above (project).
+
+`IMAGE TBD: beam-analytic — a beam-like printed member, such as a bracket arm, with its load, span and deflection marked`
+
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `fdm.min_wall`, `fdm.overhang`, `fdm.bridge_span`, `fdm.bed_fit` | Geometry that the printer cannot make | model-only |
+| `fdm.layer_alignment` | A main load carried across the layer bonds, the weak direction of a print | model-only |
+| `cad.is_volume`, `cad.watertight` | A mesh that is not a closed solid | established, model-only |
+| `cad.clash`, `cad.assembly_connected` | A part that shares material with a neighbour, or that nothing holds | model-only |
+| `beam.model_validity` | A shape for which beam theory does not hold: too short for its depth, or with too much shear deflection left out | sourced |
+| `beam.bending_stress`, `beam.deflection`, `beam.buckling` | A beam-like member that bends, sags or buckles past its limit | sourced |
+
+`fdm-print` judges the mesh in print orientation. `beam-analytic` judges numbers from the model. Neither says anything about dimensional accuracy, warp or fatigue: each pack's `PACK.md` lists what it cannot settle.
+
+#### A circuit board that must fit its case
+
+**Proposer:** `pcb.autoroute` (built in). The router's board is an input. Adopting it is a decision, and then the same gates judge it as they judge a board routed by hand.
+
+<p align="center">
+<img src="docs/img/packs/pcb-kicad-routed-board.png" width="360" alt="KiCad render of a routed keyboard PCB: dome-switch contact pads and their copper traces">
+<img src="docs/img/packs/cad-solid-exploded-assembly.png" width="420" alt="Exploded CAD assembly of a two-grip phone keyboard: shells, PCBs, rubber key pads, springs and lids stacked above the base">
+</p>
+
+*A routed board, and the assembly that it must fit inside.*
+
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `pcb.drc` | Copper that breaks the board's design rules, at every severity | established (KiCad) |
+| `pcb.unconnected` | A connection that the router left open | established (KiCad) |
+| `pcb.parity` | A board that no longer matches its schematic | established (KiCad) |
+| `pcb.erc` | Schematic wiring faults: an open pin, an undriven power input | established (KiCad) |
+| `pcb.net_width` | A track too narrow for its current (IPC-2221 heating) | sourced |
+| `pcb.fab_rules` | A feature under the fabricator's published limits | sourced |
+| `pcb.enclosure_fit` | A populated board that collides with its enclosure, or a part without its clearance | established (KiCad, CadQuery) |
+
+A clean DRC does not say the circuit is right. A wrong pin map or a missing pull-up is legal copper, and the `pcb-kicad` pack lists those limits.
+
+#### A heat system with flow in it
+
+**Proposer:** illustrative. Today the agent sizes the collector, the insulation or the pipe run in the model, or writes an OpenModelica system model as the candidate.
+
+<p align="center">
+<img src="docs/img/packs/thermal-analytic-solar-charging.png" width="560" alt="Two weeks of clear-sky solar irradiance and the cumulative salt it charges in a solar thermochemical heat-storage model">
+<img src="docs/img/packs/openmodelica-simulation-result.png" width="560" alt="OpenModelica simulation of a solar Stirling system over 24 hours: heat flows, and the vessel-to-cylinder temperature difference against its 10 °C minimum">
+</p>
 
 `IMAGE TBD: cfd-openfoam — duct or channel flow field showing the pressure drop between two planes`
 
-**Is the pressure drop under its limit, and was the run sound enough to say so?**
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `thermal.conduction`, `thermal.convection`, `thermal.steady_state_temp` | A part that runs hotter than its limit | sourced |
+| `thermal.time_constant` | A lumped-capacitance answer where lumped capacitance does not hold | sourced |
+| `solar.irradiance`, `solar.collector_output`, `solar.stagnation` | A collector that delivers too little heat, or overheats when the flow stops | sourced |
+| `fluid.flow_regime`, `fluid.pipe_pressure_drop` | A loop whose pressure drop is more than the head available, or a correlation used outside its range | sourced |
+| `cfd.regime`, `cfd.converged`, `cfd.mesh_independence`, `cfd.pressure_drop` | The same pressure drop from an OpenFOAM run, which counts only when the run is laminar, converged and mesh-independent | sourced, established (ESI OpenFOAM v2606) |
+| `modelica.simulates`, `modelica.mirror_agrees` | A system model that does not run, or that disagrees with an independent implementation | established, model-only |
 
-Run a laminar OpenFOAM case behind guards—a readable case, a laminar regime, mesh quality, convergence, and mesh independence—before it settles the pressure drop between two planes; four of its six checks need ESI OpenFOAM v2606.
+Two methods can judge one quantity: the analytic pipe pressure drop and the OpenFOAM one. Each has limits. `thermal-analytic` cannot see the flow field, and `cfd-openfoam` runs only laminar flow at one temperature, so neither one judges heated flow in a duct.
 
-### FDM 3D printing — `fdm-print`
+#### A hull that floats and prints
 
-<p align="center">
-<img src="docs/img/packs/fdm-print-printed-frame.png" width="900" alt="A 3D-printed PETG drone frame, 17 g, shown from above, below, the top and the side">
-</p>
-
-**Can I print this part as designed?**
-
-Check build-volume fit, wall thickness, overhangs, bridges, layer-direction loading, and estimated print time.
-
-### Boats, floats, and fluid systems — `fluids-analytic`
+**Proposer:** illustrative. Today the agent models the hull and splits it into printable segments.
 
 <p align="center">
 <img src="docs/img/packs/fluids-analytic-boat-hull.png" width="600" alt="CAD render of a 3D-printed RC boat hull in three segments, each with its own cross-wall">
 </p>
 
-**Will it float, stay stable, and move as intended?**
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `fluid.buoyancy`, `fluid.freeboard` | A hull that sinks, or sits too low when loaded | sourced |
+| `fluid.metacentric`, `fluid.righting_arm` | A hull that rolls over instead of righting itself | sourced |
+| `fluid.drag` | Drag at speed above the thrust available | sourced |
+| `fdm.bed_fit` | A segment too big for the printer's bed | model-only |
+| `cad.watertight`, `cad.is_volume` | A segment that is not a closed solid | model-only, established |
 
-Evaluate buoyancy, freeboard, initial stability, drag, and pipe pressure drop with sourced analytical calculations.
+Every `fluids-analytic` gate is hydrostatic. Planing, waves and the free surface of water inside the hull are outside it.
 
-### System simulation — `openmodelica`
+#### An assembly you can buy
 
-<p align="center">
-<img src="docs/img/packs/openmodelica-simulation-result.png" width="800" alt="OpenModelica simulation of a solar Stirling system over 24 hours: heat flows, and the vessel-to-cylinder temperature difference against its 10 °C minimum">
-</p>
-
-**Does the model compile, balance, and produce the expected results?**
-
-Check Modelica models, recorded simulation runs, claimed variables, and agreement between a model and its independent mirror.
-
-### Circuit boards — `pcb-kicad`
+**Proposer:** illustrative. Today the agent chooses the parts. The pack format uses a parts search as its example of a proposer, but no built-in pack ships one.
 
 <p align="center">
-<img src="docs/img/packs/pcb-kicad-routed-board.png" width="360" alt="KiCad render of a routed keyboard PCB: dome-switch contact pads and their copper traces">
+<img src="docs/img/combos/site-cost-against-budget.png" width="800" alt="The cost section of the PETGasus site: the parts as a stacked bar against a 150 dollar budget line, necessary parts 156 dollars, all parts 167 dollars">
 </p>
 
-**Does the board agree with the schematic, and can it be manufactured?**
+*The PETGasus site, as built on 2026-10-18. `bom.cost` read 167.15 USD against the 150 USD budget, so the budget claim reads Failing.*
 
-Check board and schematic consistency, connectivity, design rules, trace heating, fabrication limits, and enclosure fit. A routing proposer can suggest a route; the checks still judge it.
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `cad.clash`, `cad.assembly_connected` | Parts that overlap, or a part that nothing holds | model-only |
+| `bom.complete`, `bom.availability` | A line that cannot be ordered, or that has no ship date | model-only |
+| `bom.cost`, `bom.currency` | A build over budget, or a total that adds two currencies with no rate | model-only |
+| `bom.moq`, `bom.single_source` | Minimum orders that buy a second build, or a part that only one vendor sells | model-only |
+| `bom.process_rules` | A design outside the vendor's stated capabilities | sourced |
 
-### Parts and sourcing — `sourcing`
+`sourcing` checks the arithmetic on the bill of materials you give it. It cannot see whether a price is real, or whether a part is the right part.
 
-`IMAGE TBD: sourcing — bill of materials with cost, availability, or lead-time information`
+### How much a check is worth
 
-**Can you actually buy the parts within budget?**
+Every falsifier above names its **basis**: `established` (an existing tool's own answer), `sourced` (a cited formula, standard or datasheet) or `model-only` (logic the AI wrote, with no outside source). A gate that fails its known-bad input has shown that it *can* fail. That does not show that its logic is correct or complete. A pass establishes what that gate measures, on the candidate it measured, and no more. [Packs and how far to trust them](#packs-and-how-far-to-trust-them) has the details, with every gate.
 
-Check orderability, price, currency, lead times, minimum order quantities, vendor process constraints, and single-source risk.
+### The nine built-in packs
 
-### Heat and solar — `thermal-analytic`
-
-<p align="center">
-<img src="docs/img/packs/thermal-analytic-solar-charging.png" width="700" alt="Two weeks of clear-sky solar irradiance and the cumulative salt it charges in a solar thermochemical heat-storage model">
-</p>
-
-**Will it get too hot? How much heat can it move?**
-
-Estimate conduction, convection, radiation, fin efficiency, transient temperatures, and solar collector output with analytical checks.
+| Pack | The question it asks |
+|---|---|
+| `beam-analytic` | Can this beam carry the load? |
+| `cad-solid` | Is it a real solid? Do the parts fit together? |
+| `cfd-openfoam` | Is the pressure drop under its limit, and was the run sound enough to say so? |
+| `fdm-print` | Can I print this part as designed? |
+| `fluids-analytic` | Will it float, stay stable, and move as intended? |
+| `openmodelica` | Does the model compile, balance, and produce the expected results? |
+| `pcb-kicad` | Does the board agree with the schematic, and can it be manufactured? |
+| `sourcing` | Can you actually buy the parts within budget? |
+| `thermal-analytic` | Will it get too hot? How much heat can it move? |
 
 ---
 
@@ -164,11 +292,7 @@ AI can generate design ideas quickly. The hard part is finding out which ones su
 
 Nopekit helps you explore a **space of possible designs**, not just produce one plausible-looking answer. It records the requirements, the choices and parameters that shape the design, the claims that need to hold, the checks used to evaluate those claims, and the evidence those checks produce. When an input changes, choices and results that depended on it can become stale so the agent knows to reexamine them.
 
-### A concrete example: PETGasus
-
-[PETGasus](https://neuman.github.io/PETGasusDrone/) is an example of the iterative design process Nopekit is meant to support. Its [project repository](https://github.com/neuman/petgasusdrone) shows the work behind a 3D-printed drone design.
-
-The point isn't just to get a model that looks right. A design has to fit its requirements; its parts and parameters affect one another; and checks can reveal that a candidate fails, that an assumption needs attention, or that more evidence is needed. As the design changes, the reasons for the current choices should remain understandable.
+The [worked example above](#a-worked-example-a-topology-optimized-frame-that-has-to-print) shows this on a real design. The point is not a model that looks right. A design has to fit its requirements. Its parts and parameters affect one another. Checks can reveal that a candidate fails, that an assumption needs attention, or that more evidence is needed. As the design changes, the reasons for the current choices should stay understandable.
 
 That is the goal of Nopekit: to help the human and agent work through design, evaluation, and evidence together, rather than treating a generated artifact as the end of the job.
 
