@@ -11,19 +11,19 @@
 
 Nopekit is a Claude Code plugin for exploring and engineering physical designs with an AI agent. Tell it what you want to make. It helps you work out what the design needs to do, explore possible approaches, build and run checks, and keep track of what the evidence actually says as the design changes.
 
-It's based on the [Grounding by Falsification](grounding_by_falsification.pdf) approach. AI has gotten very good at making believable proposals for all sorts of things both digital and physical but it is especially good at coding. The problem is that it's still not great at figuring out which proposals are actually good on its own. Grounding by falsification is the idea that we need to wrap AI with something outside itself that can check its work and say "nope" using trusted reasoning/math/physics/etc. Nopekit turns that approach into an extensible framework with room for plugins that can falsify proposals across any domain but especially physical design work.
+It's based on the [Grounding by Falsification](https://github.com/neuman/nopekit/blob/main/grounding_by_falsification.pdf) approach. AI has gotten very good at making believable proposals for all sorts of things both digital and physical but it is especially good at coding. The problem is that it's still not great at figuring out which proposals are actually good on its own. Grounding by falsification is the idea that we need to wrap AI with something outside itself that can check its work and say "nope" using trusted reasoning/math/physics/etc. Nopekit turns that approach into an extensible framework with room for plugins that can falsify proposals across any domain but especially physical design work.  
 
 You don't need to learn a new engineering framework before you start. Install the plugin, open a conversation, and bring your idea. The agent will work through the process with you.
+
+## See it in action
 
 <p align="center">
 <img src="docs/img/site-example.png" width="900" alt="Nopekit project site showing a 3D-printed drone design and the grounding map that connects design choices to claims and checks">
 </p>
 
-<p align="center">
-<a href="https://neuman.github.io/PETGasusDrone/">PETGasus live site</a> · <a href="https://github.com/neuman/petgasusdrone">PETGasus repository</a>
-</p>
+*The project site connects the design, its requirements, the current candidate, and the checks and evidence behind it.*
 
-*An example project site. It shows the design, the current candidate, the claims that matter, and how those claims connect to the choices and checks behind them.*
+[PETGasus live site](https://neuman.github.io/PETGasusDrone/) · [PETGasus repository](https://github.com/neuman/petgasusdrone)
 
 ## Get started
 
@@ -64,15 +64,109 @@ Keep talking with the agent, question its conclusions, change your mind, and try
 
 ---
 
+## Built-in engineering packs
+
+**Nine packs for finding out what holds up.**
+
+Nopekit comes with checks for several kinds of engineering work. Each pack brings domain-specific ways to evaluate a design. Some checks use established tools, some use sourced analytical methods, and others have a more limited basis. A result is only as trustworthy as the method behind it—and a passing check establishes only what that check actually tests.
+
+The images below should help you recognize the kind of engineering work each pack supports. Where a real project image is available, use it. Where it isn't, leave the `IMAGE TBD` marker until a suitable example exists.
+
+### Beam analysis — `beam-analytic`
+
+`IMAGE TBD: beam-analytic — beam diagram showing load, deflection, or stress`
+
+**Can this beam carry the load?**
+
+Check beam deflection, bending stress, shear, buckling, and bearing with closed-form calculations—without installing a simulation suite.
+
+### Solid parts and assemblies — `cad-solid`
+
+<p align="center">
+<img src="docs/img/packs/cad-solid-exploded-assembly.png" width="480" alt="Exploded CAD assembly of a two-grip phone keyboard: shells, PCBs, rubber key pads, springs and lids stacked above the base">
+</p>
+
+**Is it a real solid? Do the parts fit together?**
+
+Inspect exported solids, find unintended clashes, check wall thickness, and examine whether an assembly is actually connected.
+
+### Fluid flow (CFD) — `cfd-openfoam`
+
+`IMAGE TBD: cfd-openfoam — duct or channel flow field showing the pressure drop between two planes`
+
+**Is the pressure drop under its limit, and was the run sound enough to say so?**
+
+Run a laminar OpenFOAM case behind guards—a readable case, a laminar regime, mesh quality, convergence, and mesh independence—before it settles the pressure drop between two planes; four of its six checks need ESI OpenFOAM v2606.
+
+### FDM 3D printing — `fdm-print`
+
+<p align="center">
+<img src="docs/img/packs/fdm-print-printed-frame.png" width="900" alt="A 3D-printed PETG drone frame, 17 g, shown from above, below, the top and the side">
+</p>
+
+**Can I print this part as designed?**
+
+Check build-volume fit, wall thickness, overhangs, bridges, layer-direction loading, and estimated print time.
+
+### Boats, floats, and fluid systems — `fluids-analytic`
+
+<p align="center">
+<img src="docs/img/packs/fluids-analytic-boat-hull.png" width="600" alt="CAD render of a 3D-printed RC boat hull in three segments, each with its own cross-wall">
+</p>
+
+**Will it float, stay stable, and move as intended?**
+
+Evaluate buoyancy, freeboard, initial stability, drag, and pipe pressure drop with sourced analytical calculations.
+
+### System simulation — `openmodelica`
+
+<p align="center">
+<img src="docs/img/packs/openmodelica-simulation-result.png" width="800" alt="OpenModelica simulation of a solar Stirling system over 24 hours: heat flows, and the vessel-to-cylinder temperature difference against its 10 °C minimum">
+</p>
+
+**Does the model compile, balance, and produce the expected results?**
+
+Check Modelica models, recorded simulation runs, claimed variables, and agreement between a model and its independent mirror.
+
+### Circuit boards — `pcb-kicad`
+
+<p align="center">
+<img src="docs/img/packs/pcb-kicad-routed-board.png" width="360" alt="KiCad render of a routed keyboard PCB: dome-switch contact pads and their copper traces">
+</p>
+
+**Does the board agree with the schematic, and can it be manufactured?**
+
+Check board and schematic consistency, connectivity, design rules, trace heating, fabrication limits, and enclosure fit. A routing proposer can suggest a route; the checks still judge it.
+
+### Parts and sourcing — `sourcing`
+
+`IMAGE TBD: sourcing — bill of materials with cost, availability, or lead-time information`
+
+**Can you actually buy the parts within budget?**
+
+Check orderability, price, currency, lead times, minimum order quantities, vendor process constraints, and single-source risk.
+
+### Heat and solar — `thermal-analytic`
+
+<p align="center">
+<img src="docs/img/packs/thermal-analytic-solar-charging.png" width="700" alt="Two weeks of clear-sky solar irradiance and the cumulative salt it charges in a solar thermochemical heat-storage model">
+</p>
+
+**Will it get too hot? How much heat can it move?**
+
+Estimate conduction, convection, radiation, fin efficiency, transient temperatures, and solar collector output with analytical checks.
+
+---
+
 ## What Nopekit is for
 
 AI can generate design ideas quickly. The hard part is finding out which ones survive contact with reality—and keeping track of what you learned when the design changes.
 
 Nopekit helps you explore a **space of possible designs**, not just produce one plausible-looking answer. It records the requirements, the choices and parameters that shape the design, the claims that need to hold, the checks used to evaluate those claims, and the evidence those checks produce. When an input changes, choices and results that depended on it can become stale so the agent knows to reexamine them.
 
-## A concrete example: PETGasus
+### A concrete example: PETGasus
 
-[PETGasus](https://neuman.github.io/PETGasusDrone/) is a useful example of the kind of iterative design process Nopekit is meant to support. Its [project repository](https://github.com/neuman/petgasusdrone) shows the work behind a 3D-printed drone design.
+[PETGasus](https://neuman.github.io/PETGasusDrone/) is an example of the iterative design process Nopekit is meant to support. Its [project repository](https://github.com/neuman/petgasusdrone) shows the work behind a 3D-printed drone design.
 
 The point isn't just to get a model that looks right. A design has to fit its requirements; its parts and parameters affect one another; and checks can reveal that a candidate fails, that an assumption needs attention, or that more evidence is needed. As the design changes, the reasons for the current choices should remain understandable.
 
@@ -177,7 +271,7 @@ Most people can begin through conversation with Claude Code. If you want to insp
 | `nopekit check` | Runs the available gates against the current project. |
 | `nopekit report` | Shows the readiness report. Use `--write` to write `REPORT.md`. |
 | `nopekit why <name>` | Shows the history for a parameter, claim, or requirement, including recorded alternatives. |
-| `nopekit gap --propose` | Lists the claims whose mechanism (the gate, test or judgment that settles them) has yet to run, and proposes packs that might run it. |
+| `nopekit gap --propose` | Lists claims whose mechanism—the gate, test, or judgment that settles them—has yet to run, and proposes packs that might run it. |
 | `nopekit gate selftest` | Runs the gates' negative controls to check that they can fail on known-bad inputs. |
 | `nopekit doctor` | Helps diagnose a confusing or broken setup. |
 | `nopekit round` | Ends a round of work with a quick check, an updated site, and a round record. |
@@ -204,14 +298,6 @@ nopekit why thickness
 ```
 
 The example includes a deliberately failing check. That's intentional: a useful example should show you what a failure looks like, not just produce a reassuring green screen.
-
-## If something isn't working
-
-- **The agent can't find Nopekit or its instructions:** check that the plugin is installed in Claude Code and start a new session if needed.
-- **A check is skipped:** read the reason. It may need an optional Python package or external tool; install it only if you want to run that check.
-- **A result is stale:** a dependency changed after the check ran. Re-run the relevant checks rather than treating the old result as current.
-- **The design looks ready, but the report says otherwise:** follow the unresolved claims. A gap, assumption, or physical-only claim is information—not a bug to hide.
-- **You're not sure where to start:** run `nopekit doctor`, or ask Claude Code to explain the current readiness report in plain language.
 
 ## Packs and how far to trust them
 
@@ -392,7 +478,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 - [Origins](docs/ORIGINS.md) — the real project that informed the method.
 - [Pack format](docs/PACK_FORMAT.md) — how domain-specific gates and capabilities are packaged.
 - [Extension protocol](docs/EXTENSION_PROTOCOL.md) — how the system can grow new capabilities.
-- [Grounding by falsification paper](grounding_by_falsification.pdf) — optional background on the underlying idea.
+- [Grounding by Falsification paper](https://github.com/neuman/nopekit/blob/main/grounding_by_falsification.pdf) — optional background on the underlying idea.
 
 ## Status and license
 
