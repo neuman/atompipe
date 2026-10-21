@@ -79,6 +79,12 @@ is an error; a timeout is a skip.
   cell counts by the ratio. Only a 2D case's one-cell direction, across its empty
   patches, stays one cell. A feature no block resolves stays unresolved at every
   level.
+- **A pressure drop that moves after the run stops.** `cfd.converged` estimates
+  the change still to come from the history (Eca and Hoekstra 2009). Some
+  histories deceive it: an overshoot near its turning point, a slow mode under a
+  fast oscillation, a rate that becomes slower in the last few iterations, and a
+  drift under 1e-8 of the value per iteration. `references/running-openfoam.md`
+  gives each one with its measured error.
 - **Anything about a built part.** A measured pressure drop is a physical claim,
   Pending build until a person records it.
 
@@ -101,6 +107,12 @@ Pa. `cfd.regime` and `cfd.mesh_quality` report the worst of their values as a
 fraction of its limit; `cfd.mesh_independence` reports the GCI in percent;
 `cfd.converged` reports the iteration it converged at, against the case's budget
 (endTime / deltaT), and no value when it fails.
+
+Each gate that runs simpleFoam writes the pressure drop's history as a CSV file
+beside its `summary.json`, one for each mesh, and the summary holds the
+estimated remaining change as `iterative_error_pct`. A chart of the history
+calculates nothing (`references/running-openfoam.md`, "What the evidence
+holds").
 
 ## Pointing a project at its case
 

@@ -1832,16 +1832,25 @@ it:
   of non-orthogonality being only a warning to checkMesh); both before
   `cfd.converged` (tier 2, `established`: the converged line, p and U solved at
   target, the stated velocity carried within 2% along the upstream normal, and the
-  pressure drop's remaining change under 0.1%: its largest recent movement when it
-  oscillates, a geometric tail's remainder from its step sizes when it is
-  monotone); then `cfd.mesh_independence` (tier 2,
+  pressure drop's estimated remaining change under 0.1%: Eca and Hoekstra's 2009
+  iterative-error estimate, read pessimistically, in `_iter.py` since GitHub #15
+  Phase 0); then `cfd.mesh_independence` (tier 2,
   `sourced`: Celik et al. 2008) and `cfd.pressure_drop` (tier 2, `established`; a
   pressure rise is an error). The tool-free floor rises to 20. *What slipped
   through:* the first stillness test (the change over 10 iterations) passed a run
   relaxed to U 0.03 at 9.7% from converged; its first rewrite read a 2-iteration
   oscillation as still; the second review found its rate fooled by an earlier
   oscillation (a run 0.22% from converged passed) and its round-off floor applied
-  before the rate (a creep relaxed to U 1e-4 passed with 0.2% to come).
+  before the rate (a creep relaxed to U 1e-4 passed with 0.2% to come); the
+  estimate that came after read real v2606 histories settled up to 23.4% from
+  converged (a laminar pitzDaily under slow relaxation), and Phase 0 replaced it.
+  The estimate now in place cannot see an overshoot near its turning point, a slow
+  mode under a fast oscillation, a rate that becomes slower in the last few
+  iterations, a drift under 1e-8 of the value per iteration or a change after the
+  last iteration (`references/running-openfoam.md` has the measured errors). On
+  MARIN's Table 1 it reads 0.71 to 2.00 times the authors' closed tool, whose
+  correction (SNH 2006) is still unread. Each gate that runs simpleFoam writes the
+  history as CSV and the estimate as `iterative_error_pct` in its summary.
 - **Mesh independence refines every cell.** Each level multiplies every block's cell
   counts by the ratio (1.3 to 3, default 2), half up and at least one cell more than
   the level below; only a 2D case's one-cell direction, found from the empty

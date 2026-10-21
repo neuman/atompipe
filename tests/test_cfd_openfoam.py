@@ -31,6 +31,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_cfd_openfoam.
 """
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -902,6 +903,77 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         v = self.gate("cfd.mesh_independence", {"cfd_case": case})
         self.assertEqual(v.outcome, "pass", v.render())
 
+    # -- the evidence a chart draws (GitHub #15, P0.2) ------------------------
+    def evidence(self, v, name: str):
+        """The evidence file ``name`` of ``v``: a dict for JSON, rows for a CSV."""
+        path = next(p for p in v.evidence if os.path.basename(p) == name)
+        with open(path, encoding="utf-8", newline="") as fh:
+            return json.load(fh) if name.endswith(".json") else list(csv.DictReader(fh))
+
+    def assert_history(self, rows, column: str, error_pct, n: int | None = None, places=12):
+        """The rows are the history the estimate read: iterations 1.., change_pct
+        100 x |change| / |last| (none on the first row), and error_pct the
+        estimate's reading of the same values as a percentage of the last. In Pa
+        the values are the solver's times the density, each product rounded: where
+        the reading is a round-off swing of about 3e-8 of the value (the real
+        baseline), that moves it by up to about 1e-8 of itself. error_pct is the
+        reading the gate judged, on the solver's own values."""
+        vals = [float(r[column]) for r in rows]
+        if n is not None:
+            self.assertEqual(len(vals), n)
+        self.assertEqual([int(r["iteration"]) for r in rows], list(range(1, len(vals) + 1)))
+        self.assertEqual(rows[0]["change_pct"], "")
+        for i in range(1, len(vals)):
+            self.assertEqual(float(rows[i]["change_pct"]),
+                             100.0 * abs(vals[i] - vals[i - 1]) / abs(vals[-1]))
+        rem = I.remaining(vals)
+        if rem is None or rem == math.inf:
+            self.assertIsNone(error_pct)
+        else:
+            self.assertAlmostEqual(error_pct / (100.0 * rem / abs(vals[-1])), 1.0,
+                                   places=places)
+
+    def test_the_converged_run_writes_its_history_and_estimate(self):
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        summary = self.evidence(v, "summary.json")
+        rows = self.evidence(v, "history.csv")
+        self.assertNotIn("dp", summary)          # the history is the CSV, never JSON
+        self.assertEqual(summary["convergence_tol_pct"], 0.1)   # STABLE_TOL 1e-3
+        self.assertEqual(float(rows[-1]["dp_m2_s2"]), summary["dp_m2_s2"])
+        self.assertLessEqual(summary["iterative_error_pct"], summary["convergence_tol_pct"])
+        self.assert_history(rows, "dp_m2_s2", summary["iterative_error_pct"], n=60)
+
+    def test_an_unsettled_run_writes_its_estimate_too(self):
+        self.mode({"simpleFoam": {"settle_tail": 0.05}})
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "fail", v.render())
+        summary = self.evidence(v, "summary.json")
+        self.assertGreater(summary["iterative_error_pct"], summary["convergence_tol_pct"])
+        self.assert_history(self.evidence(v, "history.csv"), "dp_m2_s2",
+                            summary["iterative_error_pct"])
+        self.mode({"simpleFoam": {"converge_at": 8}})
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIsNone(self.evidence(v, "summary.json")["iterative_error_pct"])
+
+    def test_each_level_writes_its_history_and_estimate(self):
+        for gid, column in (("cfd.mesh_independence", "dp_m2_s2"), ("cfd.pressure_drop", "dp_pa")):
+            with self.subTest(gid=gid):
+                v = self.gate(gid)
+                self.assertEqual(v.outcome, "pass", v.render())
+                summary = self.evidence(v, "summary.json")
+                self.assertEqual(summary["convergence_tol_pct"], 0.1)   # STABLE_TOL 1e-3
+                rho = summary.get("density_kg_m3", 1.0)
+                for lv in summary["levels"]:
+                    rows = self.evidence(v, f"history_level{lv['k']}.csv")
+                    self.assertEqual(rows[0].keys(), {"iteration", column, "change_pct"})
+                    self.assertAlmostEqual(float(rows[-1][column]) / (rho * lv["dp_m2_s2"]),
+                                           1.0, places=12)
+                    self.assertLessEqual(lv["iterative_error_pct"], summary["convergence_tol_pct"])
+                    self.assert_history(rows, column, lv["iterative_error_pct"],
+                                        n=lv["converged_in"], places=12 if rho == 1.0 else 6)
+
     # -- what the run itself says -------------------------------------------
     def test_the_converged_line_beside_a_residual_over_target_fails(self):
         self.mode({"simpleFoam": {"final_residual": 1e-5}})
@@ -1029,6 +1101,15 @@ class TheRealOpenFOAM(_env.EnvCase):
             ny = lv["counts"][0][1]
             # The uniform inlet's entrance reaches the planes at 3e-6 of the value.
             self.assertAlmostEqual(lv["dp_m2_s2"] / (exact / (1 + 2 / ny ** 2)), 1.0, places=5)
+            # The history a chart draws, and the estimate beside it (P0.2).
+            path = next(p for p in v.evidence if p.endswith(f"history_level{lv['k']}.csv"))
+            with open(path, encoding="utf-8", newline="") as fh:
+                dp_pa = [float(r["dp_pa"]) for r in csv.DictReader(fh)]
+            self.assertEqual(len(dp_pa), lv["converged_in"])
+            self.assertLessEqual(lv["iterative_error_pct"], data["convergence_tol_pct"])
+            # In Pa each value is rounded once more (assert_history says why).
+            self.assertAlmostEqual(lv["iterative_error_pct"] / (
+                100 * I.remaining(dp_pa) / dp_pa[-1]), 1.0, places=6)
         self.assertAlmostEqual(data["gci"]["phi_ext21"] / exact, 1.0, places=3)
 
     def test_the_pack_writes_its_values_to_13_digits(self):

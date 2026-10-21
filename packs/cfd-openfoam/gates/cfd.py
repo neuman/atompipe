@@ -78,6 +78,7 @@ project's to say.
 """
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -244,6 +245,39 @@ def _evidence(ctx: GateContext, gid: str, payload: dict) -> str:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
     return path
+
+
+def _history(ctx: GateContext, gid: str, name: str, dp: list, rho=None) -> str:
+    """Write a pressure drop's history beside summary.json, as ``name``: one row per
+    iteration (counted from 1), the value (``dp_pa`` when ``rho`` is given, else the
+    solver's ``dp_m2_s2``) and ``change_pct``, 100 x |change from the iteration
+    before| / |last value| (empty on the first row): the changes the estimate reads.
+    A chart of the history and its estimate (GitHub #15, Phase 2) draws these
+    numbers and computes none. A CSV, never a list in summary.json: the site's
+    prose scan reads every number of a JSON evidence file as a match for a number
+    in any unit, and a history is thousands of them (until P0.2, cfd.converged's
+    summary held its whole history as a list)."""
+    vals = dp if rho is None else [rho * v for v in dp]
+    last = abs(vals[-1]) if vals else 0.0
+    path = ctx.out_path(PACK, gid.replace(".", "_"), name)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        out = csv.writer(fh, lineterminator="\n")
+        out.writerow(["iteration", "dp_m2_s2" if rho is None else "dp_pa", "change_pct"])
+        for i, v in enumerate(vals):
+            ok = i and 0 < last < math.inf
+            out.writerow([i + 1, repr(v), repr(100.0 * abs(v - vals[i - 1]) / last) if ok else ""])
+    return path
+
+
+def _error_pct(dp: list):
+    """The estimated remaining change as a percentage of the last value, for the
+    evidence: None when there is no estimate (too few values, no steady decay, a
+    value that is not finite; JSON holds no inf). The gate judges ``_settled``, not
+    this number."""
+    rem = I.remaining(dp)
+    if rem is None or rem == math.inf or not (dp and 0 < abs(dp[-1]) < math.inf):
+        return None
+    return 100.0 * rem / abs(dp[-1])
 
 
 # --------------------------------------------------------------------------- #
@@ -1323,9 +1357,12 @@ def converged(ctx: GateContext) -> Verdict:
     dp = solve.dp()
     ev = _evidence(ctx, gid, {"converged_in": log.converged_in, "last_iteration":
                               log.last_iteration, "budget": case.budget, "target": target,
-                              "residuals": log.residuals, "dp": dp,
+                              "residuals": log.residuals, "dp_m2_s2": dp[-1] if dp else None,
+                              "iterative_error_pct": _error_pct(dp),
+                              "convergence_tol_pct": STABLE_TOL * 100.0,
                               "u_upstream": u_run, "cells": solve.cells,
                               "install": inst.root, "build": inst.build})
+    hist = _history(ctx, gid, "history.csv", dp)
     detail = ("; ".join(why) if why else
               f"converged at iteration {at} of {case.budget} to residual target {target:g}"
               f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, an estimated "
@@ -1335,10 +1372,11 @@ def converged(ctx: GateContext) -> Verdict:
         # number still moving fail on different readings, and none is "iterations
         # past the budget" (with "<", the first draft's pass at 91 < 91 contradicted
         # itself; with "<=", its control's 5 <= 5 read inside the limit and failed).
-        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, *logs])
+        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, hist, *logs])
     # "<=": a run that converges on the last iteration of its budget converged.
     return Verdict(gate=gid, passed=True, measured=float(at), limit=float(case.budget),
-                   comparator="<=", units="iterations", detail=detail, evidence=[ev, *logs])
+                   comparator="<=", units="iterations", detail=detail,
+                   evidence=[ev, hist, *logs])
 
 
 # --------------------------------------------------------------------------- #
@@ -1517,17 +1555,23 @@ def _gci(case: Case, levels: list, target: float):
     return res, why, noise
 
 
-def _ladder_evidence(ctx, gid, case, levels, res, noise, extra) -> list[str]:
+def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None) -> list[str]:
+    """summary.json, a ``history_level{k}.csv`` per level (``_history``; in Pa when
+    ``rho`` is given) and the logs. Each level holds its estimate as
+    ``iterative_error_pct``, beside the ``convergence_tol_pct`` it was held to."""
     payload = {"dim": case.dim, "formal_order": case.formal_order,
                "levels": [{"k": lv.k, "cells": lv.solve.cells, "counts": lv.counts,
                            "converged_in": lv.solve.log.converged_in,
-                           "dp_m2_s2": lv.solve.dp()[-1]} for lv in levels],
-               "noise_m2_s2": noise}
+                           "dp_m2_s2": lv.solve.dp()[-1],
+                           "iterative_error_pct": _error_pct(lv.solve.dp())} for lv in levels],
+               "noise_m2_s2": noise, "convergence_tol_pct": STABLE_TOL * 100.0}
     if res is not None:
         payload["gci"] = {k: v for k, v in vars(res).items()}
     payload.update(extra)
+    hists = [_history(ctx, gid, f"history_level{lv.k}.csv", lv.solve.dp(), rho)
+             for lv in levels]
     logs = [p for lv in levels for p in lv.solve.logs]
-    return [_evidence(ctx, gid, payload), *logs]
+    return [_evidence(ctx, gid, payload), *hists, *logs]
 
 
 @gate(
@@ -1631,24 +1675,25 @@ def pressure_drop(ctx: GateContext) -> Verdict:
         return got
     case, _planes_, target, _note, r, _rnote, levels = got
     res, why, noise = _gci(case, levels, target)
+    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
     if res is None or res.gci_fine21 is None or why:
         # cfd.mesh_independence passed on these same meshes, or this gate would
         # not have run: a GCI that does not hold here is the two disagreeing.
         return _error(gid, "the meshes give no GCI band: " + "; ".join(why)[:300],
-                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}))
-    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho))
     if not res.phi[0] > 0:
         # What slipped through the first draft: the drop was taken as a
         # magnitude, so a pressure RISE between the planes (a pump, a diffuser,
         # the planes named in the wrong order) read as a drop under the limit.
         return _error(gid, f"the pressure on the downstream plane is not below the upstream "
                            f"one ({rho * res.phi[0]:.5g} Pa): a rise, or the planes in the "
-                           f"wrong order", _ladder_evidence(ctx, gid, case, levels, res, noise, {}))
+                           f"wrong order",
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho))
     dp_pa = rho * res.phi[0]
     top = dp_pa * (1.0 + res.gci_fine21)
     ev = _ladder_evidence(ctx, gid, case, levels, res, noise,
                           {"density_kg_m3": rho, "dp_pa": dp_pa, "band_top_pa": top,
-                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit})
+                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit}, rho)
     passed = top <= limit
     return Verdict(gate=gid, passed=passed, measured=round(top, 9), limit=limit,
                    comparator="<=", units="Pa",

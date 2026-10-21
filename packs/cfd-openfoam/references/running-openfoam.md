@@ -97,19 +97,7 @@ End
 The gate reads the converged line, the first `Initial residual` of each field in
 the last iteration (p and a U component must both be there), and the pack's
 `.dat` files. A converged line is not enough: the pressure drop's estimated
-remaining change must be under 0.1% of it. The estimate is Eca and Hoekstra's
-(Computers & Fluids 38, 2009, Eq. 9): a least-squares line through the log of
-the change per iteration gives the rate, and the sum of the geometric tail at
-that rate, times 1.25, is the change still to come. The gate uses the upper 95%
-bound of the rate and the largest result over windows of 8, 16, 32, ...
-iterations and the whole history. A rate that still changes between the two shortest windows gives
-no estimate, and the run fails. A model-free reading of the drift over the
-last half of the run is a second check, and the larger value is used.
-`gates/_iter.py` has each rule and the history that made it necessary.
-
-The estimate needs at least 17 values. A converged run with OpenFOAM's default
-precision (7 significant digits) can fail here, because its last changes are
-steps of one printed digit. That is why the pack sets `writePrecision 12`.
+remaining change must be under 0.1% of it.
 
 U relaxed to 0.03 makes the normalised residuals tiny while the number creeps:
 one such run passed a 10-iteration stillness test 9.7% from its converged value.
@@ -117,6 +105,92 @@ The estimate that replaced that test read real v2606 histories as settled up to
 23.4% from their converged value (a laminar pitzDaily under slow relaxation).
 The current estimate reads no point of those histories as settled more than
 0.1% from converged.
+
+### The estimate
+
+The estimate is Eca and Hoekstra's (Computers & Fluids 38, 2009, Eq. 9). A
+least-squares line through the log of the change per iteration gives the rate.
+The sum of the geometric tail at that rate, times 1.25, is the change still to
+come. `gates/_iter.py` adds these rules, each with the history that made it
+necessary:
+
+- The rate is the upper 95% bound of the fitted rate. A fit has 8 changes or
+  more.
+- The gate fits windows of 8, 16, 32, ... changes and the whole history, each
+  to the last change above round-off, and uses the largest result.
+- Each window fits the largest change from each iteration to the end. Thus a
+  decaying oscillation reads as a decay.
+- The rate of the last 8 changes must agree with the rate of the last 16, within
+  two combined standard errors. A slower rate gives no estimate, and the run fails. A
+  faster rate also gives no estimate while the last change is above 1e-5 of the
+  value.
+- A change under 1e-8 of the value is round-off. When the last 8 changes or more
+  are round-off, the estimate is the largest swing in that tail. This rule does
+  not apply when one of the 16 changes before the tail is exactly zero: the
+  history then moves in steps of one printed digit.
+- A second reading uses no model of the single changes. It continues the drift
+  of the means of the last three sixths of the run, and of the slopes of its
+  last two quarters, and the gate uses the larger value.
+- A value that is not a finite number gives no estimate. The gate refuses a
+  last value of inf before it compares, because inf is less than 0.1% of inf.
+
+The estimate needs at least 17 values. A converged run with OpenFOAM's default
+precision (7 significant digits) can fail here, because its last changes are
+steps of one printed digit. That is why the pack sets `writePrecision 12`.
+
+### What the estimate cannot see
+
+Each of these histories reads settled at some iterations while it is more than
+0.1% from the value it converges to. The numbers are from the synthetic
+histories of GitHub #15, Phase 0.
+
+- **An overshoot near its turning point.** Two modes of opposite sign cancel,
+  and the changes fall fast before the value turns back. Two overshoots read
+  settled at 6 points up to 0.27% and at 5 points up to 0.70%.
+- **A slow mode under a fast oscillation.** The fit follows the peaks of the
+  fast mode. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n` reads settled at 23
+  points from iteration 40 to 70, up to 0.20%.
+- **A rate that becomes slower in the last 1 to 3 iterations.** The shortest
+  window does not see it yet: 5 points, up to 1.51%.
+- **A drift under 1e-8 of the value per iteration.** The estimate calls it
+  round-off. A ramp of 5e-9 per iteration reads settled at its first 787
+  points. At that rate, the value needs 200 000 iterations to move 0.1%.
+- **A change after the last iteration.** No estimate made from the history can
+  see it. A decay that later rises (MARIN's df_iter1537) reads settled at 14
+  points, up to 1.36%.
+- **A fixed point that moves with the under-relaxation.** The estimate gives
+  the distance to the value this run converges to. It cannot tell if another
+  relaxation gives another value.
+
+Two costs are on the safe side (a run that has settled reads not settled). A
+history printed to 7 significant digits almost never reads settled. The
+turbulent pitzDaily runs never read settled, even after they settle; this pack
+is laminar only.
+
+### Against the authors' tool
+
+MARIN's `iterative_error` (closed) adds a correction from Eca and Hoekstra's
+2006 paper in SNH. Nobody here has read that paper, so this estimate agrees with
+the tool in its numbers only. On the tool manual's
+Table 1, this estimate is 0.71 to 2.00 times the tool's (median 0.93) on the 8
+items with 8 changes or more. It is below the tool on items 1, 2, 3 and 6. Eq. 9
+without the rules above is 0.32 to 0.70 times the tool's.
+
+### What the evidence holds
+
+`cfd.converged` writes `history.csv` beside its `summary.json`.
+`cfd.mesh_independence` and `cfd.pressure_drop` write `history_level0.csv`,
+`history_level1.csv` and `history_level2.csv`, one for each mesh. Each row holds
+`iteration` (from 1), the pressure drop (`dp_m2_s2`; `dp_pa` in
+`cfd.pressure_drop`) and `change_pct`: the change from the iteration before, as
+a percentage of the last value. The first row has no `change_pct`.
+
+`summary.json` holds the estimate as `iterative_error_pct`, a percentage of the
+last value (in `levels` for a ladder, one for each mesh), and the tolerance as
+`convergence_tol_pct` (0.1). `iterative_error_pct` is `null` when there is no
+estimate. A chart of the history uses these numbers and calculates none. The
+history is a CSV file because the site's prose check reads each number in a
+JSON evidence file as a match for a number in the text, in any unit.
 
 ## Where the planes sit
 
