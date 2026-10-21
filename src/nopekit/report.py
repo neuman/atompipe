@@ -542,7 +542,10 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # page owns no sentence and the scan reads each. ``judged`` names the
         # evaluator whose value the large line is; ``pictures`` is the
         # drawer's one line, which links to the card; ``table`` stands where a
-        # chart's library did not load, above the numbers it would draw.
+        # chart's library did not load, above the numbers it would draw;
+        # ``turn_failed`` where the 3D view did not load. What slipped through
+        # (review of P1): both places printed the error's own English, a
+        # sentence the page owned and no scan read.
         # *Rejected:* "from the result that this page shows" in the drawer line
         # (false beside an older picture; each figure's own currency sentence
         # says which result it is).
@@ -550,6 +553,7 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "others": "Other evaluators",
         "pictures": "Pictures: {n}. Show them.",
         "table": "The chart did not load. This table shows its numbers.",
+        "turn_failed": "The 3D view did not load.",
     }),
     # A rejected alternative on the marketing page (`rejection_words(register=
     # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the

@@ -3674,7 +3674,13 @@ A viewgen that is unavailable or crashes keeps the row its id had in the last
 is on disk; the build warns `view <id>: kept from the last build: <reason>`, and adds
 nothing to the row, so a clone without the tool bakes the same `state.json` (issue #15:
 such a viewgen returned no view, so the cleaner deleted the picture it drew last time).
-A view no viewgen declares, or one that has nothing to draw, is not kept.
+The row is kept only at the bytes the last build wrote: its digest with its view file
+(`site.view_digest`) must be the one the last `page.json` holds under its seal
+(`meta.views`); otherwise the build warns `view <id>: ... is not what the last build
+wrote, so it is not kept`, and `site status` reads the row as edited by hand (review of
+P1: a number added by hand to `data/views/<id>.json` was baked into the next page and
+vouched for prose). A view no viewgen declares, or one that has nothing to draw, is not
+kept.
 
 **Bound viewgens** (issue #15). A viewgen with `evidence_of` draws its gate's served
 verdict entry. `build` resolves and plans the evidence first, then runs the unbound
@@ -5369,7 +5375,9 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
 - **A forger who reseals a page and keeps its tokens can still change its words.**
   `page.status_problems` compares tokens, *ready*, steps and marks with the
   resolution; a word, a hint or a value text edited by hand and resealed reads
-  current until the next build writes it again.
+  current until the next build writes it again. A view file edited by hand, its new
+  digest written into `meta.views` and the page resealed, reads current too, and a
+  build without that viewgen's tool keeps it, where its numbers vouch for prose.
 
 - **A resealed round record reads as no hand edit (architecture phase 3a).** Its
   self-digest is tamper evidence against a hand edit, not a lock: anyone who can write

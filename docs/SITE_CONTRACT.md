@@ -603,7 +603,11 @@ an agent can read the site's state without a browser.
   names a view that does not exist) or `unknown-target` (a node the view does not
   declare). The locator itself stays on its verdict; nothing is dropped.
 - A view whose inline `data` is too big to sit in the summary is split into
-  `data/views/<id>.json`: its row keeps `"data": {}` and gains `data_url`.
+  `data/views/<id>.json`: its row keeps `"data": {}` and gains `data_url`. The build
+  seals the digest of each row with its view file into `page.json`'s `meta.views`
+  (`site.view_digest`). A viewgen that is unavailable or crashed keeps its row from
+  the last build only at those bytes, and `site status` reads a row or a view file
+  with other bytes as edited by hand.
 - A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
   verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
   view, its GLB; `data_url` is a chart's series file; `field_src` a committed GLB
@@ -611,8 +615,12 @@ an agent can read the site's state without a browser.
   the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
   currency, currency_word}`, where `entry` is the result the picture was drawn from
   and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
-  not current), or `older` (an earlier entry of the gate: the served one has no
-  picture yet), with its fixed sentence. A bound view with no picture has no row. The
+  not current), or `older` (another entry of the gate, not always an earlier one:
+  after A, B, A the picture beside A is B's, the later run; the served one has no
+  picture yet), with its fixed sentence. A bound view with no picture has no row. A
+  bound view is never the page's representation or a marketing alternate as a plain
+  view: it shows there only as its figure (`representation.figure`), with its chips
+  and its currency (G8). The
   technical record prints the sentence and the gate and entry under the view
   (`stage.js`); it draws a bound chart's series with `lib/chart.js`, with no limit
   (the chart file holds none, and the limit is the claim's, on the engineering page).
@@ -1147,7 +1155,9 @@ The outline's data (SPEC 28, 30), baked by `page.bake_page` and `page.bake_prose
   "schema": 1, "outline": 1, "generated": "<HUMAN.site.generated>",
   "meta": { "name": "...", "summary": "...", "revision": "v0.1",
             "records_digest": "<64>", "resolution_digest": "<64>",
-            "content_digest": "<64>" },
+            "content_digest": "<64>",
+            "views": { "<view id>": "<64: site.view_digest of its state.json row and
+                                     view file>" } },
   "representation": { "view": "assembly", "kind": "model3d", "title": "Assembly",
                       "notice": "",
                       "alternates": [ { "view": "assembly", "title": "Assembly",
@@ -1350,8 +1360,9 @@ value; a decision's `values` and the top-level `losers`):
   sentence (`current`, `stale`, `older`, `none`), `drawn`, `drawn_bare`, `shown`,
   `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
   claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
-  drawer's line, "Pictures: {n}. Show them.") and `table` (where the chart library did
-  not load).
+  drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
+  not load; its columns take the baked spec's axis titles) and `turn_failed` (where
+  the 3D view did not load). The card prints no error text of its own.
 
 **The marketing page's keys** (SPEC 40), all baked by `page.bake_page` or a helper it
 calls, so `status_problems` and the style scans see them:

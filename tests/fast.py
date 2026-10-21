@@ -1173,6 +1173,25 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.TheScaleIsAPackConstant.test_a_scale_keyed_to_a_limit_is_refused",
     "test_figures.TheScaleIsAPackConstant.test_every_chart_number_is_in_the_evidence",
     "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_figure_numbers_vouch_for_nothing",
+    # The review of P1: a digest no evidence file holds, refused by `bind` (one
+    # check, one build); a gate id the site's folder spells otherwise, read
+    # under the raw id (one check, two builds); each of an older figure's
+    # sentences, outcome and digest planted alone, and a lying outcome bake
+    # (two checks, two builds, six `site status` runs and one refused build in
+    # process, ~4 s); a bound solid kept off the hero and the alternates, and
+    # planted there (one check, one build, three `site status` runs); a bound
+    # viewgen handed no limit (one check, one build); and a kept row edited by
+    # hand (one check, two builds, two `site status` runs). ~12 s in all. The
+    # FAST rows above run the same bound pass, bake and checker. An iteration
+    # touching `BoundContext.bind`, `page.read_sidecar`, `entry_verdict`,
+    # `representation`, `alternates`, `_figure_problems`,
+    # `_kept_from_last_build` or `view_digest` runs test_figures whole.
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_digest_no_evidence_file_holds_is_never_bound",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_gate_id_the_site_spells_otherwise_shows_its_figure",
+    "test_figures.AFigureSaysWhichResultItIs.test_each_planted_sentence_outcome_and_digest_is_refused",
+    "test_figures.AFigureSaysWhichResultItIs.test_a_bound_solid_is_never_the_hero_as_a_plain_view",
+    "test_figures.TheScaleIsAPackConstant.test_a_bound_viewgen_reads_no_limit",
+    "test_figures.AMissingRendererMovesNoStatus.test_a_kept_row_is_kept_only_at_the_bytes_the_build_wrote",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

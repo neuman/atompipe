@@ -47,9 +47,11 @@ from . import graph as graph_logic
 from . import prose as prose_logic
 from . import report as report_logic
 from . import store
+from . import verdicts as verdict_logic
 from .claims import ClaimCause, ClaimStatus
 from .models import ClaimKind
 from .store import _natural
+from .util import NopekitError
 
 #: The outline this module bakes for (`site.OUTLINE_MARKER` carries it in the
 #: shell), and the schema of both files. Bumped only when a key changes meaning.
@@ -1143,6 +1145,21 @@ def figure_currency_word(currency: str) -> str:
     return str(_site_words()["figure"][currency])
 
 
+def _entry_file(root: str, gate: str, entry: str) -> str | None:
+    """The verdict cache's file of ``entry`` of ``gate``, where the spine
+    writes it (`verdicts._gate_dir`: the raw gate id), or None when the id
+    cannot name a folder. Never under `_component`, which names the site's
+    folders: a gate id the registry accepts may hold any character but ``/``,
+    ``\\``, ``..`` and ``:``. What slipped through (review of P1): the cache was
+    read under ``_component(gate)``, so a gate ``demo+drop`` showed no figure
+    (the cache "held no entry"), and every build drew its pictures again and
+    then deleted them."""
+    try:
+        return os.path.join(verdict_logic._gate_dir(root, gate), entry + ".json")
+    except NopekitError:
+        return None
+
+
 def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | None, str]:
     """``(sidecar, "")`` for the valid sidecar of ``view`` in ``figures/<gate>/
     <entry>/``, else ``(None, why)``. Valid: it parses, its keys are
@@ -1174,8 +1191,8 @@ def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | No
     if (doc.get("view"), doc.get("gate"), doc.get("entry")) != (view, gate, entry):
         return None, (f"{view}{SIDECAR_SUFFIX} names {doc.get('gate')}/{doc.get('entry')}/"
                       f"{doc.get('view')}, not the folder it is in")
-    if not os.path.isfile(os.path.join(root, ".nopekit", "verdicts", _component(gate),
-                                       entry + ".json")):
+    found_entry = _entry_file(root, gate, entry)
+    if found_entry is None or not os.path.isfile(found_entry):
         return None, f"the verdict cache holds no entry {entry} of {gate}"
     files = doc.get("files")
     if not isinstance(files, dict) or not files or set(files) - set(FIGURE_ROLES):
@@ -1238,7 +1255,7 @@ def figure_for(root: str, gate: str, view: str, served: str, fresh: bool) -> Fig
     if len(valid) == 1:
         return Figure(view, gate, served, valid[0][0], "older", valid[0][1], tuple(problems))
     if len(valid) > 1:
-        problems.append(f"view {view}: {len(valid)} earlier pictures of {gate} "
+        problems.append(f"view {view}: {len(valid)} other pictures of {gate} "
                         f"({', '.join(n for n, _ in valid)}) and none of the result the page "
                         f"shows, so none is shown. Draw it again to choose")
     return Figure(view, gate, served, "", "none", None, tuple(problems))
@@ -1296,9 +1313,11 @@ def entry_verdict(root: str, gate: str, entry: str) -> dict | None:
     served one's."""
     if not (gate and _ENTRY_NAME.match(str(entry))):
         return None
+    path = _entry_file(root, gate, entry)
+    if path is None:
+        return None
     try:
-        with open(os.path.join(root, ".nopekit", "verdicts", _component(gate),
-                               entry + ".json"), "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             doc = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -1992,9 +2011,17 @@ def alternates(views: Iterable[Mapping[str, Any]], root: str = "",
     design to look at. *Rejected:* deduplicating by ``src``
     (two paths can hold one file, and a viewgen that writes per-view copies
     would read as two models); listing every view kind (an image or a chart is
-    no model to turn)."""
+    no model to turn).
+
+    A bound view's row (one carrying ``binding``) is listed only as ``first``,
+    the figure hero's own: a bound 3D file shows only as a figure, which says
+    which result it is beside its claims' chips. What slipped through (review
+    of P1): the build merged bound rows into the views, and a bound ``model3d``
+    became an alternate with no chips and no currency."""
     site_dir = os.path.join(root, "site") if root else ""
-    rows = [r for r in views or () if str(r.get("kind") or "") in VIEWER_KINDS]
+    rows = [r for r in views or () if str(r.get("kind") or "") in VIEWER_KINDS
+            and (not r.get("binding") or (first is not None
+                                          and str(r.get("id") or "") == first))]
     if first is not None:
         rows = ([r for r in rows if str(r.get("id") or "") == first]
                 + [r for r in rows if str(r.get("id") or "") != first])
@@ -2030,10 +2057,16 @@ def representation(views: Iterable[Mapping[str, Any]], root: str = "",
     included, so both pages and the technical record say which result it is)
     and ``controls`` (`FIGURE_CONTROLS`); any other hero bakes both as null.
     What slipped through before it (F10): a ``field`` was never the hero, so a
-    project whose only pictures were a solver's had none."""
+    project whose only pictures were a solver's had none. A bound view (a row
+    carrying ``binding``) reaches the hero only through its figure, never as a
+    plain view: what slipped through (review of P1) is a bound ``model3d``
+    taken by the first loop, a hero with no figure, no chips, no currency and,
+    with its 3D file live, no file at all, which pushed aside the bound still
+    that would have said which result it was."""
     views = list(views or ())
     figures = [f for f in figures or () if f.get("currency") != "none"]
-    for row in views:
+    plain = [row for row in views if not row.get("binding")]
+    for row in plain:
         if str(row.get("kind") or "") == "model3d":
             vid = str(row.get("id") or "")
             return {"view": vid, "kind": "model3d", "title": str(row.get("title") or ""),
@@ -2048,7 +2081,7 @@ def representation(views: Iterable[Mapping[str, Any]], root: str = "",
                 return {"view": vid, "kind": wanted, "title": str(fig.get("title") or ""),
                         "notice": "", "alternates": alternates(views, root, first=vid),
                         "figure": fig, "controls": list(FIGURE_CONTROLS)}
-    for row in views:
+    for row in plain:
         if str(row.get("kind") or "") in ("image", "diagram"):
             vid = str(row.get("id") or "")
             return {"view": vid, "kind": str(row.get("kind")),
@@ -3371,7 +3404,9 @@ class FigureFacts(NamedTuple):
     ``claims`` the claims by id, ``shown`` ``{(gate, view): (entry, currency)}``
     when the caller resolved them (the build's bound pass) or None (read from
     the disk, `figure_for`), ``kept`` the build's keep set, or None (a reader:
-    every file is hashed against its sidecar instead), and ``root``."""
+    every file is hashed against its sidecar instead), ``root``, and ``bound``
+    the ids of the views a bound viewgen drew (``state.json``'s rows that carry
+    ``binding``), which reach the representation only as a figure (G8)."""
 
     root: str
     served: dict
@@ -3381,15 +3416,19 @@ class FigureFacts(NamedTuple):
     claims: dict
     shown: dict | None
     kept: frozenset | None
+    bound: frozenset = frozenset()
 
 
 def figure_facts(root: str, resolution: Any, payload: Mapping[str, Any] | None, view: Any,
                  composed: Mapping[str, Any], registry: Any, *,
                  kept: Iterable[str] | None = None,
-                 shown: Iterable[BoundFigure] | None = None) -> FigureFacts:
+                 shown: Iterable[BoundFigure] | None = None,
+                 baked_views: Iterable[Mapping[str, Any]] | None = None) -> FigureFacts:
     """The one producer of `FigureFacts`: the build passes its keep set and the
     figures its bound pass resolved; `site status`, `status` and `doctor` pass
-    neither, and the checker reads the disk."""
+    neither, and the checker reads the disk. ``baked_views`` are the view rows
+    the page was baked with (``state.json``'s, which a reader passes from the
+    disk); none given, ``payload``'s."""
     rows = getattr(resolution, "rows", None) or {}
     served = {}
     for gid, row in rows.items():
@@ -3409,7 +3448,10 @@ def figure_facts(root: str, resolution: Any, payload: Mapping[str, Any] | None, 
         shown=None if shown is None else {
             (b.gate, b.view): (b.figure.entry if b.figure.currency != "none" else "",
                                b.figure.currency) for b in shown},
-        kept=None if kept is None else frozenset(kept))
+        kept=None if kept is None else frozenset(kept),
+        bound=frozenset(str(r.get("id") or "") for r in (
+            (payload or {}).get("views") or () if baked_views is None else baked_views)
+            if isinstance(r, Mapping) and r.get("binding")))
 
 
 def _disk_shown(facts: FigureFacts, gate: str, view: str, kind: str) -> tuple[str, str]:
@@ -3557,6 +3599,30 @@ def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
         if "binding_text" in row and row.get("binding_text") != binding_text(figs):
             out.append(f"page claim {cid} binding text reads {row.get('binding_text')!r}, "
                        f"its figures say {binding_text(figs)!r}")
+    # G8: a bound view is the hero only as its figure, and never an alternate
+    # but the figure hero's own. What slipped through (review of P1): a bound
+    # model3d taken as a plain hero, with no figure, chips or currency, and
+    # listed as a marketing alternate, which the checks below never read
+    # because `figure` was null.
+    rep = page_doc.get("representation") or {}
+    bound = set(facts.bound) | {str(f.get("view") or "") for row in claims_doc.values()
+                                if isinstance(row, Mapping)
+                                for f in row.get("figures") or () if isinstance(f, Mapping)}
+    hero_view = str(rep.get("view") or "") if isinstance(rep, Mapping) else ""
+    hero_fig = rep.get("figure") if isinstance(rep, Mapping) else None
+    own = hero_view if (isinstance(hero_fig, Mapping)
+                        and str(hero_fig.get("view") or "") == hero_view) else ""
+    if isinstance(hero_fig, Mapping) and not own:
+        out.append(f"representation shows {hero_view or 'no view'} with the figure of "
+                   f"{hero_fig.get('view')}")
+    if hero_view in bound and not own:
+        out.append(f"representation {hero_view} is a bound view shown with no figure: it "
+                   f"says no result")
+    for alt in (rep.get("alternates") or ()) if isinstance(rep, Mapping) else ():
+        vid = str(alt.get("view") or "") if isinstance(alt, Mapping) else ""
+        if vid in bound and vid != own:
+            out.append(f"representation alternate {vid} is a bound view: it shows only as "
+                       f"its figure")
     # G8: the hero is the claim's own copy, held as the claim's is.
     hero = (page_doc.get("representation") or {}).get("figure")
     if isinstance(hero, Mapping):

@@ -2894,7 +2894,7 @@ def build(
     )
 
     generated, notes = run_all_viewgens(view_registry, ctx)
-    held = _kept_from_last_build(site, view_registry, notes)
+    held = _kept_from_last_build(site, view_registry, notes, warnings)
     for note in notes:
         if note["status"] in ("error", "unavailable"):
             kept_word = "kept from the last build: " if note["view"] in held else ""
@@ -3030,6 +3030,11 @@ def build(
         row["data"] = {}
         row["data_url"] = relative
         kept_view_files.append(f"{view_id}.json")
+    # What each view row is as written, its view file included, sealed into
+    # page.json: the next build keeps a row only at these bytes
+    # (`_kept_from_last_build`), and `site status` reads any other as edited.
+    page_doc["meta"]["views"] = {str(row.get("id") or ""): view_digest(
+        row, _views_file_payload(site, row)) for row in payload["views"]}
 
     # Keep every asset a view still points at, not merely the ones written this
     # run, and every evidence copy the plan links. A viewgen that is unavailable
@@ -3171,8 +3176,60 @@ def build(
     }
 
 
+def view_digest(row: Mapping[str, Any], data: Any) -> str:
+    """sha256 of a view's ``state.json`` row and the payload of its view file
+    (``data/views/<id>.json``; None when it has none), canonical JSON: what
+    ``page.json``'s ``meta.views`` holds per view. ``""`` for a row JSON cannot
+    write (the build refuses such a row before here)."""
+    try:
+        text = json.dumps({"row": row, "data": data}, sort_keys=True,
+                          separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(("nopekit-view-v1\n" + text).encode("utf-8")).hexdigest()
+
+
+def _views_file_payload(site: str, row: Mapping[str, Any]) -> Any:
+    """The payload of ``row``'s view file under ``data/views/`` (`VIEWS_DIR`),
+    as the build split it out; None for a row with no such file (inline data,
+    or a bound view's chart under ``assets/figures/``); the string
+    ``"unreadable"`` when the file is missing or does not parse, which no
+    payload the build writes (a dict) equals."""
+    view_id = str(row.get("id") or "")
+    if not view_id or row.get("data_url") != posixpath.join(VIEWS_DIR, f"{view_id}.json"):
+        return None
+    try:
+        with open(os.path.join(site, *row["data_url"].split("/")), "r",
+                  encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return "unreadable"
+
+
+def view_problems(site: str, state_doc: Mapping[str, Any],
+                  page_doc: Mapping[str, Any]) -> list[str]:
+    """Each view row of ``state_doc`` (with its view file) whose digest is not
+    the one ``page_doc``'s ``meta.views`` holds, as a sentence; [] when the page
+    holds no digests (a page built before them). The page's own seal is the
+    caller's to check: a resealed page that names the edited bytes is the
+    forged-page class (SPINE_CONTRACT's limits)."""
+    digests = (page_doc.get("meta") or {}).get("views")
+    if not isinstance(digests, dict):
+        return []
+    out = []
+    for row in state_doc.get("views") or ():
+        if not isinstance(row, dict):
+            continue
+        view_id = str(row.get("id") or "")
+        if digests.get(view_id) != view_digest(row, _views_file_payload(site, row)):
+            out.append(f"view {view_id}: its row in {DATA_DIR}/{STATE_NAME} or its file "
+                       f"{VIEWS_DIR}/{view_id}.json is not what the build wrote")
+    return out
+
+
 def _kept_from_last_build(site: str, registry: ViewRegistry,
-                          notes: Iterable[Mapping[str, Any]]) -> dict[str, View]:
+                          notes: Iterable[Mapping[str, Any]],
+                          warnings: list[str] | None = None) -> dict[str, View]:
     """``{view id: View}`` for each viewgen of ``notes`` that is unavailable or
     crashed this build: the row its id had in the last ``data/state.json``,
     with its payload read back from its ``data_url`` file, as a view again
@@ -3191,6 +3248,19 @@ def _kept_from_last_build(site: str, registry: ViewRegistry,
     (a view whose viewgen was removed or returned nothing would never go);
     keeping the file and dropping the row (the cleaner's job is to remove what
     no page links, and a picture nobody links is that).
+
+    A row is kept only at the bytes the last build wrote: its digest, with its
+    view file, must be the one the last ``page.json`` holds under its intact
+    seal (``meta.views``, `view_digest`). What slipped through (review of P1):
+    a number added by hand to ``data/views/<id>.json`` was read back here and
+    baked into the new page, where it vouched for a prose number, and the
+    build resealed the page, so `site status` no longer said *edited by hand*.
+    *Rejected:* leaving a kept row's numbers out of the prose pool (a clone
+    without the tool would then mark numbers the page built with the tool
+    matched, and the two computers would bake two pages from one set of
+    records). What it cannot close: a hand edit that also writes the digest
+    into ``page.json`` and seals it again (the forged-page class,
+    SPINE_CONTRACT's limits).
     """
     wanted = {str(n.get("view") or "") for n in notes
               if n.get("status") in ("unavailable", "error")}
@@ -3201,6 +3271,16 @@ def _kept_from_last_build(site: str, registry: ViewRegistry,
             last = json.load(fh)
     except (OSError, ValueError):
         return {}
+    try:
+        with open(os.path.join(site, DATA_DIR, PAGE_NAME), "r", encoding="utf-8") as fh:
+            last_page = json.load(fh)
+    except (OSError, ValueError):
+        last_page = None
+    digests = ((last_page.get("meta") or {}).get("views")
+               if isinstance(last_page, dict) and last_page.get("self") == page_logic.seal(
+                   last_page) else None)
+    if not isinstance(digests, dict):
+        digests = {}
     rows = last.get("views") if isinstance(last, dict) else None
     held: dict[str, View] = {}
     for row in rows if isinstance(rows, list) else ():
@@ -3212,6 +3292,12 @@ def _kept_from_last_build(site: str, registry: ViewRegistry,
         spec = found[0]
         named = [str(row.get(key) or "") for key in ("src", "data_url")]
         if not all(_site_file(site, rel) for rel in named if rel):
+            continue
+        if digests.get(row["id"]) != view_digest(row, _views_file_payload(site, row)):
+            if warnings is not None:
+                warnings.append(f"view {row['id']}: its row in {DATA_DIR}/{STATE_NAME} or "
+                                f"its file {VIEWS_DIR}/{row['id']}.json is not what the last "
+                                f"build wrote, so it is not kept")
             continue
         body = {k: v for k, v in row.items() if k != "data_url"}
         if row.get("data_url"):

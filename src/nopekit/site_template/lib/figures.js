@@ -68,7 +68,7 @@ function script(src) {
     tag.src = src;
     tag.async = false;
     tag.onload = () => resolve();
-    tag.onerror = () => reject(new Error(`${src} did not load`));
+    tag.onerror = () => reject(new Error(src));
     document.head.appendChild(tag);
   });
 }
@@ -116,6 +116,53 @@ function chartTheme() {
   };
 }
 
+/** The charts drawn on this page: ``{host, spec, view}`` each, so that a
+ *  change of theme draws them again in the new theme's colours. */
+const liveCharts = new Set();
+let themeWatched = false;
+let redrawQueued = false;
+
+/** Draw ``spec`` into ``host`` in the theme the page has now, and keep it
+ *  among the live charts. */
+function embedChart(embed, item) {
+  return embed(item.host, item.spec, { actions: false, renderer: "svg", mode: "vega-lite",
+    config: chartTheme() }).then((result) => {
+    item.view = result && result.view;
+    liveCharts.add(item);
+  });
+}
+
+/** Draw every live chart again once the theme moves: the button
+ *  (`lib/theme.js` sets ``data-theme``) or the system's dark or light. Vega
+ *  writes the theme's colours into the SVG it draws, and nothing in page.css
+ *  reaches them after. What slipped through (review of P1): after the theme
+ *  button, the chart kept the old theme's colours, and the judged point and
+ *  its label drew near-black on the dark card. A chart whose host left the
+ *  page is let go. */
+function watchTheme() {
+  if (themeWatched) return;
+  themeWatched = true;
+  const redraw = () => {
+    if (redrawQueued) return;
+    redrawQueued = true;
+    requestAnimationFrame(() => {
+      redrawQueued = false;
+      if (!window.vegaEmbed) return;
+      for (const item of [...liveCharts]) {
+        liveCharts.delete(item);
+        if (item.view && item.view.finalize) item.view.finalize();
+        if (!item.host.isConnected) continue;
+        item.host.replaceChildren();
+        embedChart(window.vegaEmbed, item).catch(() => { /* the drawing in place stays */ });
+      }
+    });
+  };
+  new MutationObserver(redraw).observe(document.documentElement,
+    { attributes: true, attributeFilter: ["data-theme"] });
+  const media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  if (media && media.addEventListener) media.addEventListener("change", redraw);
+}
+
 /** A bound chart: the baked spec handed to vegaEmbed whole, or, where the
  *  library does not load, the numbers it would draw as a table (never a
  *  drawing of our own). */
@@ -127,28 +174,45 @@ function chartBox(fig, words) {
     mount(host, el("p", { class: "muted small", text: fig.currency_word || "" }));
     return host;
   }
+  watchTheme();
   loadVega()
-    .then((embed) => embed(host, spec, { actions: false, renderer: "svg", mode: "vega-lite",
-      config: chartTheme() }))
-    .catch((err) => mount(host, chartTable(fig, words, err)));
+    .then((embed) => embedChart(embed, { host, spec, view: null }))
+    .catch((err) => {
+      // The reason stays in the console: a sentence the page shows is baked
+      // (`report.HUMAN`), so the style scans read it.
+      console.warn("chart", fig.view, err);
+      mount(host, chartTable(fig, words));
+    });
   return host;
 }
 
-function chartTable(fig, words, err) {
+/** The axis titles the baked spec gives ``x`` and ``y`` (with their units),
+ *  read from its layers as they are; "" where it has none. */
+function axisTitle(spec, channel) {
+  for (const layer of [spec, ...((spec && spec.layer) || [])]) {
+    const enc = (layer && layer.encoding && layer.encoding[channel]) || null;
+    if (enc && enc.field === channel && enc.title) return String(enc.title);
+  }
+  return "";
+}
+
+function chartTable(fig, words) {
   const chart = fig.chart || {};
-  const rows = (((chart.spec || {}).data || {}).values) || [];
+  const spec = chart.spec || {};
+  const rows = ((spec.data || {}).values) || [];
   const said = (words.figure || {});
   return el("div", { class: "fig-table" },
     el("p", { class: "nk-notice", role: "note", text: said.table || "" }),
     el("table", {},
-      el("thead", {}, el("tr", {}, el("th", { text: "" }), el("th", { text: "x" }), el("th", { text: "y" }))),
+      el("thead", {}, el("tr", {}, el("th", { text: "" }),
+        el("th", { text: axisTitle(spec, "x") || "x" }),
+        el("th", { text: axisTitle(spec, "y") || "y" }))),
       el("tbody", {}, ...rows.map((r) => el("tr", {},
         el("td", { text: r.label || r.series || "" }), el("td", { text: String(r.x) }),
         el("td", { text: String(r.y) }))))),
     chart.limit && chart.limit.label ? el("p", { class: "small", text: chart.limit.label }) : null,
     chart.current && chart.current.margin_text
-      ? el("p", { class: "small", text: chart.current.margin_text }) : null,
-    err && err.message ? el("p", { class: "small muted", text: err.message }) : null);
+      ? el("p", { class: "small", text: chart.current.margin_text }) : null);
 }
 
 // --------------------------------------------------------------------------- //
@@ -214,7 +278,7 @@ export function disposeFigureViewers() {
  *  one the bake names (`field_src`, or a 3D view's `src`) or the one this
  *  computer drew (`build.json`'s `live_figures`, keyed by the figure's id).
  *  The viewer mounts only when a reader asks: a field can be a megabyte. */
-function turnButton(fig, build) {
+function turnButton(fig, build, words) {
   const turn = fig.turn || {};
   const live = ((build && build.live_figures) || {})[fig.id] || "";
   const src = fig.field_src || (fig.kind === "field" || fig.kind === "model3d" ? fig.src : "") || live;
@@ -229,8 +293,11 @@ function turnButton(fig, build) {
       const api = createViewer({ host: frame, view: { id: fig.id, kind: "field", src, meta: {} },
         field: true,
         onReady: (ready) => ready.setSpin(false),
-        onError: (err) => mount(frame, el("p", { class: "nk-notice",
-          text: err && err.message ? err.message : String(err) })) });
+        onError: (err) => {
+          console.warn("3D view", fig.id, err);
+          mount(frame, el("p", { class: "nk-notice", role: "note",
+            text: ((words && words.figure) || {}).turn_failed || "" }));
+        } });
       viewers.add(api);
     } });
   mount(box, button);
@@ -252,7 +319,7 @@ function figureBlock(fig, words, build) {
     drawn ? null : el("p", { class: `fig-none tone-${look.tone}` },
       el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }), ` ${fig.currency_word || ""}`),
     body,
-    turnButton(fig, build),
+    turnButton(fig, build, words),
     fig.kind === "image" ? scaleLegend(fig.scale) : null,
     fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null,
     fig.tool_word ? el("p", { class: "nk-notice", role: "note", text: fig.tool_word }) : null);

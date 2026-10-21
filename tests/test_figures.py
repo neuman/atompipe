@@ -452,6 +452,24 @@ def view_row(root: str, view_id: str) -> dict | None:
                  if row.get("id") == view_id), None)
 
 
+def intro_numbers(root: str) -> list[tuple]:
+    """``(text, match)`` of each number run in ``page.json``'s intro."""
+    out: list[tuple] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            if "num" in node:
+                out.append((node["t"], node["match"]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(baked(root, "page.json")["intro"])
+    return out
+
+
 # --------------------------------------------------------------------------- #
 class NothingTheBuildDeletesIsLinked(_env.EnvCase):
     """(Invariant 14) Every file the page links is on disk after the build that
@@ -572,6 +590,40 @@ class AMissingRendererMovesNoStatus(_env.EnvCase):
         """The same with the tool present and the viewgen raising, then once
         more with the tool gone: a crash keeps the row as a missing tool does."""
         self._keeps_its_asset((("crash", "crash"), ("no tool", None)))
+
+    def test_a_kept_row_is_kept_only_at_the_bytes_the_build_wrote(self):
+        """Prose names 4.37 mm, which no baked number holds; a 4.37 is then
+        added by hand to the still's view file. `site status` reads the file
+        as edited by hand, and a build without the still's tool does not keep
+        the row: the number stays marked, and the page reads current. Red
+        before the review of P1: the build read the edited payload back,
+        baked it, matched the number with it and resealed the page."""
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        tool = plant_still(self, root)
+        check_at(self, root, 1.0)
+        run(self, root, "site", "init")
+        intro = os.path.join(root, "site", "content", "intro.md")
+        with open(intro, "w", encoding="utf-8") as fh:
+            fh.write("The plate is 4.37 mm thick.\n")
+        build_in(self, root, tool)
+        self.assertEqual(intro_numbers(root), [("4.37 mm", False)])
+        row = view_row(root, STILL)
+        payload = os.path.join(root, "site", *row["data_url"].split("/"))
+        with open(payload, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc["thickness"] = 4.37
+        with open(payload, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        info = site_status(self, root)
+        self.assertTrue(info["edited"] and STILL in info["edited"][0]
+                        and "edited by hand" in info["edited"][0], info)
+        summary = build_in(self, root, {})
+        self.assertIsNone(view_row(root, STILL))
+        self.assertTrue(any(STILL in w and "is not what the last build wrote" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(intro_numbers(root), [("4.37 mm", False)])
+        self.assertEqual(site_status(self, root)["edited"], [])
+        self.assertEqual(dangling(root), [])
 
     def _keeps_its_asset(self, legs) -> None:
         root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
@@ -858,6 +910,54 @@ class AFigureIsItsEntrysEvidence(_env.EnvCase):
         self.assertIsNone(view_row(root, PIC))
         self.assertTrue(any("over the" in w and PIC in w for w in summary["warnings"]),
                         summary["warnings"])
+
+    def test_a_digest_no_evidence_file_holds_is_never_bound(self):
+        """The field edited after the run, and the still binding it at the
+        digest of the file on disk (a viewgen that hashes whatever is there):
+        `bind` takes only a digest a verified evidence file of the result
+        holds, so nothing is drawn or published. Red with that rule removed:
+        the edited field was drawn and shown as the result's current picture."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        with open(os.path.join(root, ".nopekit", "out", "demo", "field.txt"), "ab") as fh:
+            fh.write(b"edited by hand\n")
+        draw_settings(root, bind="disk")
+        summary = build_in(self, root, draw.env)
+        self.assertTrue(any(PIC in w and "no evidence file of this result holds its digest"
+                            in w for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(draw.calls(), [])
+        self.assertEqual(page_figure(root, PIC)["currency"], "none")
+        self.assertFalse([p for p in figure_files(root) if f"/{PIC}." in p])
+
+    def test_a_gate_id_the_site_spells_otherwise_shows_its_figure(self):
+        """A gate id with a character the site's folder names replace
+        (``demo+drop``, under ``assets/figures/demo_drop/``) is read in the
+        verdict cache under the raw id, where the spine writes it: its figures
+        read current, and a second build is the memo. Red before the review of
+        P1: the cache "held no entry", the figures read none, and every build
+        drew them again and deleted them."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        for rel in ("gates/demo.py", "views/demo_pic.py", "views/demo_chart.py"):
+            path = os.path.join(root, *rel.split("/"))
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text.replace('"demo.drop"', '"demo+drop"'))
+        run(self, root, "check")
+        build_in(self, root, draw.env)
+        for view_id in (PIC, CHART):
+            with self.subTest(view_id):
+                fig = page_figure(root, view_id)
+                self.assertEqual((fig["gate"], fig["currency"]), ("demo+drop", "current"))
+                self.assertTrue(fig["src"] or fig["data_src"])
+        files = figure_files(root)
+        self.assertTrue(files and all(p.startswith("assets/figures/demo_drop/") for p in files),
+                        sorted(files))
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1, "the still was drawn again")
+        self.assertEqual(figure_files(root), files)
 
 
 # --------------------------------------------------------------------------- #
@@ -1199,6 +1299,145 @@ class AFigureSaysWhichResultItIs(_env.EnvCase):
                                  {k: fig[k] for k in ("gate", "entry", "currency",
                                                       "currency_word")})
 
+    def test_each_planted_sentence_outcome_and_digest_is_refused(self):
+        """An older figure's sentences, outcome and digest, each planted alone
+        (the currency left honest) and resealed: `site status` reads each as
+        edited by hand, naming it; and a bake that says the other result failed
+        is refused whole. What slipped through (review of P1): only a planted
+        currency was tried, and the currency check caught it first, so deleting
+        any of these five checks left every test green."""
+        from nopekit import page
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        check_at(self, root, 2.0)
+        build_in(self, root, no_tool_env())
+        honest = page_figure(root, PIC)
+        self.assertEqual((honest["currency"], honest["outcome"]), ("older", "pass"))
+        path = os.path.join(root, "site", "data", "page.json")
+        with open(path, "rb") as fh:
+            built = fh.read()
+
+        def on_pic(**fields):
+            def edit(doc):
+                for fig in [*doc["claims"][CLAIM]["figures"], doc["representation"]["figure"]]:
+                    if fig and fig["view"] == PIC:
+                        fig.update(fields)
+            return edit
+
+        def binding_text(doc):
+            doc["claims"][CLAIM]["binding_text"] = doc["claims"][CLAIM]["binding_text"].replace(
+                "another result of", "that result of")
+
+        legs = (
+            ("currency_word", on_pic(currency_word=page.figure_currency_word("current")),
+             f"figure {PIC} says {page.figure_currency_word('current')!r}, its currency's "
+             f"sentence is"),
+            ("drawn_text", on_pic(drawn_text="That other result: fail, 2 Pa."),
+             f"figure {PIC} says 'That other result: fail, 2 Pa.' of the result it was drawn "
+             f"from"),
+            ("outcome", on_pic(outcome="fail", outcome_word=page._outcome_word("fail")),
+             f"figure {PIC} outcome reads fail, the result it shows is pass"),
+            ("binding_text", binding_text, f"page claim {CLAIM} binding text reads"),
+            ("sha256", on_pic(sha256="0" * 64),
+             f"figure {PIC} names the sha256 {'0' * 64}, and its sidecar names"),
+        )
+        for label, edit, said in legs:
+            with self.subTest(label):
+                with open(path, "wb") as fh:
+                    fh.write(built)
+                plant_page(root, edit)
+                info = site_status(self, root)
+                self.assertTrue(info["edited"], info)
+                self.assertIn("edited by hand", info["edited"][0])
+                self.assertIn(said, info["edited"][0])
+        with open(path, "wb") as fh:
+            fh.write(built)
+        self.assertEqual(site_status(self, root)["edited"], [])
+        real = page.figure_row
+
+        def lying(*args, **kw):
+            fig = real(*args, **kw)
+            if fig["currency"] == "older":
+                fig.update(outcome="fail", outcome_word=page._outcome_word("fail"))
+            return fig
+
+        with mock.patch.object(page, "figure_row", lying):
+            said = refused_build(self, root, no_tool_env())
+        self.assertIn(f"figure {PIC} outcome reads fail, the result it shows is pass", said)
+        self.assertEqual(page_figure(root, PIC)["entry"], a)
+
+    def test_a_bound_solid_is_never_the_hero_as_a_plain_view(self):
+        """A bound 3D view (``demo.solid``, its file live) beside the bound
+        still: the hero is the still's figure, with its chips and its sentence,
+        and the solid is no marketing alternate; a page resealed with the solid
+        as a plain hero, or as an alternate, reads edited by hand. Red before
+        the review of P1: the solid was the hero, with no figure, no chips, no
+        currency and no file, and no check read it."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        with open(os.path.join(root, "views", "demo_solid.py"), "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write(_SOLID_VIEWGEN)
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        self.assertIsNotNone(binding(root, SOLID), "the solid drew no bound row")
+        rep = baked(root, "page.json")["representation"]
+        self.assertEqual((rep["view"], (rep["figure"] or {}).get("view")), (PIC, PIC))
+        self.assertEqual(rep["figure"]["claims"], [claim_chip(root)])
+        self.assertNotIn(SOLID, [alt["view"] for alt in rep["alternates"]])
+        self.assertEqual(site_status(self, root)["edited"], [])
+        path = os.path.join(root, "site", "data", "page.json")
+        with open(path, "rb") as fh:
+            built = fh.read()
+
+        def plain_hero(doc):
+            doc["representation"].update(view=SOLID, kind="model3d", title="The demo solid",
+                                         figure=None, controls=None)
+
+        def alternate(doc):
+            doc["representation"]["alternates"].append(
+                {"view": SOLID, "title": "The demo solid", "bytes": None})
+
+        for label, edit, said in (
+                ("hero", plain_hero,
+                 f"representation {SOLID} is a bound view shown with no figure"),
+                ("alternate", alternate,
+                 f"representation alternate {SOLID} is a bound view")):
+            with self.subTest(label):
+                with open(path, "wb") as fh:
+                    fh.write(built)
+                plant_page(root, edit)
+                info = site_status(self, root)
+                self.assertTrue(info["edited"], info)
+                self.assertIn(said, info["edited"][0])
+
+
+SOLID = "demo.solid"
+
+#: A BOUND 3D view of the figure project (``evidence_of="demo.drop"``): a stand-in
+#: GLB from the run's summary, needing no tool. Its file is live (no export re-ran
+#: the entry), so its row names no file.
+_SOLID_VIEWGEN = '''\
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+
+@viewgen(id="demo.solid", kind=ViewKind.MODEL3D, title="The demo solid",
+         evidence_of="demo.drop")
+def solid(ctx):
+    """A stand-in solid of the demo, from the run's summary."""
+    path = ctx.entry.path("summary.json")
+    if path is None:
+        return None
+    with open(path, "rb") as fh:
+        body = b"glTF" + b"\\x02\\x00\\x00\\x00" + fh.read()
+    src = ctx.write_asset("solid.glb", body)
+    return View(id="demo.solid", kind=ViewKind.MODEL3D, src=src,
+                meta={"caption": "A solid of the demo."})
+'''
+
 
 class TheClaimsStatusSitsBesideEveryFigure(_env.EnvCase):
     """(Invariant 14) Every figure carries the chips of exactly the claims its
@@ -1426,6 +1665,19 @@ class TheScaleIsAPackConstant(_env.EnvCase):
                 self.assertTrue(any(PIC in w and "a colour range taken from a limit" in w
                                     for w in summary["warnings"]), summary["warnings"])
                 self.assertEqual(page_figure(root, PIC)["currency"], "none")
+
+    def test_a_bound_viewgen_reads_no_limit(self):
+        """A bound viewgen's context holds every claim with no acceptance: the
+        chart, asked to note each claim's limit it is handed, notes none. Red
+        with the strip removed: it noted D1's 10.0, so a scale could be keyed to
+        any multiple of it, which the refusal of a range that ends at a limit
+        does not catch."""
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, note_limits=True)
+        summary = build_in(self, root, no_tool_env())
+        self.assertEqual([w for w in summary["warnings"] if "limits seen:" in w],
+                         [f"view {CHART}: limits seen: {CLAIM}=None"])
 
     def test_every_chart_number_is_in_the_evidence(self):
         draw = Draw(self)

@@ -6943,6 +6943,13 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         if isinstance(doc, dict) and doc.get("self") != page.seal(doc):
             info["edited"].append(f"data/{name} was edited by hand: a build writes it again")
     map_doc, page_doc = docs.get(site.MAP_NAME), docs.get(site.PAGE_NAME)
+    # Each view row and view file at the bytes the build sealed into page.json
+    # (review of P1): a payload edited by hand reads so, whether or not prose
+    # names one of its numbers.
+    if isinstance(page_doc, dict) and page_doc.get("self") == page.seal(page_doc):
+        info["edited"].extend(f"{problem}: edited by hand, a build writes it again"
+                              for problem in site.view_problems(
+                                  site_dir, payload, page_doc))
     if isinstance(map_doc, dict):
         info["map"] = {"lines": len(map_doc.get("lines") or ()),
                        "boards": sum(1 for n in map_doc.get("nodes") or ()
@@ -6988,8 +6995,9 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
                                      prose_as_of=as_of,
                                      pool=site.baked_pool(root, map_doc, page_doc),
                                      amber=live_amber, feeds=live_feeds,
-                                     figures=page.figure_facts(root, resolution, now, view,
-                                                               composed, registry))
+                                     figures=page.figure_facts(
+                                         root, resolution, now, view, composed, registry,
+                                         baked_views=payload.get("views") or ()))
         if found:
             info["edited"].append(f"the page data (data/{site.PAGE_NAME}, "
                                   f"data/{site.MAP_NAME}) was edited by hand: {found[0]}")

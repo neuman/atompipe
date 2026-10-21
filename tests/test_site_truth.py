@@ -1843,6 +1843,36 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertIn("repeat(2, minmax(0, 1fr))", wide[:120])
         self.assertTrue(any("width: 100%" in b for b in self._rules(css, ".fig-still img")))
 
+    def test_a_chart_follows_the_theme_and_says_only_baked_words(self):
+        """(issue #15, review of P1) Vega writes the theme's colours into the SVG
+        it draws, so a chart is drawn again when the theme moves (the button's
+        ``data-theme``, or the system's dark or light), its colours read again
+        (`chartTheme` inside the one embed every draw takes). Measured before
+        the fix, in headless Chromium: after the button, the judged point's
+        label stayed #0b0b0b on the dark card; after it, #ffffff, and #0b0b0b
+        again on the way back, one chart each time. And where Vega or a 3D view
+        does not load, the card says only baked words (no error text, which the
+        style scans never read), and the table's columns take the baked spec's
+        axis titles, units included."""
+        raw = self.js["lib/figures.js"]
+        self.assertEqual(raw.count("config: chartTheme()"), 1, "a draw that skips embedChart")
+        self.assertIn("config: chartTheme()", js_function(raw, "embedChart"))
+        watch = js_function(raw, "watchTheme")
+        self.assertRegex(watch, r"new MutationObserver\(redraw\)\.observe\(document\."
+                                r"documentElement,\s*\{[^}]*attributeFilter: \[\"data-theme\"\]")
+        self.assertIn('matchMedia("(prefers-color-scheme: dark)")', watch)
+        self.assertIn('addEventListener("change", redraw)', watch)
+        self.assertIn("embedChart(window.vegaEmbed, item)", watch)
+        self.assertIn("watchTheme();", js_function(raw, "chartBox"))
+        table = js_function(raw, "chartTable")
+        self.assertNotIn("err", table)
+        self.assertIn('axisTitle(spec, "x")', table)
+        self.assertIn('axisTitle(spec, "y")', table)
+        self.assertNotIn("err.message", raw)
+        self.assertNotIn("did not load", raw)
+        self.assertIn(".turn_failed", js_function(raw, "turnButton"))
+        self.assertIn("turn_failed", report.HUMAN["site"]["figure"])
+
     def test_the_technical_record_fits_a_phone(self):
         """The sheet's column may shrink, a verdict's value wraps and the badge
         stacks below 860 px (review of phase 5: 452 px wide at 390)."""

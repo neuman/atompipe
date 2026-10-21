@@ -758,9 +758,11 @@ def big(ctx):
 #: process may have imported already: ``mode`` (the stand-in's,
 #: `tests/_draw_standin.py`), ``timeout_s``, ``glb`` (the still writes a 3D
 #: file too: ``"asset"`` with `write_asset`, ``"live"`` with `write_live`),
-#: ``caption``, ``scale`` and ``marks`` (the still's), and ``chart`` (``ok``,
-#: ``planted-limit``: a limit in the payload, ``computed``: a number no
-#: evidence file holds).
+#: ``caption``, ``scale`` and ``marks`` (the still's), ``bind`` (``disk``: the
+#: still binds the field at the digest of the file on disk, which no evidence
+#: file need hold), ``chart`` (``ok``, ``planted-limit``: a limit in the
+#: payload, ``computed``: a number no evidence file holds) and ``note_limits``
+#: (the chart notes every claim's limit its context hands it).
 #:
 #: ``demo.pic`` is a still drawn by the tool ``nopekit-test-draw``: it reads
 #: the verified summary, binds the field file at the digest the summary lists,
@@ -808,10 +810,15 @@ def pic(ctx):
     found = summary(ctx)
     if found is None:
         return None
-    bound = ctx.bind({"<out>/demo/field.txt": found["field_sha256"]})
+    cfg = settings(ctx)
+    want = found["field_sha256"]
+    if cfg.get("bind") == "disk":
+        import hashlib
+        with open(os.path.join(ctx.root, ".nopekit", "out", "demo", "field.txt"), "rb") as fh:
+            want = hashlib.sha256(fh.read()).hexdigest()
+    bound = ctx.bind({"<out>/demo/field.txt": want})
     if bound is None:
         return None
-    cfg = settings(ctx)
     glb = cfg.get("glb", "")
     with tempfile.TemporaryDirectory() as tmp:
         png_path = os.path.join(tmp, "pic.png")
@@ -859,6 +866,9 @@ def chart(ctx):
     if found is None:
         return None
     mode = settings(ctx).get("chart", "ok")
+    if settings(ctx).get("note_limits"):
+        ctx.note("limits seen: " + ", ".join(
+            "%s=%r" % (c.id, c.acceptance.limit) for c in ctx.ledger.claims))
     data = {"series": {"value": [[found["x"], found["value"]]]},
             "x": {"label": "x"}, "y": {"label": "value", "units": "Pa"}}
     if mode == "planted-limit":
