@@ -190,12 +190,21 @@ On ParaView 6.2.0 (`py312ha24fc4a_1`), WSL2, 2026-10-21:
   runs write PNG files with the same bytes.
 - pvbatch writes Mesa, X server and deprecation lines to stderr in each run
   that succeeds. The pack does not examine stderr.
+- In an empty HOME, one render writes
+  `.config/ParaView/ParaView-UserSettings.json` and
+  `.cache/mesa_shader_cache/`. ParaView reads its settings from that file.
+  So each run gets a new empty HOME outside the project: no setting that a
+  user saved reaches a picture, and the run writes nothing into the project.
 - ParaView 6.2 calls matplotlib's viridis `Viridis`. The older name,
   `Viridis (matplotlib)`, is not there, and `ApplyPreset` stops with an error.
 - The first render resets the camera to the bounding sphere of the data. The
   control renders one time before it sets its camera.
 - `pvbatch --version` takes 0.7 s. The renderer control takes about 3 s, and
-  each still about 2 s.
+  each still about 2 s. On the baseline, `check --tier 2` took 9.5 s, the
+  first `site build` after it 6.3 s (the control and both stills), and a
+  second build 0.5 s: it draws nothing.
+- The stills of the baseline are 1600 x 160 px: the speed 4.8 KB and the
+  pressure 3.6 KB.
 - ParaView's default lookup table has 256 colours. With a continuous table
   the cell at 0.5 of the scale is (33, 144, 140), not (33, 145, 140).
 - On the baseline (8000 cells), the centre pixel of each cell away from the
@@ -215,8 +224,30 @@ On ParaView 6.2.0 (`py312ha24fc4a_1`), WSL2, 2026-10-21:
 - In headless Chromium (SwiftShader), the field mode draws each of the seven
   bands of the test file in its preset colour, in 2 of each channel. The lit
   mode of the viewer draws none of them.
+- A lit display draws about 22% darker: for the cell at 0.5 of the scale,
+  21% to 26% in each channel (see "The renderer control").
 - On the baseline, 6 cells at the corners of the inlet are above the
   pressure scale (to 2.62 pressure drops above the downstream plane), where
   the uniform inlet flow meets the walls. They are magenta. This pressure
   increases when the mesh is made finer, so no fixed top of the scale holds
   it.
+
+## The README picture
+
+`docs/img/packs/cfd-openfoam.png` is the two stills of the baseline, with
+their scales. To make it again, wrap the pack's baseline as a project
+(`tests/_projects.wrap_pack_baseline`), run `nopekit check --tier 2`,
+`nopekit site init` and `nopekit site build` with ESI v2606 and this
+ParaView, then:
+
+```sh
+pvbatch62 packs/cfd-openfoam/views/_gallery.py \
+    <project>/site/assets/figures/cfd.pressure_drop/<entry> \
+    docs/img/packs/cfd-openfoam.png
+```
+
+The script draws no field. It puts each published still into the picture
+with no change to its pixels, less its white border. matplotlib, in
+ParaView's Python, draws each scale from the still's sidecar: its stops, its
+ticks and its colours above and below the scale. Two runs write the same
+bytes.

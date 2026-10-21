@@ -2125,6 +2125,17 @@ and while building it:
   anchors' layers in the browser; reading an analytic pack's `markers` (the
   hand-drawn chart never drew them, and their labels hold the pack's own margin
   words).
+- **Phase 2, P2.6 (built):** the docs and the README's picture of the pack.
+  `PACK.md` has "Pictures on the site" (each view, the result it is of, the scales
+  and why, what git keeps, "from another run" and its command, and what a missing
+  `pvbatch62` does); `references/rendering.md` has every measured fact; the skill
+  has two lines. `docs/img/packs/cfd-openfoam.png` is the two stills a real
+  `site build` published for the pack's baseline, with their scales, put
+  together by `views/_gallery.py` in ParaView's Python: the stills' pixels with
+  no change, and matplotlib's colour bars from the sidecars' stops and ticks.
+  *Rejected:* a screenshot of the page (its chips are one build's statuses, and
+  go out of date in the README); a new run of the scene for the README (a second
+  drawing of the field, which can differ from the published one).
 - **Phase 2, decided here and not yet built:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 

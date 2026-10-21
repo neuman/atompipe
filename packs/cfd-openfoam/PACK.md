@@ -116,37 +116,59 @@ estimated remaining change as `iterative_error_pct`. A chart of the history
 calculates nothing (`references/running-openfoam.md`, "What the evidence
 holds").
 
-Two charts of `cfd.pressure_drop`'s result go on the site with no other tool:
-the pressure drop on each mesh against its cell size, with the value at zero
-cell size and the GCI band (`cfd-openfoam.ladder`), and how the pressure drop
-settled on each mesh (`cfd-openfoam.settle`). Each draws the numbers of the
-result beside it and no other. The site adds the claim's limit and the judged
-value.
+## Pictures on the site
 
-Two stills of the same result show the flow on the finest mesh: its speed
-(`cfd-openfoam.speed`, OpenFOAM's `mag(U)`) and its static pressure
-(`cfd-openfoam.pressure`, OpenFOAM's `static(p)`). Each cell shows its own
-value. The two lines are the measuring planes. The colour scale is a constant
-of the pack times a value of the result, never the limit: the speed goes from
-0 to two times the mean speed through the upstream plane, and the pressure
-from one pressure drop below the downstream plane's pressure to two pressure
-drops above it. Magenta shows a value above the scale, and grey a value below
-it. The page draws the legend from the same scale.
+Each picture is of `cfd.pressure_drop`'s result, the result that the page
+shows beside the claim. A picture changes no status.
 
-Below the pressure still, "Turn it in 3D" shows the same cut in 3D, with the
-same colours and legend. The file is the glTF that ParaView exported in the
-same run, and the page shows it with no change. The 3D file stays on this
-computer (git ignores it) until `nopekit export` runs the result again. The
-next build then commits it.
+| View | What it shows | Tool |
+|---|---|---|
+| `cfd-openfoam.ladder` | the pressure drop on each mesh against its cell size, the value at zero cell size, and the GCI band | none |
+| `cfd-openfoam.settle` | how much the pressure drop changed after each iteration on each mesh, the tolerance, and the estimate of the change still to come | none |
+| `cfd-openfoam.speed` | OpenFOAM's `mag(U)` on the finest mesh, cut at the middle of its thickness | `pvbatch62` |
+| `cfd-openfoam.pressure` | OpenFOAM's `static(p)` in Pa on the same cut; "Turn it in 3D" shows the cut in 3D | `pvbatch62` |
 
-The stills and the 3D view need ParaView 6.2.0, run through a `pvbatch62` launcher on PATH
-(`references/rendering.md`). The pack uses only the ParaView build it checked,
-and a renderer control runs once on each build before it draws. `nopekit
-doctor` shows a `pvbatch62` row. Without ParaView the stills and the 3D view
-are not drawn,
-the charts are drawn, and no status changes. When the page says that the
-solved fields on this computer are from another run, `nopekit check --force
---only cfd.pressure_drop` solves them again.
+A chart draws the numbers of the result and no other number. The site adds
+the claim's limit and the judged value. In a still, each cell shows its own
+value, and the two lines are the measuring planes. OpenFOAM computed each
+field, and ParaView only gives it colours.
+
+**The scales.** Each colour scale is a constant of the pack times a value of
+the result. It is never the claim's limit: a colour set by the limit would be
+a second verdict on the claim, so an edit of the limit changes no colour.
+
+- Speed: from 0 to two times the mean speed through the upstream plane.
+  Developed laminar flow has a peak of 1.5 times its mean between plates and
+  2 times its mean in a round pipe, so the core of the flow is in the scale. A
+  jet that is faster is magenta.
+- Static pressure: from one pressure drop below the pressure on the
+  downstream plane to two pressure drops above it. On the baseline this holds
+  the outlet (0.5 drops below) and the inlet (1.5 drops above). At the corners
+  of the inlet the pressure is above the scale (2.6 drops on the finest mesh,
+  and more on a finer mesh), so those cells are magenta.
+- The colour map is ParaView's `Viridis`. Magenta is above the scale and grey
+  is below it. The page draws the legend from the same scale.
+
+**What git keeps.** A round commits the two stills (about 4 KB each on the
+baseline) and the files of the charts. The 3D file (940 KB on the baseline)
+stays on this computer, in a folder that git ignores, until `nopekit export`
+runs the result again. The next build then commits it.
+
+**"From another run".** A still is drawn only from the field files whose
+sha256 the result's `summary.json` names. The files on this computer can be
+from another run: for example, a check of another design wrote over them
+after the result on the page. Then the build draws no new still, and its
+warning says "the file on this computer is from another run: `nopekit check
+--force --only cfd.pressure_drop` solves it again". The page keeps a still of
+another result, and says so, or shows no still. Run that command, then
+`nopekit site build`.
+
+**Without ParaView.** The stills and the 3D view need ParaView 6.2.0 through
+a `pvbatch62` launcher on PATH (`references/rendering.md`). The pack uses
+only the ParaView build it checked, and a renderer control runs one time on
+that build before the first still. `nopekit doctor` shows a `pvbatch62` row.
+Without ParaView, the charts are drawn and the stills and the 3D view are
+not. No status changes, and the build warnings say why.
 
 ## Pointing a project at its case
 
