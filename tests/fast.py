@@ -13,8 +13,27 @@ least one violation test of every invariant runs every iteration, and a break
 that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
-The budget is 90 s as ONE process on an otherwise idle machine. The merge of phase 3b
-into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
+The budget is 90 s as ONE process on an otherwise idle machine. Issue #15's P1.1 (the
+evidence bound by content) added two rows (~3 s: the A, B, A sequence and one check)
+and left its other seven to the gate. Measured on 2026-10-21 as two interleaved pairs
+against d29421e, both as exported trees, on a machine two other sessions were
+loading (load 1.1-2.6): 173.6 s and 179.5 s wall for its 701 tests against 190.2 s
+and 164.3 s for d29421e's 699, flat within that noise and over the line as its base
+is; no idle run was had. Its P1.3 (bound viewgens) added two rows and moved P1.2's
+unbound row to the gate (~2.2 s net); one unpaired run at load 1.3-4.2: 176.3 s wall
+(137.5 s user) for its 704 tests, against 229.4 s (181.5 s user) for 2f52893's 703,
+run just before it while another session raised the load to 10; still no idle run.
+Its P1.4 (the page's figures) added three rows (~5 s user: each one to two checks and a
+build in process) and test_style's figure keys (in process, ~0.05 s). One pair at load
+2.4-3.7, head then base: 217.5 s wall (164.6 s user) for its 708 tests, against 209.6 s
+(159.5 s user) for b95b7f4's 704. Over the line as its base is; no idle run.
+Its P1.5 (the template) added three rows to test_site_truth.TheBrowserComputesNoTruth,
+which runs whole here (a figure's currency, the field mode and the baked chart spec:
+source scans and one spec in process, ~0.05 s); its browser test
+(test_field_browser, ~2.5 s, a headless Chromium) is the full suite's. One unpaired
+run at load 2.1-2.9: 211.4 s wall (163.3 s user) for its 711 tests. Over the line as
+its base is; no idle run.
+The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
 3d8eaaf (load average 1.4-2.4, not idle): 122.9 s and 119.5 s wall (89.9 s and 87.3 s
@@ -1040,6 +1059,38 @@ FAST: list[str] = [
     "test_derivation.TheOrderIsObserved.test_a_move_the_rounding_hides_does_not_reverse_the_order",
     "test_derivation.TheMapSaysWhatTheTraceDidNotSee",
     "test_records.NoCommandWritesARecord.test_a_rewritten_or_unsealed_trace_file_is_named",
+    # Issue #15, P1.1 (the evidence bound by content): the A, B, A sequence on
+    # the figure project through the CLI (~2.5 s: three checks, `site init` and
+    # one build, each a cold process), the row that saw the defect, and the
+    # manifest's place under git's ignore rules (~0.6 s, one check).
+    "test_figures.EvidenceIsBoundByContent.test_a_cache_hit_never_publishes_another_runs_bytes",
+    "test_figures.TheEvidenceManifestIsScratch.test_check_writes_the_manifest_only_where_git_ignores",
+    # Issue #15, P1.2 (nothing the build deletes is linked): one check, `site
+    # init` and two builds of the figure project, the second without the
+    # unbound viewgen's tool, each a cold process (~3 s idle, ~6 s measured on
+    # a loaded machine). The row that saw the defect: every link of
+    # state.json, map.json and page.json is on disk after each build.
+    "test_figures.NothingTheBuildDeletesIsLinked.test_every_href_the_page_bakes_exists_after_the_build",
+    # Issue #15, P1.3 (bound viewgens): the A, B, A sequence with the stand-in
+    # renderer (three checks and `site init` as cold processes, two builds in
+    # process: ~1.5 s at load 1.7), the row that sees a picture drawn from
+    # another run's files; and AMissingRendererMovesNoStatus's design row, five
+    # builds in process with the renderer absent, crashing, hanging past a 1 s
+    # timeout and writing 2.1 MiB (~1.9 s, 1 s of it the timeout). The latter
+    # replaces P1.2's unbound row here (~1.2 s), which moved to the gate as its
+    # comment said: ~2.2 s added in all.
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_render_from_another_runs_inputs_is_never_drawn",
+    "test_figures.AMissingRendererMovesNoStatus.test_statuses_equal_with_absent_crashing_hanging_oversize_renderer",
+    # Issue #15, P1.4 (the page's figures): the design's three rows, each one to
+    # two checks as cold processes and one or two builds in process (~1.5-2.5 s
+    # each at load 2-4): a new entry with no renderer reads older beside the
+    # new composition's chips; a disagreement and an amber flip planted on the
+    # claim reach every figure's chip and the hero's, and the build's checker
+    # (G1-G8) accepts the page; a limit doubled and the still drawn again move
+    # no colour range while the chart's limit moves with the claim.
+    "test_figures.AFigureSaysWhichResultItIs.test_a_new_entry_with_no_renderer_reads_older",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_every_figure_carries_its_claims_chips",
+    "test_figures.TheScaleIsAPackConstant.test_the_scale_never_moves_with_the_limit",
 ]
 
 
@@ -1047,6 +1098,100 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Issue #15, P1.1: the rest of the evidence binding, each a figure project
+    # driven through two to nine cold CLI processes (~1-4 s each, ~12 s in all).
+    # The A, B, A row in FAST runs the same plan through the same build, with
+    # the manifest written, missing and mismatched; these hold the edges: a
+    # `--no-record` run, a crash's file over the served entry, a clone with no
+    # scratch, a copy made before the manifest, `--no-record` and the controls
+    # writing none, the build's own writes, and an earlier copy that another
+    # run's bytes never overwrite (~4 s; the FAST row's plan and build again,
+    # with a copy already on the site). An iteration touching
+    # `page.evidence_plan`, `site._evidence_plan` or the manifest in
+    # `verdicts.py` runs test_figures and test_map whole.
+    "test_figures.EvidenceIsBoundByContent.test_an_earlier_copy_is_never_overwritten_by_another_runs_bytes",
+    "test_figures.EvidenceIsBoundByContent.test_a_no_record_run_binds_nothing",
+    "test_figures.EvidenceIsBoundByContent.test_an_errored_runs_evidence_never_lands_under_the_stale_entry",
+    "test_figures.EvidenceIsBoundByContent.test_a_fresh_clone_keeps_the_committed_copy",
+    "test_figures.EvidenceIsBoundByContent.test_a_copy_made_before_the_manifest_is_kept",
+    "test_figures.TheEvidenceManifestIsScratch.test_no_record_and_controls_write_none",
+    "test_figures.TheEvidenceManifestIsScratch.test_site_build_writes_only_site_and_ignored_scratch",
+    # Issue #15, P1.2: the prose figure under `assets/` (one check and two
+    # builds, ~4 s) and the unbound viewgen crashing, then with its tool gone
+    # (one check and three builds, ~5 s). The FAST rows above build the same
+    # project without the tool, ask that every link is on disk and that the
+    # row and its files stay; these hold the crash and the prose figure's
+    # word. An iteration touching `site._kept_from_last_build`,
+    # `page.figure_misplaced` or `prose.parse_markdown` runs test_figures and
+    # test_site whole.
+    "test_figures.NothingTheBuildDeletesIsLinked.test_a_prose_figure_under_assets_reads_missing",
+    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_crashes_keeps_its_asset",
+    # Issue #15, P1.3: the unbound viewgen's row with its tool gone (one check,
+    # `site init`, two builds; ~3 s), FAST in P1.2 until this step's design
+    # row for its class landed; the bound picture kept through a build without
+    # the tool (memo, scene edit, clone: one check, four builds, ~4 s); and the
+    # rest of AFigureIsItsEntrysEvidence (a forced run drawing its own entry
+    # again, inputs moved during the draw, every path naming its entry, a
+    # forged folder, a swapped file, a file over 2 MiB: one to four checks and
+    # two to four builds each, ~20 s in all). The FAST rows above run the
+    # same bound pass with the manifest bound, missing, and a renderer that
+    # fails four ways. An iteration touching `site._bound_pass`,
+    # `_figure_refusal`, `_publish_figure`, `BoundContext`,
+    # `page.read_sidecar` or `page.figure_for` runs test_figures whole.
+    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset",
+    "test_figures.AMissingRendererMovesNoStatus.test_a_committed_render_survives_a_build_without_the_tool",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_forced_run_draws_its_own_entry_again",
+    "test_figures.AFigureIsItsEntrysEvidence.test_inputs_that_move_during_the_render_are_discarded",
+    "test_figures.AFigureIsItsEntrysEvidence.test_every_figure_path_names_its_entry",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_render_naming_an_entry_the_cache_lacks_is_never_shown",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_swapped_file_is_never_shown",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_file_over_two_mib_is_never_written_or_linked",
+    # Issue #15, P1.4: the rest of the page's figures, each one to three checks
+    # as cold processes and one to three builds and `site status` runs in
+    # process (~2-5 s each, ~40 s in all): a design edit reading stale, a
+    # planted currency (a lying bake refused, a resealed page read as edited
+    # by hand by `site status`, `status` and `doctor`), a check that moved
+    # only the entry, two older pictures after a merge, the technical page's
+    # word, planted chips, a missing or extra claim, the chart's limit and
+    # margin, a pack limit, a status in a caption, a scale keyed to a limit, a
+    # number no evidence holds; and the pool's figure numbers (one check, one
+    # build). The FAST rows above run the same bake, the same checker in the
+    # build and the same refusals' producer. An iteration touching
+    # `page.figure_row`, `chart_block`, `figure_facts`, `_figure_problems`,
+    # `representation` or `site._bound_pass` runs test_figures, test_site_truth
+    # and test_style whole.
+    "test_figures.AFigureSaysWhichResultItIs.test_a_design_edit_reads_stale",
+    "test_figures.AFigureSaysWhichResultItIs.test_a_planted_currency_is_refused",
+    "test_figures.AFigureSaysWhichResultItIs.test_site_status_reads_behind_after_a_check_that_moved_only_the_entry",
+    "test_figures.AFigureSaysWhichResultItIs.test_two_older_renders_after_a_merge_show_none",
+    "test_figures.AFigureSaysWhichResultItIs.test_the_technical_page_says_the_same_word",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_planted_chip_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_missing_or_extra_claim_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_chart_limit_and_margin_are_the_floors",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_pack_limit_in_a_chart_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_caption_with_a_status_word_is_refused",
+    "test_figures.TheScaleIsAPackConstant.test_a_scale_keyed_to_a_limit_is_refused",
+    "test_figures.TheScaleIsAPackConstant.test_every_chart_number_is_in_the_evidence",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_figure_numbers_vouch_for_nothing",
+    # The review of P1: a digest no evidence file holds, refused by `bind` (one
+    # check, one build); a gate id the site's folder spells otherwise, read
+    # under the raw id (one check, two builds); each of an older figure's
+    # sentences, outcome and digest planted alone, and a lying outcome bake
+    # (two checks, two builds, six `site status` runs and one refused build in
+    # process, ~4 s); a bound solid kept off the hero and the alternates, and
+    # planted there (one check, one build, three `site status` runs); a bound
+    # viewgen handed no limit (one check, one build); and a kept row edited by
+    # hand (one check, two builds, two `site status` runs). ~12 s in all. The
+    # FAST rows above run the same bound pass, bake and checker. An iteration
+    # touching `BoundContext.bind`, `page.read_sidecar`, `entry_verdict`,
+    # `representation`, `alternates`, `_figure_problems`,
+    # `_kept_from_last_build` or `view_digest` runs test_figures whole.
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_digest_no_evidence_file_holds_is_never_bound",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_gate_id_the_site_spells_otherwise_shows_its_figure",
+    "test_figures.AFigureSaysWhichResultItIs.test_each_planted_sentence_outcome_and_digest_is_refused",
+    "test_figures.AFigureSaysWhichResultItIs.test_a_bound_solid_is_never_the_hero_as_a_plain_view",
+    "test_figures.TheScaleIsAPackConstant.test_a_bound_viewgen_reads_no_limit",
+    "test_figures.AMissingRendererMovesNoStatus.test_a_kept_row_is_kept_only_at_the_bytes_the_build_wrote",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

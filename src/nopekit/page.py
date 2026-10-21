@@ -37,6 +37,7 @@ import json
 import math
 import os
 import posixpath
+import re
 import shlex
 from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
@@ -46,9 +47,11 @@ from . import graph as graph_logic
 from . import prose as prose_logic
 from . import report as report_logic
 from . import store
+from . import verdicts as verdict_logic
 from .claims import ClaimCause, ClaimStatus
 from .models import ClaimKind
 from .store import _natural
+from .util import NopekitError
 
 #: The outline this module bakes for (`site.OUTLINE_MARKER` carries it in the
 #: shell), and the schema of both files. Bumped only when a key changes meaning.
@@ -91,6 +94,19 @@ EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
 
 #: Where the evidence lands, under ``site/``.
 EVIDENCE_DIR = "assets/evidence"
+
+#: Where the agent's prose figures go, under ``site/``, and the folder they
+#: must not use (`figure_misplaced`). ``assets/`` is the build's: the cleaner
+#: (`site.clean_assets`) deletes each file there that no view and no evidence
+#: copy names, and a prose figure is neither. What slipped through (issue #15):
+#: a figure under ``assets/`` read present, the build that baked it deleted
+#: it, and the next build baked another page. *Rejected:* adding prose figures
+#: to the cleaner's keep set (a picture the agent forgot would then outlive the
+#: text that named it, and only the next text edit would let it go); a warning
+#: alone with the figure shown (the page would link a file the same build
+#: deletes).
+PROSE_FIGURE_DIR = "content/img"
+ASSETS_PREFIX = "assets/"
 
 #: The prose subjects that are not boards: the description, the next steps and,
 #: from the two pages, the marketing page's story. Every list of them (the
@@ -137,7 +153,14 @@ WORD_KEYS = frozenset({
     "generated", "notice", "sentence", "limits", "label", "word", "value_text", "hint",
     "cause_text", "text", "kind_word", "by_word", "basis_word", "outcome_word", "missing",
     "term", "why", "recorded", "heading",
-    "headline", "type_word", "returns_word", "lost_label", "decisions_more"})
+    "headline", "type_word", "returns_word", "lost_label", "decisions_more",
+    # issue #15, B.4.3: a bound figure's words. A pack's ``caption``, ``alt``
+    # and scale words sit under word keys so that the scan reads them; ``alt``
+    # moved here from the record keys (it was only ever a prose block's, and
+    # blocks are the prose's own).
+    "currency_word", "drawn_text", "caption", "alt", "provenance", "tool_word",
+    "over_word", "under_word", "source_text", "binding_text", "live_word", "margin_text",
+    "quantity"})
 RECORD_KEYS = frozenset({
     "schema", "name", "summary", "revision", "records_digest", "resolution_digest",
     "content_digest", "trace", "view", "kind", "title", "token", "id", "key", "lane",
@@ -145,7 +168,7 @@ RECORD_KEYS = frozenset({
     "pack", "outcome", "self", "reads_all", "claim", "status", "file", "subject", "as_of",
     "current_as_of", "stamp", "statement", "cause", "by", "how", "acceptance",
     "limit_text", "gate", "comparator", "source", "stale_reason", "detail", "href",
-    "description", "article", "type", "src", "alt", "t", "num",
+    "description", "article", "type", "src", "t", "num",
     "unit", "unmatched", "register", "problems", "lanes", "members", "claims", "marks",
     "stops", "values", "unread", "evaluators", "requirements", "rests_on", "resolves",
     "resolved_by", "commands", "legend", "nodes", "edges", "via", "steps", "milestones",
@@ -157,7 +180,17 @@ RECORD_KEYS = frozenset({
     "source", "sources", "state", "rank", "sets", "unmoved", "unmeasured",
     # the two pages: the marketing page's record text and tokens
     "when", "params", "value", "reason", "rationale", "returns_text", "input",
-    "preference", "returns", "decisions", "rejected", "lost", "alternates"})
+    "preference", "returns", "decisions", "rejected", "lost", "alternates",
+    # issue #15, B.4.3: a bound figure's ids, paths, digests and tokens
+    "figures", "figure", "currency", "entry", "sha256", "field_src", "data_src", "scale",
+    "over", "under", "colour", "ticks", "chart", "turn", "controls",
+    # P1.5: a bound chart's Vega-Lite spec (`chart_spec`), under ``chart.spec``.
+    # Its strings are Vega-Lite's vocabulary (a mark's ``type`` and ``shape``,
+    # a theme ``style`` name, a data ``field``, ``width: "container"``, a text
+    # mark's ``align`` and ``baseline``) and a data row's ``series`` key; its words are the floor's and the pack's
+    # labels, under ``label`` and ``text`` (words), and the axis ``title``, a
+    # record as a view's title is.
+    "spec", "style", "field", "shape", "width", "series", "align", "baseline"})
 
 
 class Board(NamedTuple):
@@ -733,19 +766,30 @@ def value_text(measured: Any, units: str, limit_text: str, margin: float | None)
         text = said["value_bare"].format(measured=_num(measured), units=units or "")
     text = " ".join(text.split())
     if margin is not None and limit_text:
-        if margin == 0:
-            text += said["margin_at"]
-        elif margin > 0:
-            text += said["margin_inside"].format(pct=_pct(margin))
-        else:
-            text += said["margin_past"].format(pct=_pct(margin))
+        text += ", " + margin_text(margin)
     return text
+
+
+def margin_text(margin: float | None) -> str:
+    """The margin's words alone (``40% past the limit``), as `value_text` ends
+    with them, or ``""`` for no margin: what a bound chart says beside its
+    point (issue #15, B.4.2), from the same words as the floor's line."""
+    if margin is None:
+        return ""
+    said = _site_words()
+    if margin == 0:
+        found = said["margin_at"]
+    elif margin > 0:
+        found = said["margin_inside"].format(pct=_pct(margin))
+    else:
+        found = said["margin_past"].format(pct=_pct(margin))
+    return found.lstrip(", ").strip()
 
 
 def words_block() -> dict:
     """``page.json``'s ``words``: each token's word, term and hint, and the
     tables the page labels with (lanes, kinds, mechanism, basis, outcome,
-    headings, notices)."""
+    headings, notices, and a figure card's words)."""
     said = _site_words()
     tokens: dict[str, dict] = {}
     for token in claim_logic.SEVERITY_ORDER:
@@ -757,6 +801,7 @@ def words_block() -> dict:
             "by": dict(said["by"]), "basis": dict(said["basis"]),
             "outcome": dict(said["outcome"]), "headings": dict(said["headings"]),
             "notices": dict(said["notices"]),
+            "figure": dict(said["figure"]),
             "ready": {"ready": said["ready_word"], "not-ready": said["not_ready_word"]},
             "trace": {k: (dict(v) if isinstance(v, Mapping) else v)
                       for k, v in said["trace"].items()}}
@@ -814,7 +859,8 @@ class Evidence(NamedTuple):
     the page's words when there is none; ``action`` ``copy``, ``keep`` or
     ``none``; ``reason`` why it is not on the page, in the build's words, for
     the build's warnings only (it reads this machine's disk, so it is never
-    baked)."""
+    baked); ``sha256`` the digest a ``copy`` was verified at, which the copy
+    checks again on the bytes it reads (``""`` for every other action)."""
 
     gate: str
     entry: str
@@ -826,6 +872,7 @@ class Evidence(NamedTuple):
     missing: str
     action: str
     reason: str = ""
+    sha256: str = ""
 
 
 def _component(text: str) -> str:
@@ -859,8 +906,64 @@ def _free_name(name: str, taken: set[str]) -> str:
     return shown
 
 
+#: Why a file on this computer is not copied as an entry's evidence, by
+#: content (issue #15): the build's warnings only, never baked.
+_ANOTHER_RUN = ("the file on this computer is from another run: `nopekit check --force "
+                "--only {gate}` solves it again")
+_NO_RECORDED_RUN = "no recorded run on this computer wrote this entry"
+
+
+def _sha256_of(path: str) -> tuple[str, int] | None:
+    """``(sha256, bytes)`` of the file at ``path``, or ``None``."""
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+                size += len(block)
+    except OSError:
+        return None
+    return digest.hexdigest(), size
+
+
+def evidence_source(root: str, text: str, *,
+                    ignored: Callable[[str], bool] | None = None
+                    ) -> tuple[str | None, bool, str]:
+    """``(source, outside, reason)`` for one evidence path as a verdict names
+    it (`evidence_plan`'s rule, shared with a bound viewgen's entry,
+    `site.BoundEntry`): ``<out>/rest`` under ``.nopekit/out/``, links
+    followed and kept inside; a bare relative path under the root, no hidden
+    part, not ignored by git (``ignored``); ``outside`` for ``<out:controls>/``,
+    ``<tmp>/``, ``~/``, ``<pack:…>/``, an absolute path and a ``..`` part.
+    ``source`` is None when the path is outside or refused (``reason``)."""
+    out_root = store.out_dir(root)
+    if text.startswith("<out>/"):
+        parts = text[len("<out>/"):].replace("\\", "/").split("/")
+        if ".." in parts or not any(parts):
+            return None, True, ""
+        candidate = os.path.join(out_root, *[p for p in parts if p])
+        if os.path.lexists(candidate) and not _inside(candidate, out_root):
+            return None, False, "it leaves .nopekit/out/ through a link"
+        return candidate, False, ""
+    if text.startswith(("<", "~")) or os.path.isabs(text):
+        return None, True, ""
+    parts = [p for p in text.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or ".." in parts:
+        return None, True, ""
+    if any(p.startswith(".") for p in parts):
+        return None, False, "a hidden file is never published"
+    if ignored is not None and ignored("/".join(parts)):
+        return None, False, "git ignores it, so it is never published"
+    candidate = os.path.join(root, *parts)
+    if os.path.lexists(candidate) and not _inside(candidate, root):
+        return None, False, "it leaves the project through a link"
+    return candidate, False, ""
+
+
 def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *,
-                  ignored: Callable[[str], bool] | None = None) -> list:
+                  ignored: Callable[[str], bool] | None = None,
+                  manifest: Callable[[str, str], Mapping | None] | None = None) -> list:
     """Every evidence path of every verdict whose row stands on a cache entry,
     planned: ``<out>/rest`` resolves under ``.nopekit/out/`` and must stay
     there, links followed; a bare relative path resolves under the root and
@@ -873,6 +976,19 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
     build made and links it; names that clash in one entry, ignoring case,
     gain ``-2``, ``-3``. Plans only: `site.build` copies.
 
+    Bound by content (issue #15): a file is planned ``copy`` only when its
+    sha256 is the one ``manifest(gate, entry)`` (``verdicts.evidence_manifest``)
+    holds for its path, the bytes the recorded run that wrote the entry cited.
+    A file with other bytes, or with no manifest for its entry, is ``keep``
+    where the entry-keyed copy is on the site already and ``none`` where it is
+    not, and the build says why. No ``manifest`` reader binds nothing, so
+    nothing is copied. What slipped through: the plan copied whatever
+    ``.nopekit/out`` held under the cited name, so a design that went A, B, A
+    (a cache hit serving A over B's files) published B's bytes as A's evidence,
+    over A's earlier copy. *Rejected:* checking the bytes in `site.build` only
+    (the plan baked an href to a copy the build then refused); a digest in the
+    tracked entry (see `verdicts._EVIDENCE_DIR`).
+
     The words baked beside a path that is not on the page depend only on the
     path (outside the project, or not on the page); why a file inside is not
     copied (too large, a directory, gone, ignored, a link out) reads this
@@ -884,46 +1000,19 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
     planned one destination; and a fresh clone baked other words than the
     machine that ran the check, so the same records gave other bytes."""
     said = _site_words()["evidence"]
-    out_root = store.out_dir(root)
     rows = getattr(resolution, "rows", None) or {}
     plan: list[Evidence] = []
     for verdict in getattr(view, "verdicts", None) or ():
         row = rows.get(verdict.gate)
         entry = getattr(row, "entry", None)
         entry_name = getattr(entry, "name", "") if entry is not None else ""
+        bound = (manifest(verdict.gate, entry_name) if manifest is not None and entry_name
+                 else None)
         taken: set[str] = set()
         for path in verdict.evidence or ():
             text = str(path)
             name = posixpath.basename(text.replace("\\", "/").rstrip("/")) or "evidence"
-            source: str | None = None
-            outside = False
-            reason = ""
-            if text.startswith("<out>/"):
-                parts = text[len("<out>/"):].replace("\\", "/").split("/")
-                if ".." in parts or not any(parts):
-                    outside = True
-                else:
-                    candidate = os.path.join(out_root, *[p for p in parts if p])
-                    if os.path.lexists(candidate) and not _inside(candidate, out_root):
-                        reason = "it leaves .nopekit/out/ through a link"
-                    else:
-                        source = candidate
-            elif text.startswith(("<", "~")) or os.path.isabs(text):
-                outside = True
-            else:
-                parts = [p for p in text.replace("\\", "/").split("/") if p not in ("", ".")]
-                if not parts or ".." in parts:
-                    outside = True
-                elif any(p.startswith(".") for p in parts):
-                    reason = "a hidden file is never published"
-                elif ignored is not None and ignored("/".join(parts)):
-                    reason = "git ignores it, so it is never published"
-                else:
-                    candidate = os.path.join(root, *parts)
-                    if os.path.lexists(candidate) and not _inside(candidate, root):
-                        reason = "it leaves the project through a link"
-                    else:
-                        source = candidate
+            source, outside, reason = evidence_source(root, text, ignored=ignored)
             if outside or not entry_name:
                 plan.append(Evidence(verdict.gate, entry_name, text, name, None, None, None,
                                      said["outside"] if outside else said["not_copied"],
@@ -933,6 +1022,7 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
             dest = posixpath.join(EVIDENCE_DIR, _component(verdict.gate),
                                   _component(entry_name), shown)
             on_site = os.path.join(root, "site", *dest.split("/"))
+            unbound = False
             if reason:
                 pass
             elif source is not None and os.path.isdir(source):
@@ -943,15 +1033,28 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
                     reason = (f"it is {_size_words(size)}, over the "
                               f"{_size_words(EVIDENCE_MAX_BYTES)} cap")
                 else:
-                    plan.append(Evidence(verdict.gate, entry_name, text, name, source, dest,
-                                         dest, "", "copy"))
-                    continue
-            elif os.path.isfile(on_site):
-                plan.append(Evidence(verdict.gate, entry_name, text, name, None, dest, dest, "",
-                                     "keep"))
-                continue
+                    found = _sha256_of(source)
+                    want = bound.get(text) if isinstance(bound, Mapping) else None
+                    if (found is not None and isinstance(want, Mapping)
+                            and want.get("sha256") == found[0]):
+                        plan.append(Evidence(verdict.gate, entry_name, text, name, source,
+                                             dest, dest, "", "copy", "", found[0]))
+                        continue
+                    unbound = True
+                    reason = (_NO_RECORDED_RUN if bound is None
+                              else _ANOTHER_RUN.format(gate=verdict.gate))
             else:
+                unbound = True
                 reason = "it is not on this computer (run the check to write it)"
+            if unbound and os.path.isfile(on_site):
+                # The copy an earlier build made stays linked (a fresh clone, or
+                # a file on this computer that is not the entry's run's bytes):
+                # the file here never replaces it. ``reason`` says why it was
+                # not copied again, for the build's warnings.
+                plan.append(Evidence(verdict.gate, entry_name, text, name, None, dest, dest, "",
+                                     "keep", "" if source is None or not os.path.isfile(source)
+                                     else reason))
+                continue
             plan.append(Evidence(verdict.gate, entry_name, text, name, None, None, None,
                                  said["not_copied"], "none", reason))
     return plan
@@ -963,6 +1066,708 @@ def evidence_assets(plan: Iterable[Evidence]) -> dict[str, list[str]]:
     for item in plan:
         out.setdefault(item.gate, []).append(item.href or "")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# figures bound to a verdict entry (issue #15, B.1.4-B.1.5)
+# --------------------------------------------------------------------------- #
+#: Where a bound viewgen's figure is published, under ``site/``: one folder per
+#: (gate, verdict entry), tracked. And where its live 3D file goes, ignored by
+#: git (``site/.gitignore``'s ``assets/live/``): a GLB is committed only for an
+#: entry an export re-ran, because a solved field's GLB is up to 2 MiB a
+#: result, and a project that commits one for every check grows its repository
+#: on every re-run. *Rejected:* a folder per view (an entry's pictures would
+#: then sit apart, and nothing would say which result each one is); one file
+#: name per view with no digest (a browser that cached the old picture would
+#: show it under the new page); committing every GLB (the size above).
+FIGURES_DIR = "assets/figures"
+LIVE_DIR = "assets/live"
+
+#: The tracked sidecar beside a figure's files: ``<view>.view.json``. It names
+#: each file with its sha256, so a swapped file is told by content, and it
+#: holds no clock and no machine path. Schema 1: `SIDECAR_KEYS`. *Rejected:*
+#: stamps inside the PNG and the GLB (one reader per format, and a canonical
+#: PNG keeps no ancillary chunk); a field on ``models.View`` (a second spine
+#: edit, and a strict-reader change, for one use).
+SIDECAR_SUFFIX = ".view.json"
+SIDECAR_SCHEMA = 1
+SIDECAR_KEYS = ("schema", "view", "gate", "entry", "kind", "recipe", "files", "title",
+                "caption", "alt", "scale", "marks", "tool")
+
+#: The roles a sidecar's files play: the still (a PNG), the 3D field (a GLB,
+#: ``live`` when it is under `LIVE_DIR`) and the chart's series (JSON).
+FIGURE_ROLES = ("image", "field", "chart")
+
+#: The four words a bound figure's currency can take (B.1.5), each with its
+#: sentence in ``report.HUMAN["site"]["figure"]``: ``current`` beside the fresh
+#: served entry, ``stale`` beside a served entry that is not current,
+#: ``older`` when the picture is of another entry of the gate, ``none`` when
+#: there is no picture to show.
+FIGURE_CURRENCIES = ("current", "stale", "older", "none")
+
+_ENTRY_NAME = re.compile(r"^[0-9a-f]{16}-[0-9a-f]{8}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class Figure(NamedTuple):
+    """One bound view's figure as the disk holds it: ``served`` the gate's
+    served entry (``""`` for none), ``entry`` the entry it was drawn from
+    (``""`` for none), ``currency`` one of `FIGURE_CURRENCIES`, ``sidecar``
+    the valid sidecar it reads (``None`` for none), ``problems`` the build's
+    warnings about folders it refused or could not choose between."""
+
+    view: str
+    gate: str
+    served: str
+    entry: str
+    currency: str
+    sidecar: Mapping | None
+    problems: tuple
+
+    @property
+    def folder(self) -> str:
+        """The figure's folder under ``site/`` (``""`` for none)."""
+        return figure_folder(self.gate, self.entry) if self.entry else ""
+
+
+def figure_folder(gate: str, entry: str) -> str:
+    """``assets/figures/<gate>/<entry>``, under ``site/``."""
+    return posixpath.join(FIGURES_DIR, _component(gate), _component(entry))
+
+
+def live_folder(gate: str, entry: str) -> str:
+    """``assets/live/<gate>/<entry>``, under ``site/``."""
+    return posixpath.join(LIVE_DIR, _component(gate), _component(entry))
+
+
+def figure_currency_word(currency: str) -> str:
+    """A currency's sentence (``report.HUMAN["site"]["figure"]``)."""
+    return str(_site_words()["figure"][currency])
+
+
+def _entry_file(root: str, gate: str, entry: str) -> str | None:
+    """The verdict cache's file of ``entry`` of ``gate``, where the spine
+    writes it (`verdicts._gate_dir`: the raw gate id), or None when the id
+    cannot name a folder. Never under `_component`, which names the site's
+    folders: a gate id the registry accepts may hold any character but ``/``,
+    ``\\``, ``..`` and ``:``. What slipped through (review of P1): the cache was
+    read under ``_component(gate)``, so a gate ``demo+drop`` showed no figure
+    (the cache "held no entry"), and every build drew its pictures again and
+    then deleted them."""
+    try:
+        return os.path.join(verdict_logic._gate_dir(root, gate), entry + ".json")
+    except NopekitError:
+        return None
+
+
+def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | None, str]:
+    """``(sidecar, "")`` for the valid sidecar of ``view`` in ``figures/<gate>/
+    <entry>/``, else ``(None, why)``. Valid: it parses, its keys are
+    `SIDECAR_KEYS`, its ``view``, ``gate`` and ``entry`` are the folder's,
+    the verdict cache holds the entry (``.nopekit/verdicts/<gate>/<entry>.json``),
+    and each file it names that is not live is a plain name in the folder, at
+    most `EVIDENCE_MAX_BYTES`, whose sha256 and size are the sidecar's. A live
+    file is named, never required: it is on one computer only.
+
+    What it closes (issue #15): a folder or a sidecar written by hand under an
+    entry the cache lacks, a picture swapped under its name, or a file over
+    the cap placed by hand, shown as a result's picture. What it cannot close:
+    a forged sidecar whose bytes all match, under an entry the cache holds
+    (the forged-cache class; SPINE_CONTRACT's limits)."""
+    if not (_ENTRY_NAME.match(str(entry)) and gate and view):
+        return None, f"{entry!r} is not a verdict entry's name"
+    folder = os.path.join(root, "site", *figure_folder(gate, entry).split("/"))
+    path = os.path.join(folder, view + SIDECAR_SUFFIX)
+    if not os.path.isfile(path):
+        return None, "no sidecar"
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None, f"{view}{SIDECAR_SUFFIX} does not parse"
+    if not isinstance(doc, dict) or set(doc) != set(SIDECAR_KEYS) \
+            or doc.get("schema") != SIDECAR_SCHEMA:
+        return None, f"{view}{SIDECAR_SUFFIX} is not a sidecar of schema {SIDECAR_SCHEMA}"
+    if (doc.get("view"), doc.get("gate"), doc.get("entry")) != (view, gate, entry):
+        return None, (f"{view}{SIDECAR_SUFFIX} names {doc.get('gate')}/{doc.get('entry')}/"
+                      f"{doc.get('view')}, not the folder it is in")
+    found_entry = _entry_file(root, gate, entry)
+    if found_entry is None or not os.path.isfile(found_entry):
+        return None, f"the verdict cache holds no entry {entry} of {gate}"
+    files = doc.get("files")
+    if not isinstance(files, dict) or not files or set(files) - set(FIGURE_ROLES):
+        return None, f"{view}{SIDECAR_SUFFIX} names no file, or a role it does not know"
+    for role, row in files.items():
+        if not (isinstance(row, dict) and isinstance(row.get("name"), str)
+                and isinstance(row.get("sha256"), str) and _SHA256.match(row["sha256"])
+                and isinstance(row.get("bytes"), int) and not isinstance(row["bytes"], bool)):
+            return None, f"its {role} row is not a file row"
+        name = row["name"]
+        if not name.startswith(view + ".") or "/" in name or "\\" in name:
+            return None, f"its {role} file {name!r} is not a name in the folder"
+        if row.get("live") is True:
+            continue
+        found = _sha256_of(os.path.join(folder, name))
+        if found is None:
+            return None, f"its {role} file {name} is not on disk"
+        if found[1] > EVIDENCE_MAX_BYTES:
+            return None, (f"its {role} file {name} is {_size_words(found[1])}, over the "
+                          f"{_size_words(EVIDENCE_MAX_BYTES)} cap")
+        if (found[0], found[1]) != (row["sha256"], row["bytes"]):
+            return None, f"its {role} file {name} is not the bytes the sidecar names"
+    return doc, ""
+
+
+def figure_for(root: str, gate: str, view: str, served: str, fresh: bool) -> Figure:
+    """The figure a bound view shows (B.1.5), read from the disk: the valid
+    sidecar under the served entry (``current`` when the entry is fresh, else
+    ``stale``); else the one other entry's folder of the gate that holds a
+    valid sidecar for the view (``older``); else ``none``. Several older
+    folders (after a merge) are ``none`` too, each named in ``problems``,
+    because which is newer depends on clocks no two computers share. A folder
+    whose sidecar is refused is named in ``problems``. *Rejected:* the newest
+    older folder by obs time or commit time (another computer would choose
+    another picture for the same records)."""
+    problems: list[str] = []
+    if served:
+        found, why = read_sidecar(root, gate, served, view)
+        if found is not None:
+            return Figure(view, gate, served, served, "current" if fresh else "stale", found,
+                          ())
+        if why != "no sidecar":
+            problems.append(f"view {view}: the picture under {gate}/{served} is not shown: "
+                            f"{why}")
+    base = os.path.join(root, "site", *FIGURES_DIR.split("/"), _component(gate))
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        names = []
+    valid: list[tuple[str, dict]] = []
+    for name in names:
+        if name == served or not os.path.isfile(os.path.join(base, name,
+                                                             view + SIDECAR_SUFFIX)):
+            continue
+        found, why = read_sidecar(root, gate, name, view)
+        if found is None:
+            problems.append(f"view {view}: the picture under {gate}/{name} is not shown: {why}")
+        else:
+            valid.append((name, found))
+    if len(valid) == 1:
+        return Figure(view, gate, served, valid[0][0], "older", valid[0][1], tuple(problems))
+    if len(valid) > 1:
+        problems.append(f"view {view}: {len(valid)} other pictures of {gate} "
+                        f"({', '.join(n for n, _ in valid)}) and none of the result the page "
+                        f"shows, so none is shown. Draw it again to choose")
+    return Figure(view, gate, served, "", "none", None, tuple(problems))
+
+
+# --------------------------------------------------------------------------- #
+# figures on the page (issue #15, B.4.2 and B.5)
+# --------------------------------------------------------------------------- #
+#: Phrases a bound figure's caption may not hold, beside the page's word for
+#: every status token (`caption_status`): a caption says what the picture
+#: shows, and the claim's chip beside it says the status. *Rejected:* a caption
+#: free to say "passes" (it would outlive the result it described). Here, not
+#: in `site`, because the build's refusal and the page's checker (G7) are one
+#: rule.
+CAPTION_STATUS_PHRASES = ("inside the limit", "past the limit", "checked", "failing")
+
+#: The controls the marketing page shows around a figure as its hero: a figure
+#: turns, and nothing else applies. Parts, colours, wireframe and explode act on
+#: a model's parts, and a solved field has none. *Rejected:* the full
+#: customizer (its part list would be empty, and a colour swatch would tint a
+#: picture whose colours are a scale).
+FIGURE_CONTROLS = ("spin",)
+
+
+def caption_status(caption: str) -> str:
+    """The first status word or phrase ``caption`` holds, or ``""``: the page's
+    word for every status token (`report._site_status_word`) and
+    `CAPTION_STATUS_PHRASES`, whole words, any case."""
+    words = {report_logic._site_status_word(token) for token in
+             set(claim_logic.STATUS_KEY.values())} | set(CAPTION_STATUS_PHRASES)
+    lowered = " ".join(str(caption or "").lower().split())
+    for word in sorted(words, key=lambda w: (-len(w), w)):
+        if word and re.search(rf"(?<![a-z]){re.escape(word.lower())}(?![a-z])", lowered):
+            return word
+    return ""
+
+
+class BoundFigure(NamedTuple):
+    """One bound viewgen's figure as the build hands it to `bake_page`: the
+    view's id, kind, gate, title and provenance (its ViewSpec's description),
+    and the `Figure` the disk resolved it to (``currency`` ``none`` when it
+    shows nothing, a sidecar of another kind included)."""
+
+    view: str
+    kind: str
+    gate: str
+    title: str
+    provenance: str
+    figure: Figure
+
+
+def entry_verdict(root: str, gate: str, entry: str) -> dict | None:
+    """The verdict a cache entry holds (``.nopekit/verdicts/<gate>/<entry>.json``),
+    or None: an older figure says its own result's outcome and value, never the
+    served one's."""
+    if not (gate and _ENTRY_NAME.match(str(entry))):
+        return None
+    path = _entry_file(root, gate, entry)
+    if path is None:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    found = doc.get("verdict") if isinstance(doc, dict) else None
+    return found if isinstance(found, dict) else None
+
+
+def entry_outcome(verdict: Mapping[str, Any] | None) -> str:
+    """A cache entry's outcome token: ``error``, ``pass`` or ``fail``; ``unrun``
+    for none."""
+    if not isinstance(verdict, Mapping):
+        return "unrun"
+    if verdict.get("error"):
+        return "error"
+    return "pass" if verdict.get("passed") is True else "fail"
+
+
+def drawn_text(verdict: Mapping[str, Any] | None) -> str:
+    """An older figure's line about the result it was drawn from: its outcome
+    and, when it measured a number, its value (``That other result: pass,
+    2 Pa.``)."""
+    said = _site_words()["figure"]
+    word = _outcome_word(entry_outcome(verdict))
+    measured = (verdict or {}).get("measured")
+    if isinstance(measured, bool) or not isinstance(measured, (int, float)) \
+            or not math.isfinite(measured):
+        return said["drawn_bare"].format(outcome=word)
+    value = f"{_num(measured)} {(verdict or {}).get('units') or ''}".strip()
+    return said["drawn"].format(outcome=word, value=value)
+
+
+def binding_text(figures: Iterable[Mapping[str, Any]]) -> str:
+    """A claim's line under its figures: for each gate and result its figures
+    are drawn from, in their order, which result it is. A figure with nothing
+    to show names none."""
+    said = _site_words()["figure"]
+    out: list[str] = []
+    seen: set[tuple] = set()
+    for fig in figures:
+        key = (fig.get("gate"), fig.get("entry"), fig.get("currency"))
+        if not fig.get("entry") or key in seen:
+            continue
+        seen.add(key)
+        word = "other" if fig.get("currency") == "older" else "shown"
+        out.append(said[word].format(gate=fig.get("gate"), entry=fig.get("entry")))
+    return " ".join(out)
+
+
+def _chart_payload(root: str, path: str) -> Any:
+    """A chart file's payload (a site path), or None."""
+    if not path:
+        return None
+    try:
+        with open(os.path.join(root, "site", *path.split("/")), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _chart_y_units(payload: Any) -> str:
+    y = payload.get("y") if isinstance(payload, Mapping) else None
+    return str((y or {}).get("units") or "").strip() if isinstance(y, Mapping) else ""
+
+
+def _series_x(payload: Any, y: float) -> float | None:
+    """The x of the first series point whose y is ``y`` (relative 1e-9), or
+    None: where the chart's own point is the judged one. Read through
+    `_chart_series`, so both spellings of a series are read alike (P1.5: the
+    list spelling was read as one series of dicts, and its point was never
+    found)."""
+    if not _finite_number(y):
+        return None
+    for row in _chart_series(payload):
+        if math.isclose(float(row["y"]), float(y), rel_tol=1e-9, abs_tol=0.0):
+            return row["x"]
+    return None
+
+
+def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tuple[dict, str]:
+    """``({limit, current, spec}, warning)``: a bound chart's limit and judged
+    point, and the Vega-Lite spec that draws them with its series (`chart_spec`),
+    set by the spine from the floor row of (claim, gate), never from the chart
+    (B.4.2, G6). The limit is the claim's acceptance condition where the row is
+    compared with it (S-35), else the row's own; the point is the row's
+    measured value with its margin words. A chart whose y units are not the
+    limit's draws no limit line, and one whose y units are not the value's no
+    point, and the build says so. What slipped through before (F9):
+    `_chart_margins` took a chart's margin from the view's own limit, so a pack
+    limit beside the claim's was a second limit on the page. The spec is in
+    the block, so G6 holds what the browser draws, not only the numbers beside
+    it."""
+    if row is None:
+        return {"limit": None, "current": None, "spec": chart_spec(payload, None, None)}, ""
+    said = _site_words()["figure"]
+    y_units = _chart_y_units(payload)
+    units = str(row.get("units") or "")
+    limit: dict | None = None
+    if row.get("compared"):
+        acc = getattr(claim, "acceptance", None)
+        value = getattr(acc, "limit", None)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            limit = {"value": value, "comparator": _comparator(acc),
+                     "units": str(getattr(acc, "units", "") or ""),
+                     "label": said["limit_label"].format(
+                         limit=report_logic.limit_words(acc))}
+            if _comparator(acc) == "between":
+                limit["value_hi"] = getattr(acc, "limit_hi", None)
+    elif isinstance(row.get("limit"), (int, float)) and not isinstance(row.get("limit"), bool):
+        limit = {"value": row["limit"], "comparator": str(row.get("comparator") or ""),
+                 "units": units,
+                 "label": said["limit_label"].format(limit=f"{_num(row['limit'])} {units}"
+                                                     .strip())}
+    current = {"x": _series_x(payload, row["measured"]), "y": row["measured"],
+               "margin_text": str(row.get("margin_text") or "")}
+    warning = ""
+    if limit is not None and y_units != limit["units"]:
+        warning = (f"its y axis is in {y_units or 'no units'} and the limit in "
+                   f"{limit['units'] or 'no units'}, so no limit line is drawn")
+        limit = None
+    if y_units != units:
+        warning = warning or (f"its y axis is in {y_units or 'no units'} and the result in "
+                              f"{units or 'no units'}, so the result is not marked")
+        current = None
+    return {"limit": limit, "current": current,
+            "spec": chart_spec(payload, limit, current)}, warning
+
+
+# --------------------------------------------------------------------------- #
+# the chart as Vega-Lite draws it (issue #15, rule 0.1 of its design)
+# --------------------------------------------------------------------------- #
+#: The keys a baked Vega-Lite spec may never hold, at any depth: each makes
+#: Vega compute a value (a transform, an aggregate, a bin, a fitted curve, a
+#: stack's running sum) or run an expression (``expr``, ``signal``, a
+#: selection's ``params``, a condition's ``test``). With none of them, Vega
+#: places the baked numbers and computes only the axes, so the chart draws what
+#: the spine wrote and the browser decides nothing (invariant 14). The spine
+#: writes no spec that holds one (`chart_spec`), the checker refuses a page
+#: that holds one (G6), and `test_site_truth.TheBrowserComputesNoTruth` plants
+#: each. *Rejected:* a list of the allowed keys (Vega-Lite's own vocabulary
+#: would be copied here and drift with its versions); ``stack`` and ``test``
+#: left out (the design's list missed both: a stacked area sums its series, and
+#: a condition's test is an expression).
+VEGA_FORBIDDEN_KEYS = frozenset({
+    "transform", "calculate", "filter", "aggregate", "params", "expr", "signal", "bin",
+    "timeUnit", "impute", "regression", "loess", "density", "fold", "stack", "test"})
+
+#: The chart's height in CSS pixels; its width is the card's (``"container"``).
+#: 260 px holds a ladder of three points, its limit and their labels at 390 px
+#: wide with the axis text at 12 px (the figure project's page, P1.5).
+#: *Rejected:* a fixed 840 x 460 drawing scaled to fit, the hand-drawn chart's
+#: way (its text fell to about 5 px on a phone).
+CHART_HEIGHT = 260
+
+
+def _finite_number(value: Any) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _chart_series(payload: Any) -> list[dict]:
+    """The series of a chart payload as rows ``{series, label, x, y}`` (with
+    ``text`` for a labelled point and ``hollow`` true for a hollow one), in the
+    payload's order. A series is ``{key: [[x, y], ...]}``, or a list of
+    ``{key | name, label?, points: [[x, y], ...] | x: [...] and y: [...],
+    labels?: [str], hollow?: bool | [bool]}``. A point that is not two finite
+    numbers is left out, never guessed."""
+    raw = payload.get("series") if isinstance(payload, Mapping) else None
+    entries: list[tuple] = []
+    if isinstance(raw, Mapping):
+        entries = [(str(k), str(k), v, None, None) for k, v in raw.items()]
+    elif isinstance(raw, list):
+        for i, item in enumerate(raw):
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("key") or item.get("name") or f"s{i}")
+            points = item.get("points")
+            if points is None and isinstance(item.get("y"), list):
+                xs = item.get("x") if isinstance(item.get("x"), list) else list(
+                    range(len(item["y"])))
+                points = [[x, y] for x, y in zip(xs, item["y"])]
+            entries.append((key, str(item.get("label") or key), points, item.get("labels"),
+                            item.get("hollow")))
+    rows: list[dict] = []
+    for key, label, points, labels, hollow in entries:
+        for i, point in enumerate(points if isinstance(points, list) else ()):
+            if not (isinstance(point, list) and len(point) >= 2
+                    and _finite_number(point[0]) and _finite_number(point[1])):
+                continue
+            row = {"series": key, "label": label, "x": point[0], "y": point[1]}
+            text = labels[i] if isinstance(labels, list) and i < len(labels) else None
+            if isinstance(text, str) and text:
+                row["text"] = text
+            flag = hollow[i] if isinstance(hollow, list) and i < len(hollow) else hollow
+            if flag is True:
+                row["hollow"] = True
+            rows.append(row)
+    return rows
+
+
+def _axis_title(axis: Mapping) -> str:
+    label, units = str(axis.get("label") or ""), str(axis.get("units") or "")
+    return " ".join(p for p in (label, f"({units})" if units else "") if p)
+
+
+def _datum(value: Any) -> dict:
+    return {"datum": value, "type": "quantitative"}
+
+
+def _text_mark(style: str, align: str, dx: int, dy: int) -> dict:
+    """A text mark at its offset from the point it labels. Its placement is in
+    the spec, never in the theme: Vega-Lite writes a text mark's ``align`` and
+    ``baseline`` into the mark itself, over any style the page gives (seen on
+    the figure project's page, P1.5: every label sat centred on its point)."""
+    return {"type": "text", "style": style, "align": align, "baseline": "bottom",
+            "dx": dx, "dy": dy}
+
+
+def chart_spec(payload: Any, limit: Mapping | None, current: Mapping | None) -> dict:
+    """The whole Vega-Lite spec of a bound chart (rule 0.1 of issue #15's
+    design): the series its chart file holds, the limit and the judged point
+    `chart_block` set from the floor, and the payload's ``band`` (``[{x, lo,
+    hi, label}]``, an error bar), ``rule`` (``{value, label}``, a tolerance
+    line, never called a limit) and ``estimates`` (``[{x, y, label}]``,
+    diamonds). Every number in it is the chart file's or the floor's, and it
+    holds none of `VEGA_FORBIDDEN_KEYS`: Vega places numbers and computes only
+    the axes. A y axis the payload marks ``"scale": "log"`` is logarithmic. The
+    side of the limit that fails is shaded (both sides of a ``between``).
+
+    What is drawn is the spine's; how it looks (colours, fonts, which side a
+    label sits on) is the page theme's, through the ``style`` names it fills in
+    (`lib/figures.js`). The browser only hands the spec to ``vegaEmbed``.
+    *Rejected:* growing the hand-drawn SVG of `lib/chart.js` (log y, bands,
+    rules, estimates, labels, hollow points): the author's rule is to build as
+    little as possible and draw with a trusted library; a spec the browser
+    composes (the page would decide what a chart shows)."""
+    payload = payload if isinstance(payload, Mapping) else {}
+    rows = _chart_series(payload)
+    x_axis = payload.get("x") if isinstance(payload.get("x"), Mapping) else {}
+    y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
+    x_title, y_title = _axis_title(x_axis), _axis_title(y_axis)
+    x_enc = {"field": "x", "type": "quantitative", "title": x_title, "scale": {"zero": False}}
+    y_enc = {"field": "y", "type": "quantitative", "title": y_title,
+             "scale": {"type": "log"} if y_axis.get("scale") == "log" else {"zero": True}}
+    several = len({r["series"] for r in rows}) > 1
+    colour = {"field": "label", "type": "nominal", "title": "",
+              "legend": {} if several else None}
+    tooltip = [{"field": "label", "type": "nominal", "title": ""},
+               {"field": "x", "type": "quantitative", "title": x_title or "x"},
+               {"field": "y", "type": "quantitative", "title": y_title or "y"}]
+    at_x = {"field": "x", "type": "quantitative"}
+    at_y = {"field": "y", "type": "quantitative"}
+    layers: list[dict] = []
+
+    def limit_layers(value: Any, fails_above: bool | None, label: str) -> None:
+        if not _finite_number(value):
+            return
+        if fails_above is not None:
+            layers.append({"mark": {"type": "rect", "style": "nk-past"},
+                           "encoding": {"x": {"value": 0}, "x2": {"value": "width"},
+                                        "y": _datum(value),
+                                        "y2": {"value": 0 if fails_above else "height"}}})
+        layers.append({"mark": {"type": "rule", "style": "nk-limit"},
+                       "encoding": {"y": _datum(value)}})
+        if label:
+            layers.append({"mark": _text_mark("nk-limit-label", "right", -6, -4),
+                           "encoding": {"x": {"value": "width"}, "y": _datum(value),
+                                        "text": {"value": label}}})
+
+    if limit:
+        comparator = str(limit.get("comparator") or "")
+        label = str(limit.get("label") or "")
+        if comparator == "between":
+            limit_layers(limit.get("value"), False, label)
+            limit_layers(limit.get("value_hi"), True, "")
+        else:
+            limit_layers(limit.get("value"),
+                         True if comparator.startswith("<") else
+                         False if comparator.startswith(">") else None, label)
+    rule = payload.get("rule")
+    for item in rule if isinstance(rule, list) else [rule] if rule else []:
+        if isinstance(item, Mapping) and _finite_number(item.get("value")):
+            layers.append({"mark": {"type": "rule", "style": "nk-rule"},
+                           "encoding": {"y": _datum(item["value"])}})
+            if item.get("label"):
+                layers.append({"mark": _text_mark("nk-rule-label", "left", 6, -4),
+                               "encoding": {"x": {"value": 0}, "y": _datum(item["value"]),
+                                            "text": {"value": str(item["label"])}}})
+    band = [{"label": str(b.get("label") or ""), "x": b["x"], "lo": b["lo"], "hi": b["hi"]}
+            for b in payload.get("band") or () if isinstance(b, Mapping)
+            and all(_finite_number(b.get(k)) for k in ("x", "lo", "hi"))]
+    if band:
+        layers.append({"data": {"values": band}, "mark": {"type": "rule", "style": "nk-band"},
+                       "encoding": {"x": at_x, "y": {"field": "lo", "type": "quantitative"},
+                                    "y2": {"field": "hi"}}})
+    if rows:
+        layers.append({"mark": {"type": "line", "style": "nk-series"},
+                       "encoding": {"x": x_enc, "y": y_enc, "color": colour,
+                                    "detail": {"field": "series", "type": "nominal"}}})
+        for hollow in (False, True):
+            chosen = [r for r in rows if bool(r.get("hollow")) is hollow]
+            if chosen:
+                layers.append({"data": {"values": chosen},
+                               "mark": {"type": "point", "filled": not hollow,
+                                        "style": "nk-hollow" if hollow else "nk-point"},
+                               "encoding": {"x": at_x, "y": at_y, "color": colour,
+                                            "tooltip": tooltip}})
+        labelled = [r for r in rows if r.get("text")]
+        if labelled:
+            layers.append({"data": {"values": labelled},
+                           "mark": _text_mark("nk-point-label", "center", 0, -8),
+                           "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
+    estimates = [{"label": str(e.get("label") or ""), "x": e["x"], "y": e["y"]}
+                 for e in payload.get("estimates") or () if isinstance(e, Mapping)
+                 and _finite_number(e.get("x")) and _finite_number(e.get("y"))]
+    if estimates:
+        layers.append({"data": {"values": estimates},
+                       "mark": {"type": "point", "shape": "diamond", "filled": True,
+                                "style": "nk-estimate"},
+                       "encoding": {"x": at_x, "y": at_y, "tooltip": tooltip}})
+    if current and _finite_number(current.get("y")):
+        text = str(current.get("margin_text") or "")
+        # Its words sit on the side of the point with room: to its left when
+        # no series point is right of it (the finest level of a ladder is
+        # its last), else to its right. What slipped through (the figure
+        # project at 390 px, P1.5): "80% inside the limit" ran off the
+        # chart's right edge from a point at the right end.
+        last = not any(r["x"] > current.get("x") for r in rows) if _finite_number(
+            current.get("x")) else False
+        label_mark = (_text_mark("nk-current-label", "right", -10, -8) if last
+                      else _text_mark("nk-current-label", "left", 10, -8))
+        if _finite_number(current.get("x")):
+            at = {"x": _datum(current["x"]), "y": _datum(current["y"])}
+            layers.append({"mark": {"type": "point", "filled": True, "style": "nk-current"},
+                           "encoding": dict(at)})
+        else:
+            at = {"x": {"value": 0}, "y": _datum(current["y"])}
+            layers.append({"mark": {"type": "rule", "style": "nk-current-rule"},
+                           "encoding": {"y": _datum(current["y"])}})
+        if text:
+            layers.append({"mark": label_mark,
+                           "encoding": {**at, "text": {"value": text}}})
+    return {"width": "container", "height": CHART_HEIGHT, "data": {"values": rows},
+            "layer": layers}
+
+
+def vega_forbidden(spec: Any) -> list[str]:
+    """The `VEGA_FORBIDDEN_KEYS` ``spec`` holds at any depth, sorted."""
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            found.update(k for k in node if k in VEGA_FORBIDDEN_KEYS)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(spec)
+    return sorted(found)
+
+
+def _figure_files(fig: Figure, kind: str) -> dict:
+    """``{src, field_src, data_src, sha256, bytes}`` of a figure: its still (an
+    image), its committed GLB (beside a still, or as a 3D view's ``src``) and
+    its chart file, each a site path; the digest and size of the file the
+    figure shows first (``src``, else the chart's)."""
+    out = {"src": "", "field_src": "", "data_src": "", "sha256": "", "bytes": 0}
+    files = (fig.sidecar or {}).get("files") or {}
+    folder = fig.folder
+    main: Mapping | None = None
+    solid = kind in VIEWER_KINDS
+    if "image" in files and not solid:
+        out["src"] = posixpath.join(folder, files["image"]["name"])
+        main = files["image"]
+    field = files.get("field")
+    if field and field.get("live") is not True:
+        path = posixpath.join(folder, field["name"])
+        if solid:
+            out["src"], main = path, field
+        else:
+            out["field_src"] = path
+    if "chart" in files:
+        out["data_src"] = posixpath.join(folder, files["chart"]["name"])
+        main = main or files["chart"]
+    if main is not None:
+        out["sha256"], out["bytes"] = str(main["sha256"]), int(main["bytes"])
+    return out
+
+
+def figure_chips(cids: Iterable[str], toks: Any, marks: Mapping[str, list[str]]) -> list[dict]:
+    """The chips of the claims a figure's gate covers: each claim's token, word,
+    ``errored`` and marks, from `graph.tokens` and `_marks` (G1)."""
+    out = []
+    for cid in cids:
+        token = (getattr(toks, "claims", None) or {}).get(cid)
+        if token is None:
+            continue
+        out.append({"id": cid, "token": token, "word": _word(token),
+                    "errored": token == "errored", "marks": list(marks.get(cid) or ())})
+    return out
+
+
+def figure_row(root: str, bound: BoundFigure, *, claim: Any, floor_row: Mapping | None,
+               chips: list[dict], outcome: str,
+               warnings: list[str] | None = None) -> dict:
+    """One figure as ``page.json`` bakes it under a claim (B.4.2): which result
+    it is (its gate, the entry it was drawn from, its currency and the
+    currency's sentence; an older one's own outcome and ``drawn_text``), the
+    chips of every claim its gate covers, its files and the words its sidecar
+    holds, and, for a chart, the limit and the point the spine sets
+    (`chart_block`). ``outcome`` is the evaluator row's, for a figure of the
+    served entry; an older figure's is its own entry's. Nothing in it reads
+    this computer's tools: a clone bakes the same object."""
+    said = _site_words()["figure"]
+    fig = bound.figure
+    sidecar = fig.sidecar or {}
+    entry = fig.entry if fig.currency != "none" else ""
+    if fig.currency == "older":
+        verdict = entry_verdict(root, bound.gate, entry)
+        outcome = entry_outcome(verdict)
+        drawn = drawn_text(verdict)
+    else:
+        drawn = ""
+    files = _figure_files(fig if fig.currency != "none" else fig._replace(sidecar=None),
+                          bound.kind)
+    chart: dict = {}
+    if bound.kind == "chart" and files["data_src"]:
+        chart, warning = chart_block(claim, floor_row, _chart_payload(root, files["data_src"]))
+        if warning and warnings is not None:
+            warnings.append(f"view {bound.view}: {warning}")
+    field = (sidecar.get("files") or {}).get("field")
+    tool = sidecar.get("tool") if isinstance(sidecar.get("tool"), Mapping) else {}
+    return {
+        "id": f"{bound.gate}/{entry or 'none'}/{bound.view}",
+        "view": bound.view, "kind": bound.kind, "gate": bound.gate, "entry": entry,
+        "currency": fig.currency, "currency_word": figure_currency_word(fig.currency),
+        "drawn_text": drawn, "outcome": outcome, "outcome_word": _outcome_word(outcome),
+        "claims": chips,
+        "title": str(sidecar.get("title") or bound.title or ""),
+        "caption": str(sidecar.get("caption") or ""), "alt": str(sidecar.get("alt") or ""),
+        "provenance": bound.provenance,
+        "tool_word": said["tool_unchecked"] if tool.get("accepted_by") == "environment"
+        else "",
+        **files,
+        "marks": list(sidecar.get("marks") or []), "scale": dict(sidecar.get("scale") or {}),
+        "chart": chart,
+        "turn": ({"word": said["turn"], "live_word": said["live"] if field.get("live") is True
+                  else ""} if isinstance(field, Mapping) else {}),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1206,9 +2011,17 @@ def alternates(views: Iterable[Mapping[str, Any]], root: str = "",
     design to look at. *Rejected:* deduplicating by ``src``
     (two paths can hold one file, and a viewgen that writes per-view copies
     would read as two models); listing every view kind (an image or a chart is
-    no model to turn)."""
+    no model to turn).
+
+    A bound view's row (one carrying ``binding``) is listed only as ``first``,
+    the figure hero's own: a bound 3D file shows only as a figure, which says
+    which result it is beside its claims' chips. What slipped through (review
+    of P1): the build merged bound rows into the views, and a bound ``model3d``
+    became an alternate with no chips and no currency."""
     site_dir = os.path.join(root, "site") if root else ""
-    rows = [r for r in views or () if str(r.get("kind") or "") in VIEWER_KINDS]
+    rows = [r for r in views or () if str(r.get("kind") or "") in VIEWER_KINDS
+            and (not r.get("binding") or (first is not None
+                                          and str(r.get("id") or "") == first))]
     if first is not None:
         rows = ([r for r in rows if str(r.get("id") or "") == first]
                 + [r for r in rows if str(r.get("id") or "") != first])
@@ -1232,22 +2045,52 @@ def alternates(views: Iterable[Mapping[str, Any]], root: str = "",
     return out
 
 
-def representation(views: Iterable[Mapping[str, Any]], root: str = "") -> dict:
+def representation(views: Iterable[Mapping[str, Any]], root: str = "",
+                   figures: Iterable[Mapping[str, Any]] = ()) -> dict:
     """The outline's representation: the first ``model3d`` view in the page's
-    order, else the first ``image`` or ``diagram``, else a notice saying what
-    view to add; with ``alternates`` (`alternates`, the two pages), the model
-    views the marketing page's viewer can switch between, this one first."""
+    order; else a bound figure (issue #15, B.4.1) whose 3D file is committed
+    (an entry an export re-ran), as a ``field``; else the first bound still;
+    else the first ``image`` or ``diagram``; else a notice saying what view to
+    add. With ``alternates`` (`alternates`, the two pages), the model views the
+    marketing page's viewer can switch between, this one first. A figure hero
+    bakes the figure object itself (``figure``, chips and currency word
+    included, so both pages and the technical record say which result it is)
+    and ``controls`` (`FIGURE_CONTROLS`); any other hero bakes both as null.
+    What slipped through before it (F10): a ``field`` was never the hero, so a
+    project whose only pictures were a solver's had none. A bound view (a row
+    carrying ``binding``) reaches the hero only through its figure, never as a
+    plain view: what slipped through (review of P1) is a bound ``model3d``
+    taken by the first loop, a hero with no figure, no chips, no currency and,
+    with its 3D file live, no file at all, which pushed aside the bound still
+    that would have said which result it was."""
     views = list(views or ())
-    for kinds in (("model3d",), ("image", "diagram")):
-        for row in views:
-            if str(row.get("kind") or "") in kinds:
-                vid = str(row.get("id") or "")
-                return {"view": vid, "kind": str(row.get("kind")),
-                        "title": str(row.get("title") or ""), "notice": "",
-                        "alternates": alternates(views, root, first=vid)}
+    figures = [f for f in figures or () if f.get("currency") != "none"]
+    plain = [row for row in views if not row.get("binding")]
+    for row in plain:
+        if str(row.get("kind") or "") == "model3d":
+            vid = str(row.get("id") or "")
+            return {"view": vid, "kind": "model3d", "title": str(row.get("title") or ""),
+                    "notice": "", "alternates": alternates(views, root, first=vid),
+                    "figure": None, "controls": None}
+    for wanted in ("field", "image"):
+        for fig in figures:
+            solid = fig.get("field_src") or (fig.get("kind") in VIEWER_KINDS and fig.get("src"))
+            if (wanted == "field" and solid) or (wanted == "image" and fig.get("kind") == "image"
+                                                  and fig.get("src")):
+                vid = str(fig.get("view") or "")
+                return {"view": vid, "kind": wanted, "title": str(fig.get("title") or ""),
+                        "notice": "", "alternates": alternates(views, root, first=vid),
+                        "figure": fig, "controls": list(FIGURE_CONTROLS)}
+    for row in plain:
+        if str(row.get("kind") or "") in ("image", "diagram"):
+            vid = str(row.get("id") or "")
+            return {"view": vid, "kind": str(row.get("kind")),
+                    "title": str(row.get("title") or ""), "notice": "",
+                    "alternates": alternates(views, root, first=vid),
+                    "figure": None, "controls": None}
     return {"view": None, "kind": None, "title": "",
             "notice": _site_words()["no_representation"],
-            "alternates": alternates(views, root)}
+            "alternates": alternates(views, root), "figure": None, "controls": None}
 
 
 def _board_token(members: Iterable[str], composed: Mapping[str, Any]) -> tuple[str, bool]:
@@ -1799,7 +2642,8 @@ def _floor_values(view: Any, composed: Mapping[str, Any], registry: Any) -> dict
                          "margin": margin, "compared": verdict.gate in compared,
                          "binding": verdict.gate == binding_gate,
                          "value_text": value_text(measured, str(verdict.units or ""),
-                                                  shown_limit, shown_margin)})
+                                                  shown_limit, shown_margin),
+                         "margin_text": margin_text(shown_margin) if shown_limit else ""})
         token = token_of(found)
         counted = _counted_result(claim)
         if token == "checked" and counted is not None and isinstance(
@@ -1817,7 +2661,8 @@ def _floor_values(view: Any, composed: Mapping[str, Any], registry: Any) -> dict
                          "margin": margin, "compared": True, "binding": not any(
                              r["binding"] for r in rows),
                          "value_text": value_text(counted.measured, str(counted.units or ""),
-                                                  limit_text, margin)})
+                                                  limit_text, margin),
+                         "margin_text": margin_text(margin) if limit_text else ""})
         out[claim.id] = rows
     return out
 
@@ -1874,11 +2719,19 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
               composed: Mapping[str, Any], *, registry: Any = None,
               payload: Mapping[str, Any] | None = None, plan: Iterable[Evidence] = (),
               records_digest: str = "", resolution_digest: str = "",
-              amber: Mapping[str, Any] | None = None) -> dict:
+              amber: Mapping[str, Any] | None = None,
+              figures: Iterable[BoundFigure] = (),
+              warnings: list[str] | None = None) -> dict:
     """``page.json`` (SPEC 28, 30): the outline's data, every claim's floor
     row once (the floor and the drawer read it), the next steps and the
     words. The prose objects are filled by `bake_prose`. A claim's ``amber``
-    (architecture phase 3b) is its amber state and flipping runs, or None."""
+    (architecture phase 3b) is its amber state and flipping runs, or None.
+
+    ``figures`` (issue #15, B.4.2): the bound figures the build resolved, in
+    registry order. Each claim bakes ``figures``, one `figure_row` per figure
+    whose gate covers it, and ``binding_text``; the representation may be one
+    of them. ``warnings`` collects what the build must say about them (a
+    chart whose y units are not its limit's)."""
     said = _site_words()
     payload = payload or {}
     meta = getattr(view, "meta", None)
@@ -1895,6 +2748,8 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
     by_id = {c.id: c for c in getattr(view, "claims", None) or ()}
     first_milestone = sorted((m for m in getattr(view, "milestones", None) or ()),
                              key=lambda m: _natural(m.id))
+    figures = list(figures or ())
+    covered = gate_cover(cover)
 
     claims_out: dict[str, dict] = {}
     for line in lay.lines:
@@ -1960,6 +2815,19 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                 None), cover=cover.get(cid) or (), tiers=tiers),
             "amber": ({"state": amber[cid].state, "word": amber_word(amber[cid].state),
                        "items": _amber_items(amber[cid])} if cid in amber else None)}
+        shown = []
+        for bound in figures:
+            if bound.gate not in (cover.get(cid) or ()):
+                continue
+            shown.append(figure_row(
+                root, bound, claim=claim,
+                floor_row=next((r for r in floor.get(cid, []) if r.get("gate") == bound.gate),
+                               None),
+                chips=figure_chips(covered.get(bound.gate, ()), toks, marks),
+                outcome=str((vrows.get(bound.gate) or {}).get("status") or "unrun"),
+                warnings=warnings))
+        claims_out[cid]["figures"] = shown
+        claims_out[cid]["binding_text"] = binding_text(shown)
 
     sections = []
     for board in lay.boards:
@@ -2044,7 +2912,8 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                  "revision": str(getattr(meta, "revision", "") or ""),
                  "records_digest": records_digest, "resolution_digest": resolution_digest,
                  "content_digest": content_digest(root)},
-        "representation": representation(payload.get("views") or (), root),
+        "representation": representation(payload.get("views") or (), root,
+                                          _hero_candidates(lay, claims_out)),
         "verdict": verdict,
         "intro": None,
         "story": None,
@@ -2061,6 +2930,43 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
         "words": words_block(),
         "problems": [],
     }
+
+
+def gate_cover(cover: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    """``{gate: [claim id, ...]}``, the inverse of `claims.effective_gates`, the
+    claims in natural order: the claims whose chips sit beside a gate's
+    figures (G1)."""
+    out: dict[str, list[str]] = {}
+    for cid, gates in cover.items():
+        for gid in gates or ():
+            out.setdefault(gid, []).append(cid)
+    return {gid: sorted(set(cids), key=_natural) for gid, cids in out.items()}
+
+
+def _hero_candidates(lay: Layout, claims_out: Mapping[str, Any]) -> list[dict]:
+    """Every figure once, in the page's order (board rows, then registry order
+    within a claim): the copy under the first claim that shows it."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for line in lay.lines:
+        for fig in (claims_out.get(line["claim"]) or {}).get("figures") or ():
+            if fig["id"] not in seen:
+                seen.add(fig["id"])
+                out.append(fig)
+    return out
+
+
+def figure_misplaced(path: str) -> str:
+    """Why a prose figure at ``path`` (site-relative) is no place for one, or
+    ``""``: a path under `ASSETS_PREFIX`, where the build cleans; figures go
+    under `PROSE_FIGURE_DIR`. It depends on the path alone, never on the disk,
+    so a fresh clone bakes the same word."""
+    text = posixpath.normpath(str(path).replace("\\", "/"))
+    if text == ASSETS_PREFIX.rstrip("/") or text.startswith(ASSETS_PREFIX):
+        return (f"is in site/{ASSETS_PREFIX}. The build deletes the files there that no view "
+                f"uses, so the page shows this figure as missing. Put figures in "
+                f"site/{PROSE_FIGURE_DIR}/")
+    return ""
 
 
 def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> list[dict]:
@@ -2090,7 +2996,8 @@ def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> 
             text = fh.read()
         front = prose_logic.parse_front_matter(text)
         blocks, problems = prose_logic.parse_markdown(front.body, exists=exists,
-                                                      claims=claim_ids)
+                                                      claims=claim_ids,
+                                                      misplaced=figure_misplaced)
         blocks, unmatched = prose_logic.scan_numbers(blocks, pool)
         register: list[str] = []
         for chunk in prose_logic.blocks_text(blocks):
@@ -2131,7 +3038,8 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
                     view: Any, composed: Mapping[str, Any], toks: Any, *,
                     prose_as_of: Mapping[str, str | None] | None = None,
                     pool: Any = None, amber: Mapping[str, Any] | None = None,
-                    feeds: Iterable[Mapping[str, Any]] | None = None) -> list[str]:
+                    feeds: Iterable[Mapping[str, Any]] | None = None,
+                    figures: FigureFacts | None = None) -> list[str]:
     """Every place ``map_doc`` or ``page_doc`` says a status, a *ready*, a word
     or a mark the resolution does not: a claim's token on the map, a line, a
     floor row, a board's section or a next step against `graph.tokens`; a
@@ -2156,6 +3064,12 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     ``estimate`` must be the live one — amber on a pass the trace does not
     flip, or a feed drawn as resting on a confirmed assumption, is the page
     saying more than the resolution.
+
+    With ``figures`` (issue #15, B.5: `figure_facts`), each bound figure on the
+    page and the representation's (`_figure_problems`, G1-G8): its claims and
+    their chips, which result it is and its currency, its sentences and
+    outcome, its files, a chart's limit and point, and its caption. Without
+    it (an in-process bake with no disk) figures are not held.
 
     From the two pages, the marketing page's rows too (`_two_pages_problems`):
     a requirement row against its map node and `graph.tokens`, a requirement
@@ -2250,7 +3164,7 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
             if verdict is None:
                 continue
             state = claim_logic.cross_check(claim, verdict).state
-            text = str(value.get("value_text") or "")
+            text = f"{value.get('value_text') or ''} {value.get('margin_text') or ''}"
             if state == "fails" and inside in text:
                 problems.append(f"page claim {cid} {verdict.gate} says {inside!r}, and the "
                                 f"claim's condition rejects its value")
@@ -2306,6 +3220,9 @@ def status_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
         word_of(f"open step {step.get('claim')}", step)
         mark_of(f"open step {step.get('claim')}", step, str(step.get("claim")) in disagree)
     problems += _prose_problems(page_doc, view, toks, prose_as_of=prose_as_of, pool=pool)
+    if figures is not None:
+        problems += _figure_problems(page_doc, figures, toks, _marks(toks, amber),
+                                     amber_known=amber is not None)
     return problems
 
 
@@ -2475,6 +3392,255 @@ def _amber_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
     return out
 
 
+# --------------------------------------------------------------------------- #
+# the figures' checker (issue #15, B.5: G1-G8)
+# --------------------------------------------------------------------------- #
+class FigureFacts(NamedTuple):
+    """What `_figure_problems` holds a baked figure against, from one producer
+    (`figure_facts`): ``served`` ``{gate: (entry name, fresh)}`` (the
+    resolution's), ``outcomes`` ``{gate: status}`` (``state.json``'s verdict
+    rows, as `bake_page`'s evaluators read them), ``floor`` ``{(claim, gate):
+    row}`` (`_floor_values`), ``cover`` ``{gate: [claim ids]}`` (`gate_cover`),
+    ``claims`` the claims by id, ``shown`` ``{(gate, view): (entry, currency)}``
+    when the caller resolved them (the build's bound pass) or None (read from
+    the disk, `figure_for`), ``kept`` the build's keep set, or None (a reader:
+    every file is hashed against its sidecar instead), ``root``, and ``bound``
+    the ids of the views a bound viewgen drew (``state.json``'s rows that carry
+    ``binding``), which reach the representation only as a figure (G8)."""
+
+    root: str
+    served: dict
+    outcomes: dict
+    floor: dict
+    cover: dict
+    claims: dict
+    shown: dict | None
+    kept: frozenset | None
+    bound: frozenset = frozenset()
+
+
+def figure_facts(root: str, resolution: Any, payload: Mapping[str, Any] | None, view: Any,
+                 composed: Mapping[str, Any], registry: Any, *,
+                 kept: Iterable[str] | None = None,
+                 shown: Iterable[BoundFigure] | None = None,
+                 baked_views: Iterable[Mapping[str, Any]] | None = None) -> FigureFacts:
+    """The one producer of `FigureFacts`: the build passes its keep set and the
+    figures its bound pass resolved; `site status`, `status` and `doctor` pass
+    neither, and the checker reads the disk. ``baked_views`` are the view rows
+    the page was baked with (``state.json``'s, which a reader passes from the
+    disk); none given, ``payload``'s."""
+    rows = getattr(resolution, "rows", None) or {}
+    served = {}
+    for gid, row in rows.items():
+        entry = getattr(row, "entry", None)
+        served[gid] = (str(getattr(entry, "name", "") or ""), bool(getattr(row, "fresh", False)))
+    outcomes = {str(r.get("gate")): str(r.get("status") or "unrun")
+                for r in (payload or {}).get("verdicts") or () if isinstance(r, Mapping)}
+    floor: dict[tuple, dict] = {}
+    for cid, values in _floor_values(view, composed, registry).items():
+        for row in values:
+            if row.get("gate") is not None:
+                floor.setdefault((cid, row["gate"]), row)
+    return FigureFacts(
+        root=root, served=served, outcomes=outcomes, floor=floor,
+        cover=gate_cover(claim_logic.effective_gates(view, registry)),
+        claims={c.id: c for c in getattr(view, "claims", None) or ()},
+        shown=None if shown is None else {
+            (b.gate, b.view): (b.figure.entry if b.figure.currency != "none" else "",
+                               b.figure.currency) for b in shown},
+        kept=None if kept is None else frozenset(kept),
+        bound=frozenset(str(r.get("id") or "") for r in (
+            (payload or {}).get("views") or () if baked_views is None else baked_views)
+            if isinstance(r, Mapping) and r.get("binding")))
+
+
+def _disk_shown(facts: FigureFacts, gate: str, view: str, kind: str) -> tuple[str, str]:
+    """``(entry, currency)`` the disk resolves (gate, view) to, as the bound
+    pass does: a sidecar of another kind shows nothing."""
+    served, fresh = facts.served.get(gate, ("", False))
+    found = figure_for(facts.root, gate, view, served, fresh)
+    if found.sidecar is None or found.sidecar.get("kind") != kind:
+        return "", "none"
+    return found.entry, found.currency
+
+
+def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
+                     marks: Mapping[str, list[str]], *, amber_known: bool) -> list[str]:
+    """Each baked figure (B.5) that says more than the resolution and the disk:
+    G1 its claims (exactly the gate's cover) and their chips; G2 its currency
+    and its entry; G3 its sentences; G4 its outcome; G5 its files (under its
+    own folder, kept by the build or the bytes its sidecar names); G6 a
+    chart's limit and point (the floor's), and the Vega-Lite spec that draws
+    them (`chart_spec`'s, holding none of `VEGA_FORBIDDEN_KEYS`); G7 a caption
+    that says a status;
+    G8 the same on the representation's figure, which must be the claim's own
+    copy. A figure the page leaves out says less, never more."""
+    out: list[str] = []
+    want = dict(getattr(toks, "claims", None) or {})
+    shown_cache: dict[tuple, tuple[str, str]] = {}
+    sidecars: dict[tuple, tuple[dict | None, str]] = {}
+
+    def one(where: str, cid: str, fig: Mapping[str, Any]) -> None:
+        gate, view_id = str(fig.get("gate") or ""), str(fig.get("view") or "")
+        kind, entry = str(fig.get("kind") or ""), str(fig.get("entry") or "")
+        currency = fig.get("currency")
+        where = f"{where} figure {view_id}"
+        # G1: the claims its gate covers, each chip the resolution's.
+        cover = list(facts.cover.get(gate) or ())
+        if cid not in cover:
+            out.append(f"{where} sits under {cid}, which {gate} does not cover")
+        chips = [c for c in fig.get("claims") or () if isinstance(c, Mapping)]
+        if [str(c.get("id")) for c in chips] != cover:
+            out.append(f"{where} shows the claims {[c.get('id') for c in chips]}, and {gate} "
+                       f"covers {cover}")
+        for chip in chips:
+            key = str(chip.get("id"))
+            token = want.get(key)
+            if token is None:
+                continue
+            said_marks = list(chip.get("marks") or ())
+            live_marks = list(marks.get(key) or ())
+            if not amber_known:
+                said_marks = [m for m in said_marks if m != "amber"]
+                live_marks = [m for m in live_marks if m != "amber"]
+            for name, said, expected in (("token", chip.get("token"), token),
+                                         ("word", chip.get("word"), _word(token)),
+                                         ("errored", chip.get("errored"), token == "errored"),
+                                         ("marks", said_marks, live_marks)):
+                if said != expected:
+                    out.append(f"{where} chip {key} {name} reads {said}, the resolution says "
+                               f"{expected}")
+        # G2: which result it is.
+        if facts.shown is not None and (gate, view_id) in facts.shown:
+            disk = facts.shown[(gate, view_id)]
+        else:
+            if (gate, view_id, kind) not in shown_cache:
+                shown_cache[(gate, view_id, kind)] = _disk_shown(facts, gate, view_id, kind)
+            disk = shown_cache[(gate, view_id, kind)]
+        served, fresh = facts.served.get(gate, ("", False))
+        expected = ("none" if not entry else ("current" if fresh else "stale")
+                    if entry == served else "older")
+        if (entry, currency) != disk or currency != expected:
+            out.append(f"{where} reads {currency} from {entry or 'no result'}, the resolution "
+                       f"and the disk say {disk[1]} from {disk[0] or 'no result'}")
+        # G3: its sentences.
+        if fig.get("currency_word") != figure_currency_word(str(disk[1])):
+            out.append(f"{where} says {fig.get('currency_word')!r}, its currency's sentence "
+                       f"is {figure_currency_word(str(disk[1]))!r}")
+        verdict = entry_verdict(facts.root, gate, entry) if currency == "older" else None
+        if fig.get("drawn_text") != (drawn_text(verdict) if currency == "older" else ""):
+            out.append(f"{where} says {fig.get('drawn_text')!r} of the result it was drawn "
+                       f"from")
+        # G4: the outcome beside it.
+        outcome = (entry_outcome(verdict) if currency == "older"
+                   else facts.outcomes.get(gate, "unrun"))
+        if (fig.get("outcome"), fig.get("outcome_word")) != (outcome, _outcome_word(outcome)):
+            out.append(f"{where} outcome reads {fig.get('outcome')}, the result it shows is "
+                       f"{outcome}")
+        # G5: its files, under its own gate and entry, and the bytes it names.
+        folder = figure_folder(gate, entry) + "/" if entry else None
+        paths = [str(fig.get(k) or "") for k in ("src", "field_src", "data_src")]
+        for path in (p for p in paths if p):
+            if folder is None or not path.startswith(folder) or "/" in path[len(folder):]:
+                out.append(f"{where} links {path}, which is not in the folder of "
+                           f"{gate}/{entry or 'no result'}")
+            elif facts.kept is not None and path not in facts.kept:
+                out.append(f"{where} links {path}, which the build does not keep")
+        if entry and facts.kept is None:
+            if (gate, entry, view_id) not in sidecars:
+                sidecars[(gate, entry, view_id)] = read_sidecar(facts.root, gate, entry,
+                                                                view_id)
+            sidecar, why = sidecars[(gate, entry, view_id)]
+            if sidecar is None:
+                out.append(f"{where}: its picture under {gate}/{entry} is not what the page "
+                           f"was built with ({why})")
+            else:
+                named = {posixpath.join(folder.rstrip("/"), row["name"]): row
+                         for row in (sidecar.get("files") or {}).values()
+                         if isinstance(row, Mapping) and row.get("live") is not True}
+                for path in (p for p in paths if p):
+                    if path not in named:
+                        out.append(f"{where} links {path}, which its sidecar does not name")
+                main = paths[0] or paths[2]
+                if main in named and (fig.get("sha256"), fig.get("bytes")) != (
+                        named[main]["sha256"], named[main]["bytes"]):
+                    out.append(f"{where} names the sha256 {fig.get('sha256')}, and its "
+                               f"sidecar names {named[main]['sha256']}")
+        if not entry and any(paths):
+            out.append(f"{where} links a file and shows no result")
+        # G6: a chart's limit and point are the floor's.
+        chart = fig.get("chart")
+        if kind == "chart" and paths[2]:
+            expected_chart, _warning = chart_block(
+                facts.claims.get(cid), facts.floor.get((cid, gate)),
+                _chart_payload(facts.root, paths[2]))
+            planted = vega_forbidden((chart or {}).get("spec")) if isinstance(
+                chart, Mapping) else []
+            if planted:
+                out.append(f"{where} chart spec holds {', '.join(map(repr, planted))}: Vega "
+                           f"would compute what the page shows")
+            if chart != expected_chart:
+                out.append(f"{where} chart reads {chart}, the floor of {cid} says "
+                           f"{expected_chart}")
+        elif chart not in ({}, None):
+            out.append(f"{where} carries a chart block and is no chart")
+        # G7: a caption says what the picture shows, never a status.
+        word = caption_status(str(fig.get("caption") or ""))
+        if word:
+            out.append(f"{where} caption says {word!r}, a status")
+
+    claims_doc = page_doc.get("claims") or {}
+    for cid, row in claims_doc.items():
+        if not isinstance(row, Mapping):
+            continue
+        figs = [f for f in row.get("figures") or () if isinstance(f, Mapping)]
+        for fig in figs:
+            one(f"page claim {cid}", str(cid), fig)
+        if "binding_text" in row and row.get("binding_text") != binding_text(figs):
+            out.append(f"page claim {cid} binding text reads {row.get('binding_text')!r}, "
+                       f"its figures say {binding_text(figs)!r}")
+    # G8: a bound view is the hero only as its figure, and never an alternate
+    # but the figure hero's own. What slipped through (review of P1): a bound
+    # model3d taken as a plain hero, with no figure, chips or currency, and
+    # listed as a marketing alternate, which the checks below never read
+    # because `figure` was null.
+    rep = page_doc.get("representation") or {}
+    bound = set(facts.bound) | {str(f.get("view") or "") for row in claims_doc.values()
+                                if isinstance(row, Mapping)
+                                for f in row.get("figures") or () if isinstance(f, Mapping)}
+    hero_view = str(rep.get("view") or "") if isinstance(rep, Mapping) else ""
+    hero_fig = rep.get("figure") if isinstance(rep, Mapping) else None
+    own = hero_view if (isinstance(hero_fig, Mapping)
+                        and str(hero_fig.get("view") or "") == hero_view) else ""
+    if isinstance(hero_fig, Mapping) and not own:
+        out.append(f"representation shows {hero_view or 'no view'} with the figure of "
+                   f"{hero_fig.get('view')}")
+    if hero_view in bound and not own:
+        out.append(f"representation {hero_view} is a bound view shown with no figure: it "
+                   f"says no result")
+    for alt in (rep.get("alternates") or ()) if isinstance(rep, Mapping) else ():
+        vid = str(alt.get("view") or "") if isinstance(alt, Mapping) else ""
+        if vid in bound and vid != own:
+            out.append(f"representation alternate {vid} is a bound view: it shows only as "
+                       f"its figure")
+    # G8: the hero is the claim's own copy, held as the claim's is.
+    hero = (page_doc.get("representation") or {}).get("figure")
+    if isinstance(hero, Mapping):
+        owner = next((cid for cid, row in claims_doc.items() if isinstance(row, Mapping)
+                      and any(isinstance(f, Mapping) and f.get("id") == hero.get("id")
+                              for f in row.get("figures") or ())), None)
+        if owner is None:
+            out.append(f"representation figure {hero.get('id')} is under no claim")
+        else:
+            copy = next(f for f in claims_doc[owner]["figures"]
+                        if isinstance(f, Mapping) and f.get("id") == hero.get("id"))
+            if dict(hero) != dict(copy):
+                out.append(f"representation figure {hero.get('id')} differs from the copy "
+                           f"under {owner}")
+            one("representation", str(owner), hero)
+    return out
+
+
 def live_feeds(lay: Layout, built: Any, toks: Any) -> list[dict]:
     """The feeds as `bake_map` bakes them, for `status_problems`' ``feeds``."""
     return [{"zone": f["zone"], "to": f["to"], "choices": list(f["choices"]),
@@ -2537,6 +3703,13 @@ __all__ = [
     "IMPLICIT_STATIONS_WARN", "SOURCE_OF_KIND", "SOURCES", "source_of", "trace_block",
     "amber_word", "live_feeds",
     "EVIDENCE_MAX_BYTES", "EVIDENCE_DIR", "PROSE_SUBJECTS", "WORD_KEYS", "RECORD_KEYS",
+    # issue #15: figures bound to a verdict entry
+    "FIGURES_DIR", "LIVE_DIR", "SIDECAR_SUFFIX", "SIDECAR_SCHEMA", "SIDECAR_KEYS",
+    "FIGURE_ROLES", "FIGURE_CURRENCIES", "Figure", "figure_folder", "live_folder",
+    "figure_currency_word", "read_sidecar", "figure_for", "evidence_source",
+    "CAPTION_STATUS_PHRASES", "FIGURE_CONTROLS", "caption_status", "BoundFigure",
+    "entry_verdict", "entry_outcome", "drawn_text", "binding_text", "chart_block",
+    "figure_chips", "figure_row", "gate_cover", "FigureFacts", "figure_facts", "margin_text",
     "Board", "Zone", "Station", "Layout", "Evidence",
     "token_of", "boards_of", "layout", "value_text", "words_block", "evidence_plan",
     "evidence_assets", "settle", "subject_tokens", "named_in", "prose_named", "prose_files",

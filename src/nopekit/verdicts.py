@@ -156,6 +156,8 @@ __all__ = [
     "selftest_walk", "control_static", "write_control", "read_controls",
     "record_control", "remember", "remembered", "forget", "record_obs", "read_obs",
     "last_read_sets",
+    # issue #15: which bytes a recorded run cited (scratch, untracked)
+    "EVIDENCE_MANIFEST_SCHEMA", "write_evidence_manifest", "evidence_manifest",
     # part three: freshness, admission state, the one resolver (U19)
     "MAX_STALE_REASONS", "Fresh", "Stale", "Unknown", "Never", "freshness",
     "Admission", "admission_state", "Row", "Resolution", "resolve", "apply_prerequisites",
@@ -5847,6 +5849,119 @@ def record_obs(root: str, gate_id: str, *, entry: str, when: str, duration_s: fl
                        "runs": runs[-OBS_KEEP:]})
 
 
+# --------------------------------------------------------------------------- #
+# the evidence manifest: which bytes a recorded run cited (untracked; issue #15)
+# --------------------------------------------------------------------------- #
+#: Where a recorded run's evidence digests live: ``.nopekit/cache/evidence/
+#: <gate>/<entry>.json``. Under ``cache/``, which the project's ignore block
+#: ignores and no gate writes to (a gate writes under ``out/`` through
+#: ``ctx.out_path``, so a manifest there could be a gate's own file). *Rejected:*
+#: the digests in the tracked entry (``out8`` hashes the outcome only and the
+#: body is kept-first, so a solver log with a timestamp would raise a
+#: kept-first warning on every forced run); obs rows (``read_obs`` refuses any
+#: other key, obs is latency and never truth, and it keeps ``OBS_KEEP`` rows, so
+#: the binding would go after 20 runs); writing it from ``cli.check`` after the
+#: sweep (no spine edit, but a later gate's write would land in an earlier
+#: gate's manifest).
+_EVIDENCE_DIR = "evidence"
+
+#: The manifest's schema. 1: ``{"schema", "gate", "entry", "files": {portable
+#: path: {"sha256", "bytes"}}}``, exactly these keys.
+EVIDENCE_MANIFEST_SCHEMA = 1
+
+_ENTRY_STEM = re.compile(rf"^[0-9a-f]{{{RHO_CHARS}}}-[0-9a-f]{{{OUT_CHARS}}}$")
+
+
+def _manifest_path(root: str, gate_id: str, entry_name: str) -> str:
+    return os.path.join(root, _STATE_DIR, _CACHE_DIR, _EVIDENCE_DIR,
+                        _check_gate_id(gate_id), entry_name + ".json")
+
+
+def _file_sha256(path: str) -> tuple[str, int] | None:
+    """``(sha256, bytes)`` of a regular file, links followed, or ``None``."""
+    try:
+        if not stat_module.S_ISREG(os.stat(path).st_mode):
+            return None
+        digest = hashlib.sha256()
+        size = 0
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+                size += len(block)
+    except OSError:
+        return None
+    return digest.hexdigest(), size
+
+
+def write_evidence_manifest(root: str, gate_id: str, entry_name: str,
+                            evidence: Iterable[Any], anchors: Anchors) -> str:
+    """Record the bytes a recorded run cited; return the manifest's path.
+
+    ``evidence`` is the verdict's evidence as the run returned it (absolute
+    paths, or paths relative to ``root``); each key is its portable spelling
+    (``anchors.portable_path``, as the entry's ``evidence`` spells it), each
+    value its sha256 and size. A path with no portable spelling, a directory or
+    a file that is not there is left out. Written whole and atomically, and
+    replaced by a later recorded run of the same entry name: the same rho and
+    the same outcome tuple, so that run's files are as much this entry's
+    evidence as the first's.
+
+    What slipped through before it: ``page.evidence_plan`` copied whatever
+    ``.nopekit/out`` held under a cited name, so a design that went A, B, A
+    (a cache hit serving A over B's files) published B's bytes as A's evidence.
+    """
+    _check_gate_id(gate_id)
+    if not _ENTRY_STEM.match(str(entry_name)):
+        raise NopekitError(f"{gate_id}: {entry_name!r} is not an entry name")
+    files: dict[str, dict] = {}
+    for path in evidence or ():
+        spelled = anchors.portable_path(path)
+        if spelled is None:
+            continue
+        text = os.fsdecode(os.fspath(path))
+        found = _file_sha256(text if os.path.isabs(text) else os.path.join(root, text))
+        if found is not None:
+            files[spelled] = {"sha256": found[0], "bytes": found[1]}
+    target = _manifest_path(root, gate_id, entry_name)
+    atomic_write_json(target, {"schema": EVIDENCE_MANIFEST_SCHEMA, "gate": gate_id,
+                               "entry": entry_name, "files": files})
+    return target
+
+
+def evidence_manifest(root: str, gate_id: str, entry_name: str) -> dict | None:
+    """``{portable path: {"sha256", "bytes"}}`` a recorded run of ``entry_name``
+    on this computer cited, or ``None``: no such run (an entry from before the
+    manifest, one a clone brought, a ``--no-record`` run), or a file that does
+    not parse, has other keys, or names another gate or entry. Scratch: it says
+    which bytes on this computer are an entry's evidence, never a verdict."""
+    try:
+        path = _manifest_path(root, gate_id, entry_name)
+    except NopekitError:
+        return None
+    if not _ENTRY_STEM.match(str(entry_name)):
+        return None
+    data_bytes = _file_bytes(path)
+    if data_bytes is None:
+        return None
+    try:
+        data = _strict_json(data_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or set(data) != {"schema", "gate", "entry", "files"} \
+            or data["schema"] != EVIDENCE_MANIFEST_SCHEMA or data["gate"] != gate_id \
+            or data["entry"] != entry_name or not isinstance(data["files"], dict):
+        return None
+    files: dict[str, dict] = {}
+    for key, row in data["files"].items():
+        if not (isinstance(row, dict) and set(row) == {"sha256", "bytes"}
+                and isinstance(row["sha256"], str) and _HEX64.match(row["sha256"])
+                and isinstance(row["bytes"], int) and not isinstance(row["bytes"], bool)
+                and row["bytes"] >= 0):
+            return None
+        files[str(key)] = {"sha256": row["sha256"], "bytes": row["bytes"]}
+    return files
+
+
 def last_read_sets(root: str) -> dict[str, set]:
     """``{gate id: {param path tuple, ...}}`` from each gate's latest executed
     entry — the newest obs run whose entry is still there, else the sole entry,
@@ -10603,6 +10718,15 @@ def _sweep_one(s: _Session, spec: Any, fn: Any, state: Any, run_ctx: Any, *,
             wrote = write_entry(s.root, entry)
             s.notes.extend(wrote.warnings)
             forget(s.root, gid, answered)
+            # Which bytes this run cited, beside the entry it wrote (issue #15):
+            # the site copies a file as this entry's evidence only when its
+            # bytes are these. Scratch: a manifest that cannot be written binds
+            # nothing, so the page shows less, and the check goes on.
+            try:
+                write_evidence_manifest(s.root, gid, name, verdict.evidence or (), s.anchors)
+            except (NopekitError, OSError) as exc:
+                s.notes.append(f"{gid}: the evidence manifest of {name} was not written "
+                               f"({exc}), so the site does not copy its evidence")
     elif s.record:
         # Under the inputs of the tier this run took (`input_rho`), never the
         # served entry's: a tier-0 crash filed under the tier-2 entry left the

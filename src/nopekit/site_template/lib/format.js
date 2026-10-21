@@ -167,6 +167,25 @@ export function outcomeLook(key) {
   return VERDICT_STATUS[key] || { glyph: "◌", tone: "dim" };
 }
 
+/** A bound figure's currency (issue #15, `page.FIGURE_CURRENCIES`): its glyph,
+ *  its tone and whether its card says it at the top, keyed by the bake's word.
+ *  The spine decides which word a figure carries; this table only says how
+ *  each word looks, as TOKEN_LOOK does for a claim's token. A picture of
+ *  another result, or of a result that is not current, takes Stale's glyph
+ *  and a dashed frame (page.css), so it never looks like the result beside it.
+ *  An unknown word gets the neutral look and its notice, never the current
+ *  look. */
+const CURRENCY_LOOK = {
+  current: { glyph: "✓", tone: "ok",    notice: false },
+  stale:   { glyph: "≈", tone: "dim",   notice: true },
+  older:   { glyph: "≈", tone: "warn",  notice: true },
+  none:    { glyph: "◌", tone: "muted", notice: false },
+};
+
+export function currencyLook(key) {
+  return CURRENCY_LOOK[key] || { glyph: "◌", tone: "dim", notice: true };
+}
+
 export function claimKind(key) {
   return CLAIM_KIND[key] || { title: String(key || "other"), blurb: "" };
 }

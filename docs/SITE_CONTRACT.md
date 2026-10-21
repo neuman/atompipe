@@ -87,7 +87,10 @@ site/
     views/<id>.json   per-view payloads too big for state.json
     build.json        IGNORED: the build time, each verdict's age, the live flag
   assets/             GENERATED — what viewgens wrote (GLB, PNG, SVG, CSV)
-    evidence/<gate>/<entry>/<file>   evidence copied from .nopekit/out/
+    evidence/<gate>/<entry>/<file>   evidence copied from .nopekit/out/, by content
+    figures/<gate>/<entry>/          a bound figure and its sidecar <view>.view.json
+                      (issue #15; "Figures bound to verdicts")
+    live/<gate>/<entry>/             IGNORED: a 3D file of an entry no export re-ran
 .vscode/launch.json   Run and Debug: `site build`, then `site serve -p 0`, browser opened
                       on the URL the server prints. Written by `init`, `site init` or
                       `site build` when absent; never edited once it exists.
@@ -263,6 +266,9 @@ Rules:
   scheme in `PACK.md`.
 - **Assets are outputs.** Write them through `ctx.write_asset`, never by hand into
   `site/assets/`, so `site build` can clean stale ones.
+- **A picture of a result is a bound viewgen** (`evidence_of="<gate>"`, issue #15): it
+  draws one verdict entry's evidence and is checked before it is published. See
+  "Figures bound to verdicts".
 
 ## Explode: derived first draft, authored where it matters
 
@@ -597,7 +603,29 @@ an agent can read the site's state without a browser.
   names a view that does not exist) or `unknown-target` (a node the view does not
   declare). The locator itself stays on its verdict; nothing is dropped.
 - A view whose inline `data` is too big to sit in the summary is split into
-  `data/views/<id>.json`: its row keeps `"data": {}` and gains `data_url`.
+  `data/views/<id>.json`: its row keeps `"data": {}` and gains `data_url`. The build
+  seals the digest of each row with its view file into `page.json`'s `meta.views`
+  (`site.view_digest`). A viewgen that is unavailable or crashed keeps its row from
+  the last build only at those bytes, and `site status` reads a row or a view file
+  with other bytes as edited by hand.
+- A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
+  verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
+  view, its GLB; `data_url` is a chart's series file; `field_src` a committed GLB
+  beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
+  the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
+  currency, currency_word}`, where `entry` is the result the picture was drawn from
+  and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
+  not current), or `older` (another entry of the gate, not always an earlier one:
+  after A, B, A the picture beside A is B's, the later run; the served one has no
+  picture yet), with its fixed sentence. A bound view with no picture has no row. A
+  bound view is never the page's representation or a marketing alternate as a plain
+  view: it shows there only as its figure (`representation.figure`), with its chips
+  and its currency (G8). The
+  technical record prints the sentence and the gate and entry under the view
+  (`stage.js`); it draws a bound chart's series with `lib/chart.js`, with no limit
+  (the chart file holds none, and the limit is the claim's, on the engineering page).
+  Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
+  which vouches for a number in prose.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
   the param records: every parameter the model holds, in its field order, then any
   record the model no longer defines. `value`, `units`, `rationale` and
@@ -820,7 +848,26 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   `#zone=…` and so on) in the URL opens it; the marketing page links here as
   `engineering/#claim=C1` and `engineering/#requirement=R1`.
 - **A board's section** (`lib/sections.js`) is its title, line, chip and tally, then
-  the prose (its `notice` in a callout above it when `stamp` is not `current`; each
+  a **claim card** (`lib/figures.js`, issue #15) for each of its claims that has
+  `figures`, open, in the board's order: the claim and its chip; the `value_text` of its
+  `binding` value in large type with `words.figure.judged`; a tile for each other
+  value; the currency sentence of each figure that is not `current` or `none` (with
+  `drawn_text`) above the pictures, in a dashed frame; the charts (the baked `spec`
+  handed whole to `vegaEmbed`, or, where the library does not load, its data rows,
+  limit label and margin words as a table under `words.figure.table`, never a drawing
+  of our own); the stills, side by side from 720 px and stacked under it, each with its
+  title and the chips of every claim its gate covers (`tokenChip` with marks and the
+  trace's words), the PNG linked to itself, each mark as an HTML label at its baked
+  `at`, the legend (a CSS gradient of the scale's `stops`, ticks at their baked `at`
+  with their `text`, the `under` and `over` swatches with their words, `source_text`)
+  and the caption; "Turn it in 3D" (`turn.word`) only where a 3D file is there to turn
+  (`field_src`, or `build.json`'s `live_figures[<figure id>]` with `turn.live_word`),
+  which mounts the viewer in field mode when pressed; then `binding_text` and each
+  figure's `provenance`. A figure with no file shows its sentence alone. Vega, Vega-Lite
+  and vega-embed load on demand from `vendor/vega/` when it is there, else from the
+  CDN, at the versions `site.VEGA_VERSIONS` pins (`site vendor` copies them too). The
+  browser looks each currency word up (`format.currencyLook`) and compares none.
+  Then the prose (its `notice` in a callout above it when `stamp` is not `current`; each
   `num` run with `match: false` in a `<mark class="nk-unmatched">` titled
   `words.notices.unmatched`, kept on one line with a dagger, never the gap's "?", and
   `words.notices.unmatched_note` in words under a piece that has one; claim runs as
@@ -842,6 +889,17 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   tone its `counts`. `tests/test_site_truth.TheBrowserComputesNoTruth` scans every
   template script for a verdict flag read, arithmetic on a limit, a worst-of over a
   status, a sort over a status and an age compared, with a planted violator of each.
+  From issue #15 it also refuses a figure's `currency` or `entry` compared or branched
+  on, or a digest compared (`a figure's currency decided`), and
+  `test_the_field_mode_never_tints` holds the field mode below.
+- **Field mode** (`lib/viewer3d.js`, `createViewer({..., field: true})` or a view of
+  kind `field`): the colours on a field are a scale, so each mesh is drawn with
+  three.js's `MeshBasicMaterial` and its vertex colours, `toneMapped: false`, no
+  lights, and the renderer writes them out unconverted (`LinearSRGBColorSpace`,
+  `NoToneMapping`): a COLOR_0 that holds the colour map's sRGB bytes, as ParaView 6.2
+  writes it, reads back as those bytes within 2 (`tests/test_field_browser.py`, in a
+  headless Chromium when one is there). A mesh with no COLOR_0 is white. Tint,
+  highlight, isolate and explode do nothing on a field.
 
 ## The marketing page
 
@@ -869,7 +927,10 @@ in Python. Top to bottom:
    at every width. What slipped through (review of SPEC 40): the stale notice and the
    limits line sat in the fold's block, under the viewer on a phone, so at 390x844
    "Checked does not mean true" started at y=906, off the first screen. A `model3d`
-   or `field` representation runs `lib/viewer3d.js` with the customizer; an image is
+   or `field` representation runs `lib/viewer3d.js` with the customizer (a figure as
+   the hero, issue #15: its committed GLB in field mode with only the baked `controls`,
+   spin; under it, as under a figure's still, the figure's currency sentence, its chips
+   and its legend); an image is
    an `<img>`, a diagram `stage.renderDiagram`; with no
    representation the hero is text only (no box, no notice). The model loads behind a
    spinner, "Loading the model", with a progress bar (`createViewer`'s `onProgress`,
@@ -1094,11 +1155,15 @@ The outline's data (SPEC 28, 30), baked by `page.bake_page` and `page.bake_prose
   "schema": 1, "outline": 1, "generated": "<HUMAN.site.generated>",
   "meta": { "name": "...", "summary": "...", "revision": "v0.1",
             "records_digest": "<64>", "resolution_digest": "<64>",
-            "content_digest": "<64>" },
+            "content_digest": "<64>",
+            "views": { "<view id>": "<64: site.view_digest of its state.json row and
+                                     view file>" } },
   "representation": { "view": "assembly", "kind": "model3d", "title": "Assembly",
                       "notice": "",
                       "alternates": [ { "view": "assembly", "title": "Assembly",
-                                        "bytes": 6155468 } ] },
+                                        "bytes": 6155468 } ],
+                      "figure": null, "controls": null },   // issue #15: a figure hero
+                      // bakes its figure object and "controls": ["spin"]
   "verdict": { "token": "not-ready", "ready": false,
                "headline": "v0.1 is NOT ready.",
                "sentence": "<the readiness sentence, register='site'>",
@@ -1152,7 +1217,8 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
   "values": [ { "gate": "bracket.deflection", "measured": 0.6997, "units": "mm",
                 "limit": 0.5, "limit_hi": null, "comparator": "<=", "margin": -0.3994,
                 "compared": true, "binding": true,
-                "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit" } ],
+                "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit",
+                "margin_text": "40% past the limit" } ],
   "evaluators": [ { "id": "bracket.deflection", "basis": "sourced", "basis_word": "...",
                     "outcome": "fail", "outcome_word": "fail", "order": 0,
                     "current": true, "stale_reason": "", "detail": "...",
@@ -1165,10 +1231,37 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
                       //   "heading": "Test on a built part" } — the site's words
   "rests_on": ["C6"], "resolves": [], "resolved_by": [],
   "settle": { "text": "...", "commands": ["nopekit why C1", "nopekit check"] },
-  "amber": null }   // architecture phase 3b, a Checked claim resting on an unconfirmed
-                    // assumption: { "state": "flips", "word": "...", "items": [
-                    //   { "assumption": "C6", "choice": "load_n", "sign": "+",
-                    //     "evaluator": "bracket.bearing", "text": "..." } ] }
+  "amber": null,   // architecture phase 3b, a Checked claim resting on an unconfirmed
+                   // assumption: { "state": "flips", "word": "...", "items": [
+                   //   { "assumption": "C6", "choice": "load_n", "sign": "+",
+                   //     "evaluator": "bracket.bearing", "text": "..." } ] }
+  "figures": [ <figure> ],   // issue #15: one per bound figure whose gate covers it
+  "binding_text": "The pictures of cfd.pressure_drop come from its result ... " }
+```
+
+A figure (issue #15, `page.figure_row`): a bound viewgen's picture, chart or 3D file,
+as the disk resolved it (`page.figure_for`), under each claim its gate covers:
+
+```jsonc
+{ "id": "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed",
+  "view": "cfd-openfoam.speed", "kind": "image", "gate": "cfd.pressure_drop",
+  "entry": "9c1e04d2b7a35f60-3a7b19e2",      // the entry it was drawn from ("" for none)
+  "currency": "current",                     // current | stale | older | none
+  "currency_word": "This picture is from the result on this page.",
+  "drawn_text": "",                          // older: "That other result: pass, 2 Pa."
+  "outcome": "pass", "outcome_word": "pass", // the evaluator row's; older: its own entry's
+  "claims": [ { "id": "C1", "token": "checked", "word": "checked", "errored": false,
+                "marks": [] } ],             // every claim the gate covers
+  "title": "...", "caption": "...", "alt": "...", "provenance": "...", "tool_word": "",
+  "src": "assets/figures/<gate>/<entry>/<view>.<sha12>.png", "sha256": "<64>",
+  "bytes": 10800, "field_src": "", "data_src": "",
+  "marks": [ { "at": 0.25, "text": "upstream plane" } ],
+  "scale": { ... },                          // the sidecar's, a pack constant
+  "chart": {},                               // a chart: { "limit": { "value", "comparator",
+                                             //   "units", "label" } | null, "current":
+                                             //   { "x", "y", "margin_text" } | null,
+                                             //   "spec": <the whole Vega-Lite spec> }
+  "turn": {} }                               // a 3D file: { "word", "live_word" }
 ```
 
 A step group (one per milestone, natural order; `project` with no milestone, over the
@@ -1225,6 +1318,32 @@ value; a decision's `values` and the top-level `losers`):
   `--authority <name>`). A test on a built part with no milestone has no `export`
   command: its text says how to build the part and to name the claim in a milestone
   file. A step carries its claim's `marks`, as the floor row does.
+- `figures` (issue #15): the words depend on the records, the cache and the committed
+  figure files alone, never on this computer's tools, so a clone bakes the same object.
+  A chart's `limit` and `current` are the floor row's for (claim, gate), the claim's
+  limit where the row is compared with it, set by the spine (`page.chart_block`); a
+  chart whose y units are not the limit's bakes no limit, and the build says so. Its
+  `spec` (P1.5, `page.chart_spec`) is the whole Vega-Lite spec that draws it: the series
+  of its chart file as data rows (`series`, `label`, `x`, `y`, and `text` and `hollow`
+  where the payload gives them), the limit as a shaded side and a dashed rule with its
+  label, the judged point with its margin words, and the payload's `band` (error bars),
+  `rule` (a tolerance line, never called a limit) and `estimates` (diamonds), on a log y
+  axis where the payload's `y.scale` is `"log"`. Every number in it is the chart file's
+  or the floor's, and it holds none of `page.VEGA_FORBIDDEN_KEYS` (`transform`,
+  `calculate`, `filter`, `aggregate`, `params`, `expr`, `signal`, `bin`, `timeUnit`,
+  `impute`, `regression`, `loess`, `density`, `fold`, `stack`, `test`), so Vega places
+  numbers and computes only the axes. Its marks name a `style` (`nk-limit`, `nk-past`,
+  `nk-current`, ...) whose look the page's theme gives; where a label sits is in the
+  spec. A live
+  3D file is never named here (`build.json`'s `live_figures`). The representation is a
+  `model3d` view, else a figure whose 3D file is committed (as `field`), else the first
+  bound still, else an `image` or `diagram` view. `page.status_problems` holds each
+  figure (G1-G8 of the design): its claims exactly the gate's cover and each chip the
+  resolution's; its entry and currency the disk's and the served entry's; its
+  sentences and outcome; its files under its own folder, the build's keep set or the
+  bytes its sidecar names; a chart's limit, point and spec (`chart_block`'s whole, with
+  no forbidden key); a caption with no status word;
+  and the representation's figure the claim's own copy.
 - **The checker** (`page.status_problems`, invariant 14) holds every token, *ready*,
   word and mark above to the resolution: a claim's, a section's and a step's `word` is
   its token's; a milestone's and the project's `ready`, `token` and `word` are
@@ -1236,7 +1355,14 @@ value; a decision's `values` and the top-level `losers`):
   no board. From SPEC 40 `words.headings` holds the marketing page's headings too
   (`story`, `asked`, `decisions`, `losers`, `evidence`, `unsettled`,
   `whole_decision`), and `words.notices` holds `stale_public` ("Some results are older
-  than the design.") and `no_story`: the page prints no heading of its own.
+  than the design.") and `no_story`: the page prints no heading of its own. From issue
+  #15 `words.figure` holds `report.HUMAN["site"]["figure"]` whole: each currency's
+  sentence (`current`, `stale`, `older`, `none`), `drawn`, `drawn_bare`, `shown`,
+  `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
+  claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
+  drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
+  not load; its columns take the baked spec's axis titles) and `turn_failed` (where
+  the 3D view did not load). The card prints no error text of its own.
 
 **The marketing page's keys** (SPEC 40), all baked by `page.bake_page` or a helper it
 calls, so `status_problems` and the style scans see them:
@@ -1344,7 +1470,11 @@ paragraphs, one-level `-`/`*` and `1.` lists, `>` quotes, a paragraph that is on
 image (a figure, its path under `site/`), `**bold**`, `*italic*`, `` `code` `` and
 links (`https:`, `http:`, a site path, `#anchor`). A claim id that exists becomes a
 link to the drawer. Raw HTML, tables and fenced code stay literal text, each with a
-problem.
+problem. A figure whose file is not under `site/` reads `"missing": true`. A figure
+under `site/assets/` reads `"missing": true` also, whether its file exists or not, and
+the build says to put figures in `site/content/img/`: the build deletes the files in
+`assets/` that no view uses, so such a file would be gone after the build that linked
+it (issue #15).
 
 ```jsonc
 { "file": "content/strength.md", "subject": "strength", "as_of": "3f2a9c1e0b7d4a55",
@@ -1392,16 +1522,181 @@ bare relative path resolves under the root and must stay inside it, with no hidd
 part (`.env`, `.git/`) and not ignored by git (`vcs.ignored`, asked by `site build`);
 `<out:controls>/`, `<tmp>/`, `~/`, `<pack:…>/`, absolute paths and any `..` part are
 never published. A regular file of at most 2 MiB (`page.EVIDENCE_MAX_BYTES`) is
-copied to `assets/evidence/<gate>/<entry name>/<file>`, only when the bytes differ;
-names that clash in one entry, ignoring case and after unsafe characters become `_`,
-gain `-2`, `-3`. When the source is gone but the entry-keyed copy exists (a fresh
-clone: `.nopekit/out/` is ignored) the copy is kept and linked; the path is keyed by
-the entry, so the copy is that entry's. Anything else reads `missing` with words that
+copied to `assets/evidence/<gate>/<entry name>/<file>` only when its sha256 is the one
+the entry's evidence manifest names (`verdicts.evidence_manifest`, below), and only
+when the bytes differ; `site build` hashes the file again just before it copies.
+Names that clash in one entry, ignoring case and after unsafe characters become `_`,
+gain `-2`, `-3`. A file with other bytes than the manifest's, or with no manifest,
+is another run's (or a run nothing recorded): the build keeps the entry-keyed copy
+when one exists, plans none when not, and says why in its warnings ("the file on this
+computer is from another run: `nopekit check --force --only <gate>` ..."). When the
+source is gone but the entry-keyed copy exists (a fresh clone: `.nopekit/out/` is
+ignored) the copy is kept and linked. A copy already on the site is kept and never
+checked again: the build binds what it copies, not what it keeps. Anything else reads
+`missing` with words that
 depend on the path alone: outside the project, or not on the page
 (`HUMAN["site"]["evidence"]`); why a file in the project was not copied (its size, a
 directory, gone, hidden, ignored, a link out) reads this machine's disk, so it is a
 build warning and never baked, and a fresh clone bakes the same bytes. `state.json`'s
 verdict rows carry `evidence_assets`, aligned with `evidence`.
+
+**The evidence manifest** (issue #15). When `check` records a run whose outcome is
+measured (pass or fail), it writes `.nopekit/cache/evidence/<gate>/<entry>.json`
+beside the entry it files: `{"schema": 1, "gate", "entry", "files": {<portable
+evidence path>: {"sha256", "bytes"}}}`, for each regular file the verdict cites under
+an anchor. It is scratch (git ignores `.nopekit/cache/`), so a fresh clone has none. A
+cache hit, `--no-record`, an error, a skip, a control, a mutation and a trace run write
+none; `export`'s re-runs do. What slipped through before it: the copy was bound by
+name, so a design that went A, B, A (the last a cache hit, with B's files still in
+`.nopekit/out/`) published B's files under A's entry.
+
+## Figures bound to verdicts
+
+Issue #15. A **figure** is a still (a PNG), a chart or a 3D field (a GLB) that a pack
+draws from the evidence of one verdict entry: the pressure field of the CFD run that
+judged a pressure drop, beside the claim it judged. A picture is persuasive, so it is
+held as the numbers are (invariant 14): it says which result it is, it sits beside the
+status of every claim its gate covers, and it never says more than the evidence of
+that result.
+
+**What the spine holds.**
+
+1. A figure is the evidence of one named verdict entry, bound by content. The run's
+   files are bound by the entry's evidence manifest ("Evidence on the page"); the
+   inputs a picture reads beyond them (a solved field) by the digests the verified
+   evidence lists (`ctx.bind`); the picture by its entry-keyed folder and a tracked
+   sidecar that holds its sha256.
+2. The spine says whether a figure is current, stale, another result's or absent. The
+   browser never decides it: the page bakes the word, the drawn result's outcome and
+   the chips of every claim the gate covers.
+3. Figures are drawn at `site build` only, never in a gate or in `check`. A renderer
+   that is missing, crashes, hangs or is refused moves no status and deletes no
+   committed figure: views never reach the resolution.
+4. A colour range is a pack constant times a named evidence value, never a claim's
+   limit. One `scale` object gives the pixels and the HTML legend.
+5. A chart draws only numbers its entry's verified evidence holds. Its limit and its
+   judged point are the floor row's, set by the spine.
+6. No figure file is over 2 MiB (`page.EVIDENCE_MAX_BYTES`).
+
+**The viewgen** declares the gate whose served entry it draws, `evidence_of`, and the
+files besides its module whose bytes key its memo, `recipe` (`docs/PACK_FORMAT.md`,
+"Figures bound to a verdict"). It is handed a `BoundContext`: no model, no parameters
+and no claim's acceptance, because the design now may be another design than the
+served entry's, and a limit handed to a viewgen is how a colour range gets keyed to a
+limit. `ctx.entry.files` holds only the evidence files whose bytes the manifest names;
+`ctx.entry.withheld` says why each other path is held back. It writes into scratch git
+ignores (`.nopekit/out/figures/<gate>/<entry>/<view>/`), never into `site/`.
+
+**When it draws.** `site build` resolves, plans the evidence, runs the unbound
+viewgens, then the bound pass, in registry order:
+
+| The served entry of its gate | What happens |
+|---|---|
+| none recorded | nothing is drawn; the figure reads `none` |
+| a valid sidecar under it at the current recipe digest | the memo: the viewgen is not called |
+| a valid sidecar at an older recipe, and the draw is unavailable, fails or is refused | kept, and the build says it was drawn by an older scene |
+| otherwise, the viewgen available | called with a `BoundContext`, checked, then published |
+| otherwise | nothing is drawn; the page shows what the disk holds |
+
+The recipe digest is the sha256 of the module's bytes, each `recipe` file's bytes and
+`site.FIGURE_RECIPE_SALT`. The tool's identity is not in it: with it, one teammate's
+install would draw every figure again. A rebuild that judged nothing new reads one
+sidecar per bound view and calls no tool. `site serve --watch` also polls
+`.nopekit/cache/evidence`, so a `check --force` that solves the same entry again draws
+it.
+
+**What the spine refuses** (`site._figure_refusal`; a build warning, nothing published):
+
+| Check | Refusal |
+|---|---|
+| each output at most 2 MiB (`write_asset` raises over it) | over the 2 MiB cap |
+| a still starts with the PNG signature and its IHDR parses; a 3D file starts with `glTF` | not a PNG, not a GLB |
+| one PNG and one GLB at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one GLB |
+| a picture carries no payload, and its `src` names a file it wrote | its numbers are its evidence's; its src names no file it wrote |
+| a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`) | a chart's limit and its point are the claim's |
+| every number under `series`, `band`, `estimates` and `rule` is a JSON leaf or a CSV cell of a verified evidence file | the chart holds a number no evidence file holds |
+| every bound input and verified evidence file hashes the same after the call | the inputs moved while the picture was drawn |
+| `scale.lo` and `scale.hi` equal no `limit` or `limit_hi` of a claim the gate covers, nor the entry's verdict limit (relative 1e-9); no `scale.source[].key` holds `limit` | a colour range taken from a limit |
+| the caption holds no status word (`page.CAPTION_STATUS_PHRASES`) | a caption may not say a status |
+
+**Where it lands** (`site._publish_figure`):
+
+```
+site/assets/figures/<gate>/<entry>/<view>.<sha12>.png         tracked: a still
+site/assets/figures/<gate>/<entry>/<view>.<sha12>.chart.json  tracked: a chart's payload
+site/assets/figures/<gate>/<entry>/<view>.<sha12>.glb         tracked: a 3D file, once an
+                                                              export re-ran the entry
+site/assets/figures/<gate>/<entry>/<view>.view.json           tracked: the sidecar
+site/assets/live/<gate>/<entry>/<view>.<sha12>.glb            IGNORED: any other 3D file
+```
+
+```jsonc
+{ "schema": 1, "view": "cfd-openfoam.speed", "gate": "cfd.pressure_drop",
+  "entry": "9c1e04d2b7a35f60-3a7b19e2", "kind": "image", "recipe": "<sha256>",
+  "files": { "image": { "name": "cfd-openfoam.speed.1a2b3c4d5e6f.png",
+                        "sha256": "<64>", "bytes": 10800 },
+             "field": { "name": "...glb", "sha256": "<64>", "bytes": 734012,
+                        "live": false },
+             "chart": { "name": "...chart.json", "sha256": "<64>", "bytes": 2210 } },
+  "title": "...", "caption": "...", "alt": "...",
+  "scale": { ... }, "marks": [ { "at": 0.25, "text": "upstream plane" } ],
+  "tool": { ... } }                       // the viewgen's meta.tool, as it gave it
+```
+
+The sidecar holds no clock and no machine path. It is shown only when its folder's
+gate and entry are its own, the verdict cache holds that entry
+(`.nopekit/verdicts/<gate>/<entry>.json`), and each file it names that is not live is
+on disk, at most 2 MiB, at the sha256 and size it names (`page.read_sidecar`). A forged
+folder, a swapped PNG or a file over the cap placed by hand is not shown, and a page
+that shows one anyway (a resealed hand edit) reads *edited by hand* in `site status`,
+`status` and `doctor`, which read the disk again. `site._kept_json`
+leaves `assets/figures/` and `assets/live/` out of the number pool: no scale end,
+tick, mark or series point vouches for a number in prose.
+
+**Which figure the page shows** (`page.figure_for`), and the sentence it bakes from
+`report.HUMAN["site"]["figure"]`:
+
+| On disk | `currency` | Sentence |
+|---|---|---|
+| a valid sidecar under the served entry, which is fresh | `current` | This picture is from the result on this page. |
+| the same, the served entry not fresh | `stale` | This picture is from the result on this page. That result is not current. |
+| none there, and exactly one other entry's folder holds one | `older` | This picture is from another result. The result on this page has no picture yet. |
+| none, or several other folders (after a merge) | `none` | No picture of this result is on the page. |
+
+An `older` figure also bakes that result's own outcome and value (`drawn_text`, "That
+other result: pass, 2 Pa.") from its cache entry. Each claim bakes one `binding_text`
+sentence per gate and entry ("The pictures of <gate> come from its result <entry>. This
+page shows that result.", or "... another result of <gate>."). Why a figure is absent
+on this computer goes to the build warnings only, so a fresh clone bakes the same
+`page.json`. What slipped through in review of the bake: the `older` sentence said
+"an earlier result", and after A, B, A the picture beside A is B's, the later run.
+
+**Retention** (`clean_assets`' keep set). The cleaner keeps the files of the figure each
+bound view resolved to (current, stale or older) and the served entry's live file.
+While the served folder has no valid sidecar, the one older folder stays; once the
+served entry is drawn, the older folder goes. A 3D file is committed under `figures/`
+only when an `exports/*.json` `reran` row names the entry; until then it lies under the
+ignored `assets/live/` and only `build.json`'s `live_figures` names it, and the next
+build after an export copies it into the committed folder. What slipped through
+before this: an unbound viewgen whose tool was missing returned no view, so the
+cleaner deleted the picture it drew last time; it keeps its last row now (`site.py`,
+the kept-row paragraph in `docs/SPINE_CONTRACT.md`). A prose figure belongs under
+`site/content/img/`: one under `assets/` reads `missing`, because the cleaner owns that
+folder.
+
+**A, B, A, walked.** A check of design A, then of B, then of A again (a cache hit, with
+B's files still in `.nopekit/out/`): A's manifest refuses B's bytes, so the viewgen gets
+no summary and draws nothing, and its note says to run `nopekit check --force --only
+<gate>`. The page shows A's committed figure if A was ever drawn (the memo, `current`),
+else B's as `older`, else `none`.
+
+**Where the page reads it.** `page.json`'s claim `figures` and `binding_text`, and
+`representation.figure` and `controls` for a figure hero ("`page.json`"); `state.json`'s
+bound row `binding`, `data_url` and `field_src` (`state.json`, "views"); `build.json`'s
+`live_figures` (below); the claim card in `lib/figures.js` ("The renderer"). The chart is
+a Vega-Lite spec the spine bakes whole (`page.chart_spec`), and a field is drawn as
+the file holds its colours (`lib/viewer3d.js` field mode). `page.status_problems` holds
+every figure (G1-G8, listed under `page.json`).
 
 ## `build.json`, live and published
 
@@ -1411,8 +1706,17 @@ verdict rows carry `evidence_assets`, aligned with `evidence`.
   "ok": true, "error": "",
   "verdicts": { "bracket.deflection": { "when": "...", "age_s": 412.0, "aged": false } },
   "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] },
-  "tracing": false }   // architecture phase 3b: a trace holds its lock now
+  "tracing": false,    // architecture phase 3b: a trace holds its lock now
+  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed":
+                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed.1a2b3c4d5e6f.glb" } }
+                       // issue #15: each live 3D file of a bound figure on this computer
 ```
+
+`live_figures` (issue #15) names, by figure id (`<gate>/<entry>/<view>`), the 3D file
+a bound viewgen drew for the served entry when no export re-ran that entry: it lies
+under `assets/live/`, which git ignores (`site build` adds `assets/live/` to
+`site/.gitignore` once a bound viewgen is registered), and no tracked file names it,
+so a static host never shows a 3D view that leads nowhere.
 
 `data/build.json` is the clock (SPEC 32), ignored through `site/.gitignore` (`site
 build` appends the line to an older one, and writes a `site/.gitignore` of those
@@ -1422,6 +1726,8 @@ day); `mixed_age.shown` is the banner's decision (two ages or more, the oldest a
 and more than four times the newest). **Live** (SPEC 33): `nopekit site serve --watch`
 polls `site.WATCH_DIRS` — the records, the project file, the model, the project's
 evaluators, views and generators, the packs copied in, the verdict cache, the trace,
+the evidence manifests (`.nopekit/cache/evidence`: a `check --force` that solves an
+entry again files no new entry, and its new manifest is what lets a bound figure draw),
 `site/content/`, `site/annotations.json` and `site/explode.json` — by size and mtime;
 when the set changes and holds for two polls it runs `nopekit site build --live` in a
 fresh process, waits while another command holds the lock, never runs `check`, and on

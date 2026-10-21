@@ -146,7 +146,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_round.RoundsCommitOnlyAsAListedPerson",
         "test_record_commands.InitStartsARepository",
         # Architecture phase 3b: a trace file is written once, whole.
-        "test_derivation.TheTraceIsWrittenOnce"],
+        "test_derivation.TheTraceIsWrittenOnce",
+        # Issue #15: the evidence manifest `check` writes is scratch git ignores,
+        # and `site build` writes nothing outside `site/` but what git ignores.
+        "test_figures.TheEvidenceManifestIsScratch"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -237,7 +240,26 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # reading order or an age.
          "test_site_truth.TheBrowserComputesNoTruth",
          # Architecture phase 3b: the map's feeds, stops and amber are the trace's.
-         "test_derivation.TheMapDrawsWhatTheTraceObserved"],
+         "test_derivation.TheMapDrawsWhatTheTraceObserved",
+         # Issue #15: evidence on the page is the bytes its entry's run cited,
+         # bound by content, never another run's under the same name.
+         "test_figures.EvidenceIsBoundByContent",
+         # Issue #15, P1.2: no file the page links is deleted by the build that
+         # links it, and a renderer that is missing or crashes moves no status
+         # and keeps the picture its last build drew.
+         "test_figures.NothingTheBuildDeletesIsLinked",
+         "test_figures.AMissingRendererMovesNoStatus",
+         # Issue #15, P1.3: a bound figure is drawn only from its entry's
+         # verified evidence, published under that entry, and shown only at
+         # the bytes its sidecar names, under an entry the cache holds.
+         "test_figures.AFigureIsItsEntrysEvidence",
+         # Issue #15, P1.4: a figure on the page says which result it is and
+         # sits beside the chips of every claim its gate covers, a chart's
+         # limit and point are the floor's, and a colour range is a pack
+         # constant, never a limit.
+         "test_figures.AFigureSaysWhichResultItIs",
+         "test_figures.TheClaimsStatusSitsBesideEveryFigure",
+         "test_figures.TheScaleIsAPackConstant"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",

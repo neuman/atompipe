@@ -1139,7 +1139,7 @@ def independent_unmatched(blocks: list, docs: list) -> list[str]:
     return out
 
 
-class ANumberNoBakedFileHoldsIsFlagged(unittest.TestCase):
+class ANumberNoBakedFileHoldsIsFlagged(_env.EnvCase):
     """(invariant 14) Every number in prose matches a baked number at its
     precision or is marked; identifiers, code and paths are never scanned; a
     planted matcher that matches everything is caught by an independent pool."""
@@ -1280,6 +1280,37 @@ class ANumberNoBakedFileHoldsIsFlagged(unittest.TestCase):
         self.assertEqual(section["prose"]["unmatched"], ["0.41 mm"])
 
 
+    def test_figure_numbers_vouch_for_nothing(self):
+        """A colour range's end, a tick on its legend and a mark on a picture
+        are the figure's, never a result (issue #15, B.4.3): prose that quotes
+        only one of them is marked, beside a value the floor holds, which
+        matches; and no file of a figure (its sidecar, its chart's series) is
+        pooled. What it closes before it could slip through: a scale of 0.02
+        m/s (a pack factor times a result) vouching for "0.02 m/s" in prose
+        about anything."""
+        import test_figures as tf
+        draw = tf.Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        tf.check_at(self, root, 1.0)
+        tf.draw_settings(root, scale=tf.SCALE, marks=[{"at": 0.37, "text": "the plane"}])
+        tf.run(self, root, "site", "init")
+        _write(os.path.join(root, "site", "content", "intro.md"),
+               "The colour range ends at 3.75 Pa. A tick reads 1.5 Pa. The plane sits at "
+               "0.37 of the strip. The value is 2 Pa.\n")
+        summary = tf.build_in(self, root, draw.env)
+        [piece] = [p for p in summary["prose"] if p["subject"] == "intro"]
+        self.assertEqual(piece["unmatched"], ["3.75 Pa", "1.5 Pa", "0.37"])
+        self.assertEqual(tf.page_figure(root, tf.PIC)["scale"]["hi"], 3.75)
+        site_dir = os.path.join(root, "site")
+        pool = site.baked_pool(root, tf.baked(root, "map.json"), tf.baked(root, "page.json"))
+        for number in (3.75, 1.5, 0.37):
+            self.assertFalse(pool.near(number, 1e-9), number)
+        self.assertTrue(pool.near(2.0, 1e-9))
+        figure_json = [rel for rel in tf.figure_files(root) if rel.endswith(".json")]
+        self.assertTrue(any(rel.endswith(".chart.json") for rel in figure_json), figure_json)
+        self.assertEqual(site._kept_json(site_dir, figure_json), [])
+
+
 # --------------------------------------------------------------------------- #
 class NextStepsAreThePredicate(unittest.TestCase):
     """(invariant 12) Next steps are `claims.unresolved`'s: each milestone's
@@ -1391,6 +1422,18 @@ BROWSER_TRUTH = {
     # `token`'s (follow-up after phase 3b: the drawer coloured the block on
     # `counts` alone, and a counted fail read green beside its Failing chip).
     "a result's counts": re.compile(r"\.counts\b"),
+    # Issue #15: which result a figure is, decided in the browser. A figure's
+    # `currency` and `entry` are the spine's (`page.figure_row`); a script
+    # shows them, looks them up (`currencyLook`) or names a class by them, and
+    # never compares them, branches on them or compares a digest. What it
+    # closes before it could slip through: a page that judged "older" from
+    # two entry names (two computers name the newer one differently).
+    "a figure's currency decided": re.compile(
+        r"\.(?:currency|entry)\b\s*(?:[!=]==?|(?<!=)[<>]=?|\?|&&|\|\|)"
+        r"|(?:[!=]==?|(?<!=)[<>]=?|!)\s*[\w.$]*\.(?:currency|entry)\b"
+        r"|\.(?:sha256|rho)\b\s*(?:[!=]==?|(?<!=)[<>]=?)"
+        r"|(?:[!=]==?|(?<!=)[<>]=?)\s*[\w.$]*\.(?:sha256|rho)\b"
+        r"|\bswitch\s*\([^)]*\.(?:currency|entry)\b"),
 }
 
 
@@ -1465,6 +1508,7 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
             "a sort over a status": "rows.sort((a, b) => RANK[a.status] - RANK[b.status]);",
             "an age compared": "const old = v.age_s >= 86400;",
             "a result's counts": 'const tone = found.counts ? "tone-ok" : "tone-muted";',
+            "a figure's currency decided": 'const old = fig.currency !== "current";',
         }
         self.assertEqual(sorted(planted), sorted(BROWSER_TRUTH))
         for rule, line in planted.items():
@@ -1504,6 +1548,91 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
             "const look = outcomeLook(found.token);",
             "const look = outcomeLook(found.counts ? \"pass\" : \"not-counted\");")
         self.assertTrue([f for f in browser_truth(planted) if ": a result's counts: " in f])
+
+    def test_no_script_decides_a_figures_currency(self):
+        """(issue #15) A figure's currency, its entry and its digests are the
+        spine's: the card, the hero and the technical record show the baked
+        sentence and look the word up, and a planted comparison is caught."""
+        import _template
+        found = [f for f in browser_truth(self.sources) if ": a figure's currency decided: " in f]
+        self.assertEqual(found, [])
+        for name in ("lib/figures.js", "lib/stage.js"):
+            code = _template.js_code(self.sources[name])
+            self.assertIn("currency_word", self.sources[name], name)
+            self.assertIn("currencyLook(", code, name)
+        planted = dict(self.sources)
+        planted["lib/figures.js"] += "\nconst older = figs.filter((f) => f.entry !== served);\n"
+        self.assertTrue([f for f in browser_truth(planted)
+                         if f.startswith("lib/figures.js:") and "currency decided" in f])
+
+    def test_the_field_mode_never_tints(self):
+        """(issue #15) A field's colours are its data: in field mode the
+        viewer's tint, highlight, isolate and explode return at once, the card
+        calls none of them, and the field mode draws with no light, no tone
+        mapping and no conversion of the colours on the way out."""
+        import _template
+        viewer = _template.js_code(self.sources["lib/viewer3d.js"])
+        for verb in ("setExplode(t)", "isolate(name)", "highlight(map)", "isolateNodes(names)",
+                     "tint(names, colour)"):
+            with self.subTest(verb):
+                at = viewer.index(verb + " {")
+                self.assertRegex(viewer[at:at + 80], r"\{\s*if \(isField\) return;", verb)
+        for setting in ("THREE.LinearSRGBColorSpace", "THREE.NoToneMapping",
+                        "new THREE.MeshBasicMaterial", "toneMapped: false", "if (!isField)"):
+            self.assertIn(setting, viewer)
+        figures = _template.js_code(self.sources["lib/figures.js"])
+        self.assertNotRegex(figures, r"\.(?:tint|highlight|setExplode|isolate|isolateNodes)\(")
+        self.assertIn("field: true", figures)
+        planted = viewer.replace("tint(names, colour) {\n      if (isField) return;",
+                                 "tint(names, colour) {\n")
+        at = planted.index("tint(names, colour) {")
+        self.assertNotRegex(planted[at:at + 80], r"\{\s*if \(isField\) return;")
+
+    def test_a_baked_chart_spec_computes_nothing(self):
+        """(issue #15, rule 0.1) A bound chart is drawn by Vega-Lite from the
+        spec the spine bakes whole (`page.chart_spec`): its numbers are the
+        chart file's and the floor's, and it holds no key that makes Vega
+        compute one (`page.VEGA_FORBIDDEN_KEYS`), with every feature on (two
+        series, labels, hollow points, a log axis, a band, a rule, estimates,
+        a between limit). Each forbidden key planted at depth is found."""
+        payload = {
+            "series": [{"key": "dp", "label": "pressure drop", "points": [[0, 0.61], [1, 0.55],
+                                                                         [2, 0.5222]],
+                        "labels": ["coarse", "", "fine"], "hollow": [True, True, False]},
+                       {"key": "other", "x": [0, 1, 2], "y": [0.7, 0.6, 0.58]}],
+            "band": [{"x": 2, "lo": 0.51, "hi": 0.53, "label": "GCI"}],
+            "rule": {"value": 0.55, "label": "tolerance"},
+            "estimates": [{"x": 3, "y": 0.52, "label": "extrapolated"}],
+            "x": {"label": "level"}, "y": {"label": "drop", "units": "Pa", "scale": "log"}}
+        limit = {"value": 0.4, "value_hi": 0.6, "comparator": "between", "units": "Pa",
+                 "label": "Limit 0.4 to 0.6 Pa"}
+        spec = page.chart_spec(payload, limit, {"x": 2, "y": 0.5222,
+                                                "margin_text": "13% inside the limit"})
+        self.assertEqual(page.vega_forbidden(spec), [])
+        self.assertEqual(json.loads(json.dumps(spec)), spec, "the spec is plain JSON")
+        layers = spec["layer"]
+        marks = [(l["mark"]["type"], l["mark"].get("style")) for l in layers]
+        for want in (("rect", "nk-past"), ("rule", "nk-limit"), ("rule", "nk-rule"),
+                     ("rule", "nk-band"), ("line", "nk-series"), ("point", "nk-point"),
+                     ("point", "nk-hollow"), ("text", "nk-point-label"),
+                     ("point", "nk-estimate"), ("point", "nk-current"),
+                     ("text", "nk-current-label")):
+            self.assertIn(want, marks)
+        datums = [l["encoding"]["y"].get("datum") for l in layers
+                  if l["mark"].get("style") == "nk-limit"]
+        self.assertEqual(datums, [0.4, 0.6], "the limit lines are the floor's")
+        line = next(l for l in layers if l["mark"]["type"] == "line")
+        self.assertEqual(line["encoding"]["y"]["scale"], {"type": "log"})
+        self.assertEqual([r["y"] for r in spec["data"]["values"]],
+                         [0.61, 0.55, 0.5222, 0.7, 0.6, 0.58])
+        hollow = next(l for l in layers if l["mark"].get("style") == "nk-hollow")
+        self.assertEqual(hollow["mark"]["filled"], False)
+        self.assertEqual(len(hollow["data"]["values"]), 2)
+        for key in sorted(page.VEGA_FORBIDDEN_KEYS):
+            with self.subTest(key):
+                planted = json.loads(json.dumps(spec))
+                planted["layer"][3]["encoding"]["y"][key] = {"a": 1}
+                self.assertEqual(page.vega_forbidden(planted), [key])
 
     def test_a_violator_in_a_comment_or_a_string_is_not_code(self):
         source = {"page.js": "// a.verdict.passed ? 1 : 0\nconst t = \"v.age_s >= 1\";\n"
@@ -1687,6 +1816,62 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertTrue(any("nowrap" in b for b in self._rules(page_css, ".nk-unmatched")))
         self.assertIn("notices.unmatched_note", self.js["lib/sections.js"])
         self.assertIn("unmatched_note", report.HUMAN["site"]["notices"])
+
+    def test_figures_chips_pass_marks(self):
+        """(issue #15) Every figure carries the chips of the claims its gate
+        covers, as baked, with their marks and amber's words; the card sits
+        before the prose; the drawer links it in one line; both heroes say
+        which result a figure is; and the cards fit a phone."""
+        figures = self.js["lib/figures.js"]
+        chips = figures[figures.index("function figureChips"):figures.index("function still")]
+        self.assertIn("fig.claims", chips)
+        self.assertRegex(chips, r"tokenChip\(c\.token, c\.word, \{[^}]*marks: c\.marks")
+        self.assertEqual(chip_calls_without_marks({"lib/figures.js": figures}), [])
+        self.assertEqual(chip_calls_without_marks({"lib/figures.js": figures}, "trace"), [])
+        sections = self.js["lib/sections.js"]
+        self.assertLess(sections.index("...figureCards(sec, page"),
+                        sections.index("renderProse(sec.prose, page"),
+                        "the cards come after the prose")
+        self.assertIn("figuresLine(row, words)", self.js["lib/drawer.js"])
+        for name in ("page.js", "marketing.js"):
+            self.assertIn("figureTag(", self.js[name], name)
+            self.assertIn("scaleLegend(", self.js[name], name)
+        self.assertIn("view.binding", self.js["lib/stage.js"])
+        css = self.css["page.css"]
+        self.assertTrue(any("minmax(0, 1fr)" in b for b in self._rules(css, ".fig-stills")))
+        wide = css[css.index("@media (min-width: 720px) { .fig-stills"):]
+        self.assertIn("repeat(2, minmax(0, 1fr))", wide[:120])
+        self.assertTrue(any("width: 100%" in b for b in self._rules(css, ".fig-still img")))
+
+    def test_a_chart_follows_the_theme_and_says_only_baked_words(self):
+        """(issue #15, review of P1) Vega writes the theme's colours into the SVG
+        it draws, so a chart is drawn again when the theme moves (the button's
+        ``data-theme``, or the system's dark or light), its colours read again
+        (`chartTheme` inside the one embed every draw takes). Measured before
+        the fix, in headless Chromium: after the button, the judged point's
+        label stayed #0b0b0b on the dark card; after it, #ffffff, and #0b0b0b
+        again on the way back, one chart each time. And where Vega or a 3D view
+        does not load, the card says only baked words (no error text, which the
+        style scans never read), and the table's columns take the baked spec's
+        axis titles, units included."""
+        raw = self.js["lib/figures.js"]
+        self.assertEqual(raw.count("config: chartTheme()"), 1, "a draw that skips embedChart")
+        self.assertIn("config: chartTheme()", js_function(raw, "embedChart"))
+        watch = js_function(raw, "watchTheme")
+        self.assertRegex(watch, r"new MutationObserver\(redraw\)\.observe\(document\."
+                                r"documentElement,\s*\{[^}]*attributeFilter: \[\"data-theme\"\]")
+        self.assertIn('matchMedia("(prefers-color-scheme: dark)")', watch)
+        self.assertIn('addEventListener("change", redraw)', watch)
+        self.assertIn("embedChart(window.vegaEmbed, item)", watch)
+        self.assertIn("watchTheme();", js_function(raw, "chartBox"))
+        table = js_function(raw, "chartTable")
+        self.assertNotIn("err", table)
+        self.assertIn('axisTitle(spec, "x")', table)
+        self.assertIn('axisTitle(spec, "y")', table)
+        self.assertNotIn("err.message", raw)
+        self.assertNotIn("did not load", raw)
+        self.assertIn(".turn_failed", js_function(raw, "turnButton"))
+        self.assertIn("turn_failed", report.HUMAN["site"]["figure"])
 
     def test_the_technical_record_fits_a_phone(self):
         """The sheet's column may shrink, a verdict's value wraps and the badge

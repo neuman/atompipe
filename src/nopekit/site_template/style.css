@@ -382,6 +382,8 @@ a { color: var(--accent); text-underline-offset: 2px; }
 .stage-empty, .viewer-fallback, .chart-empty { padding: 18px; }
 .stage-loading { padding: 18px; color: var(--muted); }
 .stage-note:empty { display: none; }
+/* A bound view's line: which result its picture is from (issue #15). */
+.binding-note { margin: 6px 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .stage-problem {
   display: flex; gap: .6em; align-items: flex-start; margin-top: 8px;
   border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);

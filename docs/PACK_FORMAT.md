@@ -1075,6 +1075,141 @@ Rules:
   entries, and nodes group by the `__` in `lid__boss_a` (a double underscore,
   because single ones are ordinary inside part names like `back_left`).
 
+### Figures bound to a verdict (`evidence_of`, `recipe`, `BoundContext`)
+
+A picture of what a gate measured (the pressure field behind a pressure drop) is a
+**bound viewgen** (issue #15): it names the gate whose served verdict entry it draws,
+and the spine hands it that entry's evidence and nothing else, checks what it drew,
+and only then publishes it beside the claims the gate covers. The page says which
+result each picture is from, and a missing tool changes no status.
+`docs/SITE_CONTRACT.md`, "Figures bound to verdicts", has the whole path.
+
+```python
+import json, subprocess, tempfile, os
+from nopekit.site import viewgen, BoundContext
+from nopekit.models import View, ViewKind
+
+@viewgen(id="flow.speed", kind=ViewKind.IMAGE, title="Speed of the flow",
+         description="OpenFOAM solved the field. ParaView drew it.",
+         evidence_of="flow.pressure_drop",            # the gate whose served entry it draws
+         recipe=("views/_scene.py", "views/_scales.py"),   # files whose bytes key the memo
+         requires_tools=["pvbatch62"])
+def speed(ctx: BoundContext) -> View | None:
+    path = ctx.entry.path("summary.json")     # a verified evidence file, or None
+    if path is None:
+        ctx.note("the solved fields on this computer are from another run: "
+                 "`nopekit check --force --only flow.pressure_drop` solves it again")
+        return None
+    with open(path, encoding="utf-8") as fh:
+        summary = json.load(fh)
+    field = ctx.bind({"<out>/flow/U": summary["fields"]["U"]})   # {path: sha256}
+    if field is None:
+        return None                           # ctx.bind said why in the warnings
+    with tempfile.TemporaryDirectory() as tmp:
+        png = os.path.join(tmp, "speed.png")
+        subprocess.run(["pvbatch62", "views/_scene.py", field["<out>/flow/U"], png],
+                       check=True, capture_output=True, timeout=120)
+        with open(png, "rb") as fh:
+            src = ctx.write_asset("speed.png", fh.read())
+    return View(id="flow.speed", kind=ViewKind.IMAGE, src=src,
+                meta={"caption": "The speed in the channel, from the run of this result.",
+                      "alt": "A channel coloured by speed",
+                      "scale": speed_scale(summary),   # your pack's: constants x an evidence value
+                      "marks": [{"at": 0.25, "text": "upstream plane"}]})
+```
+
+- **`evidence_of="<gate id>"`** binds the viewgen to one gate. Name a gate of your own
+  pack. The kind is `image` (a PNG still), `chart` (its series as the payload), or
+  `model3d` or `field` (a GLB); `table` is refused (a gate's rows are its evidence
+  already). A bound viewgen is never called with a `ViewContext`.
+- **`recipe=(...)`** names the files, beside the module, whose bytes key the memo
+  (paths inside the pack or project). The spine draws a figure again only when the
+  module, a recipe file or the served entry moves; a rebuild that judged nothing new
+  calls no tool. The tool's identity is not part of the key.
+- **The context** gives no model, no parameters and no claim's acceptance. The design
+  now may be another design than the served entry's, and a picture drawn from it would
+  be published as that entry's evidence; a limit is withheld because a colour range
+  keyed to a limit is a second judgment of the claim.
+
+```python
+class BoundEntry:                            # ctx.entry: the verdict entry it draws
+    gate: str                                # the gate id
+    name: str                                # "<rho16>-<out8>", the entry's file name
+    fresh: bool                              # the resolver's word for it
+    files: dict                              # {portable path: absolute path}: ONLY the
+                                             #   evidence files whose bytes the entry's
+                                             #   manifest names
+    withheld: dict                           # {portable path: why it is held back}
+    def path(self, basename) -> str | None   # a verified file by its base name
+
+class BoundContext(ViewContext):             # root; ledger, its claims' acceptance empty;
+    entry: BoundEntry                        #   model None; params and extra {}
+    scratch: str                             # .nopekit/out/figures/<gate>/<entry>/<view>/
+    view_id: str
+    def bind(self, inputs) -> dict | None    # {path: sha256} -> {path: absolute path}, or
+                                             #   None, said in the warnings. A path is
+                                             #   "<out>/..." or inside the project; each
+                                             #   digest must be in a verified evidence file
+                                             #   and each file must hash to it. Hashed again
+                                             #   after the call: a move discards the picture
+    def write_asset(self, name, data) -> str # into the scratch; returns the name View.src
+                                             #   takes; over 2 MiB it raises, writes nothing
+    def write_live(self, name, data) -> str  # a GLB published only under the ignored
+                                             #   assets/live/ (on this computer only)
+    def note(self, text) -> None             # a build warning, under the view's id
+    def asset_path(self, name)               # raises: nothing reaches site/ unchecked
+```
+
+- **What it returns.** A still or a 3D view: `src` is the name `write_asset` returned,
+  and `data` is empty. A chart: no `src`, and its payload in `data`. `meta` may hold
+  `caption` (ASD-STE100 site text, scanned as such), `alt`, `scale`, `marks` and
+  `tool` (written into the sidecar as given). Write at most one PNG and one GLB.
+- **The colour scale** is one object that gives both your pixels and the page's HTML
+  legend, so the two cannot disagree. Draw no colour bar into the PNG.
+
+  ```jsonc
+  { "quantity": "speed", "units": "m/s", "lo": 0, "hi": 0.02,
+    "stops": [ { "at": 0, "colour": "#440154" }, { "at": 1, "colour": "#fde725" } ],
+    "over": "#ff00ff", "under": "#808080",          // past an end: never the end colour
+    "over_word": "...", "under_word": "...",
+    "ticks": [ { "at": 0.5, "value": 0.01, "text": "0.01 m/s" } ],
+    "source": [ { "key": "u_upstream_m_s", "factor": 2.0 } ],   // what the range is
+    "source_text": "The scale is twice the measured upstream speed." }
+  ```
+
+  Its ends are a pack constant times a value the evidence names (`source`). The spine
+  refuses an end equal to a limit of a claim the gate covers or to the entry's verdict
+  limit, and a `source` key that holds `limit`. A doubled limit leaves the scale
+  byte-identical.
+- **A chart's payload** is the run's numbers, never yours:
+
+  ```jsonc
+  { "series": { "dp": [[1, 0.531], [2, 0.524], [3, 0.5222]] },   // or a list of
+              // { "key", "label", "points": [[x, y], ...], "labels": [str], "hollow": bool }
+    "x": { "label": "mesh level" },
+    "y": { "label": "pressure drop", "units": "Pa", "scale": "log" },  // scale: optional
+    "band": [ { "x": 3, "lo": 0.52, "hi": 0.525, "label": "GCI band" } ],
+    "rule": { "value": 0.1, "label": "tolerance" },               // never called a limit
+    "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated" } ] }
+  ```
+
+  Every number under `series`, `band`, `estimates` and `rule` must be a JSON leaf or a
+  CSV cell of a verified evidence file of the entry: write the numbers you want to
+  plot into the gate's evidence. A payload that holds `limit`, `limits`, `current`,
+  `marker` or `now` is refused: the limit line and the judged point are the claim's,
+  which the spine takes from the floor. State `y.units` as the claim's units, or the
+  page draws no limit line and the build says why. The spine bakes the whole Vega-Lite
+  spec from this payload (`page.chart_spec`); the pack ships no chart code.
+- **A caption says what the picture shows, never a status.** A caption with a status
+  word ("checked", "failing", "inside the limit", ...) is refused; the chips beside the
+  figure say the status.
+- **Run your tool under your own timeout.** The spine does not stop a viewgen that
+  hangs. A crash, a timeout, `None` or a refusal publishes nothing, keeps the figure the
+  page had, and moves no status.
+- **Byte-stable output.** The same entry draws the same bytes on every machine, or every
+  teammate's build commits a new picture. Stamp no clock or random id into a PNG or GLB.
+- **List the view id in `provides_views`**, as for any viewgen.
+
 ### Attaching locators to a verdict
 
 A gate that knows *where* the problem is says so, and the site stops being a report

@@ -504,6 +504,57 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "outside": "Not on the page. The file is outside the project.",
         "not_copied": "Not on the page. The site build gives the reason.",
     }),
+    # A bound figure's currency (issue #15, B.1.5; `page.FIGURE_CURRENCIES`):
+    # one sentence per word, never a reason that reads this computer's disk
+    # (why a figure is absent goes to the build's warnings), so a clone bakes
+    # the same bytes. *Rejected:* "pvbatch is not on this computer" on the page
+    # (the author's machine and a clone would bake two pages from one record).
+    "figure": MappingProxyType({
+        "current": "This picture is from the result on this page.",
+        "stale": "This picture is from the result on this page. That result is not current.",
+        "older": "This picture is from another result. The result on this page has no "
+                 "picture yet.",
+        "none": "No picture of this result is on the page.",
+        # P1.4: the words beside a figure (`page.figure_row`). ``drawn`` is the
+        # other result's own outcome and value, from its cache entry, beside
+        # an ``older`` picture. ``shown`` and ``other`` name the result each
+        # gate's pictures come from, once per gate and result. "Another", never
+        # "earlier": the picture beside a design that went A, B, A is B's, the
+        # later run (P1.3's first word said "an earlier result" there).
+        # *Rejected:* "These pictures come from result ..." once per claim (two
+        # gates' pictures under one claim would share one sentence that names
+        # one result); a short entry name such as "9c1e...-3a7b..." (two entries
+        # can share both ends, and the folder on disk has the whole name).
+        "drawn": "That other result: {outcome}, {value}.",
+        "drawn_bare": "That other result: {outcome}.",
+        "shown": "The pictures of {gate} come from its result {entry}. This page shows "
+                 "that result.",
+        "other": "The pictures of {gate} come from its result {entry}. This page shows "
+                 "another result of {gate}.",
+        "limit_label": "Limit {limit}",
+        "turn": "Turn it in 3D",
+        "live": "This 3D view is on this computer only.",
+        # O10: a renderer accepted by an environment bypass, not by the pack's
+        # lock (Phase 2's test stand-in), says so beside its picture.
+        "tool_unchecked": "The tool that drew this picture is not the build that the pack "
+                          "locks.",
+        # P1.5: the claim card's own words (`lib/figures.js`), here so that the
+        # page owns no sentence and the scan reads each. ``judged`` names the
+        # evaluator whose value the large line is; ``pictures`` is the
+        # drawer's one line, which links to the card; ``table`` stands where a
+        # chart's library did not load, above the numbers it would draw;
+        # ``turn_failed`` where the 3D view did not load. What slipped through
+        # (review of P1): both places printed the error's own English, a
+        # sentence the page owned and no scan read.
+        # *Rejected:* "from the result that this page shows" in the drawer line
+        # (false beside an older picture; each figure's own currency sentence
+        # says which result it is).
+        "judged": "Value from {gate}",
+        "others": "Other evaluators",
+        "pictures": "Pictures: {n}. Show them.",
+        "table": "The chart did not load. This table shows its numbers.",
+        "turn_failed": "The 3D view did not load.",
+    }),
     # A rejected alternative on the marketing page (`rejection_words(register=
     # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the
     # state of the return condition with no record text inside it (the
