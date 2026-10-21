@@ -1,0 +1,4 @@
+interface:
+  display_name: "nopekit pack authoring"
+  short_description: "Build a nopekit pack whose evaluators can fail."
+  default_prompt: "Use $pack-authoring to turn this validation into a nopekit pack: a pack.json, a PACK.md, evaluators with negative controls, and a baseline they all pass."

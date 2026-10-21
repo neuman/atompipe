@@ -1,7 +1,20 @@
 {
   "name": "nopekit",
+  "version": "0.1.0",
   "description": "Design and validate real physical things — hardware, enclosures, PCBs, boats, thermal systems, chemical processes. Extracts the claims that must be true, generates every output from one parametric model, gates each claim with a validator proven able to fail, and reports honestly what is verified versus assumed. Use when someone wants to design, build, fabricate, simulate, validate or manufacture a physical object or system.",
-  "author": { "name": "Eric Neuman" },
+  "author": {
+    "name": "Eric Neuman"
+  },
   "homepage": "https://github.com/neuman/nopekit",
-  "license": "Apache-2.0"
+  "repository": "https://github.com/neuman/nopekit",
+  "license": "Apache-2.0",
+  "keywords": [
+    "hardware",
+    "cad",
+    "simulation",
+    "validation",
+    "fabrication",
+    "skills"
+  ],
+  "skills": "./skills/"
 }
