@@ -1040,6 +1040,16 @@ in the data, never in shipped code: a pack does not ship JavaScript, because the
 artifact whose job is to be trusted when a gate says something is wrong must not
 depend on code nobody reviewed.
 
+A chart view with no `evidence_of` states its own numbers. Its `series` takes the
+bound chart's spellings (below), and a point can also be an `{x, y}` object or a bare
+number (its x is then its index). Put its axes in `data.x` and `data.y`, or in
+`meta.x` and `meta.y`. Its `limit` is `{value, comparator, label, axis}` (or a list);
+the spine draws the first limit on each axis. Its `current` is `{x, y}` (or a list),
+and the build writes the distance to the y limit beside it. The spine bakes the
+Vega-Lite spec of this chart too (`page.view_chart`). It does not draw `markers` or
+a series' `style`. A verdict's locator on the chart draws its `target` series heavier,
+or a line at its `position[0]`.
+
 Rules:
 
 - **Returning `None` is normal.** A CAD viewgen in a project with no geometry has

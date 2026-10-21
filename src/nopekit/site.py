@@ -352,6 +352,14 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_te
 #: for the 99% of readers who did not want the table.
 VIEW_INLINE_MAX = 8192
 
+#: The suffix of a chart view's spec split out of ``state.json`` (P2.5):
+#: ``data/views/<id>~chart.json``, beside its payload's ``<id>.json``, named
+#: in its row as ``chart_url``. ``~`` is no character of a view id
+#: (`_ID_OK`), so no view's payload file can be another view's chart file.
+#: *Rejected:* ``.chart.json`` (the view ``a.chart``'s payload would be the
+#: view ``a``'s chart); a folder of its own (a second folder to clean).
+CHART_FILE_SUFFIX = "~chart.json"
+
 #: Characters allowed in a view id. Ids become filenames (``data/views/<id>.json``)
 #: and query fragments, and a locator addresses a view by this string, so a slash
 #: or a space in one is a path escape and a broken anchor at the same time.
@@ -3210,6 +3218,20 @@ def build(
     # (`_UNJUDGED_KEYS`), so no row moves what the page judged.
     for row in payload["views"]:
         row.update(figures.rows.get(str(row.get("id") or ""), {}))
+    # Every chart view's Vega-Lite spec (issue #15, P2.5): the technical
+    # record draws it as the engineering page's cards do, and the hand-drawn
+    # `lib/chart.js` is gone. A bound view's series are its chart file's.
+    anchored: dict[str, list] = {}
+    for verdict_row in sorted(payload["verdicts"], key=lambda r: r.get("order", 0)):
+        for locator in verdict_row.get("locators") or ():
+            if isinstance(locator, dict) and locator.get("view"):
+                anchored.setdefault(str(locator["view"]), []).append((locator, verdict_row))
+    for row in payload["views"]:
+        if str(row.get("kind") or "") == "chart":
+            source = (page_logic._chart_payload(root, str(row.get("data_url") or ""))
+                      if row.get("binding") else row.get("data"))
+            row["chart"] = page_logic.view_chart(row, source,
+                                                 anchored.get(str(row.get("id") or ""), ()))
     stale = bool(payload["meta"]["stale"])
     stale_reason = str(payload["meta"]["stale_reason"])
 
@@ -3285,14 +3307,28 @@ def build(
     for row in payload["views"]:
         view_id = str(row.get("id") or "")
         inline = row.get("data") or {}
-        if not inline:
+        chart = row.get("chart") or {}
+        if not inline and not chart.get("spec"):
             continue
         try:
             _require_view_id(view_id)
         except NopekitError as exc:
             warnings.append(f"view {view_id!r} kept inline: {exc}")
             continue
-        if _rough_size(inline) <= VIEW_INLINE_MAX:
+        # A chart's spec holds its series once more (and its points twice), so
+        # it is split on its own size, into `<id>~chart.json` (P2.5): a bound
+        # chart has no inline data, and its spec alone can be the size of a
+        # settling history. *Rejected:* the spec inline beside a split payload
+        # (state.json would carry the largest chart twice over).
+        if chart.get("spec") and _rough_size(chart) > VIEW_INLINE_MAX:
+            relative = posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX)
+            if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)),
+                                     chart):
+                written.append(posixpath.join(SITE_DIR, relative))
+            row["chart"] = {}
+            row["chart_url"] = relative
+            kept_view_files.append(view_id + CHART_FILE_SUFFIX)
+        if not inline or _rough_size(inline) <= VIEW_INLINE_MAX:
             continue
         relative = posixpath.join(VIEWS_DIR, f"{view_id}.json")
         if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)), inline):
@@ -3465,13 +3501,26 @@ def _views_file_payload(site: str, row: Mapping[str, Any]) -> Any:
     as the build split it out; None for a row with no such file (inline data,
     or a bound view's chart under ``assets/figures/``); the string
     ``"unreadable"`` when the file is missing or does not parse, which no
-    payload the build writes (a dict) equals."""
+    payload the build writes (a dict) equals. A row whose chart spec was split
+    out (``chart_url``) gives ``{"data": that, "chart": the spec}``."""
     view_id = str(row.get("id") or "")
-    if not view_id or row.get("data_url") != posixpath.join(VIEWS_DIR, f"{view_id}.json"):
-        return None
+    data = None
+    if view_id and row.get("data_url") == posixpath.join(VIEWS_DIR, f"{view_id}.json"):
+        data = _view_file(site, row["data_url"])
+    if not row.get("chart_url"):
+        return data
+    # A chart's spec split out (P2.5) is sealed with its row too: a number
+    # edited into it by hand reads *edited by hand*, as one in the payload does,
+    # and a row that names another file reads so as well.
+    chart = (_view_file(site, row["chart_url"]) if view_id and row["chart_url"] ==
+             posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX) else "unreadable")
+    return {"data": data, "chart": chart}
+
+
+def _view_file(site: str, rel: str) -> Any:
+    """The JSON of the site file ``rel``, or ``"unreadable"``."""
     try:
-        with open(os.path.join(site, *row["data_url"].split("/")), "r",
-                  encoding="utf-8") as fh:
+        with open(os.path.join(site, *rel.split("/")), "r", encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return "unreadable"
@@ -3561,7 +3610,7 @@ def _kept_from_last_build(site: str, registry: ViewRegistry,
         if found is None:
             continue
         spec = found[0]
-        named = [str(row.get(key) or "") for key in ("src", "data_url")]
+        named = [str(row.get(key) or "") for key in ("src", "data_url", "chart_url")]
         if not all(_site_file(site, rel) for rel in named if rel):
             continue
         if digests.get(row["id"]) != view_digest(row, _views_file_payload(site, row)):
@@ -4125,8 +4174,10 @@ def _chart_margins(row: dict) -> dict:
     key = next((k for k in ("current", "marker", "now") if k in data), None)
     if limit is None or key is None:
         return row
-    y_axis = data.get("y") if isinstance(data.get("y"), dict) else {}
-    units = str(y_axis.get("units") or meta.get("y_units") or "")
+    # The y axis as the chart reads it (`page._view_axis`): the payload's, else
+    # the meta's, where the three analytic packs put it.
+    units = str(page_logic._view_axis(data, meta if isinstance(meta, dict) else {},
+                                      "y").get("units") or "")
     said = report_logic.HUMAN["site"]["chart_margin"]
 
     def one(item: Any) -> Any:

@@ -33,6 +33,9 @@ source scans and one spec in process, ~0.05 s); its browser test
 (test_field_browser, ~2.5 s, a headless Chromium) is the full suite's. One unpaired
 run at load 2.1-2.9: 211.4 s wall (163.3 s user) for its 711 tests. Over the line as
 its base is; no idle run.
+Its P2.5 (the technical record's charts as baked specs) added one row to
+TheBrowserComputesNoTruth (source scans and two specs in process, ~0.01 s); its build
+class, test_figures.ChartViewsAreBakedSpecs (~1.7 s), is the full suite's.
 The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against

@@ -14,9 +14,9 @@
 // curve or a hotspot on a photograph.
 
 import { el, mount, append } from "./dom.js";
-import { tag, chip, verdictStatus, num, quantity, plural, code, currencyLook } from "./format.js";
+import { tag, chip, verdictStatus, num, quantity, plural, code, currencyLook, phrase } from "./format.js";
 import { panelHead, shapeFor, severityOf, cssId, annotationCard } from "./panels.js";
-import { renderChart } from "./chart.js";
+import { drawChart } from "./figures.js";
 import { createViewer } from "./viewer3d.js";
 
 const VIEWER_KINDS = new Set(["model3d", "field"]);
@@ -99,14 +99,20 @@ export function createStage(state, app) {
 
     // A payload too big to inline was split into data/views/<id>.json by
     // `site build`. Fetched on demand so a forty-row bill of materials does not
-    // sit in the one file the page reads on first paint.
-    if (next.data_url && !(next.data && Object.keys(next.data).length)) {
+    // sit in the one file the page reads on first paint. A chart draws its
+    // baked spec alone (`chart`, or the file `chart_url` names), never its
+    // payload.
+    const isChart = String(next.kind || "") === "chart";
+    const wanted = isChart
+      ? (next.chart_url && !(next.chart && next.chart.spec) ? ["chart", next.chart_url] : null)
+      : (next.data_url && !(next.data && Object.keys(next.data).length) ? ["data", next.data_url] : null);
+    if (wanted) {
       try {
-        const res = await fetch(next.data_url, { cache: "no-store" });
+        const res = await fetch(wanted[1], { cache: "no-store" });
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        next.data = await res.json();
+        next[wanted[0]] = await res.json();
       } catch (err) {
-        mount(note, problem(`${next.data_url} did not load (${err.message}). Run \`nopekit site build\` again.`));
+        mount(note, problem(`${wanted[1]} did not load (${err.message}). Run \`nopekit site build\` again.`));
       }
     }
     if (active !== next) return;                 // a faster click won
@@ -120,7 +126,7 @@ export function createStage(state, app) {
     mount(host);
     bindingNote(active);
     if (VIEWER_KINDS.has(kind)) return renderModel();
-    if (kind === "chart") return mount(host, renderChart(active, locatorsFor(active.id)));
+    if (kind === "chart") return mount(host, renderChart(active));
     if (kind === "table") return mount(host, renderTable(active, locatorsFor(active.id), app));
     if (kind === "diagram") return renderDiagram(active, host, note);
     if (kind === "image") return mount(host, renderImage(active, locatorsFor(active.id), app));
@@ -133,6 +139,23 @@ export function createStage(state, app) {
         "The site renders model3d, image, chart, table, field and diagram views. A pack that " +
         "emits another kind is newer than this page. Upgrade the site template, or emit the " +
         "view in a kind that the renderer knows." })));
+  }
+
+  /** A chart view: the spec `site build` baked (`page.view_chart`: its
+   *  series, its limit and points, and the verdicts' anchors on it), drawn by
+   *  Vega-Lite as the engineering page's cards are, or its numbers as a table
+   *  when the library does not load. Nothing here reads the payload. */
+  function renderChart(view) {
+    const chart = view.chart || {};
+    if (!chart.spec) {
+      // A split spec that did not load is said in the note above; this box
+      // says only what a view with no series is.
+      return el("div", { class: "chart-empty" },
+        view.chart_url ? null : el("p", { text: phrase("chart_empty") }));
+    }
+    const box = el("div", { class: "chart-box" });
+    drawChart(box, chart, phrase("chart_table"), view.id);
+    return el("figure", { class: "chart", "aria-label": view.title || view.id }, box);
   }
 
   /** A bound view (issue #15) says which result it is drawn from: the bake's

@@ -3801,7 +3801,8 @@ def drawn_text(verdict) -> str               # an older figure's line about its 
 def binding_text(figures) -> str             # which result each gate's figures are of
 def margin_text(margin) -> str               # the margin's words alone
 def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec}, warning): the floor's
-def chart_spec(payload, limit, current) -> dict   # P1.5: a bound chart's whole Vega-Lite spec
+def chart_spec(payload, limit, current, *, locators=()) -> dict   # P1.5: a chart's whole Vega-Lite spec
+def view_chart(row, payload, anchored=()) -> dict   # P2.5: {limit, current, spec} of a chart view on the record
 VEGA_FORBIDDEN_KEYS: frozenset               # keys a baked spec never holds (Vega computes)
 def vega_forbidden(spec) -> list             # the forbidden keys a spec holds, sorted
 CHART_HEIGHT = 260                           # the chart's CSS height; its width is the card's
@@ -3917,8 +3918,20 @@ planted. The page's theme gives each mark `style` its look; the spec says where 
 label sits (Vega-Lite writes a text mark's alignment into the mark, over a theme's).
 *Rejected:* growing `lib/chart.js` (log y, bands, rules, estimates, hollow points),
 which the author's rule to build as little as possible and draw with a trusted
-library replaces; `lib/chart.js` stays for the technical record's unbound charts and
-their locators.
+library replaces. From P2.5 every chart view on the technical record is a baked spec
+too: `view_chart` reads an unbound view's own limit (y, or x as a vertical line) and
+points in each spelling the hand-drawn chart read, a bound view's chart file's series
+alone, and the verdicts' anchors (a located series drawn heavier, a located x a rule
+in its severity's look), and `chart_spec` takes lists of limits and points and the
+anchors as `locators`. `site.build` puts it in each chart row as `chart`, split into
+`data/views/<id>~chart.json` (`site.CHART_FILE_SUFFIX`, `chart_url`) over
+`VIEW_INLINE_MAX` and sealed with the row (`view_digest`). A layer that places only
+constants draws from one empty row of its own. *What slipped through:* such a layer
+inherited the chart's rows and was drawn once per row, so at 42 rows the shaded side
+of a limit read solid and each label was 42 copies. `lib/chart.js` is deleted.
+*Rejected:* keeping it for the record's unbound charts and their locators, as P1.5
+did (the anchors are a spine fact the bake can carry, and the hand-drawn text was
+about 5 px high on a phone).
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure

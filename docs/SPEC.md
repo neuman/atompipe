@@ -1979,9 +1979,9 @@ and while building it:
   table. *Rejected:* growing `lib/chart.js` (the author's rule); the ESM builds through
   the import map (`vega.module.js` imports 27 bare names, jsdelivr's `+esm` of
   vega-embed 7.1.0 pulls vega-lite 6.4.3, which nobody pinned, and an existing site's
-  shells are never regenerated, so they would never get the line). `lib/chart.js`
-  stays for the technical record's unbound charts and their locators, which a baked
-  spec would need every verdict's overlay to draw.
+  shells are never regenerated, so they would never get the line). From P2.5 the
+  technical record's chart views draw from a baked spec too, and `lib/chart.js` is
+  gone.
 - **A field draws its colours as the file holds them** (`lib/viewer3d.js` field mode:
   `MeshBasicMaterial` with vertex colours, `toneMapped` false, no lights,
   `LinearSRGBColorSpace` output, `NoToneMapping`). Measured with pvbatch: ParaView
@@ -2105,6 +2105,26 @@ and while building it:
   in the tests where node is); the planes' lines in the 3D file (WebGL draws a glTF
   line 1 px wide); a 3D file for the speed still too (a second file of up to 2 MiB
   for the same geometry).
+- **Phase 2, P2.5 (built):** the hand-drawn chart is retired. Every chart view on
+  the technical record draws from a Vega-Lite spec the spine bakes
+  (`page.view_chart` over `chart_spec`), through the `drawChart` the engineering
+  page's cards use, and `lib/chart.js` is deleted. An unbound view keeps its own
+  limit (on y, or on x as a vertical line) and its points with the margin words the
+  build bakes; a bound view on the record draws its chart file's series alone; the
+  verdicts' anchors on a chart are baked into its spec (a located series heavier, a
+  located x a rule in its severity's colour). A spec over 8 KB is its own file,
+  `data/views/<id>~chart.json`, sealed with its row. Without the library the box
+  shows the spec's numbers as a table. A layer of constants (a limit, a rule, a
+  label, the judged point) now draws from one empty row of its own: before, it was
+  drawn once per row of the chart, so on the first chart of 42 points the shaded
+  side of the limit read solid red and each label was 42 copies (the cards' charts
+  had it too, at three rows, unseen). On a box under about 520 px the legend stacks
+  and an axis title ends in an ellipsis. *Rejected:* keeping `lib/chart.js` for the
+  record's unbound charts and their locators (P1.5's choice: the anchors are a fact
+  the bake can carry, and its text was about 5 px high on a phone); composing the
+  anchors' layers in the browser; reading an analytic pack's `markers` (the
+  hand-drawn chart never drew them, and their labels hold the pack's own margin
+  words).
 - **Phase 2, decided here and not yet built:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 

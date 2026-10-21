@@ -78,9 +78,18 @@ function script(src) {
  *  what is drawn, and where, is the spec's. */
 function chartTheme() {
   const css = getComputedStyle(document.documentElement);
-  const v = (name, dflt) => (css.getPropertyValue(name) || "").trim() || dflt;
-  const ink = v("--ink", "#0b0b0b"), ink2 = v("--ink-2", "#52514e"), grid = v("--grid", "#e1e0d9");
-  const fail = v("--fail", "#d03b3b"), accent = v("--accent", "#2a78d6"), amber = v("--amber-strong", "#b98000");
+  // The first of ``names`` the page's stylesheet sets: page.css's tokens on
+  // the engineering page, style.css's on the technical record (P2.5: one
+  // chart, two stylesheets), else the default.
+  const v = (names, dflt) => {
+    for (const name of [].concat(names)) {
+      const found = (css.getPropertyValue(name) || "").trim();
+      if (found) return found;
+    }
+    return dflt;
+  };
+  const ink = v("--ink", "#0b0b0b"), ink2 = v("--ink-2", "#52514e"), grid = v(["--grid", "--line-2"], "#e1e0d9");
+  const fail = v(["--fail", "--bad"], "#d03b3b"), accent = v("--accent", "#2a78d6"), amber = v(["--amber-strong", "--warn"], "#b98000");
   const font = v("--sans", "system-ui, sans-serif");
   return {
     background: null,
@@ -112,6 +121,14 @@ function chartTheme() {
       "nk-current": { color: ink, size: 150, opacity: 1 },
       "nk-current-rule": { color: ink, strokeDash: [1, 3], strokeWidth: 1.5 },
       "nk-current-label": { color: ink, fontWeight: 600 },
+      // The verdicts' anchors on a chart view of the technical record
+      // (`page.view_chart`): a located series drawn heavier, a located x as
+      // a rule in its severity's colour.
+      "nk-located": { strokeWidth: 4, opacity: 1 },
+      "nk-loc-fail": { color: fail, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-warn": { color: amber, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-info": { color: accent, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-label": { color: ink2 },
     },
   };
 }
@@ -125,8 +142,18 @@ let redrawQueued = false;
 /** Draw ``spec`` into ``host`` in the theme the page has now, and keep it
  *  among the live charts. */
 function embedChart(embed, item) {
+  const config = chartTheme();
+  // An axis title longer than the box ends in an ellipsis instead of running
+  // past its edge. What slipped through (P2.5, the beam's deflection chart at
+  // 390 px): "section depth h (in the bending direction) (mm)" lost its units
+  // off the right edge. Layout only: the words are the spec's.
+  const room = Math.max(120, (item.host.clientWidth || 0) - 60);
+  config.axis = { ...config.axis, titleLimit: room };
+  // And a legend in a narrow box is one entry a line: in a row, the CFD
+  // settling chart's third mesh ran off a 390 px box (P2.5).
+  if (room < 460) config.legend = { ...config.legend, direction: "vertical" };
   return embed(item.host, item.spec, { actions: false, renderer: "svg", mode: "vega-lite",
-    config: chartTheme() }).then((result) => {
+    config }).then((result) => {
     item.view = result && result.view;
     liveCharts.add(item);
   });
@@ -169,19 +196,30 @@ function watchTheme() {
 function chartBox(fig, words) {
   const chart = fig.chart || {};
   const host = el("div", { class: "fig-chart" });
-  const spec = chart.spec;
-  if (!spec) {
+  if (!chart.spec) {
     mount(host, el("p", { class: "muted small", text: fig.currency_word || "" }));
     return host;
   }
+  return drawChart(host, chart, (words.figure || {}).table || "", fig.view);
+}
+
+/** Draw ``chart.spec`` (a spec the spine baked whole: `page.chart_spec`) into
+ *  ``host`` with Vega-Lite, or, where the library does not load, its numbers
+ *  as a table under ``notice``. The engineering page's cards and the
+ *  technical record's chart views (`lib/stage.js`) both draw through here.
+ *  What it replaced on the technical record (P2.5): `lib/chart.js`, a
+ *  hand-drawn SVG whose text fell to about 5 px on a phone. */
+export function drawChart(host, chart, notice, name) {
+  const spec = chart && chart.spec;
+  if (!spec) return host;
   watchTheme();
   loadVega()
     .then((embed) => embedChart(embed, { host, spec, view: null }))
     .catch((err) => {
       // The reason stays in the console: a sentence the page shows is baked
       // (`report.HUMAN`), so the style scans read it.
-      console.warn("chart", fig.view, err);
-      mount(host, chartTable(fig, words));
+      console.warn("chart", name, err);
+      mount(host, chartTable(chart, notice));
     });
   return host;
 }
@@ -196,13 +234,16 @@ function axisTitle(spec, channel) {
   return "";
 }
 
-function chartTable(fig, words) {
-  const chart = fig.chart || {};
+/** The labels of the baked limit (one, or a list), as they are. */
+const limitLabels = (limit) => [].concat(limit || []).map((l) => (l && l.label) || "").filter(Boolean);
+/** The baked margin words of the judged point (one, or a list), as they are. */
+const marginTexts = (current) => [].concat(current || []).map((c) => (c && c.margin_text) || "").filter(Boolean);
+
+function chartTable(chart, notice) {
   const spec = chart.spec || {};
   const rows = ((spec.data || {}).values) || [];
-  const said = (words.figure || {});
   return el("div", { class: "fig-table" },
-    el("p", { class: "nk-notice", role: "note", text: said.table || "" }),
+    el("p", { class: "nk-notice", role: "note", text: notice || "" }),
     el("table", {},
       el("thead", {}, el("tr", {}, el("th", { text: "" }),
         el("th", { text: axisTitle(spec, "x") || "x" }),
@@ -210,9 +251,8 @@ function chartTable(fig, words) {
       el("tbody", {}, ...rows.map((r) => el("tr", {},
         el("td", { text: r.label || r.series || "" }), el("td", { text: String(r.x) }),
         el("td", { text: String(r.y) }))))),
-    chart.limit && chart.limit.label ? el("p", { class: "small", text: chart.limit.label }) : null,
-    chart.current && chart.current.margin_text
-      ? el("p", { class: "small", text: chart.current.margin_text }) : null);
+    ...limitLabels(chart.limit).map((text) => el("p", { class: "small", text })),
+    ...marginTexts(chart.current).map((text) => el("p", { class: "small", text })));
 }
 
 // --------------------------------------------------------------------------- //

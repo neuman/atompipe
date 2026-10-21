@@ -411,7 +411,7 @@ def baked(root: str, name: str) -> dict:
 
 
 #: The keys under which a baked file names a file of the site.
-LINK_KEYS = ("src", "href", "data_url", "field_src", "data_src")
+LINK_KEYS = ("src", "href", "data_url", "field_src", "data_src", "chart_url")
 
 
 def links(doc) -> list[str]:
@@ -1731,6 +1731,94 @@ class TheScaleIsAPackConstant(_env.EnvCase):
         self.assertTrue(any(CHART in w and "which no evidence file of this result holds" in w
                             for w in summary["warnings"]), summary["warnings"])
         self.assertEqual(page_figure(root, CHART)["currency"], "none")
+
+
+
+# --------------------------------------------------------------------------- #
+# The technical record's chart views: a baked spec, never a drawing of its own
+# --------------------------------------------------------------------------- #
+CURVE = "demo.curve"
+
+#: An UNBOUND chart viewgen in the spellings the hand-drawn chart read: its
+#: points as ``{x, y}`` objects, its axes in ``meta``, its own limit and its
+#: point. Its 200 points put its spec over `site.VIEW_INLINE_MAX`, so the spec
+#: is split into ``data/views/demo.curve~chart.json``.
+_CURVE_VIEWGEN = '''\
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+
+@viewgen(id="demo.curve", kind=ViewKind.CHART, title="A curve")
+def curve(ctx):
+    """A curve with its own limit and its point."""
+    points = [{"x": i * 0.25, "y": round(10.0 / (1 + i), 6)} for i in range(200)]
+    return View(id="demo.curve", kind=ViewKind.CHART,
+                data={"series": [{"key": "c", "label": "the curve", "points": points}],
+                      "limit": {"value": 4.0, "comparator": "<="},
+                      "current": {"x": 0.25, "y": 5.0}},
+                meta={"x": {"label": "depth", "units": "mm"},
+                      "y": {"label": "value", "units": "Pa"}})
+'''
+
+
+class ChartViewsAreBakedSpecs(_env.EnvCase):
+    """(issue #15, P2.5) Every chart view's row on the technical record
+    carries the Vega-Lite spec `site build` baked (`page.view_chart`), which
+    `lib/stage.js` hands to `lib/figures.js`'s `drawChart`: a bound chart's
+    series alone, an unbound one's own limit and point with the margin words
+    `_chart_margins` baked. A spec over `site.VIEW_INLINE_MAX` is its own
+    file under ``data/views/``, linked as ``chart_url``, kept by the cleaner
+    and sealed with its row. What it replaced: `lib/chart.js`, which drew
+    each payload by hand in the browser."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        with open(os.path.join(self.root, "views", "curve.py"), "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write(_CURVE_VIEWGEN)
+        check_at(self, self.root, 1.0)
+        build_in(self, self.root, no_tool_env())
+
+    def test_every_chart_row_carries_its_spec(self):
+        from nopekit import page
+        bound = view_row(self.root, CHART)
+        with open(os.path.join(self.root, "site", *bound["data_url"].split("/")),
+                  encoding="utf-8") as fh:
+            payload = json.load(fh)
+        self.assertEqual(bound["chart"]["spec"], page.chart_spec(payload, None, None),
+                         "a bound chart on the record is its file's series alone")
+        row = view_row(self.root, CURVE)
+        self.assertEqual(row["chart"], {})
+        self.assertEqual(row["chart_url"], "data/views/demo.curve~chart.json")
+        with open(os.path.join(self.root, "site", *row["chart_url"].split("/")),
+                  encoding="utf-8") as fh:
+            chart = json.load(fh)
+        self.assertEqual(page.vega_forbidden(chart["spec"]), [])
+        self.assertEqual([(r["x"], r["y"]) for r in chart["spec"]["data"]["values"]],
+                         [(p["x"], p["y"]) for p in row["data"]["series"][0]["points"]])
+        self.assertEqual([(l["value"], l["comparator"], l["units"]) for l in chart["limit"]],
+                         [(4.0, "<=", "Pa")])
+        self.assertEqual(chart["current"], [{"x": 0.25, "y": 5.0,
+                                             "margin_text": "1 Pa past the limit"}])
+        self.assertEqual(row["data"]["current"]["margin_text"], "1 Pa past the limit")
+        self.assertEqual(dangling(self.root), [])
+
+    def test_a_hand_edit_to_a_split_spec_reads_edited(self):
+        rel = view_row(self.root, CURVE)["chart_url"]
+        path = os.path.join(self.root, "site", *rel.split("/"))
+        with open(path, encoding="utf-8") as fh:
+            chart = json.load(fh)
+        chart["spec"]["data"]["values"][0]["y"] = 4.37
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(chart, fh)
+        info = site_status(self, self.root)
+        self.assertTrue([e for e in info["edited"] if CURVE in e and "edited by hand" in e],
+                        info["edited"])
+        build_in(self, self.root, no_tool_env())
+        self.assertEqual(site_status(self, self.root)["edited"], [])
+        with open(path, encoding="utf-8") as fh:
+            self.assertNotEqual(json.load(fh)["spec"]["data"]["values"][0]["y"], 4.37)
 
 
 if __name__ == "__main__":

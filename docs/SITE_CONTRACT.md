@@ -438,6 +438,7 @@ was the one a reader of the contract would never look for.
                 "disagree": "the resolver and the verdicts disagree — a defect to report",
                 "result_recorded": …, "result_counts": …, "result_not_counted": …,
                 "judgment_title": "Expert judgments", "judgment_blurb": …,
+                "chart_table": …, "chart_empty": …,
                 "need": { "open": "identified", "proposed": "proposed", … },
                 "outcome_hint": { "pass": "the evaluator ran and passed", … } }
 }
@@ -458,8 +459,11 @@ an agent can read the site's state without a browser.
   words (`report.page_phrases`): `invalidated`, the flag on a verdict whose read set
   moved and on the top bar when `meta.stale` (a verdict invalidated, which is not a
   claim reading Stale: an invalidated fail stays Failing), and `need`, each gap
-  record's state (`identified` for `open`, GLOSSARY §6), and `outcome_hint`, each
-  verdict chip's title. A claim row's `reason` is why
+  record's state (`identified` for `open`, GLOSSARY §6), `outcome_hint`, each
+  verdict chip's title, and `chart_table` and `chart_empty`, what a chart view's box
+  says where the chart library did not load and where the view has no series (the
+  engineering page's `words.figure.table` and `chart_empty`, issue #15 P2.5). A
+  claim row's `reason` is why
   it reads what it reads — no evaluator, unrun, no owner recorded, needs an article —
   and the page prints it, never a sentence of its own; a Checked row (`cause:
   "checked"`) prints none. What slipped through (review of P2.1): the page said "No
@@ -608,6 +612,22 @@ an agent can read the site's state without a browser.
   (`site.view_digest`). A viewgen that is unavailable or crashed keeps its row from
   the last build only at those bytes, and `site status` reads a row or a view file
   with other bytes as edited by hand.
+- A chart view's row (issue #15, P2.5) gains `chart`: `{limit, current, spec}` from
+  `page.view_chart`, where `spec` is the whole Vega-Lite spec `page.chart_spec`
+  bakes (its series, its limit and points, and the verdicts' anchors on it: a
+  located series drawn heavier, a located x a rule in its severity's look), with none
+  of `page.VEGA_FORBIDDEN_KEYS`, or null for a view with nothing to draw. The
+  technical record hands it to `lib/figures.js`'s `drawChart`, as the engineering
+  page's cards do, and reads no chart's payload; where the library does not load it
+  shows the spec's numbers as a table. An unbound view keeps the limit and the points
+  it states itself (the first limit on each axis, its `current`, `marker` or `now`
+  with the `margin_text` the build bakes beside it in `data`); its axes are its
+  `data.x` / `data.y`, else its `meta.x` / `meta.y`, else `meta.x_label` and the
+  rest. A spec over the same 8 KB is split into `data/views/<id>~chart.json`: the
+  row keeps `"chart": {}` and gains `chart_url`, and the file is sealed with the row
+  as a view file is. *Rejected:* `lib/chart.js`, the hand-drawn SVG it replaced (the
+  author's rule of 2026-10-21: draw with a trusted library; its text fell to about
+  5 px on a phone, and it read no `markers` and no axis in `meta.x`).
 - A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
   verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
   view, its 3D file (a GLB or a glTF); `data_url` is a chart's series file;
@@ -622,8 +642,9 @@ an agent can read the site's state without a browser.
   view: it shows there only as its figure (`representation.figure`), with its chips
   and its currency (G8). The
   technical record prints the sentence and the gate and entry under the view
-  (`stage.js`); it draws a bound chart's series with `lib/chart.js`, with no limit
-  (the chart file holds none, and the limit is the claim's, on the engineering page).
+  (`stage.js`); it draws a bound chart's series alone, from the row's `chart.spec`,
+  with no limit (the chart file holds none, and the limit is the claim's, on the
+  engineering page).
   Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
   which vouches for a number in prose.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
@@ -881,8 +902,9 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   the three documents again and draws them in place, keeping the scroll, the drawer,
   the zoom and the selection. `ok: false` shows `words.notices.build_failed` and the
   error in a banner; the data stays.
-- **What the browser stopped computing** (SPEC 32): `chart.js` reads each current
-  point's `margin_text`; the technical record sorts verdict rows and anchored
+- **What the browser stopped computing** (SPEC 32): a chart draws each current
+  point's baked `margin_text` (`lib/chart.js` did, until P2.5 retired it for the
+  baked Vega-Lite spec); the technical record sorts verdict rows and anchored
   locators by the baked `order`; the mixed-age banner is `build.json`'s
   `mixed_age`; each row's age and its *aged* mark are `build.json`'s `verdicts`; a
   recorded result's word is its `outcome` (baked beside `passed`, phase 5) and its
@@ -1361,7 +1383,8 @@ value; a decision's `values` and the top-level `losers`):
   `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
   claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
   drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
-  not load; its columns take the baked spec's axis titles) and `turn_failed` (where
+  not load; its columns take the baked spec's axis titles), `chart_empty` (a chart
+  view with no series, on the technical record, from P2.5) and `turn_failed` (where
   the 3D view did not load). The card prints no error text of its own.
 
 **The marketing page's keys** (SPEC 40), all baked by `page.bake_page` or a helper it

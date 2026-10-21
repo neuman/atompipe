@@ -553,6 +553,7 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "others": "Other evaluators",
         "pictures": "Pictures: {n}. Show them.",
         "table": "The chart did not load. This table shows its numbers.",
+        "chart_empty": "This chart has no series. There is nothing to draw.",
         "turn_failed": "The 3D view did not load.",
     }),
     # A rejected alternative on the marketing page (`rejection_words(register=
@@ -3829,6 +3830,11 @@ def page_phrases() -> dict[str, Any]:
             "judgment_blurb": "Each stays with the person or institution it names, who "
                               "settles it in their own shell — no evaluator here does. Each "
                               "row says whether its authority has recorded it.",
+            # A chart view on the technical record (issue #15, P2.5): what
+            # its box says when the chart library does not load, and when
+            # the view holds nothing to draw. The engineering page's words.
+            "chart_table": HUMAN["site"]["figure"]["table"],
+            "chart_empty": HUMAN["site"]["figure"]["chart_empty"],
             "result_counts": "it counts",
             "result_not_counted": "it does not count",
             "need": {str(status.value): said for status, said in HUMAN["need"].items()},
