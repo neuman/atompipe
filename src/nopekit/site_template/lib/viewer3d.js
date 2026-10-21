@@ -64,8 +64,29 @@ function sanitise(name) {
  *  when the server sends no length); ``onSpinStop()`` runs when a pointer on
  *  the model stops the spin that ``setSpin`` started. Both are optional, and a
  *  caller that passes neither gets the viewer it had before (the front page's
- *  hero and the technical stage). */
-export function createViewer({ host, view, onSelect, onReady, onError, onProgress, onSpinStop }) {
+ *  hero and the technical stage).
+ *
+ *  FIELD MODE (``field: true``, or a view of kind ``field``; issue #15): the
+ *  colours on the mesh ARE the data, a colour scale the legend beside it
+ *  explains, so the viewer shows them as the file holds them. Every mesh gets
+ *  three.js's own ``MeshBasicMaterial`` with its vertex colours and no tone
+ *  mapping, the scene gets no lights, and the renderer writes the colours to
+ *  the canvas unconverted (``LinearSRGBColorSpace`` out, ``NoToneMapping``).
+ *  Measured on 2026-10-21: ParaView 6.2's glTF exporter writes COLOR_0 as the
+ *  colour map's own sRGB bytes (UNSIGNED_BYTE, normalized; Grayscale at 0.25
+ *  is 64), so a pixel equals the byte only when nothing converts it;
+ *  `tests/test_field_browser.py` holds a pixel to the ramp within 2. A field
+ *  has no parts: tint, highlight, isolate and explode do nothing. What it
+ *  closes before it could slip through: the three-point rig shades a scale's
+ *  colours by the angle of each face, and a reader matches the shade against
+ *  the legend (drawn lit, none of the test's four colours survived).
+ *  *Rejected:* re-encoding the vertex colours into linear values ourselves (a
+ *  GLB repacker is code a trusted tool already is); an unlit material with the
+ *  renderer's default sRGB output (``KHR_materials_unlit`` alone): it encodes
+ *  each raw byte again, and drew 64 as 137 and 128 as 188 (measured). */
+export function createViewer({ host, view, onSelect, onReady, onError, onProgress, onSpinStop,
+  field = false }) {
+  const isField = !!field || (view && view.kind === "field");
   const state = {
     explode: 0, isolate: null, wireframe: false,
     isolateNodes: null,          // Set of Object3D, or null: `isolateNodes`
@@ -123,17 +144,24 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    if (isField) {
+      renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+      renderer.toneMapping = THREE.NoToneMapping;
+    }
     canvasHost.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 1, 0.01, 10000);
     // Three lights, no environment map: an environment would need a texture the
     // site would have to ship, and a matte three-point rig reads shape better on
-    // untextured engineering geometry anyway.
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.5));
-    const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(1, 2, 1.6);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.7); fill.position.set(-1.4, 0.4, -1);
-    scene.add(key, fill);
+    // untextured engineering geometry anyway. A field gets none (field mode,
+    // above): its colours are a scale, and a light would shade them.
+    if (!isField) {
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.5));
+      const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(1, 2, 1.6);
+      const fill = new THREE.DirectionalLight(0xffffff, 0.7); fill.position.set(-1.4, 0.4, -1);
+      scene.add(key, fill);
+    }
 
     controls = new mods.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -165,6 +193,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       });
       return;
     }
+    if (isField) unlit(root);
     scene.add(root);
     indexNodes();
     readExplodeManifest();
@@ -184,6 +213,20 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
         ? (ev) => onProgress(ev.loaded || 0, ev.lengthComputable ? ev.total : 0)
         : undefined;
       loader.load(src, (gltf) => resolve(gltf.scene || gltf.scenes[0]), progress, reject);
+    });
+  }
+
+  /** Field mode: each mesh drawn with three.js's MeshBasicMaterial, its vertex
+   *  colours as the file holds them and no tone mapping. A mesh with no
+   *  COLOR_0 is drawn white, never in a colour the file did not give. */
+  function unlit(object) {
+    object.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const old = obj.material;
+      obj.material = new THREE.MeshBasicMaterial({
+        vertexColors: !!(obj.geometry && obj.geometry.getAttribute("color")),
+        toneMapped: false, side: THREE.DoubleSide });
+      for (const m of [].concat(old || [])) m && m.dispose && m.dispose();
     });
   }
 
@@ -541,14 +584,15 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
      *  one: a single-part export has parts to isolate and nothing to pull apart,
      *  and a slider that moves while nothing on screen does reads as a broken
      *  viewer rather than as a missing manifest. */
-    get canExplode() { return state.movers.size > 0; },
+    get canExplode() { return !isField && state.movers.size > 0; },
     get nodeNames() { return Array.from(new Set(Array.from(state.nodes.keys()))); },
     get missing() { return Array.from(state.missing); },
-    setExplode(t) { state.explode = Math.max(0, Math.min(1, Number(t) || 0)); applyExplode(); },
+    get field() { return isField; },
+    setExplode(t) { if (isField) return; state.explode = Math.max(0, Math.min(1, Number(t) || 0)); applyExplode(); },
     setWireframe(on) { state.wireframe = !!on; applyHighlights(); applyVisibility(); },
-    isolate(name) { state.isolate = name || null; state.isolateNodes = null; applyVisibility(); if (name) frameObjects(objectsFor(name)); else frameAll(); },
+    isolate(name) { if (isField) return; state.isolate = name || null; state.isolateNodes = null; applyVisibility(); if (name) frameObjects(objectsFor(name)); else frameAll(); },
     get isolated() { return state.isolate; },
-    highlight(map) { state.highlights = new Map(map || []); applyHighlights(); },
+    highlight(map) { if (isField) return; state.highlights = new Map(map || []); applyHighlights(); },
     frame(names) {
       const objects = (names || []).flatMap((n) => objectsFor(n));
       frameObjects(objects.length ? objects : null);
@@ -559,6 +603,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
      *  null shows every part again. A part or a group of a view's `meta` is
      *  a list of nodes, which `isolate` (one mover or one node) cannot take. */
     isolateNodes(names) {
+      if (isField) return;
       const objects = names && names.length ? nodesFor(names) : [];
       state.isolateNodes = objects.length ? new Set(objects) : null;
       state.isolate = null;
@@ -569,6 +614,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
      *  to give them their own colour back. It changes this page and nothing
      *  else; a highlight always paints over it. */
     tint(names, colour) {
+      if (isField) return;
       for (const name of names || []) {
         if (colour) state.tints.set(String(name), String(colour));
         else state.tints.delete(String(name));

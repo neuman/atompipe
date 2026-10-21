@@ -606,7 +606,10 @@ an agent can read the site's state without a browser.
   currency, currency_word}`, where `entry` is the result the picture was drawn from
   and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
   not current), or `older` (an earlier entry of the gate: the served one has no
-  picture yet), with its fixed sentence. A bound view with no picture has no row.
+  picture yet), with its fixed sentence. A bound view with no picture has no row. The
+  technical record prints the sentence and the gate and entry under the view
+  (`stage.js`); it draws a bound chart's series with `lib/chart.js`, with no limit
+  (the chart file holds none, and the limit is the claim's, on the engineering page).
   Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
   which vouches for a number in prose.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
@@ -831,7 +834,26 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   `#zone=…` and so on) in the URL opens it; the marketing page links here as
   `engineering/#claim=C1` and `engineering/#requirement=R1`.
 - **A board's section** (`lib/sections.js`) is its title, line, chip and tally, then
-  the prose (its `notice` in a callout above it when `stamp` is not `current`; each
+  a **claim card** (`lib/figures.js`, issue #15) for each of its claims that has
+  `figures`, open, in the board's order: the claim and its chip; the `value_text` of its
+  `binding` value in large type with `words.figure.judged`; a tile for each other
+  value; the currency sentence of each figure that is not `current` or `none` (with
+  `drawn_text`) above the pictures, in a dashed frame; the charts (the baked `spec`
+  handed whole to `vegaEmbed`, or, where the library does not load, its data rows,
+  limit label and margin words as a table under `words.figure.table`, never a drawing
+  of our own); the stills, side by side from 720 px and stacked under it, each with its
+  title and the chips of every claim its gate covers (`tokenChip` with marks and the
+  trace's words), the PNG linked to itself, each mark as an HTML label at its baked
+  `at`, the legend (a CSS gradient of the scale's `stops`, ticks at their baked `at`
+  with their `text`, the `under` and `over` swatches with their words, `source_text`)
+  and the caption; "Turn it in 3D" (`turn.word`) only where a 3D file is there to turn
+  (`field_src`, or `build.json`'s `live_figures[<figure id>]` with `turn.live_word`),
+  which mounts the viewer in field mode when pressed; then `binding_text` and each
+  figure's `provenance`. A figure with no file shows its sentence alone. Vega, Vega-Lite
+  and vega-embed load on demand from `vendor/vega/` when it is there, else from the
+  CDN, at the versions `site.VEGA_VERSIONS` pins (`site vendor` copies them too). The
+  browser looks each currency word up (`format.currencyLook`) and compares none.
+  Then the prose (its `notice` in a callout above it when `stamp` is not `current`; each
   `num` run with `match: false` in a `<mark class="nk-unmatched">` titled
   `words.notices.unmatched`, kept on one line with a dagger, never the gap's "?", and
   `words.notices.unmatched_note` in words under a piece that has one; claim runs as
@@ -853,6 +875,17 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   tone its `counts`. `tests/test_site_truth.TheBrowserComputesNoTruth` scans every
   template script for a verdict flag read, arithmetic on a limit, a worst-of over a
   status, a sort over a status and an age compared, with a planted violator of each.
+  From issue #15 it also refuses a figure's `currency` or `entry` compared or branched
+  on, or a digest compared (`a figure's currency decided`), and
+  `test_the_field_mode_never_tints` holds the field mode below.
+- **Field mode** (`lib/viewer3d.js`, `createViewer({..., field: true})` or a view of
+  kind `field`): the colours on a field are a scale, so each mesh is drawn with
+  three.js's `MeshBasicMaterial` and its vertex colours, `toneMapped: false`, no
+  lights, and the renderer writes them out unconverted (`LinearSRGBColorSpace`,
+  `NoToneMapping`): a COLOR_0 that holds the colour map's sRGB bytes, as ParaView 6.2
+  writes it, reads back as those bytes within 2 (`tests/test_field_browser.py`, in a
+  headless Chromium when one is there). A mesh with no COLOR_0 is white. Tint,
+  highlight, isolate and explode do nothing on a field.
 
 ## The marketing page
 
@@ -880,7 +913,10 @@ in Python. Top to bottom:
    at every width. What slipped through (review of SPEC 40): the stale notice and the
    limits line sat in the fold's block, under the viewer on a phone, so at 390x844
    "Checked does not mean true" started at y=906, off the first screen. A `model3d`
-   or `field` representation runs `lib/viewer3d.js` with the customizer; an image is
+   or `field` representation runs `lib/viewer3d.js` with the customizer (a figure as
+   the hero, issue #15: its committed GLB in field mode with only the baked `controls`,
+   spin; under it, as under a figure's still, the figure's currency sentence, its chips
+   and its legend); an image is
    an `<img>`, a diagram `stage.renderDiagram`; with no
    representation the hero is text only (no box, no notice). The model loads behind a
    spinner, "Loading the model", with a progress bar (`createViewer`'s `onProgress`,
@@ -1207,7 +1243,8 @@ as the disk resolved it (`page.figure_for`), under each claim its gate covers:
   "scale": { ... },                          // the sidecar's, a pack constant
   "chart": {},                               // a chart: { "limit": { "value", "comparator",
                                              //   "units", "label" } | null, "current":
-                                             //   { "x", "y", "margin_text" } | null }
+                                             //   { "x", "y", "margin_text" } | null,
+                                             //   "spec": <the whole Vega-Lite spec> }
   "turn": {} }                               // a 3D file: { "word", "live_word" }
 ```
 
@@ -1269,14 +1306,27 @@ value; a decision's `values` and the top-level `losers`):
   figure files alone, never on this computer's tools, so a clone bakes the same object.
   A chart's `limit` and `current` are the floor row's for (claim, gate), the claim's
   limit where the row is compared with it, set by the spine (`page.chart_block`); a
-  chart whose y units are not the limit's bakes no limit, and the build says so. A live
+  chart whose y units are not the limit's bakes no limit, and the build says so. Its
+  `spec` (P1.5, `page.chart_spec`) is the whole Vega-Lite spec that draws it: the series
+  of its chart file as data rows (`series`, `label`, `x`, `y`, and `text` and `hollow`
+  where the payload gives them), the limit as a shaded side and a dashed rule with its
+  label, the judged point with its margin words, and the payload's `band` (error bars),
+  `rule` (a tolerance line, never called a limit) and `estimates` (diamonds), on a log y
+  axis where the payload's `y.scale` is `"log"`. Every number in it is the chart file's
+  or the floor's, and it holds none of `page.VEGA_FORBIDDEN_KEYS` (`transform`,
+  `calculate`, `filter`, `aggregate`, `params`, `expr`, `signal`, `bin`, `timeUnit`,
+  `impute`, `regression`, `loess`, `density`, `fold`, `stack`, `test`), so Vega places
+  numbers and computes only the axes. Its marks name a `style` (`nk-limit`, `nk-past`,
+  `nk-current`, ...) whose look the page's theme gives; where a label sits is in the
+  spec. A live
   3D file is never named here (`build.json`'s `live_figures`). The representation is a
   `model3d` view, else a figure whose 3D file is committed (as `field`), else the first
   bound still, else an `image` or `diagram` view. `page.status_problems` holds each
   figure (G1-G8 of the design): its claims exactly the gate's cover and each chip the
   resolution's; its entry and currency the disk's and the served entry's; its
   sentences and outcome; its files under its own folder, the build's keep set or the
-  bytes its sidecar names; a chart's limit and point; a caption with no status word;
+  bytes its sidecar names; a chart's limit, point and spec (`chart_block`'s whole, with
+  no forbidden key); a caption with no status word;
   and the representation's figure the claim's own copy.
 - **The checker** (`page.status_problems`, invariant 14) holds every token, *ready*,
   word and mark above to the resolution: a claim's, a section's and a step's `word` is
@@ -1289,7 +1339,13 @@ value; a decision's `values` and the top-level `losers`):
   no board. From SPEC 40 `words.headings` holds the marketing page's headings too
   (`story`, `asked`, `decisions`, `losers`, `evidence`, `unsettled`,
   `whole_decision`), and `words.notices` holds `stale_public` ("Some results are older
-  than the design.") and `no_story`: the page prints no heading of its own.
+  than the design.") and `no_story`: the page prints no heading of its own. From issue
+  #15 `words.figure` holds `report.HUMAN["site"]["figure"]` whole: each currency's
+  sentence (`current`, `stale`, `older`, `none`), `drawn`, `drawn_bare`, `shown`,
+  `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
+  claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
+  drawer's line, "Pictures: {n}. Show them.") and `table` (where the chart library did
+  not load).
 
 **The marketing page's keys** (SPEC 40), all baked by `page.bake_page` or a helper it
 calls, so `status_problems` and the style scans see them:

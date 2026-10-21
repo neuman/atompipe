@@ -564,6 +564,7 @@ layout in full, with each writer.
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |
 | `tests/_projects.py` | test projects built once: a bracket copy (the legacy bracket by default, the committed one with `migrated=True`), and a pack's baseline wrapped as a project |
 | `tests/_draw_standin.py` | a stand-in renderer for bound figures: installed as `nopekit-test-draw` on a temporary PATH, it writes committed fixture bytes (a PNG Pillow made, a GLB trimesh made) and logs each call; it plants a crash, a hang, an oversize file and inputs moved mid-draw |
+| `tests/test_field_browser.py` | the field viewer in a headless Chromium (issue #15): a trimesh GLB's vertex colours read back within 2; skipped, saying not walked, where the browser, trimesh, Pillow or three.js is absent |
 | `tests/bracket_legacy/` | a fixture: the bracket's `.nopekit/` as it stood before its 1.3 migration (ledger, run history, ignore file), which `_projects.bracket_copy` puts back around today's sources. Never edited to make a test pass |
 | `tests/_transcript.py` | Phase 1's target transcript as data: replayed on a fresh clone by `test_fresh_clone.py`, its lines held to their shapes by `test_shapes.py` |
 | `tests/oracle/` | scripts, not tests: CI's bracket failure signature (`bracket_signature.py`) and the R-8 differential oracle run at phase review (`r8_statuses.py`) |

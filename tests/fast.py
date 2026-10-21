@@ -27,6 +27,12 @@ Its P1.4 (the page's figures) added three rows (~5 s user: each one to two check
 build in process) and test_style's figure keys (in process, ~0.05 s). One pair at load
 2.4-3.7, head then base: 217.5 s wall (164.6 s user) for its 708 tests, against 209.6 s
 (159.5 s user) for b95b7f4's 704. Over the line as its base is; no idle run.
+Its P1.5 (the template) added three rows to test_site_truth.TheBrowserComputesNoTruth,
+which runs whole here (a figure's currency, the field mode and the baked chart spec:
+source scans and one spec in process, ~0.05 s); its browser test
+(test_field_browser, ~2.5 s, a headless Chromium) is the full suite's. One unpaired
+run at load 2.1-2.9: 211.4 s wall (163.3 s user) for its 711 tests. Over the line as
+its base is; no idle run.
 The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against

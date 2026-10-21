@@ -1601,8 +1601,19 @@ class VendorIsAllOrNothing(_SiteCase):
         self.assertIn("vendor/jsm/libs/meshopt_decoder.module.js", urls)
         self.assertTrue(urls["vendor/jsm/libs/meshopt_decoder.module.js"].endswith(
             "/examples/jsm/libs/meshopt_decoder.module.js"))
-        self.assertTrue(all(site_mod.THREE_VERSION in u for u in urls.values()),
+        # Issue #15: the chart library joins it, each file at its own pinned
+        # version, and lib/figures.js loads the same three files.
+        pinned = [f"three@{site_mod.THREE_VERSION}/"] + [
+            f"{name}@{version}/" for name, version in site_mod.VEGA_VERSIONS.items()]
+        self.assertTrue(all(any(p in u for p in pinned) for u in urls.values()),
                         "an unpinned CDN URL is a build step somebody else controls")
+        vega = {k: u for k, u in urls.items() if k.startswith("vendor/vega/")}
+        self.assertEqual(len(vega), 3)
+        import _template
+        figures = _template.template_files(".js")["lib/figures.js"]
+        for relative, url in vega.items():
+            self.assertIn(f'"{url}"', figures, f"lib/figures.js loads another {relative}")
+            self.assertIn(f'"{relative}"', figures)
 
     def test_html_masquerading_as_javascript_is_refused(self):
         """A captive portal answers 200 with a login page. Vendored, that page

@@ -181,7 +181,14 @@ RECORD_KEYS = frozenset({
     "preference", "returns", "decisions", "rejected", "lost", "alternates",
     # issue #15, B.4.3: a bound figure's ids, paths, digests and tokens
     "figures", "figure", "currency", "entry", "sha256", "field_src", "data_src", "scale",
-    "over", "under", "colour", "ticks", "chart", "turn", "controls"})
+    "over", "under", "colour", "ticks", "chart", "turn", "controls",
+    # P1.5: a bound chart's Vega-Lite spec (`chart_spec`), under ``chart.spec``.
+    # Its strings are Vega-Lite's vocabulary (a mark's ``type`` and ``shape``,
+    # a theme ``style`` name, a data ``field``, ``width: "container"``, a text
+    # mark's ``align`` and ``baseline``) and a data row's ``series`` key; its words are the floor's and the pack's
+    # labels, under ``label`` and ``text`` (words), and the axis ``title``, a
+    # record as a view's title is.
+    "spec", "style", "field", "shape", "width", "series", "align", "baseline"})
 
 
 class Board(NamedTuple):
@@ -780,7 +787,7 @@ def margin_text(margin: float | None) -> str:
 def words_block() -> dict:
     """``page.json``'s ``words``: each token's word, term and hint, and the
     tables the page labels with (lanes, kinds, mechanism, basis, outcome,
-    headings, notices)."""
+    headings, notices, and a figure card's words)."""
     said = _site_words()
     tokens: dict[str, dict] = {}
     for token in claim_logic.SEVERITY_ORDER:
@@ -792,6 +799,7 @@ def words_block() -> dict:
             "by": dict(said["by"]), "basis": dict(said["basis"]),
             "outcome": dict(said["outcome"]), "headings": dict(said["headings"]),
             "notices": dict(said["notices"]),
+            "figure": dict(said["figure"]),
             "ready": {"ready": said["ready_word"], "not-ready": said["not_ready_word"]},
             "trace": {k: (dict(v) if isinstance(v, Mapping) else v)
                       for k, v in said["trace"].items()}}
@@ -1357,20 +1365,21 @@ def _chart_y_units(payload: Any) -> str:
 
 def _series_x(payload: Any, y: float) -> float | None:
     """The x of the first series point whose y is ``y`` (relative 1e-9), or
-    None: where the chart's own point is the judged one."""
-    series = payload.get("series") if isinstance(payload, Mapping) else None
-    rows = series.values() if isinstance(series, Mapping) else [series] if series else []
-    for points in rows:
-        for point in points if isinstance(points, list) else ():
-            if isinstance(point, list) and len(point) >= 2 and all(
-                    isinstance(v, (int, float)) and not isinstance(v, bool) for v in point[:2]) \
-                    and math.isclose(float(point[1]), float(y), rel_tol=1e-9, abs_tol=0.0):
-                return point[0]
+    None: where the chart's own point is the judged one. Read through
+    `_chart_series`, so both spellings of a series are read alike (P1.5: the
+    list spelling was read as one series of dicts, and its point was never
+    found)."""
+    if not _finite_number(y):
+        return None
+    for row in _chart_series(payload):
+        if math.isclose(float(row["y"]), float(y), rel_tol=1e-9, abs_tol=0.0):
+            return row["x"]
     return None
 
 
 def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tuple[dict, str]:
-    """``({limit, current}, warning)``: a bound chart's limit and judged point,
+    """``({limit, current, spec}, warning)``: a bound chart's limit and judged
+    point, and the Vega-Lite spec that draws them with its series (`chart_spec`),
     set by the spine from the floor row of (claim, gate), never from the chart
     (B.4.2, G6). The limit is the claim's acceptance condition where the row is
     compared with it (S-35), else the row's own; the point is the row's
@@ -1378,9 +1387,11 @@ def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tupl
     limit's draws no limit line, and one whose y units are not the value's no
     point, and the build says so. What slipped through before (F9):
     `_chart_margins` took a chart's margin from the view's own limit, so a pack
-    limit beside the claim's was a second limit on the page."""
+    limit beside the claim's was a second limit on the page. The spec is in
+    the block, so G6 holds what the browser draws, not only the numbers beside
+    it."""
     if row is None:
-        return {"limit": None, "current": None}, ""
+        return {"limit": None, "current": None, "spec": chart_spec(payload, None, None)}, ""
     said = _site_words()["figure"]
     y_units = _chart_y_units(payload)
     units = str(row.get("units") or "")
@@ -1411,7 +1422,243 @@ def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tupl
         warning = warning or (f"its y axis is in {y_units or 'no units'} and the result in "
                               f"{units or 'no units'}, so the result is not marked")
         current = None
-    return {"limit": limit, "current": current}, warning
+    return {"limit": limit, "current": current,
+            "spec": chart_spec(payload, limit, current)}, warning
+
+
+# --------------------------------------------------------------------------- #
+# the chart as Vega-Lite draws it (issue #15, rule 0.1 of its design)
+# --------------------------------------------------------------------------- #
+#: The keys a baked Vega-Lite spec may never hold, at any depth: each makes
+#: Vega compute a value (a transform, an aggregate, a bin, a fitted curve, a
+#: stack's running sum) or run an expression (``expr``, ``signal``, a
+#: selection's ``params``, a condition's ``test``). With none of them, Vega
+#: places the baked numbers and computes only the axes, so the chart draws what
+#: the spine wrote and the browser decides nothing (invariant 14). The spine
+#: writes no spec that holds one (`chart_spec`), the checker refuses a page
+#: that holds one (G6), and `test_site_truth.TheBrowserComputesNoTruth` plants
+#: each. *Rejected:* a list of the allowed keys (Vega-Lite's own vocabulary
+#: would be copied here and drift with its versions); ``stack`` and ``test``
+#: left out (the design's list missed both: a stacked area sums its series, and
+#: a condition's test is an expression).
+VEGA_FORBIDDEN_KEYS = frozenset({
+    "transform", "calculate", "filter", "aggregate", "params", "expr", "signal", "bin",
+    "timeUnit", "impute", "regression", "loess", "density", "fold", "stack", "test"})
+
+#: The chart's height in CSS pixels; its width is the card's (``"container"``).
+#: 260 px holds a ladder of three points, its limit and their labels at 390 px
+#: wide with the axis text at 12 px (the figure project's page, P1.5).
+#: *Rejected:* a fixed 840 x 460 drawing scaled to fit, the hand-drawn chart's
+#: way (its text fell to about 5 px on a phone).
+CHART_HEIGHT = 260
+
+
+def _finite_number(value: Any) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _chart_series(payload: Any) -> list[dict]:
+    """The series of a chart payload as rows ``{series, label, x, y}`` (with
+    ``text`` for a labelled point and ``hollow`` true for a hollow one), in the
+    payload's order. A series is ``{key: [[x, y], ...]}``, or a list of
+    ``{key | name, label?, points: [[x, y], ...] | x: [...] and y: [...],
+    labels?: [str], hollow?: bool | [bool]}``. A point that is not two finite
+    numbers is left out, never guessed."""
+    raw = payload.get("series") if isinstance(payload, Mapping) else None
+    entries: list[tuple] = []
+    if isinstance(raw, Mapping):
+        entries = [(str(k), str(k), v, None, None) for k, v in raw.items()]
+    elif isinstance(raw, list):
+        for i, item in enumerate(raw):
+            if not isinstance(item, Mapping):
+                continue
+            key = str(item.get("key") or item.get("name") or f"s{i}")
+            points = item.get("points")
+            if points is None and isinstance(item.get("y"), list):
+                xs = item.get("x") if isinstance(item.get("x"), list) else list(
+                    range(len(item["y"])))
+                points = [[x, y] for x, y in zip(xs, item["y"])]
+            entries.append((key, str(item.get("label") or key), points, item.get("labels"),
+                            item.get("hollow")))
+    rows: list[dict] = []
+    for key, label, points, labels, hollow in entries:
+        for i, point in enumerate(points if isinstance(points, list) else ()):
+            if not (isinstance(point, list) and len(point) >= 2
+                    and _finite_number(point[0]) and _finite_number(point[1])):
+                continue
+            row = {"series": key, "label": label, "x": point[0], "y": point[1]}
+            text = labels[i] if isinstance(labels, list) and i < len(labels) else None
+            if isinstance(text, str) and text:
+                row["text"] = text
+            flag = hollow[i] if isinstance(hollow, list) and i < len(hollow) else hollow
+            if flag is True:
+                row["hollow"] = True
+            rows.append(row)
+    return rows
+
+
+def _axis_title(axis: Mapping) -> str:
+    label, units = str(axis.get("label") or ""), str(axis.get("units") or "")
+    return " ".join(p for p in (label, f"({units})" if units else "") if p)
+
+
+def _datum(value: Any) -> dict:
+    return {"datum": value, "type": "quantitative"}
+
+
+def _text_mark(style: str, align: str, dx: int, dy: int) -> dict:
+    """A text mark at its offset from the point it labels. Its placement is in
+    the spec, never in the theme: Vega-Lite writes a text mark's ``align`` and
+    ``baseline`` into the mark itself, over any style the page gives (seen on
+    the figure project's page, P1.5: every label sat centred on its point)."""
+    return {"type": "text", "style": style, "align": align, "baseline": "bottom",
+            "dx": dx, "dy": dy}
+
+
+def chart_spec(payload: Any, limit: Mapping | None, current: Mapping | None) -> dict:
+    """The whole Vega-Lite spec of a bound chart (rule 0.1 of issue #15's
+    design): the series its chart file holds, the limit and the judged point
+    `chart_block` set from the floor, and the payload's ``band`` (``[{x, lo,
+    hi, label}]``, an error bar), ``rule`` (``{value, label}``, a tolerance
+    line, never called a limit) and ``estimates`` (``[{x, y, label}]``,
+    diamonds). Every number in it is the chart file's or the floor's, and it
+    holds none of `VEGA_FORBIDDEN_KEYS`: Vega places numbers and computes only
+    the axes. A y axis the payload marks ``"scale": "log"`` is logarithmic. The
+    side of the limit that fails is shaded (both sides of a ``between``).
+
+    What is drawn is the spine's; how it looks (colours, fonts, which side a
+    label sits on) is the page theme's, through the ``style`` names it fills in
+    (`lib/figures.js`). The browser only hands the spec to ``vegaEmbed``.
+    *Rejected:* growing the hand-drawn SVG of `lib/chart.js` (log y, bands,
+    rules, estimates, labels, hollow points): the author's rule is to build as
+    little as possible and draw with a trusted library; a spec the browser
+    composes (the page would decide what a chart shows)."""
+    payload = payload if isinstance(payload, Mapping) else {}
+    rows = _chart_series(payload)
+    x_axis = payload.get("x") if isinstance(payload.get("x"), Mapping) else {}
+    y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
+    x_title, y_title = _axis_title(x_axis), _axis_title(y_axis)
+    x_enc = {"field": "x", "type": "quantitative", "title": x_title, "scale": {"zero": False}}
+    y_enc = {"field": "y", "type": "quantitative", "title": y_title,
+             "scale": {"type": "log"} if y_axis.get("scale") == "log" else {"zero": True}}
+    several = len({r["series"] for r in rows}) > 1
+    colour = {"field": "label", "type": "nominal", "title": "",
+              "legend": {} if several else None}
+    tooltip = [{"field": "label", "type": "nominal", "title": ""},
+               {"field": "x", "type": "quantitative", "title": x_title or "x"},
+               {"field": "y", "type": "quantitative", "title": y_title or "y"}]
+    at_x = {"field": "x", "type": "quantitative"}
+    at_y = {"field": "y", "type": "quantitative"}
+    layers: list[dict] = []
+
+    def limit_layers(value: Any, fails_above: bool | None, label: str) -> None:
+        if not _finite_number(value):
+            return
+        if fails_above is not None:
+            layers.append({"mark": {"type": "rect", "style": "nk-past"},
+                           "encoding": {"x": {"value": 0}, "x2": {"value": "width"},
+                                        "y": _datum(value),
+                                        "y2": {"value": 0 if fails_above else "height"}}})
+        layers.append({"mark": {"type": "rule", "style": "nk-limit"},
+                       "encoding": {"y": _datum(value)}})
+        if label:
+            layers.append({"mark": _text_mark("nk-limit-label", "right", -6, -4),
+                           "encoding": {"x": {"value": "width"}, "y": _datum(value),
+                                        "text": {"value": label}}})
+
+    if limit:
+        comparator = str(limit.get("comparator") or "")
+        label = str(limit.get("label") or "")
+        if comparator == "between":
+            limit_layers(limit.get("value"), False, label)
+            limit_layers(limit.get("value_hi"), True, "")
+        else:
+            limit_layers(limit.get("value"),
+                         True if comparator.startswith("<") else
+                         False if comparator.startswith(">") else None, label)
+    rule = payload.get("rule")
+    for item in rule if isinstance(rule, list) else [rule] if rule else []:
+        if isinstance(item, Mapping) and _finite_number(item.get("value")):
+            layers.append({"mark": {"type": "rule", "style": "nk-rule"},
+                           "encoding": {"y": _datum(item["value"])}})
+            if item.get("label"):
+                layers.append({"mark": _text_mark("nk-rule-label", "left", 6, -4),
+                               "encoding": {"x": {"value": 0}, "y": _datum(item["value"]),
+                                            "text": {"value": str(item["label"])}}})
+    band = [{"label": str(b.get("label") or ""), "x": b["x"], "lo": b["lo"], "hi": b["hi"]}
+            for b in payload.get("band") or () if isinstance(b, Mapping)
+            and all(_finite_number(b.get(k)) for k in ("x", "lo", "hi"))]
+    if band:
+        layers.append({"data": {"values": band}, "mark": {"type": "rule", "style": "nk-band"},
+                       "encoding": {"x": at_x, "y": {"field": "lo", "type": "quantitative"},
+                                    "y2": {"field": "hi"}}})
+    if rows:
+        layers.append({"mark": {"type": "line", "style": "nk-series"},
+                       "encoding": {"x": x_enc, "y": y_enc, "color": colour,
+                                    "detail": {"field": "series", "type": "nominal"}}})
+        for hollow in (False, True):
+            chosen = [r for r in rows if bool(r.get("hollow")) is hollow]
+            if chosen:
+                layers.append({"data": {"values": chosen},
+                               "mark": {"type": "point", "filled": not hollow,
+                                        "style": "nk-hollow" if hollow else "nk-point"},
+                               "encoding": {"x": at_x, "y": at_y, "color": colour,
+                                            "tooltip": tooltip}})
+        labelled = [r for r in rows if r.get("text")]
+        if labelled:
+            layers.append({"data": {"values": labelled},
+                           "mark": _text_mark("nk-point-label", "center", 0, -8),
+                           "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
+    estimates = [{"label": str(e.get("label") or ""), "x": e["x"], "y": e["y"]}
+                 for e in payload.get("estimates") or () if isinstance(e, Mapping)
+                 and _finite_number(e.get("x")) and _finite_number(e.get("y"))]
+    if estimates:
+        layers.append({"data": {"values": estimates},
+                       "mark": {"type": "point", "shape": "diamond", "filled": True,
+                                "style": "nk-estimate"},
+                       "encoding": {"x": at_x, "y": at_y, "tooltip": tooltip}})
+    if current and _finite_number(current.get("y")):
+        text = str(current.get("margin_text") or "")
+        # Its words sit on the side of the point with room: to its left when
+        # no series point is right of it (the finest level of a ladder is
+        # its last), else to its right. What slipped through (the figure
+        # project at 390 px, P1.5): "80% inside the limit" ran off the
+        # chart's right edge from a point at the right end.
+        last = not any(r["x"] > current.get("x") for r in rows) if _finite_number(
+            current.get("x")) else False
+        label_mark = (_text_mark("nk-current-label", "right", -10, -8) if last
+                      else _text_mark("nk-current-label", "left", 10, -8))
+        if _finite_number(current.get("x")):
+            at = {"x": _datum(current["x"]), "y": _datum(current["y"])}
+            layers.append({"mark": {"type": "point", "filled": True, "style": "nk-current"},
+                           "encoding": dict(at)})
+        else:
+            at = {"x": {"value": 0}, "y": _datum(current["y"])}
+            layers.append({"mark": {"type": "rule", "style": "nk-current-rule"},
+                           "encoding": {"y": _datum(current["y"])}})
+        if text:
+            layers.append({"mark": label_mark,
+                           "encoding": {**at, "text": {"value": text}}})
+    return {"width": "container", "height": CHART_HEIGHT, "data": {"values": rows},
+            "layer": layers}
+
+
+def vega_forbidden(spec: Any) -> list[str]:
+    """The `VEGA_FORBIDDEN_KEYS` ``spec`` holds at any depth, sorted."""
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, Mapping):
+            found.update(k for k in node if k in VEGA_FORBIDDEN_KEYS)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(spec)
+    return sorted(found)
 
 
 def _figure_files(fig: Figure, kind: str) -> dict:
@@ -3181,7 +3428,9 @@ def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
     G1 its claims (exactly the gate's cover) and their chips; G2 its currency
     and its entry; G3 its sentences; G4 its outcome; G5 its files (under its
     own folder, kept by the build or the bytes its sidecar names); G6 a
-    chart's limit and point (the floor's); G7 a caption that says a status;
+    chart's limit and point (the floor's), and the Vega-Lite spec that draws
+    them (`chart_spec`'s, holding none of `VEGA_FORBIDDEN_KEYS`); G7 a caption
+    that says a status;
     G8 the same on the representation's figure, which must be the claim's own
     copy. A figure the page leaves out says less, never more."""
     out: list[str] = []
@@ -3283,6 +3532,11 @@ def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
             expected_chart, _warning = chart_block(
                 facts.claims.get(cid), facts.floor.get((cid, gate)),
                 _chart_payload(facts.root, paths[2]))
+            planted = vega_forbidden((chart or {}).get("spec")) if isinstance(
+                chart, Mapping) else []
+            if planted:
+                out.append(f"{where} chart spec holds {', '.join(map(repr, planted))}: Vega "
+                           f"would compute what the page shows")
             if chart != expected_chart:
                 out.append(f"{where} chart reads {chart}, the floor of {cid} says "
                            f"{expected_chart}")

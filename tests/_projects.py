@@ -828,9 +828,20 @@ def pic(ctx):
         if glb:
             with open(glb_path, "rb") as fh:
                 (ctx.write_live if glb == "live" else ctx.write_asset)("pic.glb", fh.read())
-    scale = cfg.get("scale", {"quantity": "value", "units": "Pa", "lo": 0.0,
-                              "hi": 4.0 * float(found["u_ref"]),
-                              "source": [{"key": "u_ref", "factor": 4.0}]})
+    hi = 4.0 * float(found["u_ref"])
+    scale = cfg.get("scale", {
+        "quantity": "value", "units": "Pa", "lo": 0.0, "hi": hi,
+        "stops": [{"at": 0.0, "colour": "#440154"}, {"at": 0.25, "colour": "#3b528b"},
+                  {"at": 0.5, "colour": "#21918c"}, {"at": 0.75, "colour": "#5ec962"},
+                  {"at": 1.0, "colour": "#fde725"}],
+        "over": "#ff00ff", "under": "#808080",
+        "over_word": "Magenta shows a value over the top of the scale.",
+        "under_word": "Grey shows a value under the bottom of the scale.",
+        "ticks": [{"at": 0.0, "value": 0.0, "text": "0"},
+                  {"at": 0.5, "value": hi / 2, "text": f"{hi / 2:g} Pa"},
+                  {"at": 1.0, "value": hi, "text": f"{hi:g} Pa"}],
+        "source": [{"key": "u_ref", "factor": 4.0}],
+        "source_text": "The scale is 4 times the reference value of the run."})
     return View(id="demo.pic", kind=ViewKind.IMAGE, src=src,
                 meta={"caption": cfg.get("caption", "The field of the demo, from the run "
                                                     "that wrote this result."),

@@ -538,6 +538,18 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # lock (Phase 2's test stand-in), says so beside its picture.
         "tool_unchecked": "The tool that drew this picture is not the build that the pack "
                           "locks.",
+        # P1.5: the claim card's own words (`lib/figures.js`), here so that the
+        # page owns no sentence and the scan reads each. ``judged`` names the
+        # evaluator whose value the large line is; ``pictures`` is the
+        # drawer's one line, which links to the card; ``table`` stands where a
+        # chart's library did not load, above the numbers it would draw.
+        # *Rejected:* "from the result that this page shows" in the drawer line
+        # (false beside an older picture; each figure's own currency sentence
+        # says which result it is).
+        "judged": "Value from {gate}",
+        "others": "Other evaluators",
+        "pictures": "Pictures: {n}. Show them.",
+        "table": "The chart did not load. This table shows its numbers.",
     }),
     # A rejected alternative on the marketing page (`rejection_words(register=
     # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the

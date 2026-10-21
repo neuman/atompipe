@@ -3599,7 +3599,9 @@ def write_build_json(root, *, now, id, ok=True, error="", live=False, verdicts=N
 def watch_snapshot(root) -> dict                            # {relpath: (size, mtime_ns)} over WATCH_DIRS
 def clean_assets(root, keep) -> list                        # delete unreferenced site/assets/ files
 def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`;
-                                                            #   three's meshopt decoder too (SPEC 40)
+                                                            #   three's meshopt decoder too (SPEC 40),
+                                                            #   and vega/ (issue #15)
+VEGA_VERSIONS: dict                                         # vega, vega-lite, vega-embed, pinned
 ```
 **Two pages** (SPEC 40). `build` writes an absent `engineering/index.html`,
 `marketing/index.html` or `technical.html` (making its directory), and never the root
@@ -3778,7 +3780,11 @@ def entry_outcome(verdict) -> str            # error | pass | fail | unrun
 def drawn_text(verdict) -> str               # an older figure's line about its result
 def binding_text(figures) -> str             # which result each gate's figures are of
 def margin_text(margin) -> str               # the margin's words alone
-def chart_block(claim, row, payload) -> tuple   # ({limit, current}, warning): the floor's
+def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec}, warning): the floor's
+def chart_spec(payload, limit, current) -> dict   # P1.5: a bound chart's whole Vega-Lite spec
+VEGA_FORBIDDEN_KEYS: frozenset               # keys a baked spec never holds (Vega computes)
+def vega_forbidden(spec) -> list             # the forbidden keys a spec holds, sorted
+CHART_HEIGHT = 260                           # the chart's CSS height; its width is the card's
 def figure_chips(cids, toks, marks) -> list  # the chips beside a figure
 def figure_row(root, bound, *, claim, floor_row, chips, outcome, warnings=None) -> dict
 def gate_cover(cover) -> dict                # {gate: [claim ids]}: effective_gates inverted
@@ -3881,6 +3887,18 @@ planted chip reads *edited by hand*. The build's caption refusal and G7 read one
 `caption_status` (moved here from `site`). *What slipped through before it:* a picture
 beside a status said nothing of the result it showed (F10: and a field was never the
 hero).
+
+**A chart is a baked spec** (issue #15, P1.5; rule 0.1 of its design): `chart_block`
+also returns `spec`, `chart_spec`'s whole Vega-Lite spec over the chart file's series
+and the floor's limit and point, which `lib/figures.js` hands to `vegaEmbed` unchanged.
+It holds none of `VEGA_FORBIDDEN_KEYS`, so Vega computes nothing but the axes; G6
+compares the whole block, spec included, and names a forbidden key a hand edit
+planted. The page's theme gives each mark `style` its look; the spec says where a
+label sits (Vega-Lite writes a text mark's alignment into the mark, over a theme's).
+*Rejected:* growing `lib/chart.js` (log y, bands, rules, estimates, hollow points),
+which the author's rule to build as little as possible and draw with a trusted
+library replaces; `lib/chart.js` stays for the technical record's unbound charts and
+their locators.
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure

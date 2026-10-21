@@ -1311,15 +1311,31 @@ class TheClaimsStatusSitsBesideEveryFigure(_env.EnvCase):
                 [row] = [v for v in baked(root, "page.json")["claims"][CLAIM]["values"]
                          if v["gate"] == GATE]
                 self.assertEqual(row["limit"], 10.0, "the evaluator's own limit moved")
-                self.assertEqual(fig["chart"], {
+                chart = fig["chart"]
+                self.assertEqual({k: chart[k] for k in ("limit", "current")}, {
                     "limit": {"value": limit, "comparator": "<=", "units": "Pa",
                               "label": f"Limit {limit:g} Pa"},
                     "current": {"x": 1.0, "y": 2.0, "margin_text": margin}})
-                self.assertEqual(fig["chart"]["current"]["margin_text"], row["margin_text"])
+                self.assertEqual(chart["current"]["margin_text"], row["margin_text"])
+                # P1.5: the spec Vega-Lite draws holds the same limit and point
+                # (G6 holds the spec too), and computes nothing.
+                layers = chart["spec"]["layer"]
+                self.assertEqual([l["encoding"]["y"]["datum"] for l in layers
+                                  if l["mark"].get("style") == "nk-limit"], [limit])
+                [point] = [l for l in layers if l["mark"].get("style") == "nk-current"]
+                self.assertEqual((point["encoding"]["x"]["datum"],
+                                  point["encoding"]["y"]["datum"]), (1.0, 2.0))
+                from nopekit import page
+                self.assertEqual(page.vega_forbidden(chart["spec"]), [])
         plant_page(root, lambda doc: page_figure_of(doc, CHART)["chart"]["limit"].update(
             value=10.0))
         edited = site_status(self, root)["edited"]
         self.assertTrue(edited and f"figure {CHART} chart reads" in edited[0], edited)
+        plant_page(root, lambda doc: page_figure_of(doc, CHART)["chart"]["spec"]["layer"][0]
+                   .update(transform=[{"calculate": "datum.y * 2", "as": "y"}]))
+        edited = site_status(self, root)["edited"]
+        self.assertTrue(edited and f"figure {CHART} chart spec holds 'calculate', 'transform'"
+                        in edited[0], edited)
 
     def test_a_pack_limit_in_a_chart_is_refused(self):
         draw = Draw(self)

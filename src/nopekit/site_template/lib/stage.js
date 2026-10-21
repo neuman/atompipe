@@ -14,7 +14,7 @@
 // curve or a hotspot on a photograph.
 
 import { el, mount, append } from "./dom.js";
-import { tag, chip, verdictStatus, num, quantity, plural, code } from "./format.js";
+import { tag, chip, verdictStatus, num, quantity, plural, code, currencyLook } from "./format.js";
 import { panelHead, shapeFor, severityOf, cssId, annotationCard } from "./panels.js";
 import { renderChart } from "./chart.js";
 import { createViewer } from "./viewer3d.js";
@@ -118,6 +118,7 @@ export function createStage(state, app) {
   function renderActive() {
     const kind = String(active.kind || "image");
     mount(host);
+    bindingNote(active);
     if (VIEWER_KINDS.has(kind)) return renderModel();
     if (kind === "chart") return mount(host, renderChart(active, locatorsFor(active.id)));
     if (kind === "table") return mount(host, renderTable(active, locatorsFor(active.id), app));
@@ -132,6 +133,20 @@ export function createStage(state, app) {
         "The site renders model3d, image, chart, table, field and diagram views. A pack that " +
         "emits another kind is newer than this page. Upgrade the site template, or emit the " +
         "view in a kind that the renderer knows." })));
+  }
+
+  /** A bound view (issue #15) says which result it is drawn from: the bake's
+   *  `binding` (gate, entry and the currency's sentence, from the same figure
+   *  object `page.json` holds), under the view. A bound view's 3D file, when
+   *  it has one committed, is `field_src`. */
+  function bindingNote(view) {
+    for (const old of note.querySelectorAll(".binding-note")) old.remove();
+    const b = view.binding;
+    if (!b) return;
+    const look = currencyLook(b.currency);
+    append(note, [el("p", { class: `binding-note tone-${look.tone}` },
+      el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }),
+      ` ${b.currency_word || ""} `, el("code", { class: "mono", text: `${b.gate} ${b.entry}` }))]);
   }
 
   // ------------------------------------------------------------------- //
@@ -211,6 +226,7 @@ export function createStage(state, app) {
         `${plural(missing.length, "locator")} could not be placed. This model has no node named ` +
         `${missing.map((m) => `'${m}'`).join(", ")}. The evaluators of a pack find parts by ` +
         `the node names that its viewgen exports. One side of that interface changed.`));
+      bindingNote(active);
     }
   }
 

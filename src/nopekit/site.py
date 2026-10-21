@@ -4087,6 +4087,24 @@ THREE_VERSION = "0.169.0"
 #: changing what they are.
 _THREE_BASE = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}"
 
+#: Vega, Vega-Lite and vega-embed, which draw a bound figure's chart from the
+#: spec the spine bakes (`page.chart_spec`; issue #15, rule 0.1 of its design:
+#: draw with a trusted library and build as little as possible). Pinned exactly,
+#: as three.js is, and each at least two weeks old when it was chosen
+#: (2026-10-21): vega 6.2.0 (2025-09-16), vega-lite 6.4.1 (2025-09-23),
+#: vega-embed 7.1.0 (2025-10-09). The UMD builds, each one self-contained file
+#: (``vega.min.js`` 512 KB, ``vega-lite.min.js`` 249 KB, ``vega-embed.min.js``
+#: 60 KB), loaded by `lib/figures.js` in that order, from ``vendor/vega/`` when
+#: it is there, else from the CDN; `lib/figures.js` holds the same three URLs
+#: and a test holds the two lists equal. *Rejected:* the ESM builds through the
+#: import map (``vega.module.js`` imports 27 bare package names and
+#: ``vega-lite``'s ``build/index.js`` four more, each an import-map line; and
+#: jsdelivr's ``+esm`` of vega-embed 7.1.0 resolves vega-lite to 6.4.3, a
+#: version nobody pinned); an import-map entry in the page shells (they are
+#: the project's own and never regenerated, so a site made before this change
+#: would never get the line, while ``lib/`` is refreshed by every build).
+VEGA_VERSIONS = {"vega": "6.2.0", "vega-lite": "6.4.1", "vega-embed": "7.1.0"}
+
 
 def vendor_urls() -> dict:
     """``{site-relative path: URL}`` for ``nopekit site vendor``. Offline three.js.
@@ -4130,4 +4148,10 @@ def vendor_urls() -> dict:
         # copy alone (the one situation vendoring exists for would 404 on it).
         posixpath.join(VENDOR_DIR, "jsm/libs/meshopt_decoder.module.js"):
             f"{_THREE_BASE}/examples/jsm/libs/meshopt_decoder.module.js",
+        # Issue #15: the chart library (`VEGA_VERSIONS`), under vendor/vega/,
+        # so an offline site draws its charts too and does not fall back to
+        # the table of numbers.
+        **{posixpath.join(VENDOR_DIR, "vega", f"{name}.min.js"):
+           f"https://cdn.jsdelivr.net/npm/{name}@{version}/build/{name}.min.js"
+           for name, version in VEGA_VERSIONS.items()},
     }
