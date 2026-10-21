@@ -676,3 +676,160 @@ class Planted:
         found = [r for r in result.rows if r.verdict.gate == gate_id]
         assert len(found) == 1, (gate_id, [r.verdict.gate for r in result.rows])
         return found[0]
+
+
+# --------------------------------------------------------------------------- #
+# the figure project (issue #15, design B.6)
+# --------------------------------------------------------------------------- #
+#: The figure project's model: one parameter ``x``, which the gate reads. ``{x}``
+#: is the stated value, so a test moves the design by rewriting this one line
+#: (:func:`set_figure_x`).
+_FIGURE_MODEL = '''\
+"""Planted by tests/_projects.figure_project: one parameter, read by demo.drop."""
+from dataclasses import dataclass
+
+
+@dataclass
+class Config:
+    x: float = {x}
+
+
+CONFIG = Config()
+
+
+def build(config=None):
+    c = config if config is not None else CONFIG
+    return {{"value": round(2.0 * c.x, 6)}}
+'''
+
+#: ``demo.drop``: a tier-0 evaluator with evidence, the stdlib stand-in for a
+#: solver that leaves fields behind. It writes ``<out>/demo/field.txt`` (the
+#: "solved field", which a picture would draw) and ``<out>/demo/summary.json``
+#: (what it measured, with the field's sha256, as a CFD gate's summary lists
+#: its fields), and cites the summary. Each value of ``x`` writes other bytes in
+#: both, so a run at another ``x`` is told apart by content alone.
+_FIGURE_GATE = '''\
+"""Planted by tests/_projects.figure_project: an evaluator that leaves evidence."""
+import hashlib
+import json
+
+from nopekit.gates import gate
+from nopekit.models import NegativeControl, Verdict
+
+
+@gate(id="demo.drop", claims=["D1"], settles="value",
+      negative_control=NegativeControl(fixture="selftest/bad.py:big", note="x past the limit"))
+def drop(ctx):
+    x = float(ctx.params["x"])
+    value = round(2.0 * x, 6)
+    body = ("field at x = %r\\n" % x).encode("utf-8")
+    with open(ctx.out_path("demo", "field.txt"), "wb") as fh:
+        fh.write(body)
+    summary = ctx.out_path("demo", "summary.json")
+    with open(summary, "w", encoding="utf-8", newline="\\n") as fh:
+        json.dump({"x": x, "value": value, "field_sha256": hashlib.sha256(body).hexdigest(),
+                   "u_ref": 1.0}, fh, sort_keys=True)
+        fh.write("\\n")
+    return Verdict(gate="demo.drop", passed=value <= 10.0, measured=value, limit=10.0,
+                   units="Pa", comparator="<=", evidence=[summary])
+'''
+
+_FIGURE_FIXTURES = '''\
+"""Planted by tests/_projects.figure_project: the known-bad control, the
+known-good design with x past the limit."""
+import copy
+import dataclasses
+import os
+
+from nopekit.modelio import load_path
+
+kg = load_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "known_good.py"))
+
+
+def big(ctx):
+    params = copy.deepcopy(kg.PARAMS)
+    params.update(x=50.0, value=100.0)
+    return dataclasses.replace(kg.context(ctx), params=params)
+'''
+
+#: The claim ``demo.drop`` covers, ``value <= 10 Pa``.
+FIGURE_CLAIM = {"statement": "The drop stays at or under 10 Pa", "kind": "measurable",
+                "acceptance": {"quantity": "value", "comparator": "<=", "limit": 10.0,
+                               "units": "Pa"}}
+
+
+#: The figure project's ignore files, as `nopekit init` writes them: the
+#: deny-list block in ``.nopekit/.gitignore`` and the bytecode block at the
+#: root, byte for byte as ``examples/bracket`` tracks them. Literals, never
+#: ``store.ensure_ignore_blocks`` (the module docstring's rule). Without them
+#: git ignores none of ``check``'s scratch, and invariant 8's question (is
+#: every path a command writes ignored?) has no answer to read.
+_FIGURE_IGNORES = {
+    ".nopekit/.gitignore": """\
+# nopekit:begin
+# Written by nopekit, which rewrites everything between these two markers.
+# Outputs, not sources: ledger.json is the generated index of the records,
+# ledger.legacy.json the ledger they migrated from, and the rest this checkout's
+# scratch and memory. verdicts/ is evidence and stays tracked.
+ledger.json
+ledger.legacy.json
+obs/
+cache/
+out/
+export/
+runs/
+*.tmp
+*.lock
+# nopekit:end
+""",
+    ".gitignore": """\
+# nopekit:begin
+# Written by nopekit: bytecode from importing model/, gates/ and selftest/,
+# the readiness report `nopekit report --write` renders, the packages
+# `nopekit export` writes, and the editor launch entry `nopekit init` writes
+# with this machine's paths. Outputs, never sources.
+__pycache__/
+*.py[cod]
+/REPORT.md
+/out/
+/.vscode/launch.json
+# nopekit:end
+"""}
+
+
+def figure_project(dest: str, *, x: float = 1.0) -> str:
+    """The figure project of issue #15's design (B.6), at ``x``; return its root.
+
+    A stdlib project whose one evaluator leaves evidence behind: ``demo.drop``
+    (tier 0) reads ``x``, writes ``<out>/demo/summary.json`` and
+    ``<out>/demo/field.txt``, cites the summary, and covers ``D1`` (``value <=
+    10``). At ``x = 1`` and ``x = 2`` it passes with other bytes in both files:
+    the A, B, A sequence (a design that moves and comes back, so a cache hit
+    serves A while ``.nopekit/out`` holds B's files) needs exactly that. Its
+    known-good control is ``x = 1``, its known-bad ``x = 50``. Its ignore files
+    are `init`'s, and it is a git repository from the start, so a test can ask
+    git what it ignores.
+    """
+    kg = {"x": 1.0, "value": 2.0}
+    root = plant_project(dest, {"model/m.py": _FIGURE_MODEL.format(x=repr(float(x))),
+                                "gates/demo.py": _FIGURE_GATE,
+                                "selftest/bad.py": _FIGURE_FIXTURES},
+                         claims={"D1": FIGURE_CLAIM}, known_good_params=kg)
+    for rel, text in _FIGURE_IGNORES.items():
+        with open(os.path.join(root, *rel.split("/")), "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write(text)
+    if shutil.which("git"):
+        _env.git(["init", "--quiet"], cwd=root)
+    return root
+
+
+def set_figure_x(root: str, x: float) -> None:
+    """The figure project's ``x``, rewritten in its one model line."""
+    path = os.path.join(root, "model", "m.py")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    lines = [line for line in text.splitlines() if line.startswith("    x: float = ")]
+    assert len(lines) == 1, lines
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text.replace(lines[0], f"    x: float = {float(x)!r}"))

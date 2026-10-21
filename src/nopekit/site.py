@@ -87,6 +87,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import fnmatch
+import hashlib
 import json
 import os
 import posixpath
@@ -1725,7 +1726,9 @@ def ensure_site_ignore(root: str) -> bool:
 
 def _evidence_plan(root: str, view: Any, resolution: Any, registry: Any) -> list:
     """`page.evidence_plan` with git's ignore rules: a path in the project that
-    git ignores and does not track is never published (`vcs.ignored`)."""
+    git ignores and does not track is never published (`vcs.ignored`); and
+    with the evidence manifests `check` wrote (`verdicts.evidence_manifest`),
+    so a file is copied only as the bytes its entry's run cited (issue #15)."""
     asked: dict[str, bool] = {}
 
     def ignored(relpath: str) -> bool:
@@ -1734,7 +1737,11 @@ def _evidence_plan(root: str, view: Any, resolution: Any, registry: Any) -> list
             asked[relpath] = bool(found) and relpath in found
         return asked[relpath]
 
-    return page_logic.evidence_plan(root, view, resolution, registry, ignored=ignored)
+    def manifest(gate_id: str, entry_name: str) -> Any:
+        return verdict_logic.evidence_manifest(root, gate_id, entry_name)
+
+    return page_logic.evidence_plan(root, view, resolution, registry, ignored=ignored,
+                                    manifest=manifest)
 
 
 def _kept_json(site: str, keep: Iterable[str]) -> list:
@@ -2126,7 +2133,10 @@ def build(
     judged = str(payload["meta"].get("resolution_digest") or "")
     plan = _evidence_plan(root, view, resolution, registry)
     for item in plan:
-        if item.reason:
+        if item.reason and item.action == "keep":
+            warnings.append(f"evidence {item.path} of {item.gate} is the copy an earlier "
+                            f"build made, not the file on this computer: {item.reason}")
+        elif item.reason:
             warnings.append(f"evidence {item.path} of {item.gate} is not on the page: "
                             f"{item.reason}")
     map_doc = page_logic.bake_map(view, lay, built, tokens, composed, projection=projection,
@@ -2155,6 +2165,16 @@ def build(
             target = os.path.join(site, *item.dest.split("/"))
             with open(item.source, "rb") as fh:
                 payload_bytes = fh.read()
+            if hashlib.sha256(payload_bytes).hexdigest() != item.sha256:
+                # Planned at the bytes the entry's run cited, read now as
+                # others: a run between the plan and the copy. The page links
+                # the copy an earlier build made, if any; nothing is written.
+                warnings.append(f"evidence {item.path} of {item.gate} moved while the page "
+                                f"was built, so it was not copied; build again")
+                if os.path.isfile(target):
+                    kept += 1
+                    keep_evidence.append(item.dest)
+                continue
             try:
                 with open(target, "rb") as fh:
                     same = fh.read() == payload_bytes

@@ -814,7 +814,8 @@ class Evidence(NamedTuple):
     the page's words when there is none; ``action`` ``copy``, ``keep`` or
     ``none``; ``reason`` why it is not on the page, in the build's words, for
     the build's warnings only (it reads this machine's disk, so it is never
-    baked)."""
+    baked); ``sha256`` the digest a ``copy`` was verified at, which the copy
+    checks again on the bytes it reads (``""`` for every other action)."""
 
     gate: str
     entry: str
@@ -826,6 +827,7 @@ class Evidence(NamedTuple):
     missing: str
     action: str
     reason: str = ""
+    sha256: str = ""
 
 
 def _component(text: str) -> str:
@@ -859,8 +861,30 @@ def _free_name(name: str, taken: set[str]) -> str:
     return shown
 
 
+#: Why a file on this computer is not copied as an entry's evidence, by
+#: content (issue #15): the build's warnings only, never baked.
+_ANOTHER_RUN = ("the file on this computer is from another run: `nopekit check --force "
+                "--only {gate}` solves it again")
+_NO_RECORDED_RUN = "no recorded run on this computer wrote this entry"
+
+
+def _sha256_of(path: str) -> tuple[str, int] | None:
+    """``(sha256, bytes)`` of the file at ``path``, or ``None``."""
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with open(path, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+                size += len(block)
+    except OSError:
+        return None
+    return digest.hexdigest(), size
+
+
 def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *,
-                  ignored: Callable[[str], bool] | None = None) -> list:
+                  ignored: Callable[[str], bool] | None = None,
+                  manifest: Callable[[str, str], Mapping | None] | None = None) -> list:
     """Every evidence path of every verdict whose row stands on a cache entry,
     planned: ``<out>/rest`` resolves under ``.nopekit/out/`` and must stay
     there, links followed; a bare relative path resolves under the root and
@@ -872,6 +896,19 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
     it came from, so a fresh clone (no ``.nopekit/out/``) keeps the copy a
     build made and links it; names that clash in one entry, ignoring case,
     gain ``-2``, ``-3``. Plans only: `site.build` copies.
+
+    Bound by content (issue #15): a file is planned ``copy`` only when its
+    sha256 is the one ``manifest(gate, entry)`` (``verdicts.evidence_manifest``)
+    holds for its path, the bytes the recorded run that wrote the entry cited.
+    A file with other bytes, or with no manifest for its entry, is ``keep``
+    where the entry-keyed copy is on the site already and ``none`` where it is
+    not, and the build says why. No ``manifest`` reader binds nothing, so
+    nothing is copied. What slipped through: the plan copied whatever
+    ``.nopekit/out`` held under the cited name, so a design that went A, B, A
+    (a cache hit serving A over B's files) published B's bytes as A's evidence,
+    over A's earlier copy. *Rejected:* checking the bytes in `site.build` only
+    (the plan baked an href to a copy the build then refused); a digest in the
+    tracked entry (see `verdicts._EVIDENCE_DIR`).
 
     The words baked beside a path that is not on the page depend only on the
     path (outside the project, or not on the page); why a file inside is not
@@ -891,6 +928,8 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
         row = rows.get(verdict.gate)
         entry = getattr(row, "entry", None)
         entry_name = getattr(entry, "name", "") if entry is not None else ""
+        bound = (manifest(verdict.gate, entry_name) if manifest is not None and entry_name
+                 else None)
         taken: set[str] = set()
         for path in verdict.evidence or ():
             text = str(path)
@@ -933,6 +972,7 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
             dest = posixpath.join(EVIDENCE_DIR, _component(verdict.gate),
                                   _component(entry_name), shown)
             on_site = os.path.join(root, "site", *dest.split("/"))
+            unbound = False
             if reason:
                 pass
             elif source is not None and os.path.isdir(source):
@@ -943,15 +983,28 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
                     reason = (f"it is {_size_words(size)}, over the "
                               f"{_size_words(EVIDENCE_MAX_BYTES)} cap")
                 else:
-                    plan.append(Evidence(verdict.gate, entry_name, text, name, source, dest,
-                                         dest, "", "copy"))
-                    continue
-            elif os.path.isfile(on_site):
-                plan.append(Evidence(verdict.gate, entry_name, text, name, None, dest, dest, "",
-                                     "keep"))
-                continue
+                    found = _sha256_of(source)
+                    want = bound.get(text) if isinstance(bound, Mapping) else None
+                    if (found is not None and isinstance(want, Mapping)
+                            and want.get("sha256") == found[0]):
+                        plan.append(Evidence(verdict.gate, entry_name, text, name, source,
+                                             dest, dest, "", "copy", "", found[0]))
+                        continue
+                    unbound = True
+                    reason = (_NO_RECORDED_RUN if bound is None
+                              else _ANOTHER_RUN.format(gate=verdict.gate))
             else:
+                unbound = True
                 reason = "it is not on this computer (run the check to write it)"
+            if unbound and os.path.isfile(on_site):
+                # The copy an earlier build made stays linked (a fresh clone, or
+                # a file on this computer that is not the entry's run's bytes):
+                # the file here never replaces it. ``reason`` says why it was
+                # not copied again, for the build's warnings.
+                plan.append(Evidence(verdict.gate, entry_name, text, name, None, dest, dest, "",
+                                     "keep", "" if source is None or not os.path.isfile(source)
+                                     else reason))
+                continue
             plan.append(Evidence(verdict.gate, entry_name, text, name, None, None, None,
                                  said["not_copied"], "none", reason))
     return plan

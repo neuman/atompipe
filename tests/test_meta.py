@@ -146,7 +146,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_round.RoundsCommitOnlyAsAListedPerson",
         "test_record_commands.InitStartsARepository",
         # Architecture phase 3b: a trace file is written once, whole.
-        "test_derivation.TheTraceIsWrittenOnce"],
+        "test_derivation.TheTraceIsWrittenOnce",
+        # Issue #15: the evidence manifest `check` writes is scratch git ignores,
+        # and `site build` writes nothing outside `site/` but what git ignores.
+        "test_figures.TheEvidenceManifestIsScratch"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -237,7 +240,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # reading order or an age.
          "test_site_truth.TheBrowserComputesNoTruth",
          # Architecture phase 3b: the map's feeds, stops and amber are the trace's.
-         "test_derivation.TheMapDrawsWhatTheTraceObserved"],
+         "test_derivation.TheMapDrawsWhatTheTraceObserved",
+         # Issue #15: evidence on the page is the bytes its entry's run cited,
+         # bound by content, never another run's under the same name.
+         "test_figures.EvidenceIsBoundByContent"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",

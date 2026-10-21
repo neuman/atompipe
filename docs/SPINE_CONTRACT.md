@@ -37,6 +37,7 @@ is `cli.py`'s.
 | a crash or a self-skip, remembered — never evidence | `.nopekit/cache/last_outcomes.json` | ignored | `check`, `gate selftest` |
 | time savers: file digests, re-verified fixtures | `.nopekit/cache/digests.json`, `controls.json` | ignored | `check`; losing either costs a re-hash or a fixture run, never a verdict |
 | gate scratch and evidence | `.nopekit/out/` (a control's: `out/controls/<gate id>/`) | ignored | gates |
+| which bytes a recorded run cited as its evidence, per entry it wrote (issue #15) — never a verdict | `.nopekit/cache/evidence/<gate id>/<rho16>-<out8>.json` | ignored | a recorded `check` (and `export`'s re-runs), beside each entry it writes; never `--no-record`, a control or a mutation |
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
 | a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
@@ -1535,6 +1536,14 @@ def remembered(root) -> dict      # {key: {input_rho: {"input_rho", "kind", "ver
 def forget(root, key, input_rhos) -> bool    # only the records at those rhos
 def record_obs(root, gate_id, *, entry, when, duration_s, cpu_s, control=False) -> None
 def read_obs(root, gate_id, *, control=False) -> list[dict]   # [{"entry", "when", "duration_s", "cpu_s"}]
+# issue #15: which bytes a recorded run cited (untracked scratch)
+EVIDENCE_MANIFEST_SCHEMA = 1
+def write_evidence_manifest(root, gate_id, entry_name, evidence, anchors) -> str
+                                             # the path; {portable path: {sha256, bytes}}
+                                             #   of each regular file the run cited
+def evidence_manifest(root, gate_id, entry_name) -> dict | None
+                                             # {portable path: {sha256, bytes}}, or None:
+                                             #   no recorded run here, junk, another gate/entry
 def last_read_sets(root) -> dict[str, set[tuple]]    # {gate: {param path}}: Param.gates and why, never rho
 ```
 **The code digest.** `code_digest(spec, fn)` is sha256 of canonical JSON of the
@@ -1742,6 +1751,23 @@ crash superseded.
 and no latency reader filtered them (S-31). A file naming another gate or kind — gate
 `x`'s control and a gate called `x.control` share one name — reads as no runs and is
 replaced on the next write: never a mixed series.
+
+**The evidence manifest** — `.nopekit/cache/evidence/<gate>/<rho16>-<out8>.json`
+(untracked, issue #15): `{"schema": 1, "gate", "entry", "files": {portable path:
+{"sha256", "bytes"}}}`, written atomically by `_sweep_one`'s step 4 right after
+`write_entry`, only when the sweep records and the outcome is measured. The keys are
+the entry's own `evidence` spellings (`Anchors.portable_path`); a directory, a missing
+file or a path under no anchor is left out. A later recorded run of the same entry
+name (same rho, same outcome tuple) replaces it, since its files are as much that
+entry's evidence. A cache hit, `--no-record`, an error, a skip, a control and a
+mutation write none. `evidence_manifest` reads it back strictly: a file that does not
+parse, has other keys, or names another gate or entry is `None`. The site copies a
+file as an entry's evidence only when its bytes are the manifest's
+(`page.evidence_plan`). *Rejected:* the digests in the tracked entry (`out8` hashes
+the outcome only and the body is kept-first, so a timestamped log would warn on every
+forced run); obs rows (`read_obs` refuses other keys, obs is never truth, and it
+keeps 20 rows); writing it from `cli.check` after the sweep (a later gate's write
+would land in an earlier gate's manifest).
 
 **Part three: freshness, admission state, the one resolver.** None of it runs a gate
 or a fixture; all of it reads the cache and what is on disk now.
@@ -3645,16 +3671,21 @@ class Layout(NamedTuple): boards; zones; stations; board_of; zone_of; station_of
                           station_depth; traced; ties; zone_rank; station_rank;
                           requirement_rank; idle; crossings; trace_key
 class Evidence(NamedTuple): gate; entry; path; name; source; dest; href; missing; action;
-                            reason   # why it is not on the page: the build's warning, never baked
+                            reason;  # why it is not on the page: the build's warning, never baked
+                            sha256   # a `copy`'s verified digest; the build checks it again
 def token_of(composed) -> str                # STATUS_KEY, or errored
 def boards_of(view) -> tuple                 # board records, then the generated `other`
 def layout(view, built, *, projection, params=(), registry=None, resolution=None) -> Layout
 def value_text(measured, units, limit_text, margin) -> str   # "0.6997 mm against a limit of
                                              #   0.5 mm, 40% past the limit"
 def words_block() -> dict                    # page.json's words
-def evidence_plan(root, view, resolution, registry=None, *, ignored=None) -> list
-                                             # [Evidence]; plans only; `ignored(relpath)`
-                                             #   is git's ignore rule (site build's)
+def evidence_plan(root, view, resolution, registry=None, *, ignored=None,
+                  manifest=None) -> list     # [Evidence]; plans only; `ignored(relpath)`
+                                             #   is git's ignore rule (site build's);
+                                             #   `manifest(gate, entry)` the bytes the
+                                             #   entry's run cited (issue #15): `copy` only
+                                             #   at those bytes, else `keep` an earlier
+                                             #   copy or `none`; no reader copies nothing
 def evidence_assets(plan) -> dict            # {gate: [href or "", ...]} for state.json
 def settle(claim, composed, *, milestone=None, cover=(), tiers=None) -> dict  # {text, commands}
 def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of prose is
@@ -5173,6 +5204,13 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
   never scanned: the floor sits under the prose so a reader sees the data beside it.
 - **Evidence over 2 MiB is not copied to the page**, and a viewgen that writes a clock
   into its asset breaks the page's byte stability: every build then rewrites it.
+- **A forged evidence manifest is the forged-cache class (issue #15).** The manifest is
+  scratch under `.nopekit/cache/`, a plain sha256 per file: a process that writes one
+  naming the bytes now in `.nopekit/out/` makes the build copy them as that entry's
+  evidence. `export` re-runs the gates a spend requires, which rewrites the manifest
+  from the re-run; nothing re-checks a copy an earlier build published. A copy made
+  before the manifest existed, or on another computer, is kept as it is: the build
+  binds what it copies, never what it keeps.
 - **The watcher polls size and mtime over a fixed set of directories**
   (`site.WATCH_DIRS`): an edit outside them, or one that keeps both, is not seen until
   the next build.

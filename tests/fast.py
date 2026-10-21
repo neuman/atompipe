@@ -13,7 +13,13 @@ least one violation test of every invariant runs every iteration, and a break
 that only a test in ``LEFT_FOR_THE_GATE`` sees is caught by the escalation rule
 below or by the full suite, not here.
 
-The budget is 90 s as ONE process on an otherwise idle machine. The merge of phase 3b
+The budget is 90 s as ONE process on an otherwise idle machine. Issue #15's P1.1 (the
+evidence bound by content) added two rows (~3 s: the A, B, A sequence and one check)
+and left its other seven to the gate. Measured on 2026-10-21 as two interleaved pairs
+against d29421e, both as exported trees, on a machine two other sessions were
+loading (load 1.1-2.6): 173.6 s and 179.5 s wall for its 701 tests against 190.2 s
+and 164.3 s for d29421e's 699, flat within that noise and over the line as its base
+is; no idle run was had. The merge of phase 3b
 into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
@@ -1040,6 +1046,12 @@ FAST: list[str] = [
     "test_derivation.TheOrderIsObserved.test_a_move_the_rounding_hides_does_not_reverse_the_order",
     "test_derivation.TheMapSaysWhatTheTraceDidNotSee",
     "test_records.NoCommandWritesARecord.test_a_rewritten_or_unsealed_trace_file_is_named",
+    # Issue #15, P1.1 (the evidence bound by content): the A, B, A sequence on
+    # the figure project through the CLI (~2.5 s: three checks, `site init` and
+    # one build, each a cold process), the row that saw the defect, and the
+    # manifest's place under git's ignore rules (~0.6 s, one check).
+    "test_figures.EvidenceIsBoundByContent.test_a_cache_hit_never_publishes_another_runs_bytes",
+    "test_figures.TheEvidenceManifestIsScratch.test_check_writes_the_manifest_only_where_git_ignores",
 ]
 
 
@@ -1047,6 +1059,24 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # Issue #15, P1.1: the rest of the evidence binding, each a figure project
+    # driven through two to nine cold CLI processes (~1-4 s each, ~12 s in all).
+    # The A, B, A row in FAST runs the same plan through the same build, with
+    # the manifest written, missing and mismatched; these hold the edges: a
+    # `--no-record` run, a crash's file over the served entry, a clone with no
+    # scratch, a copy made before the manifest, `--no-record` and the controls
+    # writing none, the build's own writes, and an earlier copy that another
+    # run's bytes never overwrite (~4 s; the FAST row's plan and build again,
+    # with a copy already on the site). An iteration touching
+    # `page.evidence_plan`, `site._evidence_plan` or the manifest in
+    # `verdicts.py` runs test_figures and test_map whole.
+    "test_figures.EvidenceIsBoundByContent.test_an_earlier_copy_is_never_overwritten_by_another_runs_bytes",
+    "test_figures.EvidenceIsBoundByContent.test_a_no_record_run_binds_nothing",
+    "test_figures.EvidenceIsBoundByContent.test_an_errored_runs_evidence_never_lands_under_the_stale_entry",
+    "test_figures.EvidenceIsBoundByContent.test_a_fresh_clone_keeps_the_committed_copy",
+    "test_figures.EvidenceIsBoundByContent.test_a_copy_made_before_the_manifest_is_kept",
+    "test_figures.TheEvidenceManifestIsScratch.test_no_record_and_controls_write_none",
+    "test_figures.TheEvidenceManifestIsScratch.test_site_build_writes_only_site_and_ignored_scratch",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git
