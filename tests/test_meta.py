@@ -248,7 +248,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # links it, and a renderer that is missing or crashes moves no status
          # and keeps the picture its last build drew.
          "test_figures.NothingTheBuildDeletesIsLinked",
-         "test_figures.AMissingRendererMovesNoStatus"],
+         "test_figures.AMissingRendererMovesNoStatus",
+         # Issue #15, P1.3: a bound figure is drawn only from its entry's
+         # verified evidence, published under that entry, and shown only at
+         # the bytes its sidecar names, under an entry the cache holds.
+         "test_figures.AFigureIsItsEntrysEvidence"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",

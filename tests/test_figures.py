@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import unittest
 from unittest import mock
 
@@ -319,14 +320,21 @@ class TheEvidenceManifestIsScratch(_env.EnvCase):
         self.assertEqual([os.path.basename(p) for p in found], [a + ".json"])
 
     def test_site_build_writes_only_site_and_ignored_scratch(self):
+        """And a bound viewgen's scratch (`.nopekit/out/figures/`) and its live
+        3D file (`site/assets/live/`) are both where git ignores them."""
+        draw = Draw(self)
         root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
         check_at(self, root, 1.0)
         run(self, root, "site", "init")
+        draw_settings(root, glb="live")
         before = tree(root, but="site")
-        build(self, root)
+        build(self, root, env=draw.env)
         after = tree(root, but="site")
         moved = sorted(p for p in set(before) | set(after) if before.get(p) != after.get(p))
-        for rel in moved:
+        live = ["site/" + p for p in figure_files(root) if p.startswith("assets/live/")]
+        self.assertTrue([p for p in moved if p.startswith(".nopekit/out/figures/")], moved)
+        self.assertEqual(len(live), 1, figure_files(root))
+        for rel in moved + live:
             with self.subTest(rel):
                 self.assertEqual(_env.git(["check-ignore", "-q", rel], cwd=root).returncode, 0,
                                  f"site build wrote {rel}, which git does not ignore")
@@ -500,6 +508,59 @@ class AMissingRendererMovesNoStatus(_env.EnvCase):
     and deletes no picture the page showed: the view keeps the row and the file
     its last build had, and the build says so."""
 
+    def test_statuses_equal_with_absent_crashing_hanging_oversize_renderer(self):
+        """A still drawn, then its scene edited (so no memo) and built with the
+        tool absent, crashing, hanging past its timeout and writing 2.1 MiB:
+        every build exits 0, and the verdict rows, the claims, the resolution
+        digest, `page.json` and `map.json` are the same five times; the still
+        drawn first stays linked, and the stand-in ran in each leg it was
+        on PATH for."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        first = resolution_view(root)
+        state = baked(root, "state.json")
+        legs = (("absent", None), ("crash", "crash"), ("hang", "hang"),
+                ("oversize", "oversize"))
+        for i, (label, mode) in enumerate(legs):
+            with self.subTest(label):
+                edit_scene(root, f"scene {i + 2}")
+                draw_settings(root, **({"mode": mode, "timeout_s": 1} if mode else {}))
+                calls = len(draw.calls())
+                summary = build_in(self, root, draw.env if mode else no_tool_env())
+                self.assertEqual(len(draw.calls()), calls + (1 if mode else 0))
+                self.assertEqual(resolution_view(root), first)
+                self.assertEqual(baked(root, "state.json"), state)
+                self.assertEqual(dangling(root), [])
+                self.assertTrue(any(PIC in w and "older scene" in w
+                                    for w in summary["warnings"]), summary["warnings"])
+
+    def test_a_committed_render_survives_a_build_without_the_tool(self):
+        """Drawn, then built without the tool: at the same recipe (the memo),
+        after a scene edit (kept, and said), and as a fresh clone (no
+        `.nopekit/out`, no `.nopekit/cache`): the still and its row stay, and
+        the page is the same bytes."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        files, state, page = figure_files(root), baked(root, "state.json"), page_bytes(root)
+        for label in ("memo", "scene", "clone"):
+            with self.subTest(label):
+                if label == "scene":
+                    edit_scene(root, "scene 2")
+                if label == "clone":
+                    for scratch in ("out", "cache"):
+                        shutil.rmtree(os.path.join(root, ".nopekit", scratch))
+                summary = build_in(self, root, no_tool_env())
+                self.assertEqual(figure_files(root), files)
+                self.assertEqual(baked(root, "state.json"), state)
+                self.assertEqual(page_bytes(root), page)
+                self.assertEqual(any(PIC in w and "older scene" in w
+                                     for w in summary["warnings"]), label != "memo",
+                                 summary["warnings"])
+
     def test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset(self):
         """Drawn, then built with its tool gone: the row, the picture and the
         split payload stay as they were, and the build says "kept from the last
@@ -540,6 +601,372 @@ class AMissingRendererMovesNoStatus(_env.EnvCase):
                 self.assertTrue(any(STILL in w and "kept from the last build" in w
                                     for w in summary["warnings"]), summary["warnings"])
                 self.assertEqual(baked(root, "state.json"), state)
+
+
+# --------------------------------------------------------------------------- #
+# Bound viewgens: a figure drawn from one verdict entry (issue #15, P1.3)
+# --------------------------------------------------------------------------- #
+PIC, CHART = "demo.pic", "demo.chart"
+DRAW_TOOL = "nopekit-test-draw"
+STANDIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_draw_standin.py")
+
+
+class Draw:
+    """The stand-in renderer (`tests/_draw_standin.py`) installed as
+    ``nopekit-test-draw`` in a temporary folder: ``env`` puts it on PATH and
+    names its call log; ``calls()`` reads the log."""
+
+    def __init__(self, case: _env.EnvCase) -> None:
+        tools = case.tmp()
+        self.log = os.path.join(tools, "draw.log")
+        tool = os.path.join(tools, DRAW_TOOL)
+        with open(tool, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(f'#!/bin/sh\nexec "{sys.executable}" "{STANDIN}" "$@"\n')
+        os.chmod(tool, 0o755)
+        self.env = {"PATH": tools + os.pathsep + os.environ.get("PATH", ""),
+                    "NOPEKIT_TEST_DRAW_LOG": self.log}
+
+    def calls(self) -> list[dict]:
+        try:
+            with open(self.log, encoding="utf-8") as fh:
+                return [json.loads(line) for line in fh if line.strip()]
+        except OSError:
+            return []
+
+
+def draw_settings(root: str, **cfg) -> None:
+    """``views/draw.cfg``: what the figure project's bound viewgens do."""
+    with open(os.path.join(root, "views", "draw.cfg"), "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh)
+
+
+def edit_scene(root: str, text: str) -> None:
+    """A new recipe for the still (``views/_demo_scene.txt``): no memo."""
+    with open(os.path.join(root, "views", "_demo_scene.txt"), "w", encoding="utf-8") as fh:
+        fh.write(text + "\n")
+
+
+def build_in(case: _env.EnvCase, root: str, env: dict | None = None) -> dict:
+    """``site build --json`` in this process (each cold process costs ~1 s on
+    the fast tier), with ``env``'s variables set and nothing else of this
+    machine's PATH changed; the summary."""
+    from test_site_truth import _fresh_registry, _main
+    _fresh_registry(case)
+    if not os.path.isdir(os.path.join(root, "site")):
+        run(case, root, "site", "init")
+    with mock.patch.dict(os.environ, dict(env or {})):
+        if env is None:
+            os.environ.pop("NOPEKIT_TEST_DRAW_LOG", None)
+        code, said = _main("site", "build", "-C", root, "--json")
+    case.assertEqual(code, 0, said[-3000:])
+    return json.loads(said[said.index("{"):])
+
+
+def no_tool_env() -> dict:
+    """PATH without any folder that holds the stand-in."""
+    keep = [p for p in os.environ.get("PATH", "").split(os.pathsep)
+            if p and not os.path.exists(os.path.join(p, DRAW_TOOL))]
+    return {"PATH": os.pathsep.join(keep)}
+
+
+def figure_files(root: str) -> dict[str, bytes]:
+    """Every file under ``site/assets/figures`` and ``assets/live``, by site path."""
+    out = {}
+    for top in ("figures", "live"):
+        base = os.path.join(root, "site", "assets", top)
+        for directory, _dirs, names in os.walk(base):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, "rb") as fh:
+                    out[os.path.relpath(path, os.path.join(root, "site"))
+                        .replace(os.sep, "/")] = fh.read()
+    return out
+
+
+def binding(root: str, view_id: str) -> dict | None:
+    row = view_row(root, view_id)
+    return None if row is None else row.get("binding")
+
+
+def sidecar_of(root: str, entry: str, view_id: str) -> dict:
+    path = os.path.join(root, "site", "assets", "figures", GATE, entry, view_id + ".view.json")
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+class AFigureIsItsEntrysEvidence(_env.EnvCase):
+    """(Invariant 14) A bound figure is drawn only from its entry's verified
+    evidence, published only under that entry's folder, and shown only while
+    each file is the bytes its sidecar names, under an entry the cache holds.
+    What slipped through before this: a picture was whatever a viewgen wrote,
+    under one name per view, so nothing said which result it was of."""
+
+    def test_a_render_from_another_runs_inputs_is_never_drawn(self):
+        """Check A, check B, draw (B's picture), then A from the cache with B's
+        files in `.nopekit/out`: the tool is never called for A, nothing is
+        published under A, and the page shows B's picture as an older one."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        b = check_at(self, root, 2.0)
+        build_in(self, root, draw.env)
+        self.assertEqual([c["entry"] for c in draw.calls()], [b])
+        self.assertEqual(check_at(self, root, 1.0), a)
+        summary = build_in(self, root, draw.env)
+        self.assertEqual([c["entry"] for c in draw.calls()], [b], "the tool drew A from B's files")
+        self.assertFalse([p for p in figure_files(root) if f"/{a}/" in p],
+                         "a figure was published under A")
+        for view_id in (PIC, CHART):
+            with self.subTest(view_id):
+                self.assertEqual({k: binding(root, view_id)[k] for k in ("entry", "currency")},
+                                 {"entry": b, "currency": "older"})
+        self.assertTrue(any(PIC in w and "from another run" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        self.assertEqual(dangling(root), [])
+
+    def test_a_forced_run_draws_its_own_entry_again(self):
+        """After the A, B, A sequence, `check --force` solves A again: A is
+        drawn from its own files and read current, and B's folder goes."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        b = check_at(self, root, 2.0)
+        build_in(self, root, draw.env)
+        check_at(self, root, 1.0)
+        run(self, root, "check", "--force", "--only", GATE)
+        build_in(self, root, draw.env)
+        self.assertEqual([c["entry"] for c in draw.calls()], [b, a])
+        self.assertEqual(binding(root, PIC)["currency"], "current")
+        self.assertEqual(binding(root, PIC)["entry"], a)
+        self.assertFalse([p for p in figure_files(root) if f"/{b}/" in p])
+
+    def test_inputs_that_move_during_the_render_are_discarded(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, mode="move-inputs")
+        summary = build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1, "the stand-in did not run")
+        self.assertIsNone(view_row(root, PIC))
+        self.assertFalse([p for p in figure_files(root) if PIC in p])
+        self.assertTrue(any(PIC in w and "the inputs moved while the picture was drawn" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(binding(root, CHART)["currency"], "current")
+
+    def test_every_figure_path_names_its_entry(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, glb="live")
+        build_in(self, root, draw.env)
+        found = figure_files(root)
+        self.assertEqual({p.split("/")[1] for p in found}, {"figures", "live"})
+        for rel in found:
+            with self.subTest(rel):
+                _assets, _top, gate, entry, name = rel.split("/")
+                self.assertEqual((gate, entry), (GATE, a))
+                self.assertIn(entry, entries(root))
+                self.assertTrue(name.startswith((PIC + ".", CHART + ".")), name)
+        for view_id in (PIC, CHART):
+            row = view_row(root, view_id)
+            for key in ("src", "data_url"):
+                if row.get(key):
+                    self.assertTrue(row[key].startswith(f"assets/figures/{GATE}/{a}/"), row)
+            side = sidecar_of(root, a, view_id)
+            self.assertEqual((side["gate"], side["entry"], side["view"]), (GATE, a, view_id))
+
+    def test_a_render_naming_an_entry_the_cache_lacks_is_never_shown(self):
+        """A folder copied under an entry the cache does not hold, its sidecars
+        rewritten to name it: never shown, never linked, and named."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        fake = "f" * 16 + "-" + "e" * 8
+        base = os.path.join(root, "site", "assets", "figures", GATE)
+        shutil.copytree(os.path.join(base, a), os.path.join(base, fake))
+        for view_id in (PIC, CHART):
+            path = os.path.join(base, fake, view_id + ".view.json")
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({**doc, "entry": fake}, fh)
+        check_at(self, root, 2.0)
+        summary = build_in(self, root, no_tool_env())
+        self.assertEqual((binding(root, PIC)["entry"], binding(root, PIC)["currency"]),
+                         (a, "older"))
+        self.assertTrue(any(fake in w and "holds no entry" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        shutil.rmtree(os.path.join(base, a))
+        build_in(self, root, no_tool_env())
+        self.assertIsNone(view_row(root, PIC))
+        self.assertFalse([rel for name in ("state.json", "map.json", "page.json")
+                          for rel in links(baked(root, name)) if fake in rel])
+        self.assertEqual(dangling(root), [])
+
+    def test_a_swapped_file_is_never_shown(self):
+        """The still replaced under its own name: not shown (its bytes are not
+        the sidecar's), and drawn again where the tool is."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        src = view_row(root, PIC)["src"]
+        with open(os.path.join(root, "site", *src.split("/")), "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n another picture")
+        summary = build_in(self, root, no_tool_env())
+        self.assertIsNone(view_row(root, PIC))
+        self.assertTrue(any("not the bytes the sidecar names" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        build_in(self, root, draw.env)
+        self.assertEqual((binding(root, PIC)["entry"], binding(root, PIC)["currency"]),
+                         (a, "current"))
+        self.assertEqual(len(draw.calls()), 2)
+
+    def test_a_file_over_two_mib_is_never_written_or_linked(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, mode="oversize")
+        summary = build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1, "the stand-in did not run")
+        self.assertIsNone(view_row(root, PIC))
+        self.assertTrue(any(PIC in w and "2 MiB" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        for directory, _dirs, names in os.walk(root):
+            for name in names:
+                path = os.path.join(directory, name)
+                if ".git" not in path.split(os.sep):
+                    self.assertLessEqual(os.path.getsize(path), 2 * 1024 * 1024, path)
+        # A file over the cap placed by hand, its sidecar resealed to match.
+        draw_settings(root)
+        build_in(self, root, draw.env)
+        side = sidecar_of(root, a, PIC)
+        big = b"\x89PNG\r\n\x1a\n" + b"\0" * (2 * 1024 * 1024 + 1)
+        with open(os.path.join(root, "site", "assets", "figures", GATE, a,
+                               side["files"]["image"]["name"]), "wb") as fh:
+            fh.write(big)
+        side["files"]["image"].update(sha256=hashlib.sha256(big).hexdigest(), bytes=len(big))
+        with open(os.path.join(root, "site", "assets", "figures", GATE, a, PIC + ".view.json"),
+                  "w", encoding="utf-8") as fh:
+            json.dump(side, fh)
+        summary = build_in(self, root, no_tool_env())
+        self.assertIsNone(view_row(root, PIC))
+        self.assertTrue(any("over the" in w and PIC in w for w in summary["warnings"]),
+                        summary["warnings"])
+
+
+# --------------------------------------------------------------------------- #
+def resolution_view(root: str) -> tuple:
+    """What a renderer may never move: the verdict rows, the claims and the
+    resolution digest of ``state.json``, and ``map.json`` and ``page.json``
+    whole."""
+    state = baked(root, "state.json")
+    return (state["verdicts"], state["claims"], state["meta"]["resolution_digest"],
+            page_bytes(root), baked(root, "map.json"))
+
+
+class ANoOpRebuildDrawsNothing(_env.EnvCase):
+    """A build over a figure already drawn calls no renderer and writes no byte,
+    and the watcher wakes on a run that solves the served entry again."""
+
+    def test_a_second_build_writes_nothing_and_calls_nothing(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1)
+        before = _snapshot_site(root)
+        summary = build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1, "the memo called the tool again")
+        self.assertEqual(summary["wrote"], [])
+        self.assertEqual(_snapshot_site(root), before)
+        self.assertEqual({n["view"]: n["status"] for n in summary["viewgens"]
+                          if n["view"] in (PIC, CHART)}, {PIC: "memo", CHART: "memo"})
+
+    def test_the_watcher_wakes_on_a_run_that_solves_the_entry_again(self):
+        from nopekit import site
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"), figures=False)
+        a = check_at(self, root, 1.0)
+        before = site.watch_snapshot(root)
+        rel = f".nopekit/cache/evidence/{GATE}/{a}.json"
+        self.assertIn(rel, before)
+        run(self, root, "check", "--force", "--only", GATE)
+        self.assertNotEqual(site.watch_snapshot(root).get(rel), before[rel])
+
+
+def _snapshot_site(root: str) -> dict:
+    """Every file under ``site/`` but the ignored clock file: bytes and mtime."""
+    found = {}
+    base = os.path.join(root, "site")
+    for directory, _dirs, names in os.walk(base):
+        for name in names:
+            path = os.path.join(directory, name)
+            rel = os.path.relpath(path, base).replace(os.sep, "/")
+            if rel == "data/build.json":
+                continue
+            with open(path, "rb") as fh:
+                found[rel] = (fh.read(), os.stat(path).st_mtime_ns)
+    return found
+
+
+class OnePictureSetPerGate(_env.EnvCase):
+    """One picture set per (view, served entry): an older folder is kept only
+    while the served entry has none, and a GLB is committed only for an entry
+    an export re-ran; otherwise it is live, ignored and named in build.json."""
+
+    def test_an_older_folder_is_removed_once_the_served_one_is_drawn(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        b = check_at(self, root, 2.0)
+        build_in(self, root, no_tool_env())
+        self.assertEqual((binding(root, PIC)["entry"], binding(root, PIC)["currency"]),
+                         (a, "older"))
+        self.assertEqual((binding(root, CHART)["entry"], binding(root, CHART)["currency"]),
+                         (b, "current"))
+        self.assertTrue([p for p in figure_files(root) if f"/{a}/{PIC}." in p])
+        self.assertFalse([p for p in figure_files(root) if f"/{a}/{CHART}." in p],
+                         "the chart's older folder outlived the served one's picture")
+        build_in(self, root, draw.env)
+        self.assertEqual(binding(root, PIC)["entry"], b)
+        self.assertEqual({p.split("/")[3] for p in figure_files(root)}, {b})
+
+    def test_a_glb_is_committed_only_for_an_export_entry(self):
+        from nopekit import store
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, glb="asset")
+        build_in(self, root, draw.env)
+        live = [p for p in figure_files(root) if p.startswith("assets/live/")]
+        self.assertEqual(len(live), 1, figure_files(root))
+        self.assertTrue(live[0].startswith(f"assets/live/{GATE}/{a}/{PIC}.")
+                        and live[0].endswith(".glb"))
+        self.assertFalse([p for p in figure_files(root)
+                          if p.startswith("assets/figures/") and p.endswith(".glb")])
+        self.assertEqual(_env.git(["check-ignore", "-q", "site/" + live[0]], cwd=root)
+                         .returncode, 0, "the live GLB is not ignored")
+        with open(os.path.join(root, "site", "data", "build.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["live_figures"], {f"{GATE}/{a}/{PIC}": live[0]})
+        self.assertNotIn("field_src", view_row(root, PIC))
+        self.assertNotIn(live[0], json.dumps([baked(root, n) for n in
+                                              ("state.json", "map.json", "page.json")]))
+        # An export re-ran A: the next build commits the GLB it drew, and
+        # draws nothing.
+        rho16, out8 = a.split("-")
+        store.append_sealed(root, "exports", "m", "exports",
+                            {"milestone": "m", "reran": [{"gate": GATE, "rho": rho16,
+                                                          "out8": out8}]})
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1)
+        committed = [p for p in figure_files(root)
+                     if p.startswith(f"assets/figures/{GATE}/{a}/") and p.endswith(".glb")]
+        self.assertEqual(len(committed), 1)
+        self.assertEqual(view_row(root, PIC)["field_src"], committed[0])
+        self.assertFalse([p for p in figure_files(root) if p.startswith("assets/live/")])
+        self.assertFalse(sidecar_of(root, a, PIC)["files"]["field"]["live"])
 
 
 if __name__ == "__main__":

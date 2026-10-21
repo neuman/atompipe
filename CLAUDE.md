@@ -456,7 +456,7 @@ named.)
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
 | 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus` |
 | 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
-| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved`, `test_figures.EvidenceIsBoundByContent`, `test_figures.NothingTheBuildDeletesIsLinked`, `test_figures.AMissingRendererMovesNoStatus` |
+| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved`, `test_figures.EvidenceIsBoundByContent`, `test_figures.NothingTheBuildDeletesIsLinked`, `test_figures.AMissingRendererMovesNoStatus`, `test_figures.AFigureIsItsEntrysEvidence` |
 | 15 | `test_mutation.MutationIsSealed`, `test_derivation.TheTraceBuildsInACopy`, `test_derivation.AnAmberRunWritesNothing` |
 | 16 | `test_derivation.UntracedIsNeverIndependent`, `test_derivation.APartialTraceIsNeverWritten`, `test_derivation.AmberOnlyWhileCurrent` |
 
@@ -522,8 +522,10 @@ Each fact has one home; everything else that shows it is an output of that home.
   package `export` wrote),
   `.nopekit/cache/trace/` (a trace's resumable scratch), `.nopekit/out/trace.log`
   (a background trace's log), `.nopekit/out/serve.json`, `serve.lock` and `serve.log`
-  (a detached live server's address, the lock it holds for its life, and its log) and
-  `site/data/build.json` (the page's build time and each result's age). The index
+  (a detached live server's address, the lock it holds for its life, and its log),
+  `site/data/build.json` (the page's build time, each result's age and the live 3D
+  files it names), `site/assets/live/` (a bound figure's 3D file for a result no
+  export re-ran) and `.nopekit/out/figures/` (a bound viewgen's scratch). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
 - **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at
@@ -561,6 +563,7 @@ layout in full, with each writer.
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |
 | `tests/_projects.py` | test projects built once: a bracket copy (the legacy bracket by default, the committed one with `migrated=True`), and a pack's baseline wrapped as a project |
+| `tests/_draw_standin.py` | a stand-in renderer for bound figures: installed as `nopekit-test-draw` on a temporary PATH, it writes committed fixture bytes (a PNG Pillow made, a GLB trimesh made) and logs each call; it plants a crash, a hang, an oversize file and inputs moved mid-draw |
 | `tests/bracket_legacy/` | a fixture: the bracket's `.nopekit/` as it stood before its 1.3 migration (ledger, run history, ignore file), which `_projects.bracket_copy` puts back around today's sources. Never edited to make a test pass |
 | `tests/_transcript.py` | Phase 1's target transcript as data: replayed on a fresh clone by `test_fresh_clone.py`, its lines held to their shapes by `test_shapes.py` |
 | `tests/oracle/` | scripts, not tests: CI's bracket failure signature (`bracket_signature.py`) and the R-8 differential oracle run at phase review (`r8_statuses.py`) |

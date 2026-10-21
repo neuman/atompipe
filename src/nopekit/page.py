@@ -37,6 +37,7 @@ import json
 import math
 import os
 import posixpath
+import re
 import shlex
 from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
@@ -895,6 +896,40 @@ def _sha256_of(path: str) -> tuple[str, int] | None:
     return digest.hexdigest(), size
 
 
+def evidence_source(root: str, text: str, *,
+                    ignored: Callable[[str], bool] | None = None
+                    ) -> tuple[str | None, bool, str]:
+    """``(source, outside, reason)`` for one evidence path as a verdict names
+    it (`evidence_plan`'s rule, shared with a bound viewgen's entry,
+    `site.BoundEntry`): ``<out>/rest`` under ``.nopekit/out/``, links
+    followed and kept inside; a bare relative path under the root, no hidden
+    part, not ignored by git (``ignored``); ``outside`` for ``<out:controls>/``,
+    ``<tmp>/``, ``~/``, ``<pack:…>/``, an absolute path and a ``..`` part.
+    ``source`` is None when the path is outside or refused (``reason``)."""
+    out_root = store.out_dir(root)
+    if text.startswith("<out>/"):
+        parts = text[len("<out>/"):].replace("\\", "/").split("/")
+        if ".." in parts or not any(parts):
+            return None, True, ""
+        candidate = os.path.join(out_root, *[p for p in parts if p])
+        if os.path.lexists(candidate) and not _inside(candidate, out_root):
+            return None, False, "it leaves .nopekit/out/ through a link"
+        return candidate, False, ""
+    if text.startswith(("<", "~")) or os.path.isabs(text):
+        return None, True, ""
+    parts = [p for p in text.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or ".." in parts:
+        return None, True, ""
+    if any(p.startswith(".") for p in parts):
+        return None, False, "a hidden file is never published"
+    if ignored is not None and ignored("/".join(parts)):
+        return None, False, "git ignores it, so it is never published"
+    candidate = os.path.join(root, *parts)
+    if os.path.lexists(candidate) and not _inside(candidate, root):
+        return None, False, "it leaves the project through a link"
+    return candidate, False, ""
+
+
 def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *,
                   ignored: Callable[[str], bool] | None = None,
                   manifest: Callable[[str, str], Mapping | None] | None = None) -> list:
@@ -934,7 +969,6 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
     planned one destination; and a fresh clone baked other words than the
     machine that ran the check, so the same records gave other bytes."""
     said = _site_words()["evidence"]
-    out_root = store.out_dir(root)
     rows = getattr(resolution, "rows", None) or {}
     plan: list[Evidence] = []
     for verdict in getattr(view, "verdicts", None) or ():
@@ -947,35 +981,7 @@ def evidence_plan(root: str, view: Any, resolution: Any, registry: Any = None, *
         for path in verdict.evidence or ():
             text = str(path)
             name = posixpath.basename(text.replace("\\", "/").rstrip("/")) or "evidence"
-            source: str | None = None
-            outside = False
-            reason = ""
-            if text.startswith("<out>/"):
-                parts = text[len("<out>/"):].replace("\\", "/").split("/")
-                if ".." in parts or not any(parts):
-                    outside = True
-                else:
-                    candidate = os.path.join(out_root, *[p for p in parts if p])
-                    if os.path.lexists(candidate) and not _inside(candidate, out_root):
-                        reason = "it leaves .nopekit/out/ through a link"
-                    else:
-                        source = candidate
-            elif text.startswith(("<", "~")) or os.path.isabs(text):
-                outside = True
-            else:
-                parts = [p for p in text.replace("\\", "/").split("/") if p not in ("", ".")]
-                if not parts or ".." in parts:
-                    outside = True
-                elif any(p.startswith(".") for p in parts):
-                    reason = "a hidden file is never published"
-                elif ignored is not None and ignored("/".join(parts)):
-                    reason = "git ignores it, so it is never published"
-                else:
-                    candidate = os.path.join(root, *parts)
-                    if os.path.lexists(candidate) and not _inside(candidate, root):
-                        reason = "it leaves the project through a link"
-                    else:
-                        source = candidate
+            source, outside, reason = evidence_source(root, text, ignored=ignored)
             if outside or not entry_name:
                 plan.append(Evidence(verdict.gate, entry_name, text, name, None, None, None,
                                      said["outside"] if outside else said["not_copied"],
@@ -1029,6 +1035,184 @@ def evidence_assets(plan: Iterable[Evidence]) -> dict[str, list[str]]:
     for item in plan:
         out.setdefault(item.gate, []).append(item.href or "")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# figures bound to a verdict entry (issue #15, B.1.4-B.1.5)
+# --------------------------------------------------------------------------- #
+#: Where a bound viewgen's figure is published, under ``site/``: one folder per
+#: (gate, verdict entry), tracked. And where its live 3D file goes, ignored by
+#: git (``site/.gitignore``'s ``assets/live/``): a GLB is committed only for an
+#: entry an export re-ran, because a solved field's GLB is up to 2 MiB a
+#: result, and a project that commits one for every check grows its repository
+#: on every re-run. *Rejected:* a folder per view (an entry's pictures would
+#: then sit apart, and nothing would say which result each one is); one file
+#: name per view with no digest (a browser that cached the old picture would
+#: show it under the new page); committing every GLB (the size above).
+FIGURES_DIR = "assets/figures"
+LIVE_DIR = "assets/live"
+
+#: The tracked sidecar beside a figure's files: ``<view>.view.json``. It names
+#: each file with its sha256, so a swapped file is told by content, and it
+#: holds no clock and no machine path. Schema 1: `SIDECAR_KEYS`. *Rejected:*
+#: stamps inside the PNG and the GLB (one reader per format, and a canonical
+#: PNG keeps no ancillary chunk); a field on ``models.View`` (a second spine
+#: edit, and a strict-reader change, for one use).
+SIDECAR_SUFFIX = ".view.json"
+SIDECAR_SCHEMA = 1
+SIDECAR_KEYS = ("schema", "view", "gate", "entry", "kind", "recipe", "files", "title",
+                "caption", "alt", "scale", "marks", "tool")
+
+#: The roles a sidecar's files play: the still (a PNG), the 3D field (a GLB,
+#: ``live`` when it is under `LIVE_DIR`) and the chart's series (JSON).
+FIGURE_ROLES = ("image", "field", "chart")
+
+#: The four words a bound figure's currency can take (B.1.5), each with its
+#: sentence in ``report.HUMAN["site"]["figure"]``: ``current`` beside the fresh
+#: served entry, ``stale`` beside a served entry that is not current,
+#: ``older`` when the picture is of another entry of the gate, ``none`` when
+#: there is no picture to show.
+FIGURE_CURRENCIES = ("current", "stale", "older", "none")
+
+_ENTRY_NAME = re.compile(r"^[0-9a-f]{16}-[0-9a-f]{8}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class Figure(NamedTuple):
+    """One bound view's figure as the disk holds it: ``served`` the gate's
+    served entry (``""`` for none), ``entry`` the entry it was drawn from
+    (``""`` for none), ``currency`` one of `FIGURE_CURRENCIES`, ``sidecar``
+    the valid sidecar it reads (``None`` for none), ``problems`` the build's
+    warnings about folders it refused or could not choose between."""
+
+    view: str
+    gate: str
+    served: str
+    entry: str
+    currency: str
+    sidecar: Mapping | None
+    problems: tuple
+
+    @property
+    def folder(self) -> str:
+        """The figure's folder under ``site/`` (``""`` for none)."""
+        return figure_folder(self.gate, self.entry) if self.entry else ""
+
+
+def figure_folder(gate: str, entry: str) -> str:
+    """``assets/figures/<gate>/<entry>``, under ``site/``."""
+    return posixpath.join(FIGURES_DIR, _component(gate), _component(entry))
+
+
+def live_folder(gate: str, entry: str) -> str:
+    """``assets/live/<gate>/<entry>``, under ``site/``."""
+    return posixpath.join(LIVE_DIR, _component(gate), _component(entry))
+
+
+def figure_currency_word(currency: str) -> str:
+    """A currency's sentence (``report.HUMAN["site"]["figure"]``)."""
+    return str(_site_words()["figure"][currency])
+
+
+def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | None, str]:
+    """``(sidecar, "")`` for the valid sidecar of ``view`` in ``figures/<gate>/
+    <entry>/``, else ``(None, why)``. Valid: it parses, its keys are
+    `SIDECAR_KEYS`, its ``view``, ``gate`` and ``entry`` are the folder's,
+    the verdict cache holds the entry (``.nopekit/verdicts/<gate>/<entry>.json``),
+    and each file it names that is not live is a plain name in the folder, at
+    most `EVIDENCE_MAX_BYTES`, whose sha256 and size are the sidecar's. A live
+    file is named, never required: it is on one computer only.
+
+    What it closes (issue #15): a folder or a sidecar written by hand under an
+    entry the cache lacks, a picture swapped under its name, or a file over
+    the cap placed by hand, shown as a result's picture. What it cannot close:
+    a forged sidecar whose bytes all match, under an entry the cache holds
+    (the forged-cache class; SPINE_CONTRACT's limits)."""
+    if not (_ENTRY_NAME.match(str(entry)) and gate and view):
+        return None, f"{entry!r} is not a verdict entry's name"
+    folder = os.path.join(root, "site", *figure_folder(gate, entry).split("/"))
+    path = os.path.join(folder, view + SIDECAR_SUFFIX)
+    if not os.path.isfile(path):
+        return None, "no sidecar"
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return None, f"{view}{SIDECAR_SUFFIX} does not parse"
+    if not isinstance(doc, dict) or set(doc) != set(SIDECAR_KEYS) \
+            or doc.get("schema") != SIDECAR_SCHEMA:
+        return None, f"{view}{SIDECAR_SUFFIX} is not a sidecar of schema {SIDECAR_SCHEMA}"
+    if (doc.get("view"), doc.get("gate"), doc.get("entry")) != (view, gate, entry):
+        return None, (f"{view}{SIDECAR_SUFFIX} names {doc.get('gate')}/{doc.get('entry')}/"
+                      f"{doc.get('view')}, not the folder it is in")
+    if not os.path.isfile(os.path.join(root, ".nopekit", "verdicts", _component(gate),
+                                       entry + ".json")):
+        return None, f"the verdict cache holds no entry {entry} of {gate}"
+    files = doc.get("files")
+    if not isinstance(files, dict) or not files or set(files) - set(FIGURE_ROLES):
+        return None, f"{view}{SIDECAR_SUFFIX} names no file, or a role it does not know"
+    for role, row in files.items():
+        if not (isinstance(row, dict) and isinstance(row.get("name"), str)
+                and isinstance(row.get("sha256"), str) and _SHA256.match(row["sha256"])
+                and isinstance(row.get("bytes"), int) and not isinstance(row["bytes"], bool)):
+            return None, f"its {role} row is not a file row"
+        name = row["name"]
+        if not name.startswith(view + ".") or "/" in name or "\\" in name:
+            return None, f"its {role} file {name!r} is not a name in the folder"
+        if row.get("live") is True:
+            continue
+        found = _sha256_of(os.path.join(folder, name))
+        if found is None:
+            return None, f"its {role} file {name} is not on disk"
+        if found[1] > EVIDENCE_MAX_BYTES:
+            return None, (f"its {role} file {name} is {_size_words(found[1])}, over the "
+                          f"{_size_words(EVIDENCE_MAX_BYTES)} cap")
+        if (found[0], found[1]) != (row["sha256"], row["bytes"]):
+            return None, f"its {role} file {name} is not the bytes the sidecar names"
+    return doc, ""
+
+
+def figure_for(root: str, gate: str, view: str, served: str, fresh: bool) -> Figure:
+    """The figure a bound view shows (B.1.5), read from the disk: the valid
+    sidecar under the served entry (``current`` when the entry is fresh, else
+    ``stale``); else the one other entry's folder of the gate that holds a
+    valid sidecar for the view (``older``); else ``none``. Several older
+    folders (after a merge) are ``none`` too, each named in ``problems``,
+    because which is newer depends on clocks no two computers share. A folder
+    whose sidecar is refused is named in ``problems``. *Rejected:* the newest
+    older folder by obs time or commit time (another computer would choose
+    another picture for the same records)."""
+    problems: list[str] = []
+    if served:
+        found, why = read_sidecar(root, gate, served, view)
+        if found is not None:
+            return Figure(view, gate, served, served, "current" if fresh else "stale", found,
+                          ())
+        if why != "no sidecar":
+            problems.append(f"view {view}: the picture under {gate}/{served} is not shown: "
+                            f"{why}")
+    base = os.path.join(root, "site", *FIGURES_DIR.split("/"), _component(gate))
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        names = []
+    valid: list[tuple[str, dict]] = []
+    for name in names:
+        if name == served or not os.path.isfile(os.path.join(base, name,
+                                                             view + SIDECAR_SUFFIX)):
+            continue
+        found, why = read_sidecar(root, gate, name, view)
+        if found is None:
+            problems.append(f"view {view}: the picture under {gate}/{name} is not shown: {why}")
+        else:
+            valid.append((name, found))
+    if len(valid) == 1:
+        return Figure(view, gate, served, valid[0][0], "older", valid[0][1], tuple(problems))
+    if len(valid) > 1:
+        problems.append(f"view {view}: {len(valid)} earlier pictures of {gate} "
+                        f"({', '.join(n for n, _ in valid)}) and none of the result the page "
+                        f"shows, so none is shown. Draw it again to choose")
+    return Figure(view, gate, served, "", "none", None, tuple(problems))
 
 
 # --------------------------------------------------------------------------- #
@@ -2617,6 +2801,10 @@ __all__ = [
     "IMPLICIT_STATIONS_WARN", "SOURCE_OF_KIND", "SOURCES", "source_of", "trace_block",
     "amber_word", "live_feeds",
     "EVIDENCE_MAX_BYTES", "EVIDENCE_DIR", "PROSE_SUBJECTS", "WORD_KEYS", "RECORD_KEYS",
+    # issue #15: figures bound to a verdict entry
+    "FIGURES_DIR", "LIVE_DIR", "SIDECAR_SUFFIX", "SIDECAR_SCHEMA", "SIDECAR_KEYS",
+    "FIGURE_ROLES", "FIGURE_CURRENCIES", "Figure", "figure_folder", "live_folder",
+    "figure_currency_word", "read_sidecar", "figure_for", "evidence_source",
     "Board", "Zone", "Station", "Layout", "Evidence",
     "token_of", "boards_of", "layout", "value_text", "words_block", "evidence_plan",
     "evidence_assets", "settle", "subject_tokens", "named_in", "prose_named", "prose_files",

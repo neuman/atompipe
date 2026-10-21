@@ -73,9 +73,14 @@ BANNED_WORDS = ("delve", "robust", "seamless", "crucial", "honest")
 #: `index` and `tier` were pooled, so every small integer in prose matched one.
 #: `bytes` (the two pages: a model file's size, the marketing viewer's loading
 #: bar) is a file's size, never a result: "6,481,920" in a story is no value of
-#: the design.
+#: the design. A bound figure's ``scale``, ``marks`` and ``binding`` (issue #15,
+#: B.4.3, in ``state.json``'s view rows): a colour range is a pack constant
+#: times a result, a mark's ``at`` a place on the picture, and neither is a
+#: result a sentence may quote (a colour bound of 0.02 m/s would vouch for
+#: "0.02 m/s" in prose about anything).
 POOL_EXCLUDED_KEYS = frozenset({"schema", "outline", "order", "column", "columns", "severity",
-                                "rank", "row", "index", "tier", "bytes"})
+                                "rank", "row", "index", "tier", "bytes", "scale", "marks",
+                                "binding"})
 
 #: Keys whose numbers (and every number under them) are counts: how many claims,
 #: gaps or evaluators. A count matches only a number written with no unit, so

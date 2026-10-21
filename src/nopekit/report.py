@@ -504,6 +504,18 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "outside": "Not on the page. The file is outside the project.",
         "not_copied": "Not on the page. The site build gives the reason.",
     }),
+    # A bound figure's currency (issue #15, B.1.5; `page.FIGURE_CURRENCIES`):
+    # one sentence per word, never a reason that reads this computer's disk
+    # (why a figure is absent goes to the build's warnings), so a clone bakes
+    # the same bytes. *Rejected:* "pvbatch is not on this computer" on the page
+    # (the author's machine and a clone would bake two pages from one record).
+    "figure": MappingProxyType({
+        "current": "This picture is from the result on this page.",
+        "stale": "This picture is from the result on this page. That result is not current.",
+        "older": "This picture is from an earlier result. The result on this page has no "
+                 "picture yet.",
+        "none": "No picture of this result is on the page.",
+    }),
     # A rejected alternative on the marketing page (`rejection_words(register=
     # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the
     # state of the return condition with no record text inside it (the

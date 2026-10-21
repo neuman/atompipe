@@ -19,8 +19,11 @@ and left its other seven to the gate. Measured on 2026-10-21 as two interleaved 
 against d29421e, both as exported trees, on a machine two other sessions were
 loading (load 1.1-2.6): 173.6 s and 179.5 s wall for its 701 tests against 190.2 s
 and 164.3 s for d29421e's 699, flat within that noise and over the line as its base
-is; no idle run was had. The merge of phase 3b
-into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
+is; no idle run was had. Its P1.3 (bound viewgens) added two rows and moved P1.2's
+unbound row to the gate (~2.2 s net); one unpaired run at load 1.3-4.2: 176.3 s wall
+(137.5 s user) for its 704 tests, against 229.4 s (181.5 s user) for 2f52893's 703,
+run just before it while another session raised the load to 10; still no idle run.
+The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
 3d8eaaf (load average 1.4-2.4, not idle): 122.9 s and 119.5 s wall (89.9 s and 87.3 s
@@ -1058,12 +1061,16 @@ FAST: list[str] = [
     # a loaded machine). The row that saw the defect: every link of
     # state.json, map.json and page.json is on disk after each build.
     "test_figures.NothingTheBuildDeletesIsLinked.test_every_href_the_page_bakes_exists_after_the_build",
-    # And the row that keeps an unavailable unbound viewgen's row and files
-    # (one check, `site init`, two builds; ~3 s idle). It is
-    # AMissingRendererMovesNoStatus's only row here until P1.3 brings the
-    # design's FAST row for that class (the statuses across five renderers);
-    # then this one can move to the gate.
-    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset",
+    # Issue #15, P1.3 (bound viewgens): the A, B, A sequence with the stand-in
+    # renderer (three checks and `site init` as cold processes, two builds in
+    # process: ~1.5 s at load 1.7), the row that sees a picture drawn from
+    # another run's files; and AMissingRendererMovesNoStatus's design row, five
+    # builds in process with the renderer absent, crashing, hanging past a 1 s
+    # timeout and writing 2.1 MiB (~1.9 s, 1 s of it the timeout). The latter
+    # replaces P1.2's unbound row here (~1.2 s), which moved to the gate as its
+    # comment said: ~2.2 s added in all.
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_render_from_another_runs_inputs_is_never_drawn",
+    "test_figures.AMissingRendererMovesNoStatus.test_statuses_equal_with_absent_crashing_hanging_oversize_renderer",
 ]
 
 
@@ -1099,6 +1106,26 @@ LEFT_FOR_THE_GATE: list[str] = [
     # test_site whole.
     "test_figures.NothingTheBuildDeletesIsLinked.test_a_prose_figure_under_assets_reads_missing",
     "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_crashes_keeps_its_asset",
+    # Issue #15, P1.3: the unbound viewgen's row with its tool gone (one check,
+    # `site init`, two builds; ~3 s), FAST in P1.2 until this step's design
+    # row for its class landed; the bound picture kept through a build without
+    # the tool (memo, scene edit, clone: one check, four builds, ~4 s); and the
+    # rest of AFigureIsItsEntrysEvidence (a forced run drawing its own entry
+    # again, inputs moved during the draw, every path naming its entry, a
+    # forged folder, a swapped file, a file over 2 MiB: one to four checks and
+    # two to four builds each, ~20 s in all). The FAST rows above run the
+    # same bound pass with the manifest bound, missing, and a renderer that
+    # fails four ways. An iteration touching `site._bound_pass`,
+    # `_figure_refusal`, `_publish_figure`, `BoundContext`,
+    # `page.read_sidecar` or `page.figure_for` runs test_figures whole.
+    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset",
+    "test_figures.AMissingRendererMovesNoStatus.test_a_committed_render_survives_a_build_without_the_tool",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_forced_run_draws_its_own_entry_again",
+    "test_figures.AFigureIsItsEntrysEvidence.test_inputs_that_move_during_the_render_are_discarded",
+    "test_figures.AFigureIsItsEntrysEvidence.test_every_figure_path_names_its_entry",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_render_naming_an_entry_the_cache_lacks_is_never_shown",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_swapped_file_is_never_shown",
+    "test_figures.AFigureIsItsEntrysEvidence.test_a_file_over_two_mib_is_never_written_or_linked",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

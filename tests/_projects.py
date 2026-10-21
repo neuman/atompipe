@@ -752,6 +752,117 @@ def big(ctx):
     return dataclasses.replace(kg.context(ctx), params=params)
 '''
 
+#: The figure project's two BOUND viewgens (issue #15, B.6), both
+#: ``evidence_of="demo.drop"``. ``views/draw.cfg`` (JSON; absent: ``{}``; never ``.json``, which ``views/`` reads as a view record) sets
+#: what they do, so a test plants a fault without editing a module this
+#: process may have imported already: ``mode`` (the stand-in's,
+#: `tests/_draw_standin.py`), ``timeout_s``, ``glb`` (the still writes a 3D
+#: file too: ``"asset"`` with `write_asset`, ``"live"`` with `write_live`),
+#: ``caption`` and ``scale`` (the still's), and ``chart`` (``ok``,
+#: ``planted-limit``: a limit in the payload, ``computed``: a number no
+#: evidence file holds).
+#:
+#: ``demo.pic`` is a still drawn by the tool ``nopekit-test-draw``: it reads
+#: the verified summary, binds the field file at the digest the summary lists,
+#: and calls the tool under a timeout. Its recipe file is
+#: ``views/_demo_scene.txt``. ``demo.chart`` is a chart that needs no tool:
+#: the summary's ``x`` and ``value`` as one point. Each module carries the two
+#: helpers itself: a project's ``views/`` is not on the import path.
+_FIGURE_DRAW_COMMON = '''\
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+
+def settings(ctx):
+    path = os.path.join(ctx.root, "views", "draw.cfg")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def summary(ctx):
+    path = ctx.entry.path("summary.json")
+    if path is None:
+        ctx.note("the solved field on this computer is from another run: "
+                 "`nopekit check --force --only demo.drop` solves it again")
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+'''
+
+_FIGURE_PIC = _FIGURE_DRAW_COMMON + '''
+
+@viewgen(id="demo.pic", kind=ViewKind.IMAGE, title="The demo field",
+         evidence_of="demo.drop", requires_tools=["nopekit-test-draw"],
+         recipe=("views/_demo_scene.txt",))
+def pic(ctx):
+    """A still of the demo field, drawn by nopekit-test-draw."""
+    found = summary(ctx)
+    if found is None:
+        return None
+    bound = ctx.bind({"<out>/demo/field.txt": found["field_sha256"]})
+    if bound is None:
+        return None
+    cfg = settings(ctx)
+    glb = cfg.get("glb", "")
+    with tempfile.TemporaryDirectory() as tmp:
+        png_path = os.path.join(tmp, "pic.png")
+        glb_path = os.path.join(tmp, "pic.glb")
+        argv = [shutil.which("nopekit-test-draw"), "--png", png_path,
+                "--field", bound["<out>/demo/field.txt"], "--entry", ctx.entry.name,
+                "--value", repr(found["value"]), "--mode", cfg.get("mode", "ok")]
+        if glb:
+            argv += ["--glb", glb_path]
+        subprocess.run(argv, check=True, capture_output=True,
+                       timeout=float(cfg.get("timeout_s", 20)))
+        with open(png_path, "rb") as fh:
+            src = ctx.write_asset("pic.png", fh.read())
+        if glb:
+            with open(glb_path, "rb") as fh:
+                (ctx.write_live if glb == "live" else ctx.write_asset)("pic.glb", fh.read())
+    scale = cfg.get("scale", {"quantity": "value", "units": "Pa", "lo": 0.0,
+                              "hi": 4.0 * float(found["u_ref"]),
+                              "source": [{"key": "u_ref", "factor": 4.0}]})
+    return View(id="demo.pic", kind=ViewKind.IMAGE, src=src,
+                meta={"caption": cfg.get("caption", "The field of the demo, from the run "
+                                                    "that wrote this result."),
+                      "alt": "A strip of colour", "scale": scale,
+                      "marks": [{"at": 0.5, "text": "the middle"}]})
+'''
+
+_FIGURE_CHART = _FIGURE_DRAW_COMMON + '''
+
+@viewgen(id="demo.chart", kind=ViewKind.CHART, title="The demo value",
+         evidence_of="demo.drop")
+def chart(ctx):
+    """The demo's value against x, from the run's summary."""
+    found = summary(ctx)
+    if found is None:
+        return None
+    mode = settings(ctx).get("chart", "ok")
+    data = {"series": {"value": [[found["x"], found["value"]]]},
+            "x": {"label": "x"}, "y": {"label": "value", "units": "Pa"}}
+    if mode == "planted-limit":
+        data["limit"] = {"value": 10.0, "comparator": "<="}
+    elif mode == "computed":
+        data["series"]["value"].append([found["x"] + 0.5, found["value"] * 0.5 + 0.123])
+    return View(id="demo.chart", kind=ViewKind.CHART, data=data,
+                meta={"caption": "The value the run wrote, against x."})
+'''
+
+#: The still's recipe file: its bytes key the memo with the module's, so an
+#: edit here draws the still again.
+_FIGURE_SCENE = "scene 1: a strip, one colour per value\n"
+
+
 #: The claim ``demo.drop`` covers, ``value <= 10 Pa``.
 FIGURE_CLAIM = {"statement": "The drop stays at or under 10 Pa", "kind": "measurable",
                 "acceptance": {"quantity": "value", "comparator": "<=", "limit": 10.0,
@@ -797,7 +908,7 @@ __pycache__/
 """}
 
 
-def figure_project(dest: str, *, x: float = 1.0) -> str:
+def figure_project(dest: str, *, x: float = 1.0, figures: bool = True) -> str:
     """The figure project of issue #15's design (B.6), at ``x``; return its root.
 
     A stdlib project whose one evaluator leaves evidence behind: ``demo.drop``
@@ -808,13 +919,17 @@ def figure_project(dest: str, *, x: float = 1.0) -> str:
     serves A while ``.nopekit/out`` holds B's files) needs exactly that. Its
     known-good control is ``x = 1``, its known-bad ``x = 50``. Its ignore files
     are `init`'s, and it is a git repository from the start, so a test can ask
-    git what it ignores.
+    git what it ignores. With ``figures`` (the default), its two bound
+    viewgens: ``demo.pic`` (a still, drawn by the stand-in tool
+    ``nopekit-test-draw``, which a test puts on PATH) and ``demo.chart``.
     """
     kg = {"x": 1.0, "value": 2.0}
-    root = plant_project(dest, {"model/m.py": _FIGURE_MODEL.format(x=repr(float(x))),
-                                "gates/demo.py": _FIGURE_GATE,
-                                "selftest/bad.py": _FIGURE_FIXTURES},
-                         claims={"D1": FIGURE_CLAIM}, known_good_params=kg)
+    files = {"model/m.py": _FIGURE_MODEL.format(x=repr(float(x))),
+             "gates/demo.py": _FIGURE_GATE, "selftest/bad.py": _FIGURE_FIXTURES}
+    if figures:
+        files.update({"views/demo_pic.py": _FIGURE_PIC, "views/demo_chart.py": _FIGURE_CHART,
+                      "views/_demo_scene.txt": _FIGURE_SCENE})
+    root = plant_project(dest, files, claims={"D1": FIGURE_CLAIM}, known_good_params=kg)
     for rel, text in _FIGURE_IGNORES.items():
         with open(os.path.join(root, *rel.split("/")), "w", encoding="utf-8",
                   newline="\n") as fh:

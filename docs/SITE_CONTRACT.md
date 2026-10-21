@@ -598,6 +598,17 @@ an agent can read the site's state without a browser.
   declare). The locator itself stays on its verdict; nothing is dropped.
 - A view whose inline `data` is too big to sit in the summary is split into
   `data/views/<id>.json`: its row keeps `"data": {}` and gains `data_url`.
+- A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
+  verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
+  view, its GLB; `data_url` is a chart's series file; `field_src` a committed GLB
+  beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
+  the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
+  currency, currency_word}`, where `entry` is the result the picture was drawn from
+  and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
+  not current), or `older` (an earlier entry of the gate: the served one has no
+  picture yet), with its fixed sentence. A bound view with no picture has no row.
+  Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
+  which vouches for a number in prose.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
   the param records: every parameter the model holds, in its field order, then any
   record the model no longer defines. `value`, `units`, `rationale` and
@@ -1415,8 +1426,17 @@ verdict rows carry `evidence_assets`, aligned with `evidence`.
   "ok": true, "error": "",
   "verdicts": { "bracket.deflection": { "when": "...", "age_s": 412.0, "aged": false } },
   "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] },
-  "tracing": false }   // architecture phase 3b: a trace holds its lock now
+  "tracing": false,    // architecture phase 3b: a trace holds its lock now
+  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed":
+                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed.1a2b3c4d5e6f.glb" } }
+                       // issue #15: each live 3D file of a bound figure on this computer
 ```
+
+`live_figures` (issue #15) names, by figure id (`<gate>/<entry>/<view>`), the 3D file
+a bound viewgen drew for the served entry when no export re-ran that entry: it lies
+under `assets/live/`, which git ignores (`site build` adds `assets/live/` to
+`site/.gitignore` once a bound viewgen is registered), and no tracked file names it,
+so a static host never shows a 3D view that leads nowhere.
 
 `data/build.json` is the clock (SPEC 32), ignored through `site/.gitignore` (`site
 build` appends the line to an older one, and writes a `site/.gitignore` of those
