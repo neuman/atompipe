@@ -9,7 +9,7 @@
 
 **Have an idea for a real thing? Let's find out what holds up.**
 
-Nopekit is a Claude Code plugin for exploring and engineering physical designs with an AI agent. Tell it what you want to make. It helps you work out what the design needs to do, explore possible approaches, build and run checks, and keep track of what the evidence actually says as the design changes.
+Nopekit is a plugin for Claude Code, Codex and Cursor for exploring and engineering physical designs with an AI agent. Tell it what you want to make. It helps you work out what the design needs to do, explore possible approaches, build and run checks, and keep track of what the evidence actually says as the design changes.
 
 It's based on the [Grounding by Falsification](https://github.com/neuman/nopekit/blob/main/grounding_by_falsification.pdf) approach. AI has gotten very good at making believable proposals for all sorts of things both digital and physical but it is especially good at coding. The problem is that it's still not great at figuring out which proposals are actually good on its own. Grounding by falsification is the idea that we need to wrap AI with something outside itself that can check its work and say "nope" using trusted reasoning/math/physics/etc. Nopekit turns that approach into an extensible framework with room for plugins that can falsify proposals across any domain but especially physical design work.  
 
@@ -27,9 +27,13 @@ You don't need to learn a new engineering framework before you start. Install th
 
 ## Get started
 
-### 1. Install Nopekit in Claude Code
+### 1. Install Nopekit
 
-If you're already using Claude Code, start by asking it:
+Nopekit is one plugin for three agents: the repository root holds a manifest for each
+(`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`), and they share the same skills
+and the same end-of-turn hook, which records each round.
+
+**Claude Code.** Ask it:
 
 > Install the Nopekit plugin from `https://github.com/neuman/nopekit` and help me get it ready to use.
 
@@ -40,6 +44,27 @@ Or install it directly with Claude Code's plugin commands:
 /plugin install nopekit
 ```
 
+**Codex.** Codex reads the same marketplace:
+
+```bash
+codex plugin marketplace add neuman/nopekit
+codex plugin add nopekit@nopekit
+```
+
+Codex runs a plugin's hook only after you review and trust it, and asks again after
+every update of the plugin. Until you do, rounds are not recorded at the end of a turn;
+`nopekit round --commit` records one by hand.
+
+**Cursor.** Clone the plugin into Cursor's local plugins, then restart Cursor:
+
+```bash
+git clone --depth 1 https://github.com/neuman/nopekit ~/.cursor/plugins/local/nopekit
+```
+
+To update, `git -C ~/.cursor/plugins/local/nopekit pull` and restart. Cursor can also
+import the Claude Code plugin; install it one way, not both, or each turn ends with two
+rounds.
+
 You'll need Python 3.10 or newer available as `python3`. Nopekit's core has no third-party Python dependencies. Some checks need optional tools or packages; the agent should tell you when one is needed. For mesh checks used in 3D printing and solid-part work, install:
 
 ```sh
@@ -48,7 +73,7 @@ pip install trimesh numpy
 
 ### 2. Start a project
 
-Open Claude Code in an empty directory and start with a prompt like this:
+Open your agent (Claude Code, Codex or Cursor) in an empty directory and start with a prompt like this:
 
 ```text
 I want to use Nopekit to design something new. Interview me about the idea, one question at a time. Help me turn what I want into requirements, explore possible designs, set up the project and its checks, and launch the project site so I can understand the design and follow its progress.
@@ -58,7 +83,7 @@ Then have a conversation. You can bring a rough idea, a half-finished project, a
 
 ### 3. Follow the work in the project site
 
-As the project takes shape, Nopekit starts a local site for the project. Open the URL Claude Code gives you. The site is the human-readable surface of the project's **grounded design state**: it helps you see what you're trying to build, what alternatives are in play, which candidate is current, and why that candidate is or isn't ready.
+As the project takes shape, Nopekit starts a local site for the project. Open the URL the agent gives you. The site is the human-readable surface of the project's **grounded design state**: it helps you see what you're trying to build, what alternatives are in play, which candidate is current, and why that candidate is or isn't ready.
 
 Keep talking with the agent, question its conclusions, change your mind, and try alternatives. The design and its evidence evolve together.
 

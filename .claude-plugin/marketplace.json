@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "nopekit",
-  "description": "Turn a sketch or a discussion into a validated physical thing \u2014 hardware, CAD, PCBs, simulation, fabrication",
+  "description": "Turn a sketch or a discussion into a validated physical thing — hardware, CAD, PCBs, simulation, fabrication",
   "owner": {
     "name": "Eric Neuman"
   },
@@ -14,7 +14,9 @@
       },
       "category": "engineering",
       "source": "./",
-      "homepage": "https://github.com/neuman/nopekit"
+      "homepage": "https://github.com/neuman/nopekit",
+      "version": "0.1.0",
+      "repository": "https://github.com/neuman/nopekit"
     }
   ]
 }

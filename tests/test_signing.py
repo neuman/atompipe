@@ -102,6 +102,20 @@ CHANNEL_ROWS: tuple = (
      "C5", "agent-session s2"),
     ("a terminal, a person's own CLAUDE_API_KEY", True, {"CLAUDE_API_KEY": "k"}, "C5",
      "interactive"),
+    # The plugin's other hosts: each agent-only marker, through a pty too, and
+    # the variables they also set in a person's own terminal, which never mark.
+    ("Codex's agent, through a pty", True,
+     {"CODEX_CI": "1", "CODEX_THREAD_ID": "t1", "CODEX_SESSION_ID": "t1"}, "C5",
+     "agent-session t1"),
+    ("Codex's tool call id alone", False, {"CODEX_TOOL_CALL_ID": "call_1"}, None,
+     "agent-session unknown"),
+    ("Cursor's agent, through a pty", True, {"CURSOR_AGENT": "1"}, "C5",
+     "agent-session unknown"),
+    ("a person's ! shell in Codex", True,
+     {"CODEX_THREAD_ID": "t1", "CODEX_SESSION_ID": "t1", "CODEX_VERSION": "1"}, "C5",
+     "interactive"),
+    ("a person's own Cursor terminal", True,
+     {"CURSOR_TRACE_ID": "x", "CURSOR_CLI": "1"}, "C5", "interactive"),
     ("a terminal, another id typed", True, {}, "C4", None),
     ("a terminal, an empty line", True, {}, "", None),
     ("a terminal, end of input", True, {}, None, None),
@@ -373,7 +387,7 @@ class WhoAndWhenAreNeverTyped(_env.EnvCase):
                 mock.patch.dict(os.environ, _env.IDENTITY), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
-            for key in [k for k in os.environ if k == "CLAUDECODE" or k == "AI_AGENT"
+            for key in [k for k in os.environ if k in cli.AGENT_MARKERS
                         or k.startswith("CLAUDE_CODE_")]:
                 os.environ.pop(key)
             code = cli.main(["-C", root, "claim", "physical", "C5", "fail", "--detail", "x",

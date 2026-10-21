@@ -22,7 +22,7 @@ import _env
 
 #: Where a path into the plugin can be written.
 PLUGIN_GLOBS = ("skills/*/SKILL.md", "skills/*/*.md", ".claude-plugin/*.json",
-                "hooks/*.json", "hooks/*")
+                ".codex-plugin/*.json", ".cursor-plugin/*.json", "hooks/*.json", "hooks/*")
 
 UNBRACED = re.compile(r"\$CLAUDE_PLUGIN_ROOT(?!\w)")
 #: A document of the plugin named by its repository path: METHOD.md or a
@@ -206,9 +206,10 @@ _PLANTED = ("difflib.py", "types.py", "queue.py", "select.py", "token.py", "json
             "nopekit/__init__.py")
 
 
-def planted_cwd_problems(command: str, plugin_root: str = _env.REPO) -> list[str]:
-    """What goes wrong when the Stop hook ``command`` runs, as Claude Code runs
-    it (a shell, ``CLAUDE_PLUGIN_ROOT`` set), from a directory holding a module
+def planted_cwd_problems(command: str, plugin_root: str = _env.REPO,
+                         root_var: str = "CLAUDE_PLUGIN_ROOT") -> list[str]:
+    """What goes wrong when the Stop hook ``command`` runs, as its host runs
+    it (a shell, ``root_var`` set), from a directory holding a module
     for each of `_PLANTED`: a planted module that ran, an exit other than 0, or
     stdout other than one JSON object."""
     import json
@@ -223,7 +224,7 @@ def planted_cwd_problems(command: str, plugin_root: str = _env.REPO) -> list[str
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(f"open({marker!r}, 'w').close()\nraise SystemExit(2)\n")
         proc = _env.run(["sh", "-c", command], cwd=cwd, input=json.dumps({"cwd": cwd}),
-                        env={"CLAUDE_PLUGIN_ROOT": plugin_root})
+                        env={root_var: plugin_root})
         out = [f"the planted {name[4:]} ran" for name in sorted(os.listdir(cwd))
                if name.startswith("RAN-")]
         if proc.returncode != 0:
@@ -249,6 +250,12 @@ class TheStopHookImportsNothingFromTheCwd(unittest.TestCase):
     def test_the_hook_as_shipped(self):
         self.assertEqual(planted_cwd_problems(HOOK_COMMAND), [])
 
+    def test_cursors_hook_as_shipped(self):
+        import json
+        doc = json.loads(_read("hooks/cursor-hooks.json"))
+        (command,) = [h["command"] for h in doc["hooks"]["stop"]]
+        self.assertEqual(planted_cwd_problems(command, root_var="CURSOR_PLUGIN_ROOT"), [])
+
     def test_the_old_command_is_caught(self):
         found = planted_cwd_problems(OLD_HOOK_COMMAND)
         self.assertTrue(any(p.startswith("the planted ") for p in found), found)
@@ -273,6 +280,83 @@ class TheStopHookImportsNothingFromTheCwd(unittest.TestCase):
         self.assertEqual(len(proc.stdout.splitlines()), 1, proc.stdout)
         said = json.loads(proc.stdout)["systemMessage"]
         self.assertIn("could not start (ImportError: a broken install)", said)
+
+
+# --------------------------------------------------------------------------- #
+# One plugin, three hosts: Claude Code, Codex and Cursor
+# --------------------------------------------------------------------------- #
+#: Each host's manifest. Codex probes ``.codex-plugin/`` before
+#: ``.claude-plugin/``, Cursor reads ``.cursor-plugin/``; Claude Code's marketplace
+#: file is the one ``codex plugin marketplace add`` finds too. *Rejected:* a root
+#: ``plugin.json`` (the Agent Plugins standard): Codex probes it FIRST, so its
+#: fields would hide Codex's own ``interface``, and Cursor reads only skills and
+#: MCP servers from it — a fourth copy of the description for no host's gain.
+MANIFESTS = {"claude": ".claude-plugin/plugin.json", "codex": ".codex-plugin/plugin.json",
+             "cursor": ".cursor-plugin/plugin.json"}
+
+#: The keys Cursor's published schema allows (``cursor/plugins``,
+#: ``schemas/plugin.schema.json``, ``additionalProperties: false``).
+CURSOR_KEYS = {"name", "displayName", "description", "version", "minClientVersions", "author",
+               "publisher", "homepage", "repository", "license", "logo", "keywords",
+               "category", "tags", "commands", "agents", "skills", "rules", "hooks",
+               "variables", "mcpServers"}
+
+
+def _json(rel: str):
+    import json
+    return json.loads(_read(rel))
+
+
+class OnePluginThreeHosts(unittest.TestCase):
+    """The repository root is the plugin for every host: one ``skills/``, one
+    ``hooks/stop.py``, and a manifest per host that agrees with the others."""
+
+    def test_every_manifest_names_one_plugin_at_one_version(self):
+        version = _read("VERSION").strip()
+        from nopekit import __version__
+        self.assertEqual(__version__, version)
+        self.assertIn(f'version = "{version}"', _read("pyproject.toml"))
+        descriptions = set()
+        for host, rel in MANIFESTS.items():
+            with self.subTest(host):
+                doc = _json(rel)
+                self.assertEqual(doc["name"], "nopekit")
+                self.assertEqual(doc["version"], version)
+                self.assertEqual(doc["skills"], "./skills/")
+                descriptions.add(doc["description"])
+        descriptions.add(_json(MANIFESTS["codex"])["interface"]["longDescription"])
+        self.assertEqual(len(descriptions), 1, descriptions)
+        (entry,) = _json(".claude-plugin/marketplace.json")["plugins"]
+        self.assertEqual((entry["name"], entry["source"]), ("nopekit", "./"))
+
+    def test_each_host_runs_the_one_stop_script(self):
+        # Claude Code loads hooks/hooks.json by default (naming it again is a
+        # duplicate there); Codex reads the same file in the same format.
+        self.assertNotIn("hooks", _json(MANIFESTS["claude"]))
+        self.assertEqual(_json(MANIFESTS["codex"])["hooks"], "./hooks/hooks.json")
+        cursor = _json(MANIFESTS["cursor"])
+        self.assertEqual(cursor["hooks"], "./hooks/cursor-hooks.json")
+        self.assertLessEqual(set(cursor), CURSOR_KEYS)
+        self.assertLessEqual(set(cursor["author"]), {"name", "email"})
+        doc = _json("hooks/cursor-hooks.json")
+        self.assertEqual(doc["version"], 1)
+        self.assertEqual(set(doc["hooks"]), {"stop"})
+        (hook,) = doc["hooks"]["stop"]
+        self.assertEqual(hook["command"],
+                         'python3 "${CURSOR_PLUGIN_ROOT}/hooks/stop.py" --cursor')
+        self.assertNotIn("loop_limit", hook)
+
+    def test_codex_reads_each_skill_and_agents_md(self):
+        for path in sorted(glob.glob(os.path.join(_env.REPO, "skills", "*", "SKILL.md"))):
+            name = os.path.basename(os.path.dirname(path))
+            with self.subTest(name):
+                yaml = _read(f"skills/{name}/agents/openai.yaml")
+                self.assertIn("interface:", yaml)
+                self.assertIn(f"${name}", yaml)
+        prompts = _json(MANIFESTS["codex"])["interface"]["defaultPrompt"]
+        self.assertTrue(1 <= len(prompts) <= 3 and all(len(p) <= 128 for p in prompts))
+        # Codex reads AGENTS.md and never CLAUDE.md: the pointer is the one way in.
+        self.assertIn("(CLAUDE.md)", _read("AGENTS.md"))
 
 
 class TheSkillNamesEveryCommand(unittest.TestCase):

@@ -1615,6 +1615,32 @@ class TheStopHookNeverBlocks(_env.EnvCase):
         self.assertIn("Committed ", doc["systemMessage"])
         self.assertNotIn(2, codes)
 
+    def test_cursors_payload_and_its_launcher(self):
+        """Cursor's stop payload names no ``cwd``: its project is in
+        ``workspace_roots`` or ``$CURSOR_PROJECT_DIR``, and a plugin hook's cwd
+        there is not reliably the project's. Through ``hooks/stop.py --cursor``
+        stdout is ``{}`` — Cursor's one key would start another turn — and the
+        paragraph is on stderr."""
+        codes: list = []
+        outside = self.tmp()
+        project = self._project()
+        _edit_json(os.path.join(project, "claims", "C7.json"), rationale="a change to commit")
+        doc = self._hook(outside, {"workspace_roots": [outside, project], "status": "completed",
+                                   "loop_count": 0}, codes=codes)
+        self.assertIn("Committed ", doc["systemMessage"])
+        _edit_json(os.path.join(project, "claims", "C7.json"), rationale="another change")
+        doc = self._hook(outside, {}, env={"CURSOR_PROJECT_DIR": project}, codes=codes)
+        self.assertIn("Committed ", doc["systemMessage"])
+        self.assertNotIn(2, codes)
+        _edit_json(os.path.join(project, "claims", "C7.json"), rationale="a third change")
+        proc = _env.run([sys.executable, os.path.join(_env.REPO, "hooks", "stop.py"), "--cursor"],
+                        cwd=outside, input=json.dumps({"workspace_roots": [project]}),
+                        identity=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, "{}\n")
+        self.assertIn("nopekit round ", proc.stderr)
+        self.assertIn("Committed ", proc.stderr)
+
     def test_a_write_to_file_descriptor_1_reaches_no_stdout(self):
         """`_quiet_fd(1)`: a model or a solver writes to the inherited fd 1, below
         `redirect_stdout`, and one stray line before the JSON object would keep
