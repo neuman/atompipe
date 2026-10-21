@@ -23,15 +23,15 @@ where this skill says *evaluator*; `gates/` is where an evaluator's code lives).
 
 ## Make it runnable
 
-The spine is standard library only. From the plugin, prefix every call — each Bash call
-starts a fresh shell, so an `export` or an `alias` is gone by the next one:
+The spine is standard library only. From the plugin, prefix every call — each shell call
+starts fresh, so an `export` or an `alias` is gone by the next one. Where no host filled
+`${CLAUDE_PLUGIN_ROOT}` in (Codex), it is the directory two above this file:
 
 ```sh
 PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/src" python3 -m nopekit --version
 ```
 
-Below, `nopekit …` stands for that form. `nopekit doctor` is the first thing to run when
-anything is confusing; it writes nothing. Every read command takes `--json`.
+Below, `nopekit …` is that form. Confused? `nopekit doctor`. Read commands take `--json`.
 
 ## 1. Interview first
 

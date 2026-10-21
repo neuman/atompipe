@@ -553,8 +553,10 @@ layout in full, with each writer.
 | `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (a redirect to `engineering/`), `engineering/index.html` (the outline: the representation, the verdict, the map, a section per board, next steps), `marketing/index.html` (the product in a viewer, its story, what it must do, the choices behind it; SPEC 40) and `technical.html` (today's panels), all four the project's own; `content/` the agent's prose (`story.md` the marketing page's), stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
-| `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
-| `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
+| `.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/` | one plugin, three hosts: a manifest each, held to one name, version (`VERSION`) and description by `tests/test_plugin.py` (`OnePluginThreeHosts`); `marketplace.json` serves Claude Code and Codex |
+| `skills/` | the skills every host loads (`nopekit`, `pack-authoring`); `agents/openai.yaml` is each one's Codex listing |
+| `hooks/` | the plugin's Stop hook: `hooks.json` (Claude Code's format, which Codex reads too) and `cursor-hooks.json` (Cursor's, `stop.py --cursor`); `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
+| `AGENTS.md` | Codex's and Cursor's way in: it points here |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |

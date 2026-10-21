@@ -1,0 +1,4 @@
+interface:
+  display_name: "nopekit"
+  short_description: "Design physical things, and check every claim."
+  default_prompt: "Use $nopekit to interview me about what I want to make, turn it into requirements and claims, build the model, run evaluators that can fail, and launch the project site."

@@ -2621,10 +2621,15 @@ def _hook_payload() -> dict:
 
 def _hook_root(args: argparse.Namespace, payload: Mapping[str, Any]) -> str | None:
     """The project the hook ends a round in: the first of `-C`, the payload's
-    ``cwd``, ``$CLAUDE_PROJECT_DIR`` and the process's cwd that is inside one
-    (walking up, as every command does)."""
+    ``cwd`` (Claude Code's and Codex's), its ``workspace_roots`` (Cursor's),
+    ``$CLAUDE_PROJECT_DIR``, ``$CURSOR_PROJECT_DIR`` and the process's cwd that
+    is inside one (walking up, as every command does). Cursor's payload names no
+    ``cwd``, and a plugin hook's cwd there is not reliably the project's — read
+    alone, the process's cwd would end the round in the wrong directory or none."""
+    roots = payload.get("workspace_roots")
     candidates = [getattr(args, "dir", None), payload.get("cwd"),
-                  os.environ.get("CLAUDE_PROJECT_DIR")]
+                  *(roots if isinstance(roots, list) else []),
+                  os.environ.get("CLAUDE_PROJECT_DIR"), os.environ.get("CURSOR_PROJECT_DIR")]
     try:
         candidates.append(os.getcwd())
     except OSError:
@@ -2680,17 +2685,19 @@ def _hook_quiet(outcome: RoundOutcome) -> bool:
 
 
 def _round_hook(args: argparse.Namespace) -> int:
-    """Claude Code's Stop hook (architecture phase 6, SPEC 24): read the hook's
-    JSON on stdin, find the project from its ``cwd`` (then
-    ``$CLAUDE_PROJECT_DIR``, then the process's cwd), run `round --commit`
-    with nothing reaching stdout, rebuild the index, and print ONE JSON object
-    — ``{"systemMessage": "<the paragraph>"}``, or ``{}`` outside a project or
-    when nothing happened. Plain stdout from a Stop hook is shown to nobody, and
-    a stray line would break the parse.
+    """The plugin's Stop hook (architecture phase 6, SPEC 24) — Claude Code's
+    and Codex's, which share its format, and Cursor's through ``hooks/stop.py
+    --cursor``: read the hook's JSON on stdin, find the project (`_hook_root`),
+    run `round --commit` with nothing reaching stdout, rebuild the index, and
+    print ONE JSON object — ``{"systemMessage": "<the paragraph>"}``, or ``{}``
+    outside a project or when nothing happened. Plain stdout from a Stop hook is
+    shown to nobody, and a stray line would break the parse — and Codex refuses
+    any key outside Claude Code's own set, so the object never grows a host's
+    private key.
 
-    Always exit 0, and never ``"decision": "block"``: Claude Code reads exit 2 or
-    a block as "continue the turn", and a round that kept the agent working
-    would loop. ``stop_hook_active`` changes nothing for the same reason: this
+    Always exit 0, and never ``"decision": "block"``: Claude Code and Codex read
+    exit 2 or a block as "continue the turn", and a round that kept the agent
+    working would loop. ``stop_hook_active`` changes nothing for the same reason: this
     hook never blocks, so it can never be the reason a turn continues. A crash
     becomes one line of ``systemMessage``."""
     args._index_done = True
@@ -3973,10 +3980,28 @@ def cmd_claim_show(args: argparse.Namespace) -> int:
 #: it). The cost, said: a future session marker under a new name reads a
 #: person's shell until it is added here — the seal is drift's catch, and P3's
 #: permission rule the lock (D-13).
+#:
+#: Codex and Cursor (the plugin's other hosts, 2026-10-21): ``CODEX_CI`` and
+#: ``CODEX_TOOL_CALL_ID``, which Codex's exec tool sets for every command the
+#: agent runs and its TUI's ``!`` shell does not (``openai/codex``,
+#: ``core/src/unified_exec/process_manager.rs``, ``core/src/tasks/user_shell.rs``);
+#: ``CURSOR_AGENT``, Cursor's documented mark of its agent's terminal. What
+#: would have slipped through without them: from a Codex or Cursor session no
+#: marker was set, so a pass the agent typed through a pty read as a person's.
+#: *Rejected:* ``CODEX_THREAD_ID``, ``CODEX_SESSION_ID`` and ``CODEX_VERSION``
+#: (Codex sets them in a person's ``!`` shell too); ``CURSOR_TRACE_ID`` and
+#: ``CURSOR_CLI`` (set in every Cursor terminal, a person's own included);
+#: ``CODEX_SANDBOX`` (macOS only, and only under the sandbox).
 AGENT_MARKERS: tuple[str, ...] = (
     "CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID")
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID",
+    "CODEX_CI", "CODEX_TOOL_CALL_ID", "CURSOR_AGENT")
+
+#: Where an agent session's id is read, first set wins, once a marker says the
+#: shell is an agent's: Claude Code's, then Codex's thread. Cursor sets none in
+#: its agent's terminal; its sessions read ``agent-session unknown``.
+_SESSION_ID_VARS: tuple[str, ...] = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
 
 #: Flags `claim physical` still parses only to refuse — any value, before the
 #: project is read — each with what it names instead (P2.5a-D5; A-14 asks to
@@ -4013,8 +4038,8 @@ def _channel(stdin_isatty: bool, environ: Mapping[str, str], answer: str | None,
     """How a result or an attribution is being entered (P2.5a-D4) — pure, so a
     test drives it with an injected TTY, environment and typed line:
 
-    * ``agent-session <CLAUDE_CODE_SESSION_ID or unknown>`` when an agent marker
-      is set (``AGENT_MARKERS``, by exact name) — the marker wins over
+    * ``agent-session <its id (`_SESSION_ID_VARS`) or unknown>`` when an agent
+      marker is set (``AGENT_MARKERS``, by exact name) — the marker wins over
       a TTY: an agent can open a pty;
     * ``non-interactive`` with no TTY on stdin (a pipe, CI, a script);
     * ``interactive`` from a TTY with no marker, once the person typed the
@@ -4030,7 +4055,8 @@ def _channel(stdin_isatty: bool, environ: Mapping[str, str], answer: str | None,
     requiring stdout a TTY too (``… | tee log`` in a person's own shell would be
     refused for no safety gain)."""
     if _agent_marker(environ):
-        session = "-".join(str(environ.get("CLAUDE_CODE_SESSION_ID") or "unknown").split())
+        found = next((environ[name] for name in _SESSION_ID_VARS if environ.get(name)), "")
+        session = "-".join(str(found or "unknown").split())
         return f"agent-session {session[:_SESSION_ID_MAX] or 'unknown'}"
     if not stdin_isatty:
         return "non-interactive"

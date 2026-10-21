@@ -4032,7 +4032,7 @@ a `commit` object (`staged`, `not_files`, `too_large`, `secret`, `earlier`, besi
 `made`, `oid`, `subject`, `who`, `why`, `detail`). A round whose check could not run,
 or whose claims fail, still commits: the commit is history, not a quality gate.
 **`round --hook`** reads the hook's JSON on stdin, finds the project from `-C`, its
-`cwd`, `$CLAUDE_PROJECT_DIR` or the process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
+`cwd`, Cursor's `workspace_roots`, `$CLAUDE_PROJECT_DIR`, `$CURSOR_PROJECT_DIR` or the process's cwd, runs `_round_run(commit=True, wait_s=ROUND_LOCK_WAIT_S)` with stdout (the
 Python stream and fd 1) and stderr sent nowhere, rebuilds the index itself
 (`args._index_done`, so `_after` writes nothing after it), and prints one JSON object:
 `{"systemMessage": report.round_hook_message(...)}`, or `{}` outside a project or when
@@ -5294,8 +5294,11 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
   cannot run before the print is tested, and the files only it reads join an article
   recorded from its first run on.
 - **A new agent marker (review of P2.5a).** The markers are matched by exact name;
-  a session marker a later Claude Code adds under a new name reads as a person's
-  shell until it is added to `cli.AGENT_MARKERS`.
+  a session marker a later Claude Code, Codex or Cursor adds under a new name reads as
+  a person's shell until it is added to `cli.AGENT_MARKERS`. Codex's markers
+  (`CODEX_CI`, `CODEX_TOOL_CALL_ID`) are read from its source, not a documented
+  contract, and Cursor's `CURSOR_AGENT` has gone missing from one of its CLI builds
+  before; a host that drops one reads as a person's shell until a pipe says otherwise.
 - **An institution as an authority (P2.5a).** The authority's git identity must be
   theirs; an institution with no person's identity cannot record its judgment until
   named delegates exist (on the check-in batch).

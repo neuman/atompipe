@@ -35,7 +35,8 @@ What a child gets, and why each line:
   ``attributes`` even when ``GIT_CONFIG_GLOBAL`` replaces the config file.
 * ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` only with ``identity=True``; ``EMAIL`` is
   stripped with them, since git falls back to it for an identity.
-* ``NOPEKIT_PACK_PATH`` unset; ``CLAUDE*`` and ``AI_AGENT`` stripped;
+* ``NOPEKIT_PACK_PATH`` unset; ``CLAUDE*``, ``CODEX_*``, ``CURSOR_*`` and
+  ``AI_AGENT`` stripped;
   ``PYTHONDONTWRITEBYTECODE`` stripped — a user's shell does not set it, and the
   fresh-clone transcript must see the ``__pycache__`` a real run writes.
 
@@ -98,12 +99,13 @@ _STRIP = frozenset({
     "XDG_CONFIG_HOME", "HOME", "USERPROFILE", "PYTHONPATH", "PYTHONUSERBASE",
 })
 
-#: Stripped by prefix: every agent-session variable and every git variable.
+#: Stripped by prefix: every agent-session variable — Claude Code's, Codex's and
+#: Cursor's, the plugin's three hosts — and every git variable.
 #: Rejected: listing GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE alone — git reads
 #: dozens more (GIT_CONFIG_PARAMETERS carries `git -c` into a hook's children,
 #: GIT_CONFIG_COUNT injects config, GIT_OBJECT_DIRECTORY redirects the store), and
 #: a list of the ones someone remembered is the allow-list mistake again.
-_STRIP_PREFIXES = ("CLAUDE", "GIT_")
+_STRIP_PREFIXES = ("CLAUDE", "GIT_", "CODEX_", "CURSOR_")
 
 #: Seconds before a child is declared hung. Why 180: far above what a child costs
 #: (measured 2026-09-27: a bracket `check --tier 3` in 0.1 s; loading all 54

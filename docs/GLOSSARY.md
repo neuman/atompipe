@@ -307,7 +307,7 @@ The tables already split the easy ones (*verdict*, *covering*, *baseline*, *bloc
 | report files | `report --write` → `REPORT.md`; an export's package `out/<milestone>/REPORT.md` and its test card; `docs/decisions.md`; the `message` text of `check --junit` |
 | site text | static strings in `site_template/` (`lib/format.js`, `lib/panels.js`, `index.html`) and every sentence `site.py` writes into `state.json` |
 | skill and doctrine text an agent quotes | `skills/*/SKILL.md`, `METHOD.md`, `README.md`, `CLAUDE.md`, `packs/*/PACK.md`, `packs/*/references/*.md` |
-| plugin and marketplace descriptions | the `description` fields of `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`: what a user and Claude Code read before installing |
+| plugin and marketplace descriptions | the `description` fields of `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` (and its `interface`), `.cursor-plugin/plugin.json` and `.claude-plugin/marketplace.json`: what a user and their agent read before installing; the three manifests' are one text (`test_plugin.OnePluginThreeHosts`) |
 | what an evaluator writes | each verdict's `detail`, `skip_reason` and `error` |
 | slash-command output | `.claude-plugin` commands (none yet) |
 | hook output | the Stop hook's `systemMessage`: one paragraph from `round --hook` (`report.round_hook_message`); `{}` when nothing happened (phase 6) |

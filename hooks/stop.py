@@ -25,6 +25,18 @@ one-liner inside ``hooks.json`` (untestable, and unreadable in a JSON string).
 
 Nothing but builtins and modules already loaded at startup is imported before
 ``sys.path`` is set.
+
+One script for the plugin's three hosts. Claude Code and Codex run it from
+``hooks.json`` with no argument: Codex reads Claude Code's hook format, sets
+``CLAUDE_PLUGIN_ROOT`` for a plugin's hook, and takes the same one JSON object
+(it refuses any key outside Claude Code's set). Cursor runs it from
+``cursor-hooks.json`` with ``--cursor``: Cursor's stop hook has no message key —
+its one key, ``followup_message``, is submitted as the next prompt, so a round
+said there would start another turn, and another round, up to its loop limit.
+Under ``--cursor`` the paragraph goes to stderr (Cursor's hook log) and stdout
+is ``{}``. *Rejected:* ``followup_message`` (the loop above); one hooks file for
+all three (Cursor's format is ``{"version": 1, "hooks": {"stop": [...]}}``,
+Claude Code's and Codex's a nested ``Stop`` matcher list).
 """
 import os
 import sys
@@ -41,10 +53,35 @@ def _say(message: dict) -> None:
     sys.stdout.flush()
 
 
-def run() -> int:
+def run(argv: list | None = None) -> int:
     """`cli.main(["round", "--hook"])`, which prints its one JSON object and
     returns 0; anything that escapes it, or stops nopekit importing, becomes
-    one ``systemMessage`` line. Always 0: Claude Code reads exit 2 as "block"."""
+    one ``systemMessage`` line. Always 0: Claude Code and Codex read exit 2 as
+    "block". With ``--cursor``, that object's message goes to stderr instead."""
+    argv = sys.argv[1:] if argv is None else argv
+    if "--cursor" not in argv:
+        return _round()
+    import io
+    real, caught = sys.stdout, io.StringIO()
+    sys.stdout = caught
+    try:
+        _round()
+    finally:
+        sys.stdout = real
+    import json
+    for line in caught.getvalue().splitlines():
+        try:
+            said = json.loads(line).get("systemMessage")
+        except (ValueError, AttributeError):
+            said = line
+        if said:
+            sys.stderr.write(str(said) + "\n")
+    _say({})
+    return 0
+
+
+def _round() -> int:
+    """The hook's body, saying its one JSON object on ``sys.stdout``."""
     try:
         from nopekit.cli import main
     except BaseException as exc:  # noqa: BLE001 — the hook never fails the turn

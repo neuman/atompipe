@@ -10,6 +10,9 @@ your project; a pack is that gate made reusable, self-testing and contributable.
 
 Read `${CLAUDE_PLUGIN_ROOT}/docs/PACK_FORMAT.md` for the contract. This skill is the *procedure*.
 
+Where no host filled `${CLAUDE_PLUGIN_ROOT}` in (Codex), it is the directory two above
+this file: the plugin's root.
+
 ## Before you start
 
 **Have you followed `${CLAUDE_PLUGIN_ROOT}/docs/EXTENSION_PROTOCOL.md`?** A pack is step 7 of that
