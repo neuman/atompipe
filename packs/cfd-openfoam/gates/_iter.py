@@ -84,6 +84,17 @@ Designs that lost:
   round-off rule read a creep printed to 7 digits settled at 767 cuts at 0.20%;
   an oscillating fast mode over a slow one at 27 cuts up to 0.44%.
 
+The P0 review changed two readings on purpose, each measured on the judge's
+harness: the acceleration test refuses deeper (SPEED_FLOOR 1e-7, was 1e-5) and
+waits for a difference of DIVE_SLACK of the rate, and a history with too few
+changes before a flat tail that is not round-off reads inf (it was None). The
+parity below was run again after them, against the judged estimator with the
+same two changes made: the same largest difference, 4.3e-13, and no cut point
+that changes sides. On the harness no real history reads settled more than 0.1%
+from converged, before or after; 183 of the 40,192 real cuts that read settled
+now read not settled, no real residual stop changes, and the synthetic misses
+went from 75 cuts in 9 histories to 61.
+
 The arithmetic is the standard library's (``statistics.linear_regression``,
 ``statistics.fmean``, ``math.fsum``) where the judged estimator summed by hand.
 P0.1's parity run held the two together at every cut point the judge's harness
@@ -104,9 +115,12 @@ from statistics import fmean, linear_regression
 #: Eca & Hoekstra's safety factor on the extrapolated iterative error: U_i =
 #: 1.25 e_i (C&F 2009, Sec. 2.1.1, p. 1582). With it their estimate bounded the
 #: true iterative error at more than 95% of the nodes in almost every case (pp.
-#: 1585-86; conclusions, p. 1590). Rejected: 1 (Eq. (9) bare is 0.32-0.70 of the
-#: authors' own tool on its manual's Table 1, and misses more); 3 (the GCI's
-#: two-grid factor: no iterative study carries it over).
+#: 1585-86; conclusions, p. 1590). Rejected: 1 (measured on the judge's harness
+#: in the P0 review: the synthetic misses go from 61 cuts in 9 histories to 67 in
+#: 10, the worst from 1.51% to 1.53%, MARIN's df_iter histories from 14 cuts in 3
+#: to 28 in 6, and the reading on the manual's Table 1 falls from 0.71 to 0.57 of
+#: the authors' own tool at its lowest); 3 (the GCI's two-grid factor: no
+#: iterative study carries it over).
 SAFETY = 1.25
 
 #: The fewest changes a window is fitted on: 8, so the slope's standard error has
@@ -166,33 +180,68 @@ ROUNDOFF = 1e-8
 #: floor, 10 x ROUNDOFF (the test stand-in's converged run, a decay that jumps to
 #: an exact constant 12 iterations before its end, its last change 1.8e-6 of the
 #: value, never settled, and 11 of the pack's tests failed).
+#: The length, 16 changes, is not a measured choice. In the P0 review a look-back
+#: of 8, of 32 and of the whole history read every cut of the judge's harness the
+#: same as 16, and the pack's tests passed with each. 16 is the judged value, two
+#: shortest windows; no history at hand tells the lengths apart.
 STAIRS = 2 * WINDOW_MIN
 
 #: An acceleration (the shortest window's rate faster than the next one's, by more
-#: than CONFIDENCE combined standard errors) is refused only while the last change
-#: above round-off is above SPEED_FLOOR of the value: a decay that speeds up into
-#: round-off is how a run near its fixed point ends, and one that dives far above
-#: it may be two modes cancelling ahead of a turning point. Ours, measured. Without
-#: the refusal (eh-envelope's one-sided test) the overshoot 1 + 0.05 x 0.8^n -
-#: 0.003 x 0.997^n read settled at 16 cuts up to 0.27% (with it, 6), and three
-#: overshoots at 39 cuts (with it, 19). Rejected: 0 (the refusal at any depth):
-#: the pack's own known-bad for cfd.mesh_independence, the channel on 10 x 2
-#: cells, ends its 29 iterations accelerating from 7e-6 to 5e-11 of its value,
-#: read inf, and failed the prerequisite cfd.converged, so the selftest called
-#: cfd.mesh_independence unqualified ("control not isolated"); 1e-6 and 1e-7 (a
-#: real 1e-6 stop at U 0.3, 1.8e-5 from converged, its rate faster by 8.5e-6
-#: decade per iteration in its last 8 iterations than in its last 16, with
-#: standard errors of 1.5e-6 and 1.0e-6, read inf); 1e-4 (the overshoots come
-#: back: 37 cuts); a rate difference of 5% or more before refusing either way
-#: (RATE_SLACK: the tiny standard error of a smooth decay is what catches a
-#: power-law creep; six two-mode histories came back at up to 1.03%, 1 +
-#: 0.05/sqrt(n) at 2071 cuts).
-SPEED_FLOOR = 1e-5
+#: than CONFIDENCE combined standard errors and by more than DIVE_SLACK of the
+#: next one's rate) is refused only while the last change above round-off is
+#: above SPEED_FLOOR of the value: a decay that speeds up into round-off is how a
+#: run near its fixed point ends, and one that dives far above it may be two modes
+#: cancelling ahead of a turning point. Ours, measured; 10 x ROUNDOFF. Without the
+#: refusal (eh-envelope's one-sided test) the overshoot 1 + 0.05 x 0.8^n - 0.003 x
+#: 0.997^n read settled at 16 cuts up to 0.27% (with it, 2), and three overshoots
+#: at 39 cuts (with it, 5).
+#: What slipped through the judged 1e-5 (P0 review): two slow modes of opposite
+#: sign change by less than 1e-5 of the value per iteration long before
+#: round-off, so the refusal never fired and the value read settled near its
+#: extremum. 1 + 0.05 x 0.995^n - 0.06 x 0.998^n read settled at cuts 233-248,
+#: 2.21% from its limit; on 84 two-mode overshoots (rates 0.7 to 0.9995 per
+#: iteration, every cut to 1200) 1810 cuts read settled more than 0.1% out, 187
+#: at 1e-7 (what is left: ``remaining``).
+#: Rejected: 1e-5 (above); 1e-6 (998 of those cuts, and three overshoots of the
+#: judge's set at 8); 1e-8, ROUNDOFF itself, and 0 (the pack's own known-bad for
+#: cfd.mesh_independence, the channel on 10 x 2 cells, ends its 29 iterations
+#: accelerating, its last change above round-off 2.3e-8 of its value: it read inf
+#: and failed the prerequisite cfd.converged, so the selftest called
+#: cfd.mesh_independence unqualified, "control not isolated"); 1e-4 (more gets
+#: through than at 1e-5: three overshoots at 37 cuts); a rate difference of 5% or
+#: more before refusing either way (RATE_SLACK: the tiny standard error of a
+#: smooth decay is what catches a power-law creep; six two-mode histories came
+#: back at up to 1.03%, 1 + 0.05/sqrt(n) at 2071 cuts).
+SPEED_FLOOR = 1e-7
+
+#: The share of the next window's rate by which an acceleration must also be
+#: faster before it is refused. Ours, measured (P0 review), on the side of an
+#: acceleration only: on the side of a slowing rate a slack lets a slow mode
+#: through (RATE_SLACK, above). A real 1e-6 stop at U 0.3, 1.8e-5 from converged,
+#: decays so evenly that its standard errors are 1.5e-6 and 1.0e-6 decade per
+#: iteration. Its last 8 changes run faster than its last 16 by 8.5e-6 decade per
+#: iteration, 2e-4 of its rate, and its last change is 1.8e-6 of its value: with
+#: no slack it read inf under any SPEED_FLOOR below that (the judge's reason to
+#: reject 1e-6 and 1e-7). 1e-3 sits 5 x above it; the slow overshoots above dive
+#: by 3% of their rate or more. Rejected: 0 (the U 0.3 stop and its ladder level
+#: read inf); 1e-2 (512 cuts of the 84 overshoots against 187, for 32 more settled
+#: real cuts and no real stop that changes).
+DIVE_SLACK = 1e-3
 
 #: The model-free reading ignores a net drift under DRIFT_FLOOR of the value per
-#: window (a sixth or a quarter of the run): eh-plus-drift's, carried from the old
-#: SETTLED_FLOOR (1e-6 of the value per window). Under it, a drift that never
-#: slows needs 1000 windows to move STABLE_TOL.
+#: window. Under it, a drift that never slows needs 1000 windows to move
+#: STABLE_TOL. eh-plus-drift's value, which it took from the old SETTLED_FLOOR,
+#: but the window is not the same: that one was 10 iterations, this one is a sixth
+#: or a quarter of the run, so the floor per iteration falls as the run grows
+#: (5e-7 of the value at 17 values, 2e-9, under ROUNDOFF, at 3000). Measured in
+#: the P0 review on the judge's harness: the drift it lets through is the ramp
+#: under ROUNDOFF that the module already accepts, and a smaller floor buys back
+#: only that ramp's cuts for real cuts that read not settled. Rejected: 1e-7 (the
+#: ramp of 5e-9 per iteration at 67 cuts, not 787, for 74 real cuts that no longer
+#: read settled); 1e-9 (the ramp at none, for 138; the old floor rejected 1e-9 for
+#: the baseline's round-off read as never settling, and no real residual stop
+#: changes here); 1e-5 (the reading no longer catches the ramp: it reads settled at
+#: all 2984 of its cuts). The ramp moves 0.1% in 2e5 iterations, 100 budgets.
 DRIFT_FLOOR = 1e-6
 
 
@@ -216,16 +265,30 @@ def remaining(series):
     value that is not finite reads inf here, and inf <= STABLE_TOL x inf is True:
     the gate refuses a non-finite value before it compares.
 
-    What it still cannot see, measured: a slow mode while a fast one carries every
-    change of the last 2 x WINDOW_MIN iterations and the fast one oscillates (1 +
-    0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n: 23 cuts at n = 40-70, up to 0.20%
-    out); a rate that turned slower in the last few iterations (0.85 to 0.995 at n
-    = 40: 5 cuts, up to 1.51%); an overshoot whose turning point is near (1 + 0.2
-    x 0.9^n - 0.01 x 0.995^n: 5 cuts, up to 0.70%; 19 cuts on three overshoots); a
-    drift under ROUNDOFF per iteration; anything after the last iteration (a step,
-    a decay that later reverses: MARIN's df_iter1537); and a converged value that
-    differs with the under-relaxation (Rhie-Chow: a fixed point, not an iterative
-    error)."""
+    What it still cannot see, measured on the judge's harness and in the P0
+    review, each class with every history measured in it:
+    - An overshoot read at or near its turning point. The value stands still at
+      its extremum, and nothing in the history tells an extremum from a limit:
+      the error is the extremum's distance from the limit. The judge's three: 1 +
+      0.05 x 0.8^n - 0.003 x 0.997^n at 2 cuts up to 0.27%, 1 + 0.2 x 0.9^n -
+      0.01 x 0.995^n at 1 at 0.70%, 1 + 0.02 x 0.7^n - 0.002 x 0.999^n at 2 up to
+      0.20%. The review's 84 (rates 0.7 to 0.9995): 37 of them at 187 cuts, from
+      62 iterations before the extremum to 4 after it, up to 29% (1 + 0.25 x
+      0.7^n - 0.3 x 0.999^n at cut 19).
+    - A slow mode while a fast one carries every change of the last 2 x
+      WINDOW_MIN iterations and the fast one oscillates: 1 + 0.005 x 0.998^n +
+      0.05 x 0.9^n (-1)^n at 1 cut at 0.43%; 1 + 0.5 x 0.8^n cos(0.9 n) + 0.003 x
+      0.995^n at 12 up to 0.25%; 1 + 0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n at
+      23 (n = 40-70) up to 0.20%; 1 + 0.005 x 0.998^n + 0.01 x 0.99^n sin(0.7 n)
+      at 2 up to 0.10%.
+    - A rate that turned slower in the last few iterations: 0.85 to 0.995 at n =
+      40, 5 cuts up to 1.51%; 0.7 to 0.998 at n = 30, 13 cuts up to 0.39%.
+    - A drift under ROUNDOFF per iteration (the ramp 5e-9 per iteration, its
+      first 787 cuts).
+    - Anything after the last iteration (a step, a decay that later reverses:
+      MARIN's df_iter1537, 14 cuts up to 1.36%).
+    - A converged value that differs with the under-relaxation (Rhie-Chow: a
+      fixed point, not an iterative error)."""
     n = len(series)
     if n < 2 * WINDOW_MIN + 1:
         return None
@@ -241,7 +304,10 @@ def remaining(series):
         est = envelope([max(c, cut) for c in changes], end,
                        speed_floor=SPEED_FLOOR * abs(series[-1]))
     if est is None or est == math.inf:
-        return est
+        # None: fewer than WINDOW_MIN changes before a flat tail that is not
+        # round-off. What slipped through until the P0 review: it came back as None,
+        # and the gate said "fewer than the 17 needed" of a 31-value history.
+        return math.inf
     return max(est, drift(series))
 
 
@@ -251,18 +317,19 @@ def envelope(changes, end, speed_floor=0.0):
     the largest estimate over the windows ending at ``end`` of WINDOW_MIN, 2 x
     WINDOW_MIN, 4 x WINDOW_MIN, ... changes and of the whole of [0, end];
     infinite when the shortest window's rate is slower than the next one's by more
-    than CONFIDENCE combined standard errors, or faster by as much while the last
-    change is above ``speed_floor`` (absolute; 0 refuses an acceleration at any
-    depth); None when fewer than WINDOW_MIN changes lie in [0, end].
+    than CONFIDENCE combined standard errors, or faster by as much and by more
+    than DIVE_SLACK of the next one's rate while the last change is above
+    ``speed_floor`` (absolute; 0 refuses an acceleration at any depth); None when
+    fewer than WINDOW_MIN changes lie in [0, end].
 
     Each window: the least-squares line of log10 change on iteration (Eqs. (7),
     (10)), its slope raised to the upper bound q_f + CONFIDENCE x SE, pivoted at the
     window's centroid, read at ``end`` (Eq. (8)) and raised by one D_f. C&F 2009
     (p. 1582) say D_f "may be used to obtain a more conservative estimate" and
-    print the correction only in their 2006 SNH paper ([10]), which nobody here has
-    read: one D_f up is the plainest reading. D_f on m - 2 degrees of freedom (the
-    printed denominator does not survive the PDF's text; m - 2 is the unbiased one
-    and the larger). 1 - 10^q as -expm1: written plainly it rounds to 0.0 for a
+    print the correction only in their 2006 SNH paper ([10]), which was not read
+    for this pack: one D_f up is the plainest reading. D_f on m - 2 degrees of
+    freedom (the printed denominator does not survive the PDF's text; m - 2 is the
+    unbiased one and the larger). 1 - 10^q as -expm1: written plainly it rounds to 0.0 for a
     bound within 1e-17 of zero, and the division fails.
 
     Why a ladder of windows. One window cannot see a rate that slowed in its last
@@ -296,7 +363,7 @@ def envelope(changes, end, speed_floor=0.0):
     other way: two modes of opposite sign cancel, the changes dive faster than
     either mode, and the dive extrapolates to nothing (one-sided, 1 + 0.05 x 0.8^n
     - 0.003 x 0.997^n read settled at 16 cuts up to 0.27%, and 1 + 0.2 x 0.9^n -
-    0.01 x 0.995^n at 12 up to 0.70%; two-sided above SPEED_FLOOR, at 6 and 5;
+    0.01 x 0.995^n at 12 up to 0.70%; two-sided above SPEED_FLOOR, at 2 and 1;
     eh-plus-drift's RATE_Z is the source of the second side). The rate the tail
     will keep is not known until the two agree. Undone both ways: six two-mode
     histories read settled 199 times up to 1.03%, and power-law creeps 2266 times
@@ -320,7 +387,7 @@ def envelope(changes, end, speed_floor=0.0):
         bend = CONFIDENCE * math.hypot(se1, se2)
         if q1 > q2 + bend:
             return math.inf                           # still slowing
-        if q1 < q2 - bend and changes[end] > speed_floor:
+        if q1 < q2 - max(bend, DIVE_SLACK * abs(q2)) and changes[end] > speed_floor:
             return math.inf                           # diving: a turning point may come
     return SAFETY * max(e for _, _, e in fits)
 
@@ -390,10 +457,7 @@ def _mean_drift(s, b):
     d1, d2 = m[1] - m[0], m[2] - m[1]
     if abs(d2) <= DRIFT_FLOOR * abs(last) or d1 * d2 <= 0:
         return abs(last - m[2]) + abs(d2)
-    ahead = _carry(abs(d2), d2 / d1)
-    if ahead == math.inf:
-        return math.inf
-    return abs(last - (m[2] + math.copysign(ahead, d2)))
+    return abs(last - (m[2] + math.copysign(_carry(abs(d2), d2 / d1), d2)))
 
 
 def _slope_drift(s, w):

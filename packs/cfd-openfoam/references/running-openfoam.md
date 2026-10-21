@@ -122,8 +122,8 @@ necessary:
   decaying oscillation reads as a decay.
 - The rate of the last 8 changes must agree with the rate of the last 16, within
   two combined standard errors. A slower rate gives no estimate, and the run fails. A
-  faster rate also gives no estimate while the last change is above 1e-5 of the
-  value.
+  faster rate also gives no estimate while the last change is above 1e-7 of the
+  value, if it is faster by more than 0.1% of the rate.
 - A change under 1e-8 of the value is round-off. When the last 8 changes or more
   are round-off, the estimate is the largest swing in that tail. This rule does
   not apply when one of the 16 changes before the tail is exactly zero: the
@@ -142,16 +142,31 @@ steps of one printed digit. That is why the pack sets `writePrecision 12`.
 
 Each of these histories reads settled at some iterations while it is more than
 0.1% from the value it converges to. The numbers are from the synthetic
-histories of GitHub #15, Phase 0.
+histories of GitHub #15, Phase 0, and from its review. Each item gives every
+measured history of its kind, so its largest error is the largest that was
+measured.
 
-- **An overshoot near its turning point.** Two modes of opposite sign cancel,
-  and the changes fall fast before the value turns back. Two overshoots read
-  settled at 6 points up to 0.27% and at 5 points up to 0.70%.
+- **An overshoot at its turning point.** Two modes of opposite sign cancel, and
+  the value stops at an extremum before it turns back. At the extremum the value
+  does not move, and no estimate from the history can tell it from the limit.
+  The error is then the distance from the extremum to the limit. The three
+  overshoots of Phase 0 read settled at 2 points up to 0.27%, at 1 point at
+  0.70% and at 2 points up to 0.20%. In the review, 37 of 84 overshoots with
+  rates from 0.7 to 0.9995 per iteration read settled at 187 points, from 62
+  iterations before the extremum to 4 after it, up to 29%
+  (`1 + 0.25 x 0.7^n - 0.3 x 0.999^n` at iteration 19).
 - **A slow mode under a fast oscillation.** The fit follows the peaks of the
-  fast mode. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n` reads settled at 23
-  points from iteration 40 to 70, up to 0.20%.
-- **A rate that becomes slower in the last 1 to 3 iterations.** The shortest
-  window does not see it yet: 5 points, up to 1.51%.
+  fast mode. `1 + 0.005 x 0.998^n + 0.05 x 0.9^n (-1)^n` reads settled at 1
+  point at 0.43%. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.003 x 0.995^n` reads settled
+  at 12 points up to 0.25%. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n` reads
+  settled at 23 points from iteration 40 to 70, up to 0.20%.
+  `1 + 0.005 x 0.998^n + 0.01 x 0.99^n sin(0.7 n)` reads settled at 2 points up
+  to 0.10%.
+- **A rate that becomes slower in the last few iterations.** The shortest
+  window does not see it yet. A rate that changes from 0.85 to 0.995 per
+  iteration at iteration 40 reads settled at 5 points up to 1.51%. A rate that
+  changes from 0.7 to 0.998 at iteration 30 reads settled at 13 points up to
+  0.39%.
 - **A drift under 1e-8 of the value per iteration.** The estimate calls it
   round-off. A ramp of 5e-9 per iteration reads settled at its first 787
   points. At that rate, the value needs 200 000 iterations to move 0.1%.
@@ -170,8 +185,8 @@ is laminar only.
 ### Against the authors' tool
 
 MARIN's `iterative_error` (closed) adds a correction from Eca and Hoekstra's
-2006 paper in SNH. Nobody here has read that paper, so this estimate agrees with
-the tool in its numbers only. On the tool manual's
+2006 paper in SNH. That paper was not read for this pack, so the comparison is
+of the numbers only, and the formula is not the tool's. On the tool manual's
 Table 1, this estimate is 0.71 to 2.00 times the tool's (median 0.93) on the 8
 items with 8 changes or more. It is below the tool on items 1, 2, 3 and 6. Eq. 9
 without the rules above is 0.32 to 0.70 times the tool's.

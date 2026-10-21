@@ -83,8 +83,9 @@ is an error; a timeout is a skip.
   the change still to come from the history (Eca and Hoekstra 2009). Some
   histories deceive it: an overshoot near its turning point, a slow mode under a
   fast oscillation, a rate that becomes slower in the last few iterations, and a
-  drift under 1e-8 of the value per iteration. `references/running-openfoam.md`
-  gives each one with its measured error.
+  drift under 1e-8 of the value per iteration. An overshoot read at its turning
+  point can be far from its limit: up to 29% in the measured set.
+  `references/running-openfoam.md` gives each one with its measured error.
 - **Anything about a built part.** A measured pressure drop is a physical claim,
   Pending build until a person records it.
 

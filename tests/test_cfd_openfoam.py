@@ -323,6 +323,21 @@ class TheIterativeErrorEstimate(unittest.TestCase):
         self.assertGreaterEqual(I.remaining([1.0 + 0.0017 * (20 - i) / 20 + 1e-7 * i * i
                                              for i in range(21)]), 0.0017)
 
+    def test_a_flat_tail_with_too_little_before_it_reads_inf(self):
+        """A flat tail after an exact repeat is a print step, not round-off, and
+        goes to the fit; with fewer than WINDOW_MIN changes before it there is no
+        decay to fit. What slipped through until the P0 review: that came back as
+        None, and the gate said "fewer than the 17 needed" of 31 iterations."""
+        s = [1.0, 1.0, 1.1, 1.2, 1.25, 1.27] + [1.27] * 25
+        self.assertEqual(I.remaining(s), math.inf)
+        C = _registry().get("cfd.converged")[1].__globals__
+        solve = SimpleNamespace(log=SimpleNamespace(converged_in=31, last_iteration=31,
+                                                    residuals={"p": 1e-7, "Ux": 1e-7}),
+                                dp=lambda: s)
+        self.assertEqual(C["_settled"](solve, 1e-6, 2000),
+                         ["the pressure drop is still moving: its changes do not decrease at "
+                          "a steady rate, so the gate cannot estimate the change still to come"])
+
     def test_a_value_that_is_not_a_number_is_never_settled(self):
         """The estimator P0.1 replaced read a NaN 11 values from the end as 0.0."""
         self.assertEqual(I.remaining([1.0] * 10 + [math.nan] + [1.0] * 20), math.inf)
@@ -344,17 +359,30 @@ class TheIterativeErrorEstimate(unittest.TestCase):
 
     # -- synthetic: the limit is known ----------------------------------------
     def test_a_slow_mode_under_a_fast_one(self):
-        """Two modes: the old estimator read it settled at cuts 28-44, up to
-        0.29% out; eh-faithful (no rate-change test) at cuts 21-37."""
+        """Two modes: the old estimator read it settled at cuts 28-43 and 220, up
+        to 0.29% out; eh-faithful (no rate-change test) at cuts 21-37."""
         s = [1 + 0.3 * 0.7 ** n + 0.003 * 0.995 ** n for n in range(self.N)]
         self.never(s, range(17, 221), truth=1.0)
 
     def test_an_overshoot_before_its_turning_point(self):
         """Not settled at cuts 21-30, which the one-sided rate test read settled
-        (the old estimator at 28-30). Cuts 31-36 are the documented miss
-        (``_iter.remaining``)."""
+        (the old estimator at 28-52), nor at 31-34, which SPEED_FLOOR 1e-5 let
+        through until the P0 review. Cuts 35 and 36, just past the turning point,
+        are the documented miss (``_iter.remaining``)."""
         s = [1 + 0.05 * 0.8 ** n - 0.003 * 0.997 ** n for n in range(self.N)]
-        self.never(s, range(21, 31), truth=1.0)
+        self.never(s, range(21, 35), truth=1.0)
+
+    def test_a_slow_overshoot_before_its_turning_point(self):
+        """SPEED_FLOOR's control (P0 review): two slow modes of opposite sign
+        change by less than 1e-5 of the value per iteration long before
+        round-off. Under the judged floor (1e-5) the dive test never fired, and
+        these read settled near their extremum, 2.2% and 3.6% from the limit, at
+        cuts 233-248 and 510-514. The cuts at the turning point itself (246 and
+        248, 511-514) are the documented miss."""
+        s = [1 + 0.05 * 0.995 ** n - 0.06 * 0.998 ** n for n in range(250)]
+        self.never(s, range(17, 246), truth=1.0)
+        s = [1 + 0.1 * 0.998 ** n - 0.12 * 0.999 ** n for n in range(520)]
+        self.never(s, range(17, 511), truth=1.0)
 
     def test_a_power_law_creep(self):
         """1 + 0.05/sqrt(n+1) never decays geometrically: never settled. The old
@@ -373,7 +401,7 @@ class TheIterativeErrorEstimate(unittest.TestCase):
     def test_a_creep_printed_to_seven_digits(self):
         """STAIRS: 1 + 0.002 x 0.99995^n printed as OpenFOAM's default
         writePrecision 6 prints it moves one quantum about every ten iterations,
-        always 0.13-0.2% from its limit. The old estimator read it settled at
+        always 0.17-0.20% from its limit. The old estimator read it settled at
         2980 of 2984 cuts; a round-off rule without the staircase test at 767."""
         s = [float("%.7g" % (1 + 0.002 * 0.99995 ** n)) for n in range(self.N)]
         self.never(s, range(17, self.N + 1, 13))
@@ -409,9 +437,11 @@ class TheIterativeErrorEstimate(unittest.TestCase):
                     self.assertTrue(_settles(s, len(s)), f"{name}: {I.remaining(s)}")
 
     def test_an_oscillation_that_decays_settles(self):
-        """The running maximum's control: 1 + 0.1 x 0.995^n cos(2n) settles from
-        cut 2131 on. Fitted on the changes themselves, a window that starts in a
-        trough reads as growing, and it never settled in 3000 iterations."""
+        """The running maximum's control: 1 + 0.1 x 0.995^n cos(2n) first reads
+        settled at cut 2136 and reads settled at cut 3000 (between them, about
+        half of the cuts read not settled). Fitted on the changes themselves, a
+        window that starts in a trough reads as growing, and it never settled in
+        3000 iterations."""
         s = [1 + 0.1 * 0.995 ** n * math.cos(2 * n) for n in range(self.N)]
         self.assertTrue(_settles(s, self.N))
 
