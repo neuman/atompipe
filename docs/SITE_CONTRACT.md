@@ -1344,7 +1344,11 @@ paragraphs, one-level `-`/`*` and `1.` lists, `>` quotes, a paragraph that is on
 image (a figure, its path under `site/`), `**bold**`, `*italic*`, `` `code` `` and
 links (`https:`, `http:`, a site path, `#anchor`). A claim id that exists becomes a
 link to the drawer. Raw HTML, tables and fenced code stay literal text, each with a
-problem.
+problem. A figure whose file is not under `site/` reads `"missing": true`. A figure
+under `site/assets/` reads `"missing": true` also, whether its file exists or not, and
+the build says to put figures in `site/content/img/`: the build deletes the files in
+`assets/` that no view uses, so such a file would be gone after the build that linked
+it (issue #15).
 
 ```jsonc
 { "file": "content/strength.md", "subject": "strength", "as_of": "3f2a9c1e0b7d4a55",

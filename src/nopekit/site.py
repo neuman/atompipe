@@ -2086,9 +2086,15 @@ def build(
     )
 
     generated, notes = run_all_viewgens(view_registry, ctx)
+    held = _kept_from_last_build(site, view_registry, notes)
     for note in notes:
         if note["status"] in ("error", "unavailable"):
-            warnings.append(f"view {note['view']}: {note['note']}")
+            kept_word = "kept from the last build: " if note["view"] in held else ""
+            warnings.append(f"view {note['view']}: {kept_word}{note['note']}")
+    if held:
+        order_index = {spec.id: i for i, spec in enumerate(view_registry.specs())}
+        generated = sorted([*generated, *held.values()],
+                           key=lambda v: (int(v.order), order_index.get(v.id, 0), v.id))
 
     merged, conflicts_views = _merge_views(ledger.views, generated)
     warnings.extend(conflicts_views)
@@ -2216,10 +2222,11 @@ def build(
         kept_view_files.append(f"{view_id}.json")
 
     # Keep every asset a view still points at, not merely the ones written this
-    # run: a viewgen that skipped because its exporter is missing did not rewrite
-    # its GLB, and deleting the previous one would turn a missing dependency into
-    # a missing picture with no explanation. And every evidence copy the plan
-    # links.
+    # run, and every evidence copy the plan links. A viewgen that is unavailable
+    # or crashed is among them through the row its id had in the last build
+    # (`_kept_from_last_build`). What slipped through (issue #15): this comment
+    # said so before the code did; such a viewgen returned no view, its `src`
+    # left this list, and the cleaner deleted the picture it drew last time.
     keep = list(ctx.written) + keep_evidence
     for row in payload["views"]:
         src = str(row.get("src") or "")
@@ -2345,6 +2352,77 @@ def build(
         "evidence": {"copied": copied, "kept": kept, "missing": not_shown},
         "warnings": warnings,
     }
+
+
+def _kept_from_last_build(site: str, registry: ViewRegistry,
+                          notes: Iterable[Mapping[str, Any]]) -> dict[str, View]:
+    """``{view id: View}`` for each viewgen of ``notes`` that is unavailable or
+    crashed this build: the row its id had in the last ``data/state.json``,
+    with its payload read back from its ``data_url`` file, as a view again
+    (its identity forced from its spec, `_stamp_view`).
+
+    A view is page furniture, never a truth input: no view reaches the
+    resolution (`build` resolves against the ledger it was handed), so a row
+    kept here moves no status. The row is kept only while every file it names
+    is on disk and its payload parses; otherwise the view leaves the page, as
+    before, and the page links no file that is gone. Nothing machine-specific
+    is added to the row, so a clone without the tool bakes the same
+    ``state.json``. What slipped through (issue #15): an unavailable viewgen
+    returned no view, so a build on a computer without its tool removed the
+    view from the page and deleted its committed picture.
+    *Rejected:* keeping every file under ``assets/`` that the last state named
+    (a view whose viewgen was removed or returned nothing would never go);
+    keeping the file and dropping the row (the cleaner's job is to remove what
+    no page links, and a picture nobody links is that).
+    """
+    wanted = {str(n.get("view") or "") for n in notes
+              if n.get("status") in ("unavailable", "error")}
+    if not wanted:
+        return {}
+    try:
+        with open(os.path.join(site, DATA_DIR, STATE_NAME), "r", encoding="utf-8") as fh:
+            last = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    rows = last.get("views") if isinstance(last, dict) else None
+    held: dict[str, View] = {}
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict) or row.get("id") not in wanted or row["id"] in held:
+            continue
+        found = registry.get(row["id"])
+        if found is None:
+            continue
+        spec = found[0]
+        named = [str(row.get(key) or "") for key in ("src", "data_url")]
+        if not all(_site_file(site, rel) for rel in named if rel):
+            continue
+        body = {k: v for k, v in row.items() if k != "data_url"}
+        if row.get("data_url"):
+            if row["data_url"] != posixpath.join(VIEWS_DIR, f"{row['id']}.json"):
+                continue
+            try:
+                with open(os.path.join(site, *row["data_url"].split("/")), "r",
+                          encoding="utf-8") as fh:
+                    body["data"] = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(body["data"], dict):
+                continue
+        try:
+            view = View.from_dict(body)
+        except (TypeError, ValueError):
+            continue
+        held[spec.id], _note = _stamp_view(view, spec)
+    return held
+
+
+def _site_file(site: str, rel: str) -> bool:
+    """Whether ``rel`` is a plain relative path to a file under ``site``."""
+    text = str(rel).replace("\\", "/")
+    if (not text or text.startswith("/") or ":" in text
+            or ".." in text.split("/")):
+        return False
+    return os.path.isfile(os.path.join(site, *text.split("/")))
 
 
 def _merge_views(declared: Iterable[View], generated: Iterable[View]) -> tuple[list, list]:

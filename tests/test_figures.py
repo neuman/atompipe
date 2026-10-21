@@ -37,8 +37,8 @@ from nopekit import verdicts
 GATE = "demo.drop"
 
 
-def run(case: _env.EnvCase, root: str, *argv: str, code: int | None = 0):
-    proc = _env.nopekit(list(argv), cwd=root)
+def run(case: _env.EnvCase, root: str, *argv: str, code: int | None = 0, env=None):
+    proc = _env.nopekit(list(argv), cwd=root, env=env)
     if code is not None:
         case.assertEqual(proc.returncode, code,
                          f"`nopekit {' '.join(argv)}` exited {proc.returncode}:\n"
@@ -85,10 +85,10 @@ def served(case: _env.EnvCase, root: str) -> str:
     return hits[0]
 
 
-def build(case: _env.EnvCase, root: str) -> dict:
+def build(case: _env.EnvCase, root: str, **kw) -> dict:
     if not os.path.isdir(os.path.join(root, "site")):
         run(case, root, "site", "init")
-    proc = run(case, root, "site", "build", "--json")
+    proc = run(case, root, "site", "build", "--json", **kw)
     return json.loads(proc.stdout)
 
 
@@ -332,6 +332,214 @@ class TheEvidenceManifestIsScratch(_env.EnvCase):
                                  f"site build wrote {rel}, which git does not ignore")
         self.assertFalse([p for p in moved if p.startswith(".nopekit/cache/evidence/")],
                          "site build wrote a manifest")
+
+
+# --------------------------------------------------------------------------- #
+# An unbound viewgen that needs a tool, and the prose figures beside it
+# --------------------------------------------------------------------------- #
+STILL = "demo.still"
+STILL_TOOL = "nopekit-test-still"
+
+#: An UNBOUND viewgen (no `evidence_of`): it needs the tool `STILL_TOOL`, writes
+#: a picture with `write_asset` and a payload over `site.VIEW_INLINE_MAX` (split
+#: into `data/views/demo.still.json`), and crashes when `views/still.mode` says
+#: `crash`. Strings only in its payload: no number of it may vouch for prose.
+_STILL_VIEWGEN = '''\
+import os
+
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+
+@viewgen(id="demo.still", kind=ViewKind.IMAGE, title="A still",
+         requires_tools=["nopekit-test-still"])
+def still(ctx):
+    """A still of the demo; it needs nopekit-test-still on PATH."""
+    path = os.path.join(ctx.root, "views", "still.mode")
+    mode = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else "ok"
+    if mode == "crash":
+        raise RuntimeError("planted crash in the still")
+    src = ctx.write_asset("demo_still.png", b"a still, drawn " + mode.encode())
+    return View(id="demo.still", kind=ViewKind.IMAGE, src=src,
+                data={"notes": ["note " + chr(97 + i % 26) * (1 + i % 7)
+                                for i in range(900)]})
+'''
+
+
+def plant_still(case: _env.EnvCase, root: str) -> dict:
+    """The still's viewgen in ``root/views/``; return the environment that puts
+    its tool on PATH (`_env.run`'s ``env``)."""
+    os.makedirs(os.path.join(root, "views"), exist_ok=True)
+    with open(os.path.join(root, "views", "still.py"), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write(_STILL_VIEWGEN)
+    tools = case.tmp()
+    tool = os.path.join(tools, STILL_TOOL)
+    with open(tool, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.chmod(tool, 0o755)
+    return {"PATH": tools + os.pathsep + os.environ.get("PATH", "")}
+
+
+def still_mode(root: str, mode: str) -> None:
+    with open(os.path.join(root, "views", "still.mode"), "w", encoding="utf-8") as fh:
+        fh.write(mode)
+
+
+def plant_prose_figure(root: str, src: str) -> None:
+    """``site/content/intro.md`` holding one figure at ``src`` (site-relative),
+    and a picture there."""
+    for rel, data in ((src, b"a picture the agent placed"),
+                      ("content/intro.md", f"The demo.\n\n![A picture]({src})\n".encode())):
+        path = os.path.join(root, "site", *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+
+def baked(root: str, name: str) -> dict:
+    with open(os.path.join(root, "site", "data", name), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+#: The keys under which a baked file names a file of the site.
+LINK_KEYS = ("src", "href", "data_url", "field_src", "data_src")
+
+
+def links(doc) -> list[str]:
+    """Every site path ``doc`` links (`LINK_KEYS`), but a prose figure that
+    says it is missing: never an address with a scheme, an anchor or a root."""
+    found: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            said_missing = node.get("type") == "figure" and node.get("missing") is True
+            for key, value in node.items():
+                if key in LINK_KEYS and isinstance(value, str) and value and not said_missing:
+                    if not (value.startswith(("#", "/")) or "://" in value
+                            or value.startswith(("mailto:", "data:"))):
+                        found.append(value)
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(doc)
+    return found
+
+
+def dangling(root: str) -> list[str]:
+    """Every link of ``state.json``, ``map.json`` and ``page.json`` whose file
+    the build left absent."""
+    out = []
+    for name in ("state.json", "map.json", "page.json"):
+        for rel in links(baked(root, name)):
+            if not os.path.isfile(os.path.join(root, "site", *rel.split("/"))):
+                out.append(f"{name}: {rel}")
+    return out
+
+
+def view_row(root: str, view_id: str) -> dict | None:
+    return next((row for row in baked(root, "state.json")["views"]
+                 if row.get("id") == view_id), None)
+
+
+# --------------------------------------------------------------------------- #
+class NothingTheBuildDeletesIsLinked(_env.EnvCase):
+    """(Invariant 14) Every file the page links is on disk after the build that
+    linked it: a view's picture and payload, an evidence copy, a prose figure.
+    What slipped through: an unbound viewgen whose tool was missing left the
+    keep set, so the cleaner deleted the picture it had drawn before; and a
+    prose figure under `assets/` read present and the same build deleted it."""
+
+    def test_every_href_the_page_bakes_exists_after_the_build(self):
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        tool = plant_still(self, root)
+        check_at(self, root, 1.0)
+        run(self, root, "site", "init")
+        plant_prose_figure(root, "content/img/demo.png")
+        # Two builds: drawn, then with the tool gone (the crash and the row
+        # itself are `AMissingRendererMovesNoStatus`'s, left for the gate).
+        for label, env in (("drawn", tool), ("no tool", None)):
+            with self.subTest(label):
+                build(self, root, env=env)
+                self.assertEqual(dangling(root), [])
+                row = view_row(root, STILL)
+                self.assertIsNotNone(row, "the still left the page")
+                self.assertTrue(row["src"] and row["data_url"], row)
+        page = baked(root, "page.json")
+        self.assertIn("content/img/demo.png", links(page))
+        self.assertTrue(any(rel.startswith("assets/evidence/") for rel in links(page)))
+
+    def test_a_prose_figure_under_assets_reads_missing(self):
+        """A figure the agent put under `site/assets/`, where the cleaner deletes
+        what no view links: it reads missing on the first build as on every
+        later one, and the build says where figures go. Red before issue #15's
+        P1.2: it read present, the same build deleted it, and the next build
+        baked another page."""
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        run(self, root, "site", "init")
+        plant_prose_figure(root, "assets/demo.png")
+        summary = build(self, root)
+        figures = [block for block in baked(root, "page.json")["intro"]["blocks"]
+                   if block.get("type") == "figure"]
+        self.assertEqual([(f["src"], f["missing"]) for f in figures],
+                         [("assets/demo.png", True)])
+        self.assertTrue(any("site/content/img/" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        first = page_bytes(root)
+        build(self, root)
+        self.assertEqual(page_bytes(root), first, "the second build baked another page")
+        self.assertEqual(dangling(root), [])
+
+
+# --------------------------------------------------------------------------- #
+class AMissingRendererMovesNoStatus(_env.EnvCase):
+    """(Invariant 14) A renderer that is missing or crashes changes no status
+    and deletes no picture the page showed: the view keeps the row and the file
+    its last build had, and the build says so."""
+
+    def test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset(self):
+        """Drawn, then built with its tool gone: the row, the picture and the
+        split payload stay as they were, and the build says "kept from the last
+        build". Red before issue #15's P1.2: the view left `state.json` and the
+        cleaner deleted its picture."""
+        self._keeps_its_asset((("no tool", None),))
+
+    def test_an_unbound_viewgen_that_crashes_keeps_its_asset(self):
+        """The same with the tool present and the viewgen raising, then once
+        more with the tool gone: a crash keeps the row as a missing tool does."""
+        self._keeps_its_asset((("crash", "crash"), ("no tool", None)))
+
+    def _keeps_its_asset(self, legs) -> None:
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        tool = plant_still(self, root)
+        check_at(self, root, 1.0)
+        build(self, root, env=tool)
+        row = view_row(root, STILL)
+        self.assertIsNotNone(row)
+        files = {}
+        for rel in (row["src"], row["data_url"]):
+            with open(os.path.join(root, "site", *rel.split("/")), "rb") as fh:
+                files[rel] = fh.read()
+        state = baked(root, "state.json")
+        for label, mode in legs:
+            with self.subTest(label):
+                if mode:
+                    still_mode(root, mode)
+                summary = build(self, root, env=tool if mode else None)
+                self.assertEqual(view_row(root, STILL), row)
+                for rel, data in files.items():
+                    path = os.path.join(root, "site", *rel.split("/"))
+                    self.assertTrue(os.path.isfile(path), f"{rel} was deleted")
+                    with open(path, "rb") as fh:
+                        self.assertEqual(fh.read(), data)
+                self.assertFalse([p for p in summary["removed"] if STILL in p
+                                  or "demo_still" in p], summary["removed"])
+                self.assertTrue(any(STILL in w and "kept from the last build" in w
+                                    for w in summary["warnings"]), summary["warnings"])
+                self.assertEqual(baked(root, "state.json"), state)
 
 
 if __name__ == "__main__":

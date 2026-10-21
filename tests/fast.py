@@ -1052,6 +1052,18 @@ FAST: list[str] = [
     # manifest's place under git's ignore rules (~0.6 s, one check).
     "test_figures.EvidenceIsBoundByContent.test_a_cache_hit_never_publishes_another_runs_bytes",
     "test_figures.TheEvidenceManifestIsScratch.test_check_writes_the_manifest_only_where_git_ignores",
+    # Issue #15, P1.2 (nothing the build deletes is linked): one check, `site
+    # init` and two builds of the figure project, the second without the
+    # unbound viewgen's tool, each a cold process (~3 s idle, ~6 s measured on
+    # a loaded machine). The row that saw the defect: every link of
+    # state.json, map.json and page.json is on disk after each build.
+    "test_figures.NothingTheBuildDeletesIsLinked.test_every_href_the_page_bakes_exists_after_the_build",
+    # And the row that keeps an unavailable unbound viewgen's row and files
+    # (one check, `site init`, two builds; ~3 s idle). It is
+    # AMissingRendererMovesNoStatus's only row here until P1.3 brings the
+    # design's FAST row for that class (the statuses across five renderers);
+    # then this one can move to the gate.
+    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_is_unavailable_keeps_its_asset",
 ]
 
 
@@ -1077,6 +1089,16 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.EvidenceIsBoundByContent.test_a_copy_made_before_the_manifest_is_kept",
     "test_figures.TheEvidenceManifestIsScratch.test_no_record_and_controls_write_none",
     "test_figures.TheEvidenceManifestIsScratch.test_site_build_writes_only_site_and_ignored_scratch",
+    # Issue #15, P1.2: the prose figure under `assets/` (one check and two
+    # builds, ~4 s) and the unbound viewgen crashing, then with its tool gone
+    # (one check and three builds, ~5 s). The FAST rows above build the same
+    # project without the tool, ask that every link is on disk and that the
+    # row and its files stay; these hold the crash and the prose figure's
+    # word. An iteration touching `site._kept_from_last_build`,
+    # `page.figure_misplaced` or `prose.parse_markdown` runs test_figures and
+    # test_site whole.
+    "test_figures.NothingTheBuildDeletesIsLinked.test_a_prose_figure_under_assets_reads_missing",
+    "test_figures.AMissingRendererMovesNoStatus.test_an_unbound_viewgen_that_crashes_keeps_its_asset",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

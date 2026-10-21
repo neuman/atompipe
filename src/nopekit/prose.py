@@ -262,11 +262,17 @@ def _inline(text: str, claims: frozenset, problems: list[str]) -> list[dict]:
 
 
 def parse_markdown(body: str, *, exists: Callable[[str], bool] = lambda _p: True,
-                   claims: Iterable[str] = ()) -> tuple[list[dict], list[str]]:
+                   claims: Iterable[str] = (),
+                   misplaced: Callable[[str], str] = lambda _p: ""
+                   ) -> tuple[list[dict], list[str]]:
     """``body`` as typed blocks (``h3``, ``h4``, ``p``, ``quote``, ``ul``,
     ``ol``, ``figure``) of runs, and the problems found. Never HTML: the page
     builds DOM from the runs. ``exists(path)`` says whether a figure's file is
     under ``site/``; ``claims`` are the claim ids a word may link to.
+    ``misplaced(path)`` is why a figure's path is no place for a figure, or
+    ``""``: such a figure reads missing whether its file exists or not, and the
+    reason is its problem (issue #15: a figure under ``site/assets/``, which
+    the build cleans).
 
     The subset: ``#`` and ``##`` are ``h3`` (the section's ``h2`` is the
     board's title), ``###`` and deeper ``h4``; paragraphs split on blank lines;
@@ -295,8 +301,11 @@ def parse_markdown(body: str, *, exists: Callable[[str], bool] = lambda _p: True
                 problems.append(f"figure {src!r} is not a path under site/: it is shown as text")
                 blocks.append({"type": "p", "runs": [{"t": text}]})
                 return
-            missing = not exists(src)
-            if missing:
+            why = misplaced(src)
+            missing = bool(why) or not exists(src)
+            if why:
+                problems.append(f"figure {src} {why}")
+            elif missing:
                 problems.append(f"figure {src} is not under site/")
             blocks.append({"type": "figure", "src": src, "alt": figure.group("alt"),
                            "caption": _inline(figure.group("cap") or "", claim_set, problems),

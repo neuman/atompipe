@@ -92,6 +92,19 @@ EVIDENCE_MAX_BYTES = 2 * 1024 * 1024
 #: Where the evidence lands, under ``site/``.
 EVIDENCE_DIR = "assets/evidence"
 
+#: Where the agent's prose figures go, under ``site/``, and the folder they
+#: must not use (`figure_misplaced`). ``assets/`` is the build's: the cleaner
+#: (`site.clean_assets`) deletes each file there that no view and no evidence
+#: copy names, and a prose figure is neither. What slipped through (issue #15):
+#: a figure under ``assets/`` read present, the build that baked it deleted
+#: it, and the next build baked another page. *Rejected:* adding prose figures
+#: to the cleaner's keep set (a picture the agent forgot would then outlive the
+#: text that named it, and only the next text edit would let it go); a warning
+#: alone with the figure shown (the page would link a file the same build
+#: deletes).
+PROSE_FIGURE_DIR = "content/img"
+ASSETS_PREFIX = "assets/"
+
 #: The prose subjects that are not boards: the description, the next steps and,
 #: from the two pages, the marketing page's story. Every list of them (the
 #: stamp's argument, the reserved group ids, the build's messages, the pool's
@@ -2116,6 +2129,19 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
     }
 
 
+def figure_misplaced(path: str) -> str:
+    """Why a prose figure at ``path`` (site-relative) is no place for one, or
+    ``""``: a path under `ASSETS_PREFIX`, where the build cleans; figures go
+    under `PROSE_FIGURE_DIR`. It depends on the path alone, never on the disk,
+    so a fresh clone bakes the same word."""
+    text = posixpath.normpath(str(path).replace("\\", "/"))
+    if text == ASSETS_PREFIX.rstrip("/") or text.startswith(ASSETS_PREFIX):
+        return (f"is in site/{ASSETS_PREFIX}. The build deletes the files there that no view "
+                f"uses, so the page shows this figure as missing. Put figures in "
+                f"site/{PROSE_FIGURE_DIR}/")
+    return ""
+
+
 def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> list[dict]:
     """Fill ``page_doc``'s prose objects from ``site/content/`` and return one
     summary row per file: ``{file, subject, stamp, unmatched, register,
@@ -2143,7 +2169,8 @@ def bake_prose(root: str, page_doc: dict, lay: Layout, toks: Any, pool: Any) -> 
             text = fh.read()
         front = prose_logic.parse_front_matter(text)
         blocks, problems = prose_logic.parse_markdown(front.body, exists=exists,
-                                                      claims=claim_ids)
+                                                      claims=claim_ids,
+                                                      misplaced=figure_misplaced)
         blocks, unmatched = prose_logic.scan_numbers(blocks, pool)
         register: list[str] = []
         for chunk in prose_logic.blocks_text(blocks):

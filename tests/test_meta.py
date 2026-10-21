@@ -243,7 +243,12 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_derivation.TheMapDrawsWhatTheTraceObserved",
          # Issue #15: evidence on the page is the bytes its entry's run cited,
          # bound by content, never another run's under the same name.
-         "test_figures.EvidenceIsBoundByContent"],
+         "test_figures.EvidenceIsBoundByContent",
+         # Issue #15, P1.2: no file the page links is deleted by the build that
+         # links it, and a renderer that is missing or crashes moves no status
+         # and keeps the picture its last build drew.
+         "test_figures.NothingTheBuildDeletesIsLinked",
+         "test_figures.AMissingRendererMovesNoStatus"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",

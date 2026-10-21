@@ -3640,6 +3640,12 @@ A locator is never dropped for being undrawable: it stays on its verdict, and
 `locator_problems` publishes the problem beside it in `state.json`, because a gate
 that believes it is drawing and is not looks exactly like a gate that found nothing. `clean_assets` deletes only what
 it can prove is unreferenced, which is why every asset arrives through `write_asset`.
+A viewgen that is unavailable or crashes keeps the row its id had in the last
+`state.json`, with its `src` and its `data_url` payload, while every file the row names
+is on disk; the build warns `view <id>: kept from the last build: <reason>`, and adds
+nothing to the row, so a clone without the tool bakes the same `state.json` (issue #15:
+such a viewgen returned no view, so the cleaner deleted the picture it drew last time).
+A view no viewgen declares, or one that has nothing to draw, is not kept.
 
 ### `page.py`  (deps: models, util, store, claims, report, graph, prose)
 The two pages' baked data (architecture phase 5, SPEC 28-33, 40): `map.json` and
@@ -3659,6 +3665,8 @@ OTHER = "other"                              # the generated board and zone
 IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
 EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
 EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next", "story")
+PROSE_FIGURE_DIR = "content/img"; ASSETS_PREFIX = "assets/"   # where prose figures go,
+                                             #   and the folder the build cleans
 DECISIONS_SHOWN = 5                          # the marketing page's featured decisions on show
 VIEWER_KINDS = ("model3d", "field")          # the view kinds an alternate may be
 WORD_KEYS: frozenset; RECORD_KEYS: frozenset # every string key of page.json and map.json:
@@ -3718,6 +3726,9 @@ def bake_map(view, lay, built, toks, composed, *, projection, params=(), registr
 def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
               plan=(), records_digest="", resolution_digest="", amber=None) -> dict
 def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
+def figure_misplaced(path) -> str            # why a prose figure's path is no place for
+                                             #   one ("" if it is): under assets/, it reads
+                                             #   missing, by its path alone
 def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
                     pool=None, amber=None, feeds=None) -> list[str]   # invariant 14: tokens,
                                              #   words, marks, ready, amber, feeds,
@@ -3780,7 +3791,9 @@ class Pool(NamedTuple): values; tagged       # every baked number's absolute val
 def parse_front_matter(text) -> FrontMatter
 def stamp_text(text, as_of) -> str           # writes only the as_of line
 def stamp_digest(subject, tokens) -> str     # 16 hex: sha256 over nopekit-stamp-v1
-def parse_markdown(body, *, exists=..., claims=()) -> tuple[list[dict], list[str]]
+def parse_markdown(body, *, exists=..., claims=(), misplaced=...) -> tuple[list[dict], list[str]]
+                                             # misplaced(path): a reason makes the figure
+                                             #   missing, the reason its problem
 def number_pool(docs) -> Pool
 def scan_numbers(blocks, pool) -> tuple[list[dict], list[str]]   # number runs, unmatched
 def matches(text, decimals, percent, pool, unit="") -> bool   # a unit must agree

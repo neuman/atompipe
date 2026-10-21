@@ -1250,9 +1250,41 @@ class ViewgensThroughTheCli(_SiteCase):
         self.assertIn("assembly", out)
         self.assertEqual([v["id"] for v in self._state()["views"]], ["assembly"])
 
+    def test_an_asset_whose_viewgen_became_unavailable_is_kept(self):
+        """Built once, then built with its exporter gone: the view keeps the row
+        and the GLB its last build had, and the build says so. Before issue
+        #15's P1.2 this was the deletion case: the view left the page and the
+        cleaner deleted its GLB. Once the GLB is gone by hand, the row goes too,
+        so the page never links a file that is not there."""
+        _capture(["site", "build", "-C", self.root])
+        before = [v for v in self._state()["views"] if v["id"] == "assembly"]
+        self.assertEqual(len(before), 1)
+        glb = os.path.join(self.root, site_mod.SITE_DIR, "assets", "assembly.glb")
+        # Under another file name: a module this process imported is reused
+        # (`cli._import_viewgen_module`), so the edit goes to a new file.
+        os.unlink(os.path.join(self.root, "views", "assembly.py"))
+        path = os.path.join(self.root, "views", "assembly_unavailable.py")
+        declared = '@viewgen(id="assembly", kind=ViewKind.MODEL3D, title="Assembly")'
+        self.assertIn(declared, VIEWGEN_SOURCE)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(VIEWGEN_SOURCE.replace(declared, declared[:-1] + ', requires_python='
+                                            '["nopekit_no_such_exporter"])'))
+        _code, out = _capture(["site", "build", "--json", "-C", self.root])
+        payload = json.loads(out)
+        self.assertTrue(os.path.isfile(glb), "the GLB of an unavailable viewgen was deleted")
+        self.assertNotIn("site/assets/assembly.glb", payload["removed"])
+        self.assertEqual([v for v in self._state()["views"] if v["id"] == "assembly"], before)
+        self.assertTrue(any("assembly" in w and "kept from the last build" in w
+                            and "nopekit_no_such_exporter" in w for w in payload["warnings"]),
+                        payload["warnings"])
+        os.unlink(glb)
+        _capture(["site", "build", "-C", self.root])
+        self.assertEqual([v["id"] for v in self._state()["views"]], [])
+
     def test_a_stale_asset_from_a_renamed_view_is_removed(self):
         """A renamed view otherwise leaves a 12 MB GLB behind that renders
-        perfectly and belongs to nothing."""
+        perfectly and belongs to nothing. A view no viewgen declares is not an
+        unavailable one: nothing keeps its file."""
         _capture(["site", "build", "-C", self.root])
         orphan = os.path.join(self.root, site_mod.SITE_DIR, "assets", "old.glb")
         with open(orphan, "wb") as fh:
