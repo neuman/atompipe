@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A stand-in OpenFOAM v2606 tool for tests/test_cfd_openfoam.py: blockMesh,
+"""A stand-in OpenFOAM v2606 tool for tests/test_cfd_openfoam.py and test_cfd_views.py:
 checkMesh and simpleFoam in one script, dispatched on the name it runs as.
 
 Its output is shaped as v2606 wrote it while the pack was written (the banner,
@@ -7,9 +7,19 @@ checkMesh's lines, simpleFoam's residual and converged lines, the
 surfaceFieldValue .dat). What it prints is set by ``$WM_PROJECT_DIR/standin.json``,
 which the test writes. It reads the staged case the way the real tools do:
 blockMesh and simpleFoam take the cell counts from ``system/blockMeshDict``,
+checkMesh its non-orthogonality from the first block's corner angle (unless the
+mode states one), simpleFoam a pressure drop proportional to the case's nu,
 simpleFoam its iteration budget from ``system/controlDict``, its residual
 target from ``system/fvSolution`` and its function objects' names from the
 controlDict.
+
+It writes what the real tools leave on disk for the pictures (GitHub #15, Phase
+2): blockMesh the five ``constant/polyMesh`` files, simpleFoam ``U`` and ``p`` at
+its last iteration, and ``mag(U)`` and ``static(p)`` there when the controlDict
+holds the pack's ``mag`` and ``pressure`` objects (``static(p)`` is ``rhoInf``
+times ``p``, as the real object writes it). Their bytes follow the mesh and the
+solution, so another run writes other bytes; their contents are not OpenFOAM's
+format, which nothing reads here.
 
 The banner follows the environment as the real one does: the trapping line only
 with ``FOAM_SIGFPE=true``, the disallowing line only when
@@ -60,6 +70,39 @@ def counts():
             re.findall(r"hex\s*\([\d\s]+\)\s*(?:\w+\s*)?\((\d+)\s+(\d+)\s+(\d+)\)", text)]
 
 
+def skew_deg() -> float:
+    """The first block's non-orthogonality as checkMesh reports it for a
+    parallelogram: how far its corner at vertex 0, between the block's first
+    and second directions, is from a right angle. The baseline's is 0; the
+    pack's ``sheared`` known-bad's is atan(4), 76 degrees. 0 when the
+    blockMeshDict does not read this simply."""
+    text = open(os.path.join("system", "blockMeshDict")).read()
+    body = re.search(r"vertices\s*\((.*?)\);", text, re.S)
+    block = re.search(r"hex\s*\(([\d\s]+)\)", text)
+    if not body or not block:
+        return 0.0
+    verts = [tuple(float(c) for c in v.split()) for v in re.findall(r"\(([^()]+)\)", body.group(1))]
+    ids = [int(i) for i in block.group(1).split()]
+    try:
+        a = [verts[ids[1]][i] - verts[ids[0]][i] for i in range(3)]
+        b = [verts[ids[3]][i] - verts[ids[0]][i] for i in range(3)]
+        cos = sum(x * y for x, y in zip(a, b)) / math.sqrt(sum(x * x for x in a) * sum(y * y for y in b))
+    except (IndexError, ValueError, ZeroDivisionError):
+        return 0.0
+    return abs(90.0 - math.degrees(math.acos(max(-1.0, min(1.0, cos)))))
+
+
+def nu_factor() -> float:
+    """The case's nu over the baseline's 1e-05: a laminar pressure drop is
+    proportional to it (the pack's ``thicker_fluid`` known-bad doubles it)."""
+    text = open(os.path.join("constant", "transportProperties")).read()
+    found = re.search(r"^nu\s+([^;\s]+)\s*;", text, re.M)
+    try:
+        return float(found.group(1)) / 1e-05 if found else 1.0
+    except ValueError:
+        return 1.0
+
+
 def end(text: str = "") -> None:
     if MODE.get(TOOL, {}).get("no_end"):
         sys.exit(0)
@@ -93,6 +136,10 @@ fail_if_asked()
 
 if TOOL == "blockMesh":
     n = sum(a * b * c for a, b, c in counts())
+    os.makedirs(os.path.join("constant", "polyMesh"), exist_ok=True)
+    for name in ("points", "faces", "owner", "neighbour", "boundary"):
+        with open(os.path.join("constant", "polyMesh", name), "w") as fh:
+            fh.write(f"// stand-in {name}: blocks {counts()}, {n} cells\n")
     print(f"Creating block mesh topology\n  nCells: {n}\n  boundingBox: (0 0 0) (0.1 0.01 0.001)\n")
     end()
 
@@ -107,7 +154,8 @@ if TOOL == "checkMesh":
         out.append(f" ***High aspect ratio cells found, Max aspect ratio: {ar:g}, number of cells 1"
                    if ar > 1000 else f"    Max aspect ratio = {ar:g} OK.")
     if "non_ortho" not in m.get("omit", []):
-        out.append(f"    Mesh non-orthogonality Max: {m.get('non_ortho', 0.0):g} average: 0")
+        out.append(f"    Mesh non-orthogonality Max: {m.get('non_ortho', skew_deg()):g} "
+                   f"average: 0")
     out.append(f"    Max skewness = {m.get('skew', 4.4e-16):g} OK.")
     out.append("")
     out.append("Mesh OK." if m.get("ok", True) else
@@ -121,7 +169,8 @@ if TOOL == "simpleFoam":
     budget = int(float(re.search(r"^endTime\s+(\S+);", control, re.M).group(1)))
     solution = open(os.path.join("system", "fvSolution")).read()
     target = float(re.search(r"residualControl\s*\{\s*p\s+(\S+);", solution).group(1))
-    names = re.findall(r"^\s*(nopekit_\w+)\s*$", control, re.M)
+    objects = dict(re.findall(r"^\s*(nopekit_\w+)\s*\{\s*type\s+(\w+);", control, re.M))
+    names = [k for k, v in objects.items() if v == "surfaceFieldValue"]
     ny = counts()[0][1]
     # The pressure drop this mesh converges to: a law in the level's Ny.
     law = m.get("dp", "poiseuille")
@@ -139,7 +188,7 @@ if TOOL == "simpleFoam":
         dp = 6.0e-4 / (1 + 50.0 / ny ** 2)
     else:
         dp = float(law)
-    dp *= m.get("scale", 1.0)
+    dp *= m.get("scale", 1.0) * nu_factor()
     stop = int(m.get("converge_at", 60)) if ny not in m.get("never_at_ny", []) else budget + 1
     last = min(stop, budget)
     converged = stop <= budget
@@ -163,6 +212,17 @@ if TOOL == "simpleFoam":
             for it, v in rows:
                 p = v if k == 0 else 0.0
                 fh.write(f"{it}                 \t{p:.10e}\t({u:.10e} 0 0)\n")
+    rho = re.search(r"rhoInf\s+(\S+);", control)
+    field_dir = str(last)
+    os.makedirs(field_dir, exist_ok=True)
+    fields = {"U": [u] * ny, "p": [dp * (1 - j / ny) for j in range(ny)]}
+    if "mag" in objects.values():
+        fields["mag(U)"] = [abs(u)] * ny
+    if "pressure" in objects.values() and rho:
+        fields["static(p)"] = [float(rho.group(1)) * v for v in fields["p"]]
+    for name, values in fields.items():
+        with open(os.path.join(field_dir, name), "w") as fh:
+            fh.write(f"// stand-in {name} at {last}\n" + "\n".join(repr(v) for v in values) + "\n")
     res = m.get("final_residual", target / 2) if converged else 1e-3
     criteria = m.get("criteria", {"p": target, "U": target})
     print("SIMPLE: convergence criteria")

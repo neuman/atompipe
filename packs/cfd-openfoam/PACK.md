@@ -36,8 +36,9 @@ subset it can read exactly as OpenFOAM does (see "Pointing a project at its
 case"): a directive, a macro or a file it would not evaluate is a fail, never a
 guess. The others copy the case's `0/`, `constant/` (not its mesh) and
 `system/` under the gate's out directory and run OpenFOAM there. On that copy the
-pack writes its own residual targets and its own two function objects, and
-removes the case's: the numbers come from the pack, never from the project's
+pack writes its own residual targets and its own function objects (two
+planes; in `cfd.pressure_drop` also OpenFOAM's `mag` of U and its static
+pressure in Pa, which the site's pictures draw), and removes the case's: the numbers come from the pack, never from the project's
 `controlDict`. Before the run, OpenFOAM's own reading of the copy
 (`foamDictionary -expand`) must hold exactly the pack's function objects and
 residual targets and the case's nu, and the solver's log must report the pack's
@@ -114,6 +115,13 @@ beside its `summary.json`, one for each mesh, and the summary holds the
 estimated remaining change as `iterative_error_pct`. A chart of the history
 calculates nothing (`references/running-openfoam.md`, "What the evidence
 holds").
+
+Two charts of `cfd.pressure_drop`'s result go on the site with no other tool:
+the pressure drop on each mesh against its cell size, with the value at zero
+cell size and the GCI band (`cfd-openfoam.ladder`), and how the pressure drop
+settled on each mesh (`cfd-openfoam.settle`). Each draws the numbers of the
+result beside it and no other. The site adds the claim's limit and the judged
+value.
 
 ## Pointing a project at its case
 

@@ -1543,7 +1543,8 @@ def chart_spec(payload: Any, limit: Mapping | None, current: Mapping | None) -> 
     line, never called a limit) and ``estimates`` (``[{x, y, label}]``,
     diamonds). Every number in it is the chart file's or the floor's, and it
     holds none of `VEGA_FORBIDDEN_KEYS`: Vega places numbers and computes only
-    the axes. A y axis the payload marks ``"scale": "log"`` is logarithmic. The
+    the axes. A y axis the payload marks ``"scale": "log"`` is logarithmic, and
+    one it marks ``"zero": false`` does not start at zero. The
     side of the limit that fails is shaded (both sides of a ``between``).
 
     What is drawn is the spine's; how it looks (colours, fonts, which side a
@@ -1559,8 +1560,14 @@ def chart_spec(payload: Any, limit: Mapping | None, current: Mapping | None) -> 
     y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
     x_title, y_title = _axis_title(x_axis), _axis_title(y_axis)
     x_enc = {"field": "x", "type": "quantitative", "title": x_title, "scale": {"zero": False}}
+    # A y axis starts at zero unless the payload says ``"zero": false``. What
+    # slipped through (GitHub #15, P2.1): a mesh ladder's three levels differ by
+    # 0.4% of the drop, and from zero they drew as one point. Zero stays the
+    # default, so no chart is drawn from a cut-off axis unless its pack asks.
+    # *Rejected:* a log y for the ladder (its domain rounds to powers of ten).
     y_enc = {"field": "y", "type": "quantitative", "title": y_title,
-             "scale": {"type": "log"} if y_axis.get("scale") == "log" else {"zero": True}}
+             "scale": {"type": "log"} if y_axis.get("scale") == "log" else
+             {"zero": y_axis.get("zero") is not False}}
     several = len({r["series"] for r in rows}) > 1
     colour = {"field": "label", "type": "nominal", "title": "",
               "legend": {} if several else None}
@@ -1646,8 +1653,14 @@ def chart_spec(payload: Any, limit: Mapping | None, current: Mapping | None) -> 
         # chart's right edge from a point at the right end.
         last = not any(r["x"] > current.get("x") for r in rows) if _finite_number(
             current.get("x")) else False
-        label_mark = (_text_mark("nk-current-label", "right", -10, -8) if last
-                      else _text_mark("nk-current-label", "left", 10, -8))
+        # And above a series point's own words at the same x. What slipped
+        # through (cfd-openfoam.ladder, P2.1): "8000 cells" and "13% inside the
+        # limit" were drawn over each other at the finest mesh.
+        crowded = _finite_number(current.get("x")) and any(
+            r.get("text") and r["x"] == current["x"] for r in rows)
+        dy = -24 if crowded else -8
+        label_mark = (_text_mark("nk-current-label", "right", -10, dy) if last
+                      else _text_mark("nk-current-label", "left", 10, dy))
         if _finite_number(current.get("x")):
             at = {"x": _datum(current["x"]), "y": _datum(current["y"])}
             layers.append({"mark": {"type": "point", "filled": True, "style": "nk-current"},

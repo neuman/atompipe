@@ -47,6 +47,10 @@
     "cfd.mesh_independence",
     "cfd.pressure_drop"
   ],
+  "provides_views": [
+    "cfd-openfoam.ladder",
+    "cfd-openfoam.settle"
+  ],
   "provides_generators": [],
   "requires_tools": [
     "openfoam2606"

@@ -680,31 +680,43 @@ def _exe(path: str, text: str) -> None:
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def install_standin(directory: str) -> tuple[str, str]:
+    """The stand-in OpenFOAM installed under ``directory``: ``(install root,
+    bin)``, where ``bin`` holds only the ``openfoam2606`` wrapper, to put on
+    PATH. Its mode is ``<install root>/standin.json`` (``{}`` here), and each
+    tool it runs is appended to ``<install root>/calls``."""
+    root = os.path.join(directory, "openfoam2606")
+    appbin = os.path.join(root, "platforms", "linux64GccDPInt32Opt", "bin")
+    os.makedirs(appbin)
+    os.makedirs(os.path.join(root, "etc"))
+    os.makedirs(os.path.join(root, "META-INFO"))
+    with open(os.path.join(root, "etc", "bashrc"), "w") as fh:
+        fh.write('root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n'
+                 'export WM_PROJECT_DIR="$root"\n'
+                 'export FOAM_APPBIN="$root/platforms/linux64GccDPInt32Opt/bin"\n')
+    with open(os.path.join(root, "META-INFO", "api-info"), "w") as fh:
+        fh.write("api=2606\npatch=0\n")
+    for tool in ("blockMesh", "checkMesh", "simpleFoam", "foamDictionary"):
+        _exe(os.path.join(appbin, tool),
+             f"#!{sys.executable}\nimport os, runpy\nos.environ['STANDIN_TOOL'] = "
+             f"{tool!r}\nrunpy.run_path({STANDIN!r}, run_name='__main__')\n")
+    bin_dir = os.path.join(directory, "bin")
+    os.makedirs(bin_dir)
+    # v2606's wrapper, quote and all.
+    _exe(os.path.join(bin_dir, "openfoam2606"),
+         f'#!/bin/sh\nexec "{root}"/etc/openfoam "$@"\n')
+    with open(os.path.join(root, "standin.json"), "w") as fh:
+        json.dump({}, fh)
+    return root, bin_dir
+
+
 @unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
 class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     """Through the stand-in OpenFOAM: every way a run looks finished and is not."""
 
     def setUp(self):
         self.dir = self.tmp()
-        self.root = os.path.join(self.dir, "openfoam2606")
-        appbin = os.path.join(self.root, "platforms", "linux64GccDPInt32Opt", "bin")
-        os.makedirs(appbin)
-        os.makedirs(os.path.join(self.root, "etc"))
-        os.makedirs(os.path.join(self.root, "META-INFO"))
-        with open(os.path.join(self.root, "etc", "bashrc"), "w") as fh:
-            fh.write('root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n'
-                     'export WM_PROJECT_DIR="$root"\n'
-                     'export FOAM_APPBIN="$root/platforms/linux64GccDPInt32Opt/bin"\n')
-        self.api_info("api=2606\npatch=0\n")
-        for tool in ("blockMesh", "checkMesh", "simpleFoam", "foamDictionary"):
-            _exe(os.path.join(appbin, tool),
-                 f"#!{sys.executable}\nimport os, runpy\nos.environ['STANDIN_TOOL'] = "
-                 f"{tool!r}\nrunpy.run_path({STANDIN!r}, run_name='__main__')\n")
-        self.bin = os.path.join(self.dir, "bin")
-        os.makedirs(self.bin)
-        # v2606's wrapper, quote and all.
-        _exe(os.path.join(self.bin, "openfoam2606"),
-             f'#!/bin/sh\nexec "{self.root}"/etc/openfoam "$@"\n')
+        self.root, self.bin = install_standin(self.dir)
         self.registry = _registry()
         self.params = _baseline()
         self.mode({})

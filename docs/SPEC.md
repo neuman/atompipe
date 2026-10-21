@@ -1790,9 +1790,13 @@ it:
   functools, which the spine empties before each run).
 - **Every run is the pack's, on a staged copy.** The copy holds the case's `0/`,
   `constant/` but its mesh, and `system/`. The pack replaces every `functions` entry
-  with two `surfaceFieldValue` planes of its own and `residualControl` with its
-  target. Before the run, OpenFOAM's own reading of the copy (`foamDictionary
-  -expand`) must hold exactly those, and the nu, laminar model, budget and schemes
+  with function objects of its own and `residualControl` with its target: two
+  `surfaceFieldValue` planes, and in `cfd.pressure_drop`'s ladder four, with
+  OpenFOAM's `mag` of U and `pressure` (static, times the density) for the site's
+  pictures (GitHub #15, Phase 2; *rejected:* the two field objects in every ladder,
+  where the density would re-key the guards for a picture). Before the run,
+  OpenFOAM's own reading of the copy (`foamDictionary -expand`) must hold exactly
+  those, and the nu, laminar model, budget and schemes
   the guard read; simpleFoam's own convergence-criteria block must name the pack's
   target; checkMesh's direction count must be the case's dimension. Each tool runs
   with a private HOME whose user controlDict turns off `allowSystemOperations`, and
@@ -2015,6 +2019,18 @@ and while building it:
   every spine edit with a real v2606, which CI lacks.
 - **Invariant 14 grows** the figure sentence, held by the `test_figures.py` classes in
   its row.
+- **Phase 2, P2.1 (built):** `cfd.pressure_drop`'s summary holds every number the
+  pictures draw, each the gate's or OpenFOAM's: per mesh `h_rel` and `dp_pa`,
+  `h_rel_ext` (0, where the Richardson value sits), `u_upstream_m_s`, `p_up_pa`,
+  `p_down_pa`, the `planes`, and `fields` (the finest level's time and the sha256 of
+  its `U`, `p`, `mag(U)`, `static(p)` and mesh files, which a picture binds and the
+  site never copies). Two charts need no tool: `cfd-openfoam.ladder` and
+  `cfd-openfoam.settle` (`views/flow.py`), payloads of those numbers that the spine
+  bakes into Vega-Lite. A chart payload may ask for a y axis that does not start at
+  zero (`"zero": false`): the ladder's meshes differ by 0.4% of the drop and drew as
+  one point (*rejected:* a log y, whose domain rounds to powers of ten). The settling
+  chart leaves out a change of zero (no place on a log axis) and the first row
+  (*rejected:* a floor value, a number no evidence file holds).
 - **Phase 2, decided here and not yet built:** pvbatch's identity is its conda package
   records against a pack lock, with a renderer control once per identity (*rejected:*
   the banner alone, which fits another build; the launcher's 28 KB digest alone); the

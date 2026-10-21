@@ -1187,7 +1187,8 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
   { "series": { "dp": [[1, 0.531], [2, 0.524], [3, 0.5222]] },   // or a list of
               // { "key", "label", "points": [[x, y], ...], "labels": [str], "hollow": bool }
     "x": { "label": "mesh level" },
-    "y": { "label": "pressure drop", "units": "Pa", "scale": "log" },  // scale: optional
+    "y": { "label": "pressure drop", "units": "Pa", "scale": "log" },  // scale: optional;
+              // "zero": false: a linear y that does not start at zero
     "band": [ { "x": 3, "lo": 0.52, "hi": 0.525, "label": "GCI band" } ],
     "rule": { "value": 0.1, "label": "tolerance" },               // never called a limit
     "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated" } ] }

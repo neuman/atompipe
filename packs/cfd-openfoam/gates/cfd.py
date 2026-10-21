@@ -19,7 +19,9 @@ guard that did not pass.
 output on a copy of the project's case staged under the gate's out directory:
 checkMesh's text, simpleFoam's log, and the values of two ``surfaceFieldValue``
 function objects THIS PACK writes into the copy (the project's own function
-objects are removed, so a project cannot hand the gate its number). The pack also
+objects are removed, so a project cannot hand the gate its number);
+``cfd.pressure_drop``'s ladder also writes OpenFOAM's speed and static pressure
+fields, which the site's pictures draw (``MAG_U``). The pack also
 writes its own residual targets into the copy. They read inside a subprocess the
 trace cannot see into, so they are opaque and re-run on every check where
 OpenFOAM exists. The GCI arithmetic (``_gci.py``) is the standard library's and is
@@ -79,6 +81,7 @@ project's to say.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
@@ -191,6 +194,28 @@ DEFAULT_TIMEOUT_S = 600.0
 
 #: What the pack's function objects are called in the staged copy.
 UPSTREAM, DOWNSTREAM = "nopekit_upstream", "nopekit_downstream"
+
+#: The two field function objects cfd.pressure_drop's ladder adds (GitHub #15,
+#: Phase 2): OpenFOAM's own ``mag`` of U and ``pressure`` in static mode, which
+#: multiplies the kinematic p by ``rhoInf`` (cfd_density_kg_m3), so ``mag(U)``
+#: in m/s and ``static(p)`` in Pa are written at the final time. The pictures on
+#: the site draw these fields, so every number a picture shows is OpenFOAM's.
+#: Rejected: computing |U| and Pa in ParaView (a calculator in the drawing
+#: script would be arithmetic no gate checks: the issue's rule is that OpenFOAM
+#: computes every drawn field); adding them to every ladder and to cfd.converged
+#: (the pressure object reads the density, so a density edit would re-key the
+#: guards for a picture: design O3).
+MAG_U, STATIC_P = "nopekit_magU", "nopekit_static"
+
+#: The files of the finest level whose sha256 cfd.pressure_drop's summary
+#: holds (``fields``): the solved fields at the last time, the two fields the
+#: objects above wrote, and the mesh blockMesh wrote. A picture binds these
+#: digests (``BoundContext.bind``), so it draws the run of its result and no
+#: other. The digests are not part of a verdict: the files stay in the out
+#: directory and are never cited as evidence (each is up to megabytes, and the
+#: site copies cited evidence).
+FIELD_FILES = ("U", "p", "mag(U)", "static(p)")
+MESH_FILES = ("points", "faces", "owner", "neighbour", "boundary")
 
 #: The precision the pack's function objects write their values at: 12, so 13
 #: significant digits (they write in scientific notation). The convergence
@@ -898,7 +923,9 @@ def _stage_dir(ctx: GateContext, gid: str, name: str) -> str:
     return os.path.dirname(marker)
 
 
-def _function_objects(planes) -> str:
+def _function_objects(planes, rho=None) -> str:
+    """The pack's function objects: the two planes, and with ``rho`` (only
+    cfd.pressure_drop's ladder) the ``mag`` and ``pressure`` fields (MAG_U)."""
     def one(name, point, normal):
         return f"""    {name}
     {{
@@ -926,20 +953,38 @@ def _function_objects(planes) -> str:
         fields          (p U);
     }}
 """
+    fields = "" if rho is None else f"""    {MAG_U}
+    {{
+        type            mag;
+        libs            (fieldFunctionObjects);
+        field           U;
+        writeControl    writeTime;
+    }}
+    {STATIC_P}
+    {{
+        type            pressure;
+        libs            (fieldFunctionObjects);
+        mode            static;
+        rho             rhoInf;
+        rhoInf          {float(rho)!r};
+        writeControl    writeTime;
+    }}
+"""
     (p0, n0), (p1, n1) = planes
     return ("// Written by nopekit's cfd-openfoam pack: the case's own function objects\n"
             "// were removed from this copy, so the numbers below are the pack's.\n"
-            "functions\n{\n" + one(UPSTREAM, p0, n0) + one(DOWNSTREAM, p1, n1) + "}\n")
+            "functions\n{\n" + one(UPSTREAM, p0, n0) + one(DOWNSTREAM, p1, n1) + fields
+            + "}\n")
 
 
-def _prepare(stage: str, case: Case, planes, target: float, counts=None) -> None:
+def _prepare(stage: str, case: Case, planes, target: float, counts=None, rho=None) -> None:
     """The pack's edits to a staged copy: its residual targets, its function
-    objects, and (for a refined level) its cell counts. Every other byte is the
-    project's."""
+    objects (with the two field objects when ``rho`` is given), and (for a
+    refined level) its cell counts. Every other byte is the project's."""
     cd = F.case_file(stage, "system/controlDict")
     with open(cd, encoding="utf-8") as fh:
         text = fh.read()
-    text = F.put_entry(text, "functions", _function_objects(planes))
+    text = F.put_entry(text, "functions", _function_objects(planes, rho))
     with open(cd, "w", encoding="utf-8") as fh:
         fh.write(text)
     fs = F.case_file(stage, "system/fvSolution")
@@ -1009,7 +1054,8 @@ def _expanded(env, stage: str, rel: str, timeout: float):
         raise T.RunError(f"foamDictionary's expansion of {rel} does not parse: {exc}", [run.log])
 
 
-def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float) -> None:
+def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float,
+             rho=None) -> None:
     """OpenFOAM's own reading of the staged copy, held to what the pack wrote
     into it and what cfd.case_readable read from it; T.RunError on any
     difference. The tier-0 reader refuses what it cannot evaluate, and this is
@@ -1018,10 +1064,10 @@ def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float)
     edit cannot see a merge), and an ``#if`` that set the nu the solver ran."""
     problems = []
     cd = _expanded(env, stage, "system/controlDict", timeout)
-    want = F.parse(_function_objects(planes)).sub("functions")
+    want = F.parse(_function_objects(planes, rho)).sub("functions")
     if cd.sub("functions") is None or _canon(cd.sub("functions")) != _canon(want):
-        problems.append("system/controlDict's functions are not exactly the pack's two "
-                        "function objects")
+        problems.append(f"system/controlDict's functions are not exactly the pack's "
+                        f"{'two' if rho is None else 'four'} function objects")
     if cd.entry("libs") is not None:
         problems.append("system/controlDict loads libraries")
     try:
@@ -1060,14 +1106,15 @@ def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float)
                          "read it: " + "; ".join(problems))
 
 
-def _solve(stage: str, case: Case, planes, target: float, env, timeout: float) -> Solve:
+def _solve(stage: str, case: Case, planes, target: float, env, timeout: float,
+           rho=None) -> Solve:
     """blockMesh, checkMesh and simpleFoam in ``stage``, after OpenFOAM's own
     reading of it is held to the pack's: a Solve, or T.RunError / T.Timeout.
 
     No memo: the spine empties only functools caches before a run, so a
     module-level memo of runs would outlive the gate that filled it (the first
     draft's did, and ``doctor`` named it)."""
-    _as_read(env, stage, case, planes, target, timeout)
+    _as_read(env, stage, case, planes, target, timeout, rho)
     mesh = T.run(env, stage, ["blockMesh"], timeout)
     cells = T.block_mesh_cells(mesh.stdout)
     check = T.run(env, stage, ["checkMesh"], timeout)
@@ -1466,10 +1513,12 @@ def _lattice(case: Case, planes, r: float) -> list[str]:
     return why
 
 
-def _ladder(ctx: GateContext, gid: str):
+def _ladder(ctx: GateContext, gid: str, rho=None):
     """The project's mesh and two refinements of it, each solved: ``(case,
     planes, target, note, ratio, rnote, [Level coarse..fine])`` or a Verdict.
-    A level that does not converge is a fail of mesh independence, named."""
+    A level that does not converge is a fail of mesh independence, named. With
+    ``rho`` (cfd.pressure_drop), each level also writes OpenFOAM's speed and
+    static pressure fields (MAG_U)."""
     got = _settings(ctx, gid)
     if isinstance(got, Verdict):
         return got
@@ -1502,9 +1551,9 @@ def _ladder(ctx: GateContext, gid: str):
         counts = case.counts(r, k)
         stage = _stage_dir(ctx, gid, f"level{k}")
         T.stage(case.path, stage, case.files)
-        _prepare(stage, case, planes, target, counts if k else None)
+        _prepare(stage, case, planes, target, counts if k else None, rho)
         try:
-            solve = _solve(stage, case, planes, target, env, timeout)
+            solve = _solve(stage, case, planes, target, env, timeout, rho)
         except T.Timeout as exc:
             return _skip(gid, f"level {k}: {exc}")
         except (T.RunError, ValueError) as exc:
@@ -1555,16 +1604,91 @@ def _gci(case: Case, levels: list, target: float):
     return res, why, noise
 
 
-def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None) -> list[str]:
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _last_time(stage: str):
+    """The name of the latest time directory a run wrote in ``stage`` (not
+    ``0``), or None: the converged iteration, where simpleFoam writes its
+    fields and the field objects write theirs."""
+    best = None
+    for name in os.listdir(stage):
+        try:
+            t = float(name)
+        except ValueError:
+            continue
+        if t > 0 and math.isfinite(t) and os.path.isdir(os.path.join(stage, name)) \
+                and (best is None or t > best[0]):
+            best = (t, name)
+    return None if best is None else best[1]
+
+
+def _fields(ctx: GateContext, stage: str):
+    """``{stage, time, sha256}`` for the finest level's fields and mesh
+    (FIELD_FILES, MESH_FILES), or None when the run wrote no time directory.
+    ``stage`` is written ``<out>/...``, relative to the gate's out directory, as
+    ``BoundContext.bind`` reads it. A file the run did not write is left out:
+    the picture that needs it says so, and no verdict depends on it."""
+    time = _last_time(stage)
+    if time is None:
+        return None
+    rel = os.path.relpath(stage, ctx.out_path()).replace(os.sep, "/")
+    sha = {}
+    for name in FIELD_FILES:
+        path = os.path.join(stage, time, name)
+        if os.path.isfile(path):
+            sha[f"{time}/{name}"] = _sha256(path)
+    for name in MESH_FILES:
+        path = os.path.join(stage, "constant", "polyMesh", name)
+        if os.path.isfile(path):
+            sha[f"constant/polyMesh/{name}"] = _sha256(path)
+    return {"stage": f"<out>/{rel}", "time": time, "sha256": sha}
+
+
+def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
+                     planes=None) -> list[str]:
     """summary.json, a ``history_level{k}.csv`` per level (``_history``; in Pa when
     ``rho`` is given) and the logs. Each level holds its estimate as
-    ``iterative_error_pct``, beside the ``convergence_tol_pct`` it was held to."""
+    ``iterative_error_pct``, beside the ``convergence_tol_pct`` it was held to.
+
+    With ``rho`` (cfd.pressure_drop) the summary also holds what the site's
+    pictures draw (GitHub #15, Phase 2), each number the gate's or OpenFOAM's,
+    so a picture computes none: per level ``h_rel`` (its cell size relative to
+    the finest, (cells_fine / cells)^(1/dim), Celik's h) and ``dp_pa``;
+    ``h_rel_ext``, zero, where the Richardson value sits on that axis; and, on
+    the finest level at its last iteration, ``u_upstream_m_s`` (the mean
+    velocity along the upstream plane's normal, the one cfd.converged holds to
+    cfd_velocity_m_s), ``p_up_pa`` and ``p_down_pa`` (rho x each plane's
+    average p), the ``planes`` and the ``fields`` with their sha256. A
+    picture's colour range is a pack factor times one of these, never
+    ``limit_pa``."""
     payload = {"dim": case.dim, "formal_order": case.formal_order,
                "levels": [{"k": lv.k, "cells": lv.solve.cells, "counts": lv.counts,
                            "converged_in": lv.solve.log.converged_in,
                            "dp_m2_s2": lv.solve.dp()[-1],
                            "iterative_error_pct": _error_pct(lv.solve.dp())} for lv in levels],
                "noise_m2_s2": noise, "convergence_tol_pct": STABLE_TOL * 100.0}
+    if rho is not None and levels:
+        finest = levels[-1]
+        for lv, row in zip(levels, payload["levels"]):
+            row["h_rel"] = (finest.solve.cells / lv.solve.cells) ** (1.0 / case.dim)
+            row["dp_pa"] = rho * lv.solve.dp()[-1]
+        payload["h_rel_ext"] = 0.0
+        up, down = finest.solve.up, finest.solve.down
+        ip, jp = up.columns.index("areaAverage(p)"), down.columns.index("areaAverage(p)")
+        last = up.rows[-1]
+        downs = {row[0]: row[jp] for row in down.rows}
+        payload["p_up_pa"] = rho * last[ip]
+        payload["p_down_pa"] = rho * downs[last[0]] if last[0] in downs else None
+        if planes is not None:
+            payload["u_upstream_m_s"] = finest.solve.u_normal(planes[0][1])
+            payload["planes"] = [{"point": list(p), "normal": list(n)} for p, n in planes]
+        payload["fields"] = _fields(ctx, finest.stage)
     if res is not None:
         payload["gci"] = {k: v for k, v in vars(res).items()}
     payload.update(extra)
@@ -1670,17 +1794,17 @@ def pressure_drop(ctx: GateContext) -> Verdict:
         if not v > 0:
             return _error(gid, f"{key} is {v:g}; it must be positive")
         vals[key] = v
-    got = _ladder(ctx, gid)
+    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
+    got = _ladder(ctx, gid, rho)
     if isinstance(got, Verdict):
         return got
-    case, _planes_, target, _note, r, _rnote, levels = got
+    case, planes, target, _note, r, _rnote, levels = got
     res, why, noise = _gci(case, levels, target)
-    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
     if res is None or res.gci_fine21 is None or why:
         # cfd.mesh_independence passed on these same meshes, or this gate would
         # not have run: a GCI that does not hold here is the two disagreeing.
         return _error(gid, "the meshes give no GCI band: " + "; ".join(why)[:300],
-                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho))
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho, planes))
     if not res.phi[0] > 0:
         # What slipped through the first draft: the drop was taken as a
         # magnitude, so a pressure RISE between the planes (a pump, a diffuser,
@@ -1688,12 +1812,13 @@ def pressure_drop(ctx: GateContext) -> Verdict:
         return _error(gid, f"the pressure on the downstream plane is not below the upstream "
                            f"one ({rho * res.phi[0]:.5g} Pa): a rise, or the planes in the "
                            f"wrong order",
-                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho))
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho, planes))
     dp_pa = rho * res.phi[0]
     top = dp_pa * (1.0 + res.gci_fine21)
     ev = _ladder_evidence(ctx, gid, case, levels, res, noise,
                           {"density_kg_m3": rho, "dp_pa": dp_pa, "band_top_pa": top,
-                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit}, rho)
+                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit}, rho,
+                          planes)
     passed = top <= limit
     return Verdict(gate=gid, passed=passed, measured=round(top, 9), limit=limit,
                    comparator="<=", units="Pa",
