@@ -14,7 +14,8 @@ Every line here was measured on ESI OpenFOAM v2606 while the pack was written.
      two `surfaceFieldValue` function objects, `nopekit_upstream` and
      `nopekit_downstream`: `areaAverage` of `p` and `U` on a sampled plane
      (`planeType pointAndNormal`, the point inside `pointAndNormalDict`, as v2606
-     requires; `interpolate true`), written every iteration;
+     requires; `interpolate true`), written every iteration at `writePrecision
+     12` (13 significant digits, whatever the case's own controlDict says);
    - replace `SIMPLE/residualControl` in `system/fvSolution` with `p` and `U` at
      `cfd_residual_target`;
    - for a refined level, multiply each block's cell counts in
@@ -95,14 +96,27 @@ End
 
 The gate reads the converged line, the first `Initial residual` of each field in
 the last iteration (p and a U component must both be there), and the pack's
-`.dat` files. A converged line is not enough: the pressure drop's remaining
-change must be under 0.1% of it. Over the last 20 iterations, a pressure drop
-that is not monotone may still swing by its largest movement in the last 10; a
-monotone one is a geometric tail, its contraction per iteration read from the
-step sizes in each window of 10 (the slower of the two), and what is to come is
-the last step x q / (1 - q), never less than the last window's movement. U
-relaxed to 0.03 makes the normalised residuals tiny while the number creeps: one
-such run passed a 10-iteration stillness test 9.7% from its converged value.
+`.dat` files. A converged line is not enough: the pressure drop's estimated
+remaining change must be under 0.1% of it. The estimate is Eca and Hoekstra's
+(Computers & Fluids 38, 2009, Eq. 9): a least-squares line through the log of
+the change per iteration gives the rate, and the sum of the geometric tail at
+that rate, times 1.25, is the change still to come. The gate uses the upper 95%
+bound of the rate and the largest result over windows of 8, 16, 32, ...
+iterations and the whole history. A rate that still changes between the two shortest windows gives
+no estimate, and the run fails. A model-free reading of the drift over the
+last half of the run is a second check, and the larger value is used.
+`gates/_iter.py` has each rule and the history that made it necessary.
+
+The estimate needs at least 17 values. A converged run with OpenFOAM's default
+precision (7 significant digits) can fail here, because its last changes are
+steps of one printed digit. That is why the pack sets `writePrecision 12`.
+
+U relaxed to 0.03 makes the normalised residuals tiny while the number creeps:
+one such run passed a 10-iteration stillness test 9.7% from its converged value.
+The estimate that replaced that test read real v2606 histories as settled up to
+23.4% from their converged value (a laminar pitzDaily under slow relaxation).
+The current estimate reads no point of those histories as settled more than
+0.1% from converged.
 
 ## Where the planes sit
 
@@ -118,11 +132,12 @@ every level, and fails, naming the plane and the level, before it runs anything.
 With r = 2 or 3, a plane on a face or a centre of the first mesh stays on one.
 
 ```
-# Region type :   sampledSurface nopekit_upstream
-# Faces           : 20
-# Area            : 1.0000000000e-05
-# Time            	areaAverage(p)    	areaAverage(U)
-91                	8.8235294768e-04  	(1.0000e-02 1.2e-09 0)
+# Region type :     sampledSurface nopekit_upstream
+# Faces             : 20
+# Area              : 1.000000000000e-05
+# Scale factor      : 1.000000000000e+00
+# Time              	areaAverage(p)	areaAverage(U)
+91                  	8.823530330387e-04	(9.999996662583e-03 8.756808141046e-14 0.000000000000e+00)
 ```
 
 A plane whose area is 0 or not a number cuts no part of the mesh: an error. So is

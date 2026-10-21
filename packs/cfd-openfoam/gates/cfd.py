@@ -64,6 +64,12 @@ was written, on v2606):
   found the convergence estimate fooled by an earlier oscillation and by a
   round-off floor applied too soon, and boundary conditions evaluated at run
   time (``exprFixedValue``, a ``uniformFixedValue`` table) let through.
+- ``cfd.converged`` and ``cfd.mesh_independence`` (GitHub #15, Phase 0): the
+  convergence estimate, the contraction of the last two windows of 10
+  iterations, read real v2606 histories settled up to 23.4% from converged (a
+  laminar pitzDaily under slow relaxation); ``_iter.py`` replaces it. The same
+  phase found any ``upwind`` in divSchemes, even for a field a laminar run never
+  solves, setting the formal order to 1, so a second-order ladder failed.
 
 **Missing inputs skip; they never default**, except the limits marked
 ``[pack default]`` in a verdict. Which case, which planes, how fast, what density,
@@ -85,6 +91,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 F = _load_path(os.path.join(_HERE, "_foam.py"))
 T = _load_path(os.path.join(_HERE, "_tool.py"))
 G = _load_path(os.path.join(_HERE, "_gci.py"))
+I = _load_path(os.path.join(_HERE, "_iter.py"))
 
 PACK = "cfd-openfoam"
 
@@ -123,26 +130,15 @@ MACH_MAX = 0.3
 #: third digit).
 RESIDUAL_TARGET_MAX = 1e-4
 
-#: The window the pressure drop's settling is judged over, and how settled: its
-#: estimated remaining change (``_remaining``, from the last two windows of 10
-#: iterations) at most 1e-3 of itself. Residuals measure the equations'
-#: imbalance, not the number a claim is about. Rejected: a window as a fraction
-#: of the run (a 30-iteration run would judge 3); the change over one window
-#: taken as the error (it passed a run 9.7% from converged; see _remaining).
-STABLE_WINDOW = 10
+#: How settled the pressure drop must be: its estimated remaining change
+#: (``_iter.remaining``, Eca & Hoekstra's iterative-error estimate read
+#: pessimistically; GitHub #15, Phase 0) at most 1e-3 of itself. Residuals
+#: measure the equations' imbalance, not the number a claim is about. Rejected: the
+#: change over one window of 10 iterations taken as the error (it passed a run
+#: 9.7% from converged); the contraction of the last two windows of 10 (until
+#: P0.1: on real v2606 histories it read settled up to 23.4% from converged; see
+#: _iter.py).
 STABLE_TOL = 1e-3
-
-#: A monotone movement whose steps do not shrink is taken as round-off, with
-#: nothing still to come, below 1e-6 of the pressure drop over a window: there
-#: its rate can no longer be measured. Measured: the baseline's last steps are
-#: round-off at about 3e-8 of itself per window, monotone and not shrinking.
-#: Applied only after the steps are seen not to shrink: a slowly shrinking creep
-#: goes by its contraction however small it is (the first draft applied the
-#: floor before looking, and a creep relaxed to U 1e-4 passed with 0.2% to
-#: come). What it lets through: a steady drift under 1e-6 per window, which
-#: would take 1000 windows to move by STABLE_TOL. Rejected: 1e-9 (the
-#: baseline's own round-off read as never settling).
-SETTLED_FLOOR = 1e-6
 
 #: How far the mean velocity through the upstream plane may sit from the one
 #: the project states (cfd_velocity_m_s), which cfd.regime judged the Reynolds
@@ -194,6 +190,18 @@ DEFAULT_TIMEOUT_S = 600.0
 
 #: What the pack's function objects are called in the staged copy.
 UPSTREAM, DOWNSTREAM = "nopekit_upstream", "nopekit_downstream"
+
+#: The precision the pack's function objects write their values at: 12, so 13
+#: significant digits (they write in scientific notation). The convergence
+#: estimate needs a change of ``_iter.ROUNDOFF`` (1e-8) of the value resolved,
+#: and refuses a history printed in steps of one quantum (``_iter.STAIRS``).
+#: Measured in GitHub #15 Phase 0: a converged laminar pitzDaily (nu 1e-3, ESI
+#: v2606) read settled at 1702 cut points printed to 13 digits and at 18 printed
+#: to 7. Rejected: the case's own writePrecision, which set it until P0.1 (6 when
+#: the case states none, OpenFOAM's default: 7 digits, so a converged run almost
+#: never reads settled, a false fail; the baseline states 10, but a project's
+#: case need not).
+WRITE_PRECISION = 12
 
 
 def _skip(gid: str, reason: str) -> Verdict:
@@ -633,10 +641,15 @@ class Case:
 
 
 def _formal_order(schemes) -> int:
-    """1 when any convection scheme is first-order upwind, else 2."""
+    """1 when the momentum convection scheme is first-order upwind, else 2: the
+    scheme of ``div(phi,U)``, or ``default`` where the case gives none (the entry
+    OpenFOAM uses for it). What slipped through until P0.1: any ``upwind`` in any
+    divSchemes entry gave order 1, so a leftover ``div(phi,k)`` for a field a
+    laminar run never solves set the band to 0.95-1.05, and a second-order run
+    failed at its observed order 2."""
     div = schemes.sub("divSchemes")
-    words = [w for e in (div.entries if div else []) for w in F.words(e)]
-    return 1 if "upwind" in words else 2
+    entry = None if div is None else div.entry("div(phi,U)") or div.entry("default")
+    return 1 if entry is not None and "upwind" in F.words(entry) else 2
 
 
 def _thin_directions(verts, blocks, patches):
@@ -859,6 +872,7 @@ def _function_objects(planes) -> str:
         libs            (fieldFunctionObjects);
         writeControl    timeStep;
         writeInterval   1;
+        writePrecision  {WRITE_PRECISION};
         log             false;
         writeFields     false;
         regionType      sampledSurface;
@@ -1101,45 +1115,6 @@ def _settings(ctx: GateContext, gid: str):
     return case, planes, target, note, timeout
 
 
-
-def _remaining(dp: list[float]):
-    """How much the pressure drop may still move: None with fewer than
-    2 x STABLE_WINDOW + 1 iterations; else, over the last two windows of
-    STABLE_WINDOW iterations, with d1 the largest movement within the last:
-
-    - not monotone (an oscillation, or round-off): d1, what it still swings by;
-    - monotone: a geometric tail. Its per-iteration contraction q is the larger
-      of each window's (last step / first step)^(1/(w-1)), and what is still to
-      come is the last step x q / (1 - q), never less than d1; infinite when the
-      steps do not shrink, unless d1 is round-off.
-
-    What slipped through, in order. The first draft took the change over 10
-    iterations as the error: U relaxed to 0.03 passed a run 9.7% from converged.
-    The second compared only each window's two ends: a 2-iteration oscillation
-    read as still. The third took rho from the windows' spreads: an earlier
-    oscillation filling the window before made a run that had just moved 0.17%
-    pass, 0.22% from converged; its round-off floor, applied before rho, let a
-    creep relaxed to U 1e-4 pass with 0.2% to come; and a window holding a
-    turning point read a smoothly converged run as never settling. What it
-    still cannot see: a slow mode hidden under a fast one inside the last 20
-    iterations."""
-    w = STABLE_WINDOW
-    if len(dp) < 2 * w + 1:
-        return None
-    d1 = max(abs(v - dp[-1]) for v in dp[-1 - w:])
-    steps = [b - a for a, b in zip(dp[-1 - 2 * w:-1], dp[-2 * w:])]
-    if not (all(x > 0 for x in steps) or all(x < 0 for x in steps)):
-        return d1
-
-    def contraction(seg):
-        return (abs(seg[-1]) / abs(seg[0])) ** (1.0 / (len(seg) - 1))
-
-    q = max(contraction(steps[:w]), contraction(steps[w:]))
-    if not q < 1:
-        return d1 if d1 <= SETTLED_FLOOR * abs(dp[-1]) else math.inf
-    return max(d1, abs(steps[-1]) * q / (1.0 - q))
-
-
 def _settled(solve: Solve, target: float, budget: int) -> list[str]:
     """Why a run is not converged, or [] when it is: the converged line; p and
     U both solved at the last iteration, each initial residual at or below the
@@ -1158,21 +1133,27 @@ def _settled(solve: Solve, target: float, budget: int) -> list[str]:
         why.append("initial residual above the target " + f"{target:g}: " + ", ".join(
             f"{k} {v:.3g}" for k, v in sorted(over.items())))
     dp = solve.dp()
-    rem = _remaining(dp)
-    if rem is None:
-        why.append(f"{len(dp)} iterations: fewer than the {2 * STABLE_WINDOW + 1} needed to "
+    rem = I.remaining(dp)
+    if not all(math.isfinite(v) for v in dp):
+        # What slipped through until P0.1 (found by reading, in GitHub #15 Phase 0):
+        # inf <= STABLE_TOL * abs(inf) is True, so a last value of inf read settled.
+        why.append("the pressure drop is not a finite number at every iteration")
+    elif rem is None:
+        why.append(f"{len(dp)} iterations: fewer than the {2 * I.WINDOW_MIN + 1} needed to "
                    f"see the pressure drop settle")
+    elif rem == math.inf:
+        why.append("the pressure drop is still moving: its changes do not decrease at a "
+                   "steady rate, so the gate cannot estimate the change still to come")
     elif not rem <= STABLE_TOL * abs(dp[-1]):
-        why.append(f"the pressure drop is still moving: by its last {2 * STABLE_WINDOW} "
-                   f"iterations, about {rem:.3g} m^2/s^2 is still to come, more than "
-                   f"{STABLE_TOL:g} of its value")
+        why.append(f"the pressure drop is still moving: an estimated {rem:.3g} m^2/s^2 is "
+                   f"still to come, more than {STABLE_TOL:g} of its value")
     return why
 
 
 def _noise(solve: Solve) -> float:
     """The pressure drop's estimated remaining change: the iterative error the
     GCI is compared with."""
-    return _remaining(solve.dp())
+    return I.remaining(solve.dp())
 
 
 # --------------------------------------------------------------------------- #
@@ -1294,7 +1275,7 @@ def converged(ctx: GateContext) -> Verdict:
     the two planes. Passes only when the log says ``SIMPLE solution converged``,
     p and U were both solved at the last iteration, each initial residual at or
     below the target, and the pressure drop's estimated remaining change
-    (``_remaining``, from its last 20 iterations) is under 0.1% of it. The value
+    (``_iter.remaining``, from its whole history) is under 0.1% of it. The value
     is the iteration it converged at, against the case's own budget (endTime /
     deltaT).
 
@@ -1342,14 +1323,13 @@ def converged(ctx: GateContext) -> Verdict:
     dp = solve.dp()
     ev = _evidence(ctx, gid, {"converged_in": log.converged_in, "last_iteration":
                               log.last_iteration, "budget": case.budget, "target": target,
-                              "residuals": log.residuals, "dp_last": dp[-STABLE_WINDOW - 1:],
+                              "residuals": log.residuals, "dp": dp,
                               "u_upstream": u_run, "cells": solve.cells,
                               "install": inst.root, "build": inst.build})
     detail = ("; ".join(why) if why else
               f"converged at iteration {at} of {case.budget} to residual target {target:g}"
-              f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, at most "
-              f"{_remaining(dp):.2g} still to come by its last {2 * STABLE_WINDOW} "
-              f"iterations; {solve.cells} cells")
+              f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, an estimated "
+              f"{I.remaining(dp):.2g} m^2/s^2 still to come; {solve.cells} cells")
     if why:
         # No one-sided value: a run that stopped short, a residual over target and a
         # number still moving fail on different readings, and none is "iterations

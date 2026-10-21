@@ -32,11 +32,13 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_cfd_openfoam.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import stat
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import _env
@@ -53,6 +55,8 @@ STANDIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cfd_standin
 F = load_path(os.path.join(PACK, "gates", "_foam.py"))
 G = load_path(os.path.join(PACK, "gates", "_gci.py"))
 T = load_path(os.path.join(PACK, "gates", "_tool.py"))
+I = load_path(os.path.join(PACK, "gates", "_iter.py"))
+HISTORIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cfd_histories")
 
 
 def _baseline() -> dict:
@@ -234,30 +238,197 @@ class TheReaderReadsWhatOpenFOAMReads(unittest.TestCase):
         finally:
             os.remove(d)
 
-    def test_the_remaining_change_is_estimated_from_the_tail(self):
+    def test_the_formal_order_is_the_momentum_schemes(self):
+        """The order is ``div(phi,U)``'s, or ``default``'s where the case gives
+        none. What slipped through until P0.1: any ``upwind`` in any divSchemes
+        entry gave order 1 (``AFinishedLookingRunIsNotAPass`` holds the ladder
+        that failed)."""
         C = _registry().get("cfd.converged")[1].__globals__
-        settled = [1.0] * 25
-        self.assertEqual(C["_remaining"](settled), 0.0)
-        self.assertIsNone(C["_remaining"]([1.0] * 20))
-        creeping = [1.0 + 0.1 * 0.97 ** i for i in range(200)]
-        rem = C["_remaining"](creeping)
-        self.assertAlmostEqual(rem, 0.1 * 0.97 ** 199, delta=0.1 * 0.97 ** 199 * 0.05)
-        # An oscillation: what it still swings by, whatever its period.
-        self.assertAlmostEqual(C["_remaining"]([1.0 + 1e-3 * (-1) ** i for i in range(25)]),
-                               2e-3, places=12)
-        # Moving one way and not slowing: never settled.
-        self.assertEqual(C["_remaining"]([1.0 + 1e-3 * i for i in range(25)]), float("inf"))
-        # A run that just moved 0.17% after a larger oscillation: at least that.
-        tail = [1.0 + 0.02 * (-1) ** i for i in range(10)] + [1.0 + 1e-3 * 0.7 ** i
-                                                              for i in range(21)]
-        self.assertGreaterEqual(C["_remaining"](tail), 0.0)
-        self.assertGreaterEqual(C["_remaining"]([1.0 + 0.0017 * (20 - i) / 20 + 1e-7 * i * i
-                                                 for i in range(21)]), 0.0017)
+        order = lambda text: C["_formal_order"](F.parse("divSchemes { " + text + " }"))
+        self.assertEqual(order("default none; div(phi,U) bounded Gauss linearUpwind grad(U); "
+                               "div(phi,k) bounded Gauss upwind;"), 2)
+        self.assertEqual(order("default none; div(phi,U) bounded Gauss upwind;"), 1)
+        self.assertEqual(order('default none; "div\\(phi,.*\\)" bounded Gauss upwind;'), 1)
+        self.assertEqual(order("default Gauss upwind;"), 1)
+        self.assertEqual(order("default Gauss upwind; div(phi,U) Gauss linear;"), 2)
 
     def test_a_malformed_file_is_refused_whole(self):
         for text in ("a 1", "a { b 1;", "a (1 2;", "}"):
             with self.subTest(text=text), self.assertRaises(F.FoamFormatError):
                 F.parse(text)
+
+
+# --------------------------------------------------------------------------- #
+# the iterative-error estimate
+# --------------------------------------------------------------------------- #
+def _histories(name: str) -> dict:
+    """Real pressure-drop histories (``tests/cfd_histories``, each file's
+    ``_provenance`` names the case, the solver and how it was run)."""
+    with open(os.path.join(HISTORIES, name), encoding="utf-8") as fh:
+        return json.load(fh)["histories"]
+
+
+def _settles(s, cut: int) -> bool:
+    """The gate's line on the first ``cut`` values: estimate <= STABLE_TOL x |last|."""
+    rem = I.remaining(s[:cut])
+    return rem is not None and rem <= 1e-3 * abs(s[cut - 1])
+
+
+def _from_changes(change, n: int, extra: int = 40000) -> list:
+    """phi_n = 1 + the sum of change(k) for k > n: a monotone history converging
+    to 1 (GitHub #15 Phase 0's construction, the sum taken from the far end)."""
+    d = [change(k) for k in range(n + extra)]
+    tail = [0.0] * (len(d) + 1)
+    for i in range(len(d) - 1, -1, -1):
+        tail[i] = tail[i + 1] + d[i]
+    return [1.0 + tail[i + 1] for i in range(n)]
+
+
+class TheIterativeErrorEstimate(unittest.TestCase):
+    """``_iter.remaining`` against the negative controls of GitHub #15 Phase 0
+    (the judge's section 9). Each "never" is a history the estimator it
+    replaced (``cfd._remaining`` until P0.1) read settled while more than 0.1%
+    from its limit, at the cut points named in each test; each "must settle" is
+    one it read settled too, kept so a stricter estimator cannot fail a converged
+    run. The long histories are read at every cut point of a stride (the
+    estimate costs a few milliseconds a cut on 6000 values)."""
+
+    N = 3000
+
+    def never(self, s, cuts, truth=None):
+        """Not settled at any of ``cuts`` where the value is more than 0.1% from
+        ``truth`` (every cut when there is none: a history that never converges)."""
+        bad = [c for c in cuts if (truth is None or abs(s[c - 1] - truth) > 1e-3 * abs(truth))
+               and _settles(s, c)]
+        self.assertEqual(bad, [], "read settled at these cut points")
+
+    # -- the plain readings ---------------------------------------------------
+    def test_the_plain_readings(self):
+        self.assertEqual(I.remaining([1.0] * 25), 0.0)
+        self.assertIsNone(I.remaining([1.0] * 16))
+        self.assertIsNotNone(I.remaining([1.0] * 17))
+        creeping = [1.0 + 0.1 * 0.97 ** i for i in range(200)]
+        # At least what is still to come, 0.1 x 0.97^199, and not twice it: C&F's
+        # 1.25 and the slope's bound on a fit with no scatter.
+        to_come = 0.1 * 0.97 ** 199
+        self.assertGreaterEqual(I.remaining(creeping), to_come)
+        self.assertLess(I.remaining(creeping), 2 * to_come)
+        # An oscillation that does not decay, and a ramp: no decay to extrapolate.
+        # (The estimator P0.1 replaced read the oscillation as its swing, 2e-3.)
+        self.assertEqual(I.remaining([1.0 + 1e-3 * (-1) ** i for i in range(25)]), math.inf)
+        self.assertEqual(I.remaining([1.0 + 1e-3 * i for i in range(25)]), math.inf)
+        # A run that just moved 0.17%: at least that (an earlier draft passed one
+        # 0.22% from converged).
+        self.assertGreaterEqual(I.remaining([1.0 + 0.0017 * (20 - i) / 20 + 1e-7 * i * i
+                                             for i in range(21)]), 0.0017)
+
+    def test_a_value_that_is_not_a_number_is_never_settled(self):
+        """The estimator P0.1 replaced read a NaN 11 values from the end as 0.0."""
+        self.assertEqual(I.remaining([1.0] * 10 + [math.nan] + [1.0] * 20), math.inf)
+        self.assertEqual(I.remaining([1.0] * 30 + [math.inf]), math.inf)
+
+    def test_the_gate_refuses_a_last_value_of_inf(self):
+        """inf <= STABLE_TOL x abs(inf) is True: without its own refusal the gate
+        read a run whose last value is inf as settled."""
+        C = _registry().get("cfd.converged")[1].__globals__
+        for series in ([1.0] * 30 + [math.inf], [1.0] * 10 + [math.nan] + [1.0] * 20):
+            with self.subTest(last=series[-1]):
+                solve = SimpleNamespace(
+                    log=SimpleNamespace(converged_in=31, last_iteration=31,
+                                        residuals={"p": 1e-7, "Ux": 1e-7}),
+                    dp=lambda s=series: s)
+                why = C["_settled"](solve, 1e-6, 2000)
+                self.assertEqual(why, ["the pressure drop is not a finite number at every "
+                                       "iteration"])
+
+    # -- synthetic: the limit is known ----------------------------------------
+    def test_a_slow_mode_under_a_fast_one(self):
+        """Two modes: the old estimator read it settled at cuts 28-44, up to
+        0.29% out; eh-faithful (no rate-change test) at cuts 21-37."""
+        s = [1 + 0.3 * 0.7 ** n + 0.003 * 0.995 ** n for n in range(self.N)]
+        self.never(s, range(17, 221), truth=1.0)
+
+    def test_an_overshoot_before_its_turning_point(self):
+        """Not settled at cuts 21-30, which the one-sided rate test read settled
+        (the old estimator at 28-30). Cuts 31-36 are the documented miss
+        (``_iter.remaining``)."""
+        s = [1 + 0.05 * 0.8 ** n - 0.003 * 0.997 ** n for n in range(self.N)]
+        self.never(s, range(21, 31), truth=1.0)
+
+    def test_a_power_law_creep(self):
+        """1 + 0.05/sqrt(n+1) never decays geometrically: never settled. The old
+        estimator read it settled from cut 266 on; without the rate test, or with
+        a 5% slack on it, 2071 cuts."""
+        s = [1 + 0.05 / math.sqrt(n + 1) for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_creep_under_a_fast_oscillation(self):
+        """The model-free reading's control: not settled at cuts 73-109 but 76
+        (every one of them settled by the old estimator, and without the reading,
+        up to 0.44% out)."""
+        s = [1 + 0.005 * 0.998 ** n + 0.05 * 0.9 ** n * (-1) ** n for n in range(self.N)]
+        self.never(s, [c for c in range(73, 110) if c != 76], truth=1.0)
+
+    def test_a_creep_printed_to_seven_digits(self):
+        """STAIRS: 1 + 0.002 x 0.99995^n printed as OpenFOAM's default
+        writePrecision 6 prints it moves one quantum about every ten iterations,
+        always 0.13-0.2% from its limit. The old estimator read it settled at
+        2980 of 2984 cuts; a round-off rule without the staircase test at 767."""
+        s = [float("%.7g" % (1 + 0.002 * 0.99995 ** n)) for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_drift_above_the_round_off_floor(self):
+        """1 + 2e-8 n never converges. The old estimator read it settled at 2980
+        of 2984 cuts, ROUNDOFF 1e-7 at 187. (A drift of 5e-9 per iteration, under
+        ROUNDOFF, is the documented miss.)"""
+        s = [1 + 2e-8 * n for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_rate_that_slows(self):
+        """eh-faithful's control: changes 0.05 x 0.85^k, then from k = 40 at
+        0.995 per iteration. Not settled from cut 44 until the value is within
+        0.1% (the old estimator read cuts 45 and 46 settled, 1.4% out). Cuts 39-43
+        are the documented miss."""
+        a2 = 0.05 * 0.85 ** 40
+        s = _from_changes(lambda k: 0.05 * 0.85 ** k if k < 40 else a2 * 0.995 ** (k - 40),
+                          self.N)
+        self.never(s, range(44, 700), truth=1.0)
+
+    # -- real v2606 histories -------------------------------------------------
+    def test_the_packs_own_runs_settle(self):
+        """Every history the selftest's cfd.converged judges must read settled at
+        its stop. The coarse channel (the known-bad of cfd.mesh_independence)
+        ends accelerating from 7e-6 to 5e-11 of its value, which SPEED_FLOOR lets
+        through; the baseline's level 1 decays through troughs of 8e-9 of its
+        value, which STAIRS reads as round-off; at ROUNDOFF 1e-9 the thicker
+        fluid's level 1 read inf."""
+        for fixture in ("case_baseline.json", "case_thicker_fluid.json", "coarse.json"):
+            for name, s in _histories(fixture).items():
+                with self.subTest(fixture=fixture, history=name):
+                    self.assertTrue(_settles(s, len(s)), f"{name}: {I.remaining(s)}")
+
+    def test_an_oscillation_that_decays_settles(self):
+        """The running maximum's control: 1 + 0.1 x 0.995^n cos(2n) settles from
+        cut 2131 on. Fitted on the changes themselves, a window that starts in a
+        trough reads as growing, and it never settled in 3000 iterations."""
+        s = [1 + 0.1 * 0.995 ** n * math.cos(2 * n) for n in range(self.N)]
+        self.assertTrue(_settles(s, self.N))
+
+    def test_real_turbulent_histories_never_settle(self):
+        """The v2606 tutorials pitzDaily and pitzDailyExptInlet, 2000 iterations
+        each, still moving: the old estimator read them settled at 94 and 234 of
+        their cuts while more than 0.1% from their last values (up to 1.04% and
+        2.46% from it)."""
+        for name, s in _histories("pitz_dev.json").items():
+            with self.subTest(name):
+                self.never(s, range(17, len(s) + 1, 5))
+
+    def test_a_laminar_pitzdaily_under_slow_relaxation_never_settles(self):
+        """The strongest real control: laminar pitzDaily (nu 1e-3, U relaxed to
+        0.3), the flow a laminar gate decides alone. The old estimator read it
+        settled at cut points up to 23.4% from the converged value."""
+        s = _histories("lam_nu1e-3_r.json")["lam_nu1e-3_r"]
+        self.never(s, range(20, len(s) + 1, 20))
 
 
 # --------------------------------------------------------------------------- #
@@ -719,6 +890,18 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("observed order 0.7", v.detail)
 
+    def test_an_upwind_entry_for_an_unsolved_field_leaves_the_order_second(self):
+        """A divSchemes entry for a field a laminar run never solves (the
+        turbulent tutorials carry ``div(phi,k) bounded Gauss upwind``) leaves the
+        formal order 2. Until P0.1 it set the band to 0.95-1.05, and this ladder,
+        which converges at order 2, failed."""
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/fvSchemes", "divSchemes",
+              "default none; div(phi,U) bounded Gauss linearUpwind grad(U); "
+              "div((nuEff*dev2(T(grad(U))))) Gauss linear; div(phi,k) bounded Gauss upwind;")
+        v = self.gate("cfd.mesh_independence", {"cfd_case": case})
+        self.assertEqual(v.outcome, "pass", v.render())
+
     # -- what the run itself says -------------------------------------------
     def test_the_converged_line_beside_a_residual_over_target_fails(self):
         self.mode({"simpleFoam": {"final_residual": 1e-5}})
@@ -736,7 +919,7 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         self.mode({"simpleFoam": {"converge_at": 8}})
         v = self.gate("cfd.converged")
         self.assertEqual(v.outcome, "fail", v.render())
-        self.assertIn("fewer than the 21", v.detail)
+        self.assertIn("fewer than the 17", v.detail)
 
     def test_a_run_to_other_criteria_is_an_error(self):
         self.mode({"simpleFoam": {"criteria": {"p": 0.05, "U": 1e-6}}})
@@ -847,6 +1030,22 @@ class TheRealOpenFOAM(_env.EnvCase):
             # The uniform inlet's entrance reaches the planes at 3e-6 of the value.
             self.assertAlmostEqual(lv["dp_m2_s2"] / (exact / (1 + 2 / ny ** 2)), 1.0, places=5)
         self.assertAlmostEqual(data["gci"]["phi_ext21"] / exact, 1.0, places=3)
+
+    def test_the_pack_writes_its_values_to_13_digits(self):
+        """WRITE_PRECISION reaches the files the gate reads: the estimate needs a
+        change of 1e-8 of the value resolved. Until P0.1 the case's own
+        writePrecision set it (the baseline's 10: 11 digits)."""
+        root = self.tmp()
+        v = _run(self.registry, "cfd.converged", root, self.params)
+        self.assertEqual(v.outcome, "pass", v.render())
+        dats = [os.path.join(d, f) for d, _dirs, files in os.walk(root) for f in files
+                if f == "surfaceFieldValue.dat"]
+        self.assertEqual(len(dats), 2, dats)
+        for dat in dats:
+            with open(dat, encoding="utf-8") as fh:
+                row = [line for line in fh if not line.startswith("#")][-1].split()
+            digits = row[1].lstrip("-").split("e")[0].replace(".", "")
+            self.assertEqual(len(digits), 13, row)
 
     def test_calc_is_stopped_at_run_time_too(self):
         """Past cfd.case_readable (run directly): the private HOME's

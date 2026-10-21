@@ -48,7 +48,7 @@ Grid 1 is the finest. h1 < h2 < h3.
 | every level converged | `cfd.converged`'s test, on each | Celik p. 2 |
 | refinement ratio | effective r21, r32 at least 1.3 | Celik Step 2 |
 | convergence type | monotone, by `classify`, never by the sign of p | Eca & Hoekstra 2008 |
-| order | unique root, 0.95 to formal + 0.05 (formal 2; 1 when a div scheme is `upwind`) | Eca & Hoekstra 2008 |
+| order | unique root, 0.95 to formal + 0.05 (formal 2; 1 when `div(phi,U)`, or `default` without it, is `upwind`) | Eca & Hoekstra 2008 |
 | iterative error | at most 0.1 x eps21 | Celik, Appendix A |
 | GCI_fine | at most `cfd_gci_max_pct` | the claim's: no source sets one |
 | plane placement | each plane on a cell face or centre at every level | measured: OpenFOAM's sampled value is about 1% off a quarter of a cell away, and a ladder that moves the plane through the cells reads that as convergence |
