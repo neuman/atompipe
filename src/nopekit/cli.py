@@ -6603,121 +6603,9 @@ def cmd_model_trace(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def _load_viewgens(directory: str, registry: Any, *,
                    pack: str, root: str) -> list[Any]:
-    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
-
-    Deliberately the same shape as `gates.load_project_gates`, because a viewgen is a
-    gate's twin: same directory convention, same `sys.path` handling, same
-    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
-    problem and must not print as a spine traceback". A pack author who has
-    written `gates/clash.py` writes `views/assembly.py` with nothing new to
-    learn, which is the whole reason `site.py` mirrors `gates.py` field for
-    field.
-
-    Two details carry weight:
-
-    * **Module names are salted with a hash of the file's absolute path**, so a
-      pack's `views/assembly.py` and a project's `views/assembly.py` are
-      different modules. Without the salt the second one to load silently reuses
-      the first one's code while every message names the second file.
-    * **Already-imported modules are re-registered from `fn.view_spec`**, not
-      re-executed. Python will not run a module twice, so a second build in one
-      process (a test, an agent that builds after every edit, `site status`
-      after `site build`) would decorate nothing and find an EMPTY registry —
-      reporting "this project has no views" about a project with six. The
-      decorator attaches `view_spec` to the function precisely so a loader can
-      recover the registration without re-running the module.
-
-    Registering the same function under the same id twice is a no-op in
-    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
-    the two paths stay one path rather than two that can drift.
-    """
-    if not os.path.isdir(directory):
-        return []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError as exc:
-        raise NopekitError(f"cannot read {rel(directory, root)}: {exc}") from exc
-    files = [os.path.join(directory, name) for name in names
-             if name.endswith(".py") and not name.startswith("_")]
-    if not files:
-        return []
-
-    where = f"pack {pack!r}: " if pack else ""
-    before = set(registry.ids())
-    # The directory ABOVE views/ — the pack root, or the project root. On
-    # sys.path so a viewgen can `import _geom` and share the helper the gate
-    # next door already uses, and set as PACK_DIR so pack-relative fixtures
-    # resolve the same way they do for gates.
-    base = os.path.dirname(directory)
-    sys.path.insert(0, base)
-    try:
-        with site.use_view_registry(registry):
-            for path in files:
-                module = _import_viewgen_module(
-                    path, pack=pack, base=base, root=root, where=where)
-                # The attribute walk, always — see the docstring. On a fresh
-                # import it re-registers what the decorator just registered
-                # (a no-op); on a reused one it is the only thing that registers
-                # anything at all.
-                for value in list(vars(module).values()):
-                    spec = getattr(value, "view_spec", None)
-                    if not isinstance(spec, site.ViewSpec) or not callable(value):
-                        continue
-                    try:
-                        registry.register(spec, value)
-                    except NopekitError as exc:
-                        raise NopekitError(
-                            f"{where}{rel(path, root)}: {exc}") from exc
-    finally:
-        try:
-            sys.path.remove(base)       # removes OUR insertion (the first match)
-        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
-            pass
-    return [spec for spec in registry.specs() if spec.id not in before]
-
-
-def _import_viewgen_module(path: str, *, pack: str, base: str,
-                           root: str, where: str) -> Any:
-    """Import one `views/*.py`, or raise an NopekitError naming the file."""
-    stem = os.path.splitext(os.path.basename(path))[0]
-    module_name = f"nopekit_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
-    existing = sys.modules.get(module_name)
-    if existing is not None:
-        return existing                 # ordinary import semantics; see _load_viewgens
-
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:         # pragma: no cover - defensive
-        raise NopekitError(f"{where}{rel(path, root)}: no import machinery accepted this file")
-    module = importlib.util.module_from_spec(spec)
-    # Set BEFORE execution, which `module_from_spec` makes possible by handing
-    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
-    # defining module at decoration time so twenty decorators do not each retype
-    # the pack name — a mistyped one orphans a view in the site's grouping with
-    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
-    # that has to find a template or a material table shipped beside it; for a
-    # project's `views/` it is the project root, which is where those things are.
-    module.PACK = pack
-    module.PACK_DIR = base
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except NopekitError as exc:
-        # A registry refusal (duplicate view id, unknown kind) is already phrased
-        # for a human. Keep the phrasing and add the location.
-        sys.modules.pop(module_name, None)
-        raise NopekitError(f"{where}{rel(path, root)}: {exc}") from exc
-    except KeyboardInterrupt:
-        sys.modules.pop(module_name, None)
-        raise
-    except BaseException as exc:
-        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
-        # module whose exporter guards its own absence with `sys.exit()` at
-        # import time must not be able to end the command with that exit code.
-        sys.modules.pop(module_name, None)
-        raise NopekitError(
-            f"{where}{rel(path, root)} failed to import: {type(exc).__name__}: {exc}"
-        ) from exc
-    return module
+    """`site.load_viewgens`: moved there so `pack validate` (`packs.validate`)
+    loads a pack's views through the same code as a build."""
+    return site.load_viewgens(directory, registry, pack=pack, root=root)
 
 
 def _view_registry(root: str, ledger: Ledger, *,
@@ -9838,6 +9726,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         found = shutil.which(tool)
         _check(results, "tool", "ok" if found else "warn",
                f"{tool}: {found or 'not on PATH — gates needing it will SKIP, not fail'}")
+    # The tools the views draw with (issue #15, B.7): a missing one leaves a
+    # picture out and moves no status, and its row says so. What slipped
+    # through before: `doctor` named only the gates' tools, so a person with
+    # no ParaView read every row ok beside a CFD card with no pictures.
+    view_registry, view_problems = _view_registry(root, ledger, strict=False)
+    for problem in view_problems:
+        _check(results, "views", "warn", problem)
+    for ok, words in site.view_tool_rows(view_registry, root,
+                                         skip=summary["requires_tools"]):
+        _check(results, "view-tool", "ok" if ok else "warn", words)
 
     model = None
     projection = None

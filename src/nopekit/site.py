@@ -89,6 +89,7 @@ import csv
 import dataclasses
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -121,7 +122,9 @@ from .util import (
     atomic_write_json,
     atomic_write_text,
     ensure_dir,
+    rel,
     sha256_text,
+    short_hash,
     write_json_if_changed,
 )
 
@@ -139,6 +142,8 @@ __all__ = [
     "viewgen",
     "active_view_registry",
     "use_view_registry",
+    "load_viewgens",
+    "view_tool_rows",
     "availability",
     "run_viewgen",
     "run_all_viewgens",
@@ -804,6 +809,7 @@ class ViewRegistry:
 
     def __init__(self) -> None:
         self._views: dict[str, tuple[ViewSpec, Callable[[ViewContext], Any]]] = {}
+        self._tool_checks: dict[str, tuple[str, Callable[[str], Any]]] = {}
 
     # -- registration ------------------------------------------------------ #
     def register(
@@ -876,6 +882,28 @@ class ViewRegistry:
     def clear(self) -> None:
         """Empty the registry. Tests and isolated pack validation use a scratch one."""
         self._views.clear()
+        self._tool_checks.clear()
+
+    # -- the tools the views draw with ------------------------------------- #
+    def add_tool_check(self, tool: str, fn: Callable[[str], Any], *, pack: str = "") -> None:
+        """Register a view module's check of one tool it draws with
+        (`TOOL_CHECKS_NAME`). A second check of the same tool from the same
+        function is a no-op; from another, the first stays (``doctor`` shows
+        one row a tool)."""
+        self._tool_checks.setdefault(str(tool), (pack, fn))
+
+    def tool_checks(self) -> dict[str, tuple[str, Callable[[str], Any]]]:
+        """``{tool: (pack, check)}``, in registration order."""
+        return dict(self._tool_checks)
+
+    def view_tools(self) -> list[str]:
+        """Every tool a view draws with: each viewgen's ``requires_tools``,
+        then each tool a module checks, in order, once each."""
+        out: list[str] = []
+        for spec in self.specs():
+            out.extend(t for t in spec.requires_tools if t and t not in out)
+        out.extend(t for t in self._tool_checks if t not in out)
+        return out
 
     # -- lookup ------------------------------------------------------------ #
     def get(self, view_id: str) -> tuple[ViewSpec, Callable[[ViewContext], Any]] | None:
@@ -1021,6 +1049,145 @@ def use_view_registry(registry: ViewRegistry):
 
 
 # --------------------------------------------------------------------------- #
+# loading views/*.py
+# --------------------------------------------------------------------------- #
+def _shown(path: str, root: str | None) -> str:
+    """``path`` as a message names it: relative to the project, or whole when
+    there is none (`pack validate` loads a pack with no project)."""
+    return rel(path, root) if root else path
+
+
+def load_viewgens(directory: str, registry: ViewRegistry, *,
+                  pack: str, root: str | None) -> list[ViewSpec]:
+    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
+
+    Deliberately the same shape as `gates.load_project_gates`, because a viewgen is a
+    gate's twin: same directory convention, same `sys.path` handling, same
+    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
+    problem and must not print as a spine traceback". A pack author who has
+    written `gates/clash.py` writes `views/assembly.py` with nothing new to
+    learn, which is the whole reason `site.py` mirrors `gates.py` field for
+    field.
+
+    Two details carry weight:
+
+    * **Module names are salted with a hash of the file's absolute path**, so a
+      pack's `views/assembly.py` and a project's `views/assembly.py` are
+      different modules. Without the salt the second one to load silently reuses
+      the first one's code while every message names the second file.
+    * **Already-imported modules are re-registered from `fn.view_spec`**, not
+      re-executed. Python will not run a module twice, so a second build in one
+      process (a test, an agent that builds after every edit, `site status`
+      after `site build`) would decorate nothing and find an EMPTY registry —
+      reporting "this project has no views" about a project with six. The
+      decorator attaches `view_spec` to the function precisely so a loader can
+      recover the registration without re-running the module.
+
+    Registering the same function under the same id twice is a no-op in
+    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
+    the two paths stay one path rather than two that can drift.
+    """
+    if not os.path.isdir(directory):
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        raise NopekitError(f"cannot read {_shown(directory, root)}: {exc}") from exc
+    files = [os.path.join(directory, name) for name in names
+             if name.endswith(".py") and not name.startswith("_")]
+    if not files:
+        return []
+
+    where = f"pack {pack!r}: " if pack else ""
+    before = set(registry.ids())
+    # The directory ABOVE views/ — the pack root, or the project root. On
+    # sys.path so a viewgen can `import _geom` and share the helper the gate
+    # next door already uses, and set as PACK_DIR so pack-relative fixtures
+    # resolve the same way they do for gates.
+    base = os.path.dirname(directory)
+    sys.path.insert(0, base)
+    try:
+        with use_view_registry(registry):
+            for path in files:
+                module = _import_viewgen_module(
+                    path, pack=pack, base=base, root=root, where=where)
+                # The attribute walk, always — see the docstring. On a fresh
+                # import it re-registers what the decorator just registered
+                # (a no-op); on a reused one it is the only thing that registers
+                # anything at all.
+                for value in list(vars(module).values()):
+                    spec = getattr(value, "view_spec", None)
+                    if not isinstance(spec, ViewSpec) or not callable(value):
+                        continue
+                    try:
+                        registry.register(spec, value)
+                    except NopekitError as exc:
+                        raise NopekitError(
+                            f"{where}{_shown(path, root)}: {exc}") from exc
+                checks = getattr(module, TOOL_CHECKS_NAME, None)
+                if checks is None:
+                    continue
+                if not isinstance(checks, Mapping) or not all(
+                        isinstance(t, str) and t and callable(fn) for t, fn in checks.items()):
+                    raise NopekitError(
+                        f"{where}{_shown(path, root)}: {TOOL_CHECKS_NAME} must map each "
+                        f"tool's name to a function of the project root that returns "
+                        f"(ok, words)")
+                for tool, fn in checks.items():
+                    registry.add_tool_check(tool, fn, pack=pack)
+    finally:
+        try:
+            sys.path.remove(base)       # removes OUR insertion (the first match)
+        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
+            pass
+    return [spec for spec in registry.specs() if spec.id not in before]
+
+
+def _import_viewgen_module(path: str, *, pack: str, base: str,
+                           root: str | None, where: str) -> Any:
+    """Import one `views/*.py`, or raise an NopekitError naming the file."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    module_name = f"nopekit_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing                 # ordinary import semantics; see load_viewgens
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:         # pragma: no cover - defensive
+        raise NopekitError(f"{where}{_shown(path, root)}: no import machinery accepted this file")
+    module = importlib.util.module_from_spec(spec)
+    # Set BEFORE execution, which `module_from_spec` makes possible by handing
+    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
+    # defining module at decoration time so twenty decorators do not each retype
+    # the pack name — a mistyped one orphans a view in the site's grouping with
+    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
+    # that has to find a template or a material table shipped beside it; for a
+    # project's `views/` it is the project root, which is where those things are.
+    module.PACK = pack
+    module.PACK_DIR = base
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except NopekitError as exc:
+        # A registry refusal (duplicate view id, unknown kind) is already phrased
+        # for a human. Keep the phrasing and add the location.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(f"{where}{_shown(path, root)}: {exc}") from exc
+    except KeyboardInterrupt:
+        sys.modules.pop(module_name, None)
+        raise
+    except BaseException as exc:
+        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
+        # module whose exporter guards its own absence with `sys.exit()` at
+        # import time must not be able to end the command with that exit code.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(
+            f"{where}{_shown(path, root)} failed to import: {type(exc).__name__}: {exc}"
+        ) from exc
+    return module
+
+
+# --------------------------------------------------------------------------- #
 # the decorator
 # --------------------------------------------------------------------------- #
 def viewgen(
@@ -1120,6 +1287,51 @@ def availability(spec: ViewSpec) -> tuple[bool, str]:
     not learned any of that yet.
     """
     return _gate_availability(spec)      # type: ignore[arg-type]
+
+
+#: A view module may define ``TOOL_CHECKS = {"<tool>": check}``: ``check(root)``
+#: returns ``(ok, words)``, the words after ``"<tool>: "`` on ``doctor``'s row
+#: for that tool. For a tool whose presence on PATH says too little (the CFD
+#: pack checks that ``pvbatch62`` is the ParaView build it checked, and that
+#: its renderer control passed). A tool with no check reads found or not on
+#: PATH. *Rejected:* a ``ViewSpec`` field (a check is per tool, and a pack
+#: checks its tool before any viewgen needs it); doctor rows from the pack
+#: manifest's ``requires_tools`` alone (that list mixes gate and view tools,
+#: and ``doctor`` already shows the gates').
+TOOL_CHECKS_NAME = "TOOL_CHECKS"
+
+#: What a missing view tool changes, said on its row.
+NO_STATUS_WORDS = "No status depends on them."
+
+
+def view_tool_rows(registry: ViewRegistry, root: str, *,
+                   skip: Iterable[str] = ()) -> list[tuple[bool, str]]:
+    """``[(ok, "<tool>: <words>")]`` for every tool a view draws with, less
+    ``skip`` (the gates' tools, which have rows of their own): ``doctor``'s
+    rows. A check that raises reads as a problem of the check, never as the
+    tool found."""
+    skipped = set(skip)
+    rows: list[tuple[bool, str]] = []
+    checks = registry.tool_checks()
+    for tool in registry.view_tools():
+        if tool in skipped:
+            continue
+        users = [s.id for s in registry.specs() if tool in s.requires_tools]
+        if tool in checks:
+            pack, fn = checks[tool]
+            try:
+                ok, words = fn(root)
+            except Exception as exc:              # noqa: BLE001 - pack code
+                rows.append((False, f"{tool}: {pack or 'the'} check of it raised "
+                                    f"{type(exc).__name__}: {exc}"))
+                continue
+            rows.append((bool(ok), f"{tool}: {' '.join(str(words).split())}"))
+            continue
+        found = shutil.which(tool)
+        rows.append((bool(found), f"{tool}: found at {found}" if found else
+                     f"{tool}: not on PATH. These views are not drawn: "
+                     f"{', '.join(users)}. {NO_STATUS_WORDS}"))
+    return rows
 
 
 # --------------------------------------------------------------------------- #

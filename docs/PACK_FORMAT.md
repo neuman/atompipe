@@ -1049,7 +1049,16 @@ Rules:
 - **Declare `requires_python` / `requires_tools` the way a gate does.** A viewgen
   whose exporter is missing is reported as *unavailable* with the module named. A
   view that is absent because trimesh is not installed otherwise looks exactly like
-  a view the project never had.
+  a view the project never had. List each tool in the manifest's `requires_tools`
+  too: that list holds the tools of the gates and of the views.
+- **A tool that PATH says too little about gets a check.** A view module may define
+  `TOOL_CHECKS = {"<tool>": check}`, where `check(root)` returns `(ok, words)`.
+  `nopekit doctor` prints `<tool>: <words>` on the tool's row, a warning when `ok`
+  is false. Without a check the row says found, or not on PATH with the views it
+  leaves out and that no status depends on them. cfd-openfoam's check
+  (`views/_pv.py`) says which ParaView build `pvbatch62` is and whether its renderer
+  control passed. A check must be quick and draw nothing: `doctor` calls it on every
+  run.
 - **Write assets through `ctx.write_asset`**, never by hand into `site/assets/`.
   Only what the context recorded is known to be live, so a file written behind its
   back either survives forever or gets swept the first time the cleaner is made
@@ -1284,6 +1293,10 @@ every prerequisite in its `needs` closure passes that same known-bad control
 (isolation: `<gate>: control not isolated — its prerequisite <id> does not pass
 <gate>'s known-bad control (…)`). A `needs` entry that is not one of the pack's own
 gates is a problem too.
+It loads `views/` through the loader a site build uses, and holds `provides_views`
+to the view ids that register (both ways), every view's `requires_tools` and every
+`TOOL_CHECKS` tool to the manifest's `requires_tools`, and every `evidence_of` to a
+gate of the pack.
 A gate whose declared tooling is absent on this machine is printed as a `note:` and
 not demonstrated — not a problem, and not a pass either; so is an isolation check whose
 prerequisite's tooling is absent (`<gate>: isolation not checked — its prerequisite

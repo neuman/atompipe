@@ -1261,7 +1261,7 @@ class ViewgensThroughTheCli(_SiteCase):
         self.assertEqual(len(before), 1)
         glb = os.path.join(self.root, site_mod.SITE_DIR, "assets", "assembly.glb")
         # Under another file name: a module this process imported is reused
-        # (`cli._import_viewgen_module`), so the edit goes to a new file.
+        # (`site._import_viewgen_module`), so the edit goes to a new file.
         os.unlink(os.path.join(self.root, "views", "assembly.py"))
         path = os.path.join(self.root, "views", "assembly_unavailable.py")
         declared = '@viewgen(id="assembly", kind=ViewKind.MODEL3D, title="Assembly")'

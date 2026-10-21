@@ -390,6 +390,83 @@ class PacksValidate(unittest.TestCase):
                     f"{name}: pack.json declares no `settles` vocabulary, so "
                     f"`nopekit gap` can never propose it for a capability gap")
 
+#: A pack's views/ for `ProvidesViewsIsWhatRegisters`: one bound chart and
+#: one tool the module checks, each part set per test.
+_SCRATCH_VIEWS = """
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+TOOL_CHECKS = {checks}
+
+
+@viewgen(id="{view_id}", kind=ViewKind.CHART, evidence_of="{evidence_of}",
+         requires_tools={tools})
+def chart(ctx):
+    return None
+"""
+
+
+class ProvidesViewsIsWhatRegisters(unittest.TestCase):
+    """`pack validate` on a pack's views/ (issue #15, P2.2), loaded through
+    the loader a build uses: ``provides_views`` names exactly the views that
+    register, every tool a view draws with is in ``requires_tools``, and a
+    figure is bound to a gate of its own pack. What slipped through before:
+    ``provides_views`` was never read, so tier 1 could name a view no code
+    registered, and a figure could draw another pack's result."""
+
+    def problems(self, *, declared=("scratch.chart",), view_id="scratch.chart",
+                 evidence_of="scratch.span", tools=(), checks="{}",
+                 manifest_tools=(), gates=("scratch.span",)) -> list[str]:
+        root = os.path.realpath(tempfile.mkdtemp(prefix="nopekit-scratch-views-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, "views"))
+        with open(os.path.join(root, "views", "chart.py"), "w", encoding="utf-8") as fh:
+            fh.write(_SCRATCH_VIEWS.format(checks=checks, view_id=view_id,
+                                           evidence_of=evidence_of, tools=list(tools)))
+        manifest = packs_mod.PackManifest(name="scratch", provides_views=list(declared),
+                                          requires_tools=list(manifest_tools))
+        return packs_mod._view_problems(root, "scratch", manifest, set(gates))
+
+    def test_a_consistent_pack_has_no_view_problems(self):
+        self.assertEqual(self.problems(tools=["nopekit-draw"],
+                                       checks="{'nopekit-draw': lambda root: (True, 'ok')}",
+                                       manifest_tools=["nopekit-draw"]), [])
+
+    def test_a_declared_view_nothing_registers(self):
+        found = self.problems(declared=("scratch.chart", "scratch.ghost"))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("provides_views lists 'scratch.ghost' but nothing in views/ registers it",
+                      found[0])
+
+    def test_a_registered_view_the_manifest_omits(self):
+        found = self.problems(declared=())
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("view 'scratch.chart' is registered but pack.json provides_views does "
+                      "not list it", found[0])
+
+    def test_a_view_tool_the_manifest_omits(self):
+        found = self.problems(tools=["nopekit-draw"])
+        self.assertEqual(found, ["pack.json: requires_tools does not list 'nopekit-draw', "
+                                 "needed by view 'scratch.chart'"])
+
+    def test_a_checked_tool_the_manifest_omits(self):
+        found = self.problems(checks="{'nopekit-draw': lambda root: (True, 'ok')}")
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("requires_tools does not list 'nopekit-draw', which views/ checks in "
+                      "TOOL_CHECKS", found[0])
+
+    def test_a_figure_bound_to_another_packs_gate(self):
+        found = self.problems(evidence_of="other.pressure_drop")
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("is bound to 'other.pressure_drop', which is not a gate of this pack",
+                      found[0])
+
+    def test_a_tool_check_that_is_not_a_function_is_refused(self):
+        found = self.problems(checks="{'nopekit-draw': 'yes'}", manifest_tools=["nopekit-draw"])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("TOOL_CHECKS must map each tool's name to a function", found[0])
+
+
 class NegativeControlsFire(unittest.TestCase):
     """The central invariant, applied to every shipped gate."""
 

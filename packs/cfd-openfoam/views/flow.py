@@ -18,7 +18,7 @@ claim's was a second limit on the page.
 
 **No tool.** Both charts need only the evidence, so they are on the page
 wherever cfd.pressure_drop ran, ParaView or not. The stills and the 3D view
-(Phase 2, P2.3 and P2.4) need pvbatch.
+(Phase 2, P2.3 and P2.4) need pvbatch, found and checked by `_pv.py`.
 
 **Captions** are site text (ASD-STE100) and say what the chart shows, never a
 status: the chips beside the figure say that. "Open" is a status word, so the
@@ -27,13 +27,42 @@ Richardson point is "the circle with no fill".
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 import math
+import os
+import sys
 
 from nopekit.models import View, ViewKind
 from nopekit.site import viewgen
 
 GATE = "cfd.pressure_drop"
+
+
+def _load_pv():
+    """``views/_pv.py`` under a name of this pack's own: the loader puts the
+    pack root on ``sys.path``, not ``views/``, and a bare ``import _pv`` would
+    take another pack's ``_pv`` if one were first."""
+    name = "nopekit_cfd_openfoam_pv"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "_pv.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module      # before exec: its dataclasses look it up
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return sys.modules[name]
+
+
+_pv = _load_pv()
+
+#: ``nopekit doctor``'s row for the tool the stills and the 3D view draw with:
+#: found or not, the ParaView build, and its renderer control
+#: (``_pv.doctor_check``). It runs ``pvbatch --version`` and runs no control.
+TOOL_CHECKS = {_pv.WRAPPER: _pv.doctor_check}
 
 #: What the page says each chart is drawn from (the ViewSpec description, the
 #: figure's provenance line).

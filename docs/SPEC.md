@@ -2031,9 +2031,29 @@ and while building it:
   one point (*rejected:* a log y, whose domain rounds to powers of ten). The settling
   chart leaves out a change of zero (no place on a log axis) and the first row
   (*rejected:* a floor value, a number no evidence file holds).
-- **Phase 2, decided here and not yet built:** pvbatch's identity is its conda package
-  records against a pack lock, with a renderer control once per identity (*rejected:*
-  the banner alone, which fits another build; the launcher's 28 KB digest alone); the
+- **Phase 2, P2.2 (built):** cfd-openfoam finds ParaView only through a `pvbatch62`
+  launcher on PATH, whose exec line names the prefix (`views/_pv.py`;
+  `references/rendering.md` has the launcher and the install). Its identity is its
+  conda records: the paraview record must list the `bin/pvbatch` on disk by its sha256,
+  the sha256 of the paraview, Mesa and Pillow packages must be an entry of
+  `views/paraview.lock.json`, and `pvbatch --version` must agree. Another build is
+  unavailable, named; `NOPEKIT_PVBATCH_EXTRA_LOCK` adds a build, loudly. A run gets an
+  environment built from nothing (a new empty HOME outside the project each time,
+  llvmpipe pinned), a timeout, and its output only when its `result.json` is this job's
+  and names llvmpipe. A renderer control, once per build, draws `views/fixture/strip.vtk`
+  (15 cells, -0.2 to 1.2 of the scale) with ParaView's own `Viridis` preset; Pillow
+  inside pvbatch reads each cell's centre pixel, and nopekit judges them: within 1 of
+  the lookup table's colour inside the scale, exactly magenta above and grey below, and
+  viridis's (33, 145, 140) at 0.5. *Rejected:* the banner alone, which fits another
+  build; the launcher's 28 KB digest alone; a PNG decoder of our own (the author's rule:
+  Pillow reads the pixels where ParaView drew them); judging inside pvbatch only (a
+  fault in that script would pass any renderer); a HOME under the project (`doctor`
+  would write into it). `doctor` has a row for each tool the views draw with, from the
+  pack's `TOOL_CHECKS`, and runs no control; `pack validate` loads `views/` through the
+  build's loader (`site.load_viewgens`) and holds `provides_views` to the views that
+  register, their tools to `requires_tools` (which now lists `pvbatch62`), and
+  `evidence_of` to a gate of the pack.
+- **Phase 2, decided here and not yet built:** the
   pressure range is [p_down - 1.0 dp, p_down + 2.0 dp] (*rejected:* [-0.25, 1.25] dp,
   which paints the baseline's ends out of range); a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).

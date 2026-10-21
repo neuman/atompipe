@@ -123,6 +123,12 @@ settled on each mesh (`cfd-openfoam.settle`). Each draws the numbers of the
 result beside it and no other. The site adds the claim's limit and the judged
 value.
 
+The pictures of the flow need ParaView 6.2.0, run through a `pvbatch62`
+launcher on PATH (`references/rendering.md`). The pack uses only the ParaView
+build it checked, and a renderer control runs once on each build before it
+draws. `nopekit doctor` shows a `pvbatch62` row. Without ParaView the pictures
+are not drawn. No status depends on them.
+
 ## Pointing a project at its case
 
 ```json
@@ -194,6 +200,8 @@ for this oil: check the units first.
 ## Where to look next
 
 - `references/installing.md`: getting ESI OpenFOAM v2606, and checking it.
+- `references/rendering.md`: getting ParaView 6.2.0 for the pictures, the
+  `pvbatch62` launcher, and the renderer control.
 - `references/running-openfoam.md`: how the gates run each tool, and every
   failure mode they read.
 - `references/gci.md`: Celik et al.'s procedure, the traps in it, and the

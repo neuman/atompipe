@@ -3555,9 +3555,19 @@ CHART_FORBIDDEN_KEYS = {"limit", "limits", "current", "marker", "now"}   # a bou
 CHART_NUMBER_KEYS = ("series", "band", "estimates", "rule")  # every number: in the evidence
 CAPTION_STATUS_PHRASES: tuple                # with every status word: never in a caption
 class ViewRegistry:                          # register / unregister / clear / get / specs / ids / pairs
+    def add_tool_check(self, tool, fn, *, pack="") -> None   # a module's TOOL_CHECKS entry
+    def tool_checks(self) -> dict            # {tool: (pack, check)}
+    def view_tools(self) -> list[str]        # every requires_tools of a view, then each checked tool
 VIEW_REGISTRY: ViewRegistry                  # module-level default
 def active_view_registry() -> ViewRegistry   # the registry `@viewgen` decorates into right now
 def use_view_registry(registry)              # context manager, as gates.use_registry
+def load_viewgens(directory, registry, *, pack, root) -> list[ViewSpec]   # import views/*.py:
+                                             #   the one loader of a build, `site status`,
+                                             #   `doctor` and `pack validate` (P2.2)
+TOOL_CHECKS_NAME = "TOOL_CHECKS"             # a view module's {tool: check(root) -> (ok, words)}
+NO_STATUS_WORDS = "No status depends on them."
+def view_tool_rows(registry, root, *, skip=()) -> list[tuple[bool, str]]   # doctor's rows for
+                                             #   the tools the views draw with
 def viewgen(*, id, kind, title="", description="", requires_python=(), requires_tools=(),
             pack="", order=100, gates=(), registry=None, evidence_of="", recipe=())
                                                             # decorator -> registers, returns fn

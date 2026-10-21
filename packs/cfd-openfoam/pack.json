@@ -53,7 +53,8 @@
   ],
   "provides_generators": [],
   "requires_tools": [
-    "openfoam2606"
+    "openfoam2606",
+    "pvbatch62"
   ],
   "requires_python": [],
   "max_tier": 2,
