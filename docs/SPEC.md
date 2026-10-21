@@ -1917,6 +1917,102 @@ critics read the plan against the code:
 - **The meshopt decoder is vendored** with three.js (`site.vendor_urls`), so a
   compressed GLB loads offline too.
 
+**Figures bound to verdicts** (2026-10-21, phase 1 of GitHub #15's pictures: the
+spine and the site, no ParaView), decided after a three-way design panel and a judge,
+and while building it:
+
+- **The evidence copy is bound by content, through an ignored per-entry manifest**
+  (`.nopekit/cache/evidence/<gate>/<entry>.json`, written in `_sweep_one` step 4,
+  after `write_entry`, for a recorded pass or fail). *What slipped through:*
+  `evidence_plan` bound by name, so a design that went A, B, A published B's files
+  under A. *Rejected:* digests in the tracked entry (kept-first warnings on every
+  forced run, from log timestamps); obs rows (pruned at 20, and obs is "never
+  truth"); writing the manifest from `cli.check` after the sweep (no bracket
+  regeneration, but a later gate's write lands in an earlier gate's manifest);
+  `.nopekit/out/entries/` (a gate can write there through `ctx.out_path`).
+- **A figure binds through `ViewSpec.evidence_of`, not `View`.** *Rejected:* a
+  `models.View` field (a second spine-digest edit, and a strict-reader change for one
+  use). A bound record view (a gate's own PNG shown as a bound figure) waits on that
+  change.
+- **Rendering runs at `site build`, memoised per (gate, entry, view, recipe) by a
+  tracked sidecar.** The tool's identity is recorded in the sidecar, never in the key.
+  *Rejected:* rendering in `check` (a 2.7 GB optional tool on the judging path, and a
+  crash reads like a check failure); an explicit `nopekit render` (forgotten, so the
+  page is silently behind); a plain viewgen on every build (seconds per scene on every
+  edit); the identity in the key (one teammate's install draws everything again).
+- **A bound viewgen gets no model, no parameters and no claim's acceptance.** The
+  design said only the acceptance. The model went too: the design now may be another
+  design than the served entry's, and a picture drawn from it would be published as
+  that entry's evidence.
+- **`bind` takes only a digest a verified evidence file holds**, and each file must
+  hash to it. The design said only the second. *Rejected:* a digest the viewgen
+  computed itself (it would bind whatever is on the disk).
+- **The spine renders into ignored scratch, hashes the inputs again after the call,
+  and publishes only checked files.** *Rejected:* `write_asset` straight into `site/`
+  (a half-checked or oversize file is published until the check runs, and an input
+  that moved is not seen).
+- **The format checks are the stdlib minimum:** the PNG signature and IHDR, and the
+  GLB magic. *Rejected:* a PNG codec or a glTF accessor check of our own (the author's
+  rule of 2026-10-21: build as little as possible, use trusted libraries); the Khronos
+  validator stays a skipIf test for phase 2.
+- **A chart's numbers are its evidence's; its limit and point are the floor's.** *What
+  slipped through:* `_chart_margins` took the view's own limit. *Rejected:* stripping a
+  pack limit silently (a pack bug would read as a working chart).
+- **A chart is a Vega-Lite spec the spine bakes whole** (`page.chart_spec`), with none
+  of `page.VEGA_FORBIDDEN_KEYS`, so Vega computes only the axes. Vega 6.2.0, Vega-Lite
+  6.4.1 and vega-embed 7.1.0 (`site.VEGA_VERSIONS`) load as their pinned UMD files, on
+  demand, from `vendor/vega/` or the CDN; without them the card shows the numbers as a
+  table. *Rejected:* growing `lib/chart.js` (the author's rule); the ESM builds through
+  the import map (`vega.module.js` imports 27 bare names, jsdelivr's `+esm` of
+  vega-embed 7.1.0 pulls vega-lite 6.4.3, which nobody pinned, and an existing site's
+  shells are never regenerated, so they would never get the line). `lib/chart.js`
+  stays for the technical record's unbound charts and their locators, which a baked
+  spec would need every verdict's overlay to draw.
+- **A field draws its colours as the file holds them** (`lib/viewer3d.js` field mode:
+  `MeshBasicMaterial` with vertex colours, `toneMapped` false, no lights,
+  `LinearSRGBColorSpace` output, `NoToneMapping`). Measured with pvbatch: ParaView
+  6.2's glTF exporter writes COLOR_0 as the colour map's own sRGB bytes. *Rejected:*
+  `KHR_materials_unlit` with the default sRGB output (64 drew as 137, measured);
+  re-encoding the colours ourselves.
+- **Colour ranges are pack factors times a named evidence value; one scale object
+  gives the pixels and the HTML legend.** *Rejected:* absolute constants,
+  auto-rescale, the claim's limit; a colour bar inside the PNG (two legends that can
+  disagree, unreadable on a phone).
+- **D6:** one PNG per scene per served entry; a GLB is committed only for an entry an
+  export re-ran; any other GLB is ignored, under `assets/live/`, and named only in
+  `build.json`'s `live_figures`. *Rejected:* a `HEAD` probe for the live file (a static
+  host shows a button that leads nowhere); a `.live.glb` name in a tracked folder.
+- **At most one older folder per view** while the served entry is undrawn; several
+  (after a merge) read `none`, with a warning. *Rejected:* choosing by time (obs and
+  commit times differ between machines).
+- **Why a figure is absent is never baked.** The baked words are fixed per currency,
+  and the reason goes to the build warnings. *Rejected:* "pvbatch is not on this
+  computer" on the page (a fresh clone would bake other bytes). A figure that reads
+  `none` is baked in `page.json` with its chips and sentence; `state.json` has no row
+  for it.
+- **An older figure is "another result", not "an earlier result".** After A, B, A
+  the picture beside A is B's, the later run. `binding_text` is one sentence per
+  (gate, entry), naming the full entry, because one claim can show two gates' figures.
+- **A figure's provenance line is its `ViewSpec.description`**, page text already, so
+  the sidecar schema needs no key for it.
+- **The caption check refuses every status word as a whole word**, "gap", "open" and
+  "stale" in their plain sense included, and the build and G7 read one rule
+  (`page.caption_status`). Narrowing it is the author's call.
+- **Placement:** one card per claim with figures, before the board's prose; the drawer
+  gets one link line, never the pictures. *Rejected:* cards between the prose and the
+  floor (the thirty-second questions come first); cards in the drawer (duplicated
+  images).
+- **No example CFD project is committed.** Its verdict cache would need regenerating on
+  every spine edit with a real v2606, which CI lacks.
+- **Invariant 14 grows** the figure sentence, held by the `test_figures.py` classes in
+  its row.
+- **Phase 2, decided here and not yet built:** pvbatch's identity is its conda package
+  records against a pack lock, with a renderer control once per identity (*rejected:*
+  the banner alone, which fits another build; the launcher's 28 KB digest alone); the
+  pressure range is [p_down - 1.0 dp, p_down + 2.0 dp] (*rejected:* [-0.25, 1.25] dp,
+  which paints the baseline's ends out of range); a solver history is CSV evidence,
+  never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

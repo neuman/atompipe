@@ -362,8 +362,9 @@ person's. Enforced in `tests/test_preferences.py`:
     `docs/SPINE_CONTRACT.md`.)
 
 One more came with architecture phase 5, when the site gained a map and the agent's
-prose: where the site persuades, with the marketing page beside it from SPEC 40.
-Enforced in `tests/test_site_truth.py`:
+prose: where the site persuades, with the marketing page beside it from SPEC 40, and
+pictures of results with issue #15. Enforced in `tests/test_site_truth.py` and
+`tests/test_figures.py`:
 
 14. **The site never says more than the resolution, and stamped prose is flagged when
     behind.** Every status, word, count, order, margin and *ready* that `site build` bakes
@@ -384,15 +385,26 @@ Enforced in `tests/test_site_truth.py`:
     digest of the tokens of its board's claims and of every claim it names now; otherwise
     the page says it was written before the latest results, unstamped text included; and
     every number in it that no number the page keeps matches at its precision, in its
-    unit, is marked. (What slipped through: the reference page decided its go/no-go in the
-    browser from a hand-kept claim list, so a claim added to a board never reached it; the
+    unit, is marked. A figure on the page (issue #15) is the evidence of one named
+    verdict entry, bound by content: it reads current only beside the fresh served
+    entry, and otherwise says it is stale or another result's, with that result's own
+    outcome; it sits beside the chips of every claim its gate covers; its colour scale
+    is a pack constant, never a limit; a chart's limit and margin are the floor's and
+    its other numbers its evidence's; a renderer that is missing or fails moves no
+    status; and no file the page links is deleted by the build that links it. (What
+    slipped through: the reference page decided its go/no-go in the browser from a
+    hand-kept claim list, so a claim added to a board never reached it; the
     template ranked anchored verdicts by their `passed` flag beside the resolver's word,
     sorted verdict rows by a status table of its own and subtracted a chart's limit from
     its value; and nothing kept prose from saying a claim passes after it failed; and, in
     review of phase 5, a Failing claim read "99% inside the limit" (the evaluator's margin
     beside the claim's limit), a stamp missed a claim its text named from another board,
     "3 mm" matched a count of claims, and an evidence copy the same build deleted vouched
-    for a number.)
+    for a number; and, before issue #15, the evidence copy was bound by name, so a design
+    that went A, B, A published B's files under A, a viewgen whose tool was missing
+    deleted its committed picture, and a prose figure under `assets/` read present and
+    was deleted; and, in review of its figures, the sentence beside an older picture
+    called it "an earlier result" when after A, B, A it was B's, the later run.)
 
 One more came with checkpoint P2.3, numbered 15 before 14 landed (14 was reserved for
 the site, which landed in architecture phase 5). Enforced in `tests/test_mutation.py`,
