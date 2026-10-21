@@ -76,6 +76,9 @@ def main(job_path):
     lut = pv.GetColorTransferFunction(job["field"])
     lut.ApplyPreset(job["preset"], True)
     lut.ColorSpace = "RGB"
+    # Continuous, as the stills draw (ParaView's default quantises the map to
+    # 256 colours; the page's gradient is continuous).
+    lut.Discretize = 0
     lut.AutomaticRescaleRangeMode = "Never"
     lut.RescaleTransferFunction(lo, hi)
     lut.UseAboveRangeColor = 1

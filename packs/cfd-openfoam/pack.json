@@ -49,6 +49,8 @@
   ],
   "provides_views": [
     "cfd-openfoam.ladder",
+    "cfd-openfoam.speed",
+    "cfd-openfoam.pressure",
     "cfd-openfoam.settle"
   ],
   "provides_generators": [],

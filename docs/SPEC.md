@@ -2053,9 +2053,34 @@ and while building it:
   build's loader (`site.load_viewgens`) and holds `provides_views` to the views that
   register, their tools to `requires_tools` (which now lists `pvbatch62`), and
   `evidence_of` to a gate of the pack.
-- **Phase 2, decided here and not yet built:** the
-  pressure range is [p_down - 1.0 dp, p_down + 2.0 dp] (*rejected:* [-0.25, 1.25] dp,
-  which paints the baseline's ends out of range); a solver history is CSV evidence,
+- **Phase 2, P2.3 (built):** two stills bound to `cfd.pressure_drop`,
+  `cfd-openfoam.speed` (OpenFOAM's `mag(U)`) and `cfd-openfoam.pressure` (its
+  `static(p)`). Each binds the finest level's field and mesh by the sha256 the verified
+  summary names, copies those bytes into a case of its own outside the project (with a
+  controlDict of its own, so ParaView reads no other file of the run), and runs
+  `views/_scene.py` in pvbatch: a cut at the middle of the thickness, each cell its own
+  flat colour from ParaView's own `Viridis` preset, a continuous lookup table, unlit,
+  magenta above the scale and grey below, each measuring plane's trace as a 6 px line,
+  a parallel camera on the whole cut plus 5%, 1600 px wide, and the PNG written again
+  by Pillow with no chunk but the image's. Scales (`views/_scales.py`): speed on [0,
+  2 x the upstream plane's mean speed], static p on [p_down - 1.0 dp, p_down + 2.0 dp];
+  each end is factors times summary values, named in the scale's `source`. The
+  legend's stops come from `views/viridis.json`, the preset as ParaView exports it
+  (`views/_export_preset.py`), and a still is drawn only when the scene says it applied
+  that preset; its ticks are matplotlib's (`MaxNLocator`, in pvbatch). Measured on the
+  real tools: every one of 7840 cells away from the lines is the preset's colour for
+  its value to the byte, two draws are byte-identical, and each line is within a pixel
+  of its plane. On the baseline 6 cells at the inlet's corners pass the pressure
+  scale's top (to p_down + 2.62 dp) and are magenta: that rise grows as the mesh is
+  refined, so no fixed top holds it. The renderer control now draws with a continuous
+  table as the stills do (ParaView's default quantises the map to 256 colours).
+  *Rejected:* colour stops typed by hand (the design's draft), matplotlib's own viridis
+  table for the legend (another program's copy of the map), the export's stops as the
+  lookup table (an edited file would colour the picture to match itself), [-0.25, 1.25]
+  dp (paints the baseline's ends out of range), [-1, 3] dp (half the scale for the
+  rest, and a finer mesh passes it again), a line moved toward the camera (measured:
+  the same bytes), and a tick picker of the pack's own.
+- **Phase 2, decided here and not yet built:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 
 ## 9. Retired

@@ -97,8 +97,9 @@ not of an earlier one) and names llvmpipe as the GL renderer.
 
 Before the first picture on a build, the pack draws `views/fixture/strip.vtk`
 with `views/_control.py`: 15 cells, with values from -0.2 to 1.2 of a scale
-from 0 to 1. It uses ParaView's `Viridis` preset (matplotlib's viridis), the
-colour magenta above the scale and grey below it, and an unlit display. Pillow,
+from 0 to 1. It uses ParaView's `Viridis` preset (matplotlib's viridis), a
+continuous lookup table (as the stills use), the colour magenta above the scale
+and grey below it, and an unlit display. Pillow,
 in ParaView's own Python, reads the centre pixel of each cell. The pack then
 examines the pixels:
 
@@ -106,7 +107,8 @@ examines the pixels:
   colour of the lookup table for its value;
 - each cell above the scale is exactly magenta (255, 0, 255), and each cell
   below it is exactly grey (128, 128, 128);
-- the cell at 0.5 is viridis's (33, 145, 140), so the preset is viridis.
+- the cell at 0.5 is within 1 of viridis's (33, 145, 140), so the preset is
+  viridis.
 
 The result is kept in `.nopekit/cache/pvbatch/`, keyed by the build, the
 control script, the fixture and the values above. The control does not run
@@ -117,10 +119,40 @@ reads the kept result and does not run the control.
 The control finds the two faults that make a picture show an incorrect value:
 
 - a lit display, which draws each cell darker than its colour on the scale
-  (measured: the cell at 0.5 drew (26, 112, 104), not (33, 145, 140));
+  (measured: the cell at 0.5 drew (26, 111, 104), not (33, 144, 140));
 - a lookup table with no colour above the scale, which draws a value above
   the scale in the top colour (measured: (253, 231, 37), not magenta). A
   picture like that hides a value outside the scale.
+
+## The stills
+
+Each still (`cfd-openfoam.speed`, `cfd-openfoam.pressure`) is one pvbatch run
+of `views/_scene.py`, about 2 s:
+
+1. The pack copies the finest mesh and the field at its last time into a
+   new case outside the project. It copies only the files whose sha256 the
+   result's `summary.json` names, and it examines each sha256 again as it
+   copies. It writes a controlDict of its own. ParaView reads no other file
+   of the run.
+2. ParaView cuts the mesh at the middle of its thickness and gives each cell
+   one flat colour: ExtractSurface, Shrink 1.0, CellDatatoPointData, with
+   InterpolateScalarsBeforeMapping 0 and an unlit display.
+3. The colours come from the `Viridis` preset, on the scale of
+   `views/_scales.py`, with a continuous lookup table. A value above the
+   scale is magenta, and a value below it is grey.
+4. ParaView cuts the cut again with each measuring plane, and draws that
+   line in black, 6 px wide.
+5. A parallel camera shows the whole cut plus 5% on each side. The picture
+   is 1600 px wide, and its height follows the shape of the cut.
+6. Pillow writes the PNG again with no text chunk, so two runs give the same
+   bytes.
+
+The page draws the colour legend from `views/viridis.json`. That file is the
+`Viridis` preset as ParaView exported it, with
+`pvbatch62 views/_export_preset.py views/viridis.json`. Each run reports the
+sha256 of the preset it used, and the pack uses the picture only when that
+sha256 is the sha256 of `viridis.json`. If another ParaView build changes the
+preset, export it again and examine the stills.
 
 ## What was measured
 
@@ -138,4 +170,18 @@ On ParaView 6.2.0 (`py312ha24fc4a_1`), WSL2, 2026-10-21:
   `Viridis (matplotlib)`, is not there, and `ApplyPreset` stops with an error.
 - The first render resets the camera to the bounding sphere of the data. The
   control renders one time before it sets its camera.
-- `pvbatch --version` takes 0.7 s. The renderer control takes about 3 s.
+- `pvbatch --version` takes 0.7 s. The renderer control takes about 3 s, and
+  each still about 2 s.
+- ParaView's default lookup table has 256 colours. With a continuous table
+  the cell at 0.5 of the scale is (33, 144, 140), not (33, 145, 140).
+- On the baseline (8000 cells), the centre pixel of each cell away from the
+  lines is the preset's colour for the cell's value, with no difference in
+  any channel. Two runs write PNG files with the same bytes. Each line is in
+  1 px of its plane.
+- A black line in the plane of the cells is drawn over them. A line moved
+  toward the camera gave the same bytes.
+- On the baseline, 6 cells at the corners of the inlet are above the
+  pressure scale (to 2.62 pressure drops above the downstream plane), where
+  the uniform inlet flow meets the walls. They are magenta. This pressure
+  increases when the mesh is made finer, so no fixed top of the scale holds
+  it.

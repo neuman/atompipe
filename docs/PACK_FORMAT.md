@@ -1182,11 +1182,13 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
     "over": "#ff00ff", "under": "#808080",          // past an end: never the end colour
     "over_word": "...", "under_word": "...",
     "ticks": [ { "at": 0.5, "value": 0.01, "text": "0.01 m/s" } ],
-    "source": [ { "key": "u_upstream_m_s", "factor": 2.0 } ],   // what the range is
+    "source": [ { "key": "u_upstream_m_s", "lo": 0, "hi": 2.0 } ],   // what the range is
     "source_text": "The scale is twice the measured upstream speed." }
   ```
 
-  Its ends are a pack constant times a value the evidence names (`source`). The spine
+  Its ends are a pack constant times a value the evidence names (`source`; in
+  cfd-openfoam each end is the sum of its factor times each named value, and the
+  stops are a colour map preset as the drawing tool exported it). The spine
   refuses an end equal to a limit of a claim the gate covers or to the entry's verdict
   limit, and a `source` key that holds `limit`. A doubled limit leaves the scale
   byte-identical.

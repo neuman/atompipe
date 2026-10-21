@@ -26,8 +26,8 @@ Every rule here was measured on ParaView 6.2.0 (conda-forge,
 - A lit display draws a cell about 22% darker than its colour on the scale,
   and a lookup table without an above-range colour draws a value past the
   scale in the end colour. The renderer control below catches both (planted
-  and measured: the lit strip drew the middle cell (26, 112, 104) for
-  (33, 145, 140), the clipped one drew (253, 231, 37) for magenta).
+  and measured: the lit strip drew the middle cell (26, 111, 104) for
+  (33, 144, 140), the clipped one drew (253, 231, 37) for magenta).
 
 What the identity cannot see: the conda records are what the package manager
 wrote, and the check reads them and hashes ``bin/pvbatch`` alone, so records
@@ -39,12 +39,14 @@ from __future__ import annotations
 import functools
 import glob
 import hashlib
+import importlib.util
 import json
 import os
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 
@@ -89,12 +91,31 @@ LOCKED_PACKAGES = ("paraview", "mesalib", "mesa-libgallium", "mesa-llvmpipe", "p
 TIMEOUT_S = 120
 BANNER_TIMEOUT_S = 60
 
-#: The renderer control: ParaView 6.2's name for matplotlib's viridis, and the
-#: two colours past the scale (B.3.4: magenta above, as no viridis colour is
-#: near it; grey below). The stills draw with the same three.
-PRESET = "Viridis"
-OVER = (255, 0, 255)
-UNDER = (128, 128, 128)
+
+
+def sibling(stem: str):
+    """``views/<stem>.py`` of this pack, loaded once under a name of the
+    pack's own (``nopekit_cfd_openfoam<stem>``): the view loader puts the
+    pack root on ``sys.path``, not ``views/``, and a bare ``import _scales``
+    would take another pack's ``_scales`` if one were first. ``flow.py``
+    loads this module the same way, so both share one copy of each."""
+    name = f"nopekit_cfd_openfoam{stem}"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, f"{stem}.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module      # before exec: its dataclasses look it up
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return sys.modules[name]
+
+
+_scales = sibling("_scales")
+#: The renderer control draws with the stills' map and their two colours past
+#: the scale, from ``_scales.py`` (their provenance is there).
+PRESET, OVER, UNDER = _scales.PRESET, _scales.OVER, _scales.UNDER
 #: The fixture the control draws: 15 cells, t from -0.2 to 1.2 of [0, 1].
 CONTROL_DATA = os.path.join(HERE, "fixture", "strip.vtk")
 CONTROL_SCRIPT = os.path.join(HERE, "_control.py")
@@ -109,7 +130,10 @@ CONTROL_SIZE = (600, 120)
 CONTROL_TOLERANCE = 1
 #: The known pixel: viridis at 0.5 is (33, 145, 140), #21918c (matplotlib
 #: 3.11.2's ``colormaps['viridis'](0.5)``, and ParaView 6.2's ``Viridis`` at
-#: 0.5, both measured). It shows the preset is viridis and not another map.
+#: 0.5 with its default 256-colour table, both measured). It shows the preset
+#: is viridis and not another map. The control draws with a continuous table
+#: as the stills do (P2.3), and there the locked build draws (33, 144, 140),
+#: half a byte from the table's point and inside `CONTROL_TOLERANCE`.
 KNOWN = (0.5, (33, 145, 140))
 
 #: The words a picture's absence says on the page and in ``doctor``.

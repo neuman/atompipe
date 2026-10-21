@@ -123,11 +123,23 @@ settled on each mesh (`cfd-openfoam.settle`). Each draws the numbers of the
 result beside it and no other. The site adds the claim's limit and the judged
 value.
 
-The pictures of the flow need ParaView 6.2.0, run through a `pvbatch62`
-launcher on PATH (`references/rendering.md`). The pack uses only the ParaView
-build it checked, and a renderer control runs once on each build before it
-draws. `nopekit doctor` shows a `pvbatch62` row. Without ParaView the pictures
-are not drawn. No status depends on them.
+Two stills of the same result show the flow on the finest mesh: its speed
+(`cfd-openfoam.speed`, OpenFOAM's `mag(U)`) and its static pressure
+(`cfd-openfoam.pressure`, OpenFOAM's `static(p)`). Each cell shows its own
+value. The two lines are the measuring planes. The colour scale is a constant
+of the pack times a value of the result, never the limit: the speed goes from
+0 to two times the mean speed through the upstream plane, and the pressure
+from one pressure drop below the downstream plane's pressure to two pressure
+drops above it. Magenta shows a value above the scale, and grey a value below
+it. The page draws the legend from the same scale.
+
+The stills need ParaView 6.2.0, run through a `pvbatch62` launcher on PATH
+(`references/rendering.md`). The pack uses only the ParaView build it checked,
+and a renderer control runs once on each build before it draws. `nopekit
+doctor` shows a `pvbatch62` row. Without ParaView the stills are not drawn,
+the charts are drawn, and no status changes. When the page says that the
+solved fields on this computer are from another run, `nopekit check --force
+--only cfd.pressure_drop` solves them again.
 
 ## Pointing a project at its case
 

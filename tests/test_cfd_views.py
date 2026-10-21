@@ -34,7 +34,22 @@ The pvbatch wrapper (P2.2, ``views/_pv.py``), through the stand-in pvbatch
   renderer that clips past the scale or lights the faces;
 - ``doctor`` has a pvbatch62 row and runs no control.
 
-The stills and the 3D view are the later steps of Phase 2.
+The stills (P2.3: ``views/_scene.py``, ``views/_scales.py``, the speed and
+pressure viewgens), through the stand-in and, where both tools are installed,
+the real v2606 and ParaView 6.2.0:
+
+- each still binds the finest level's field and mesh by the summary's
+  digests, and ParaView reads a copy of those files and no other; another
+  run's fields, an unchecked ParaView and a failed renderer control draw
+  nothing and say why; a preset other than the legend's is an error;
+- the scale is the pack's constants times the summary's values, and the
+  legend's stops are the preset ParaView exported (``views/viridis.json``);
+- on the real tools every cell's centre pixel is the preset's colour for its
+  value within 2, a value past the scale is exactly magenta, two draws are
+  byte-identical, each plane's line is where the summary puts it, and a lit
+  copy of the scene fails the same check.
+
+The 3D view is P2.4.
 
 Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_cfd_views.py -v
 """
@@ -54,13 +69,15 @@ import _env
 import _projects
 import _pv_standin as pv_standin
 import test_cfd_openfoam as cfd_tests
-from nopekit import cli, page
+from nopekit import cli, page, report, store
 from nopekit import site as site_mod
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACK = os.path.join(REPO, "packs", "cfd-openfoam")
 GATE = "cfd.pressure_drop"
 LADDER, SETTLE = "cfd-openfoam.ladder", "cfd-openfoam.settle"
+SPEED, PRESSURE = "cfd-openfoam.speed", "cfd-openfoam.pressure"
+STILLS = (SPEED, PRESSURE)
 #: The keys a chart may not hold: the spine's own list.
 FORBIDDEN = site_mod.CHART_FORBIDDEN_KEYS
 
@@ -69,6 +86,12 @@ def _views() -> site_mod.ViewRegistry:
     registry = site_mod.ViewRegistry()
     cli._load_viewgens(os.path.join(PACK, "views"), registry, pack="cfd-openfoam", root=REPO)
     return registry
+
+
+def _scales_mod():
+    """``views/_scales.py`` as the views load it (``_pv.sibling``)."""
+    _views()
+    return sys.modules["nopekit_cfd_openfoam_scales"]
 
 
 def _evidence_numbers(paths) -> set[float]:
@@ -363,16 +386,20 @@ class ChartsNeedNoTool(_OnTheStandIn):
 @unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
 @unittest.skipUnless(shutil.which("git"), "the wrapped project's page is built in a repository")
 class TheCfdFiguresOnTheStandIn(_env.EnvCase):
-    """The chart half of B.6's test: the pack's baseline wrapped as a project,
-    the stand-in OpenFOAM and no ParaView on PATH, ``check --tier 2`` and ``site
-    build``. Both charts sit beside every claim cfd.pressure_drop covers, each
-    of the entry the page serves, beside the claims' chips, with the floor's
-    limit and judged point.
+    """B.6's test: the pack's baseline wrapped as a project, the stand-in
+    OpenFOAM, ``check --tier 2`` and ``site build``, first with no ParaView on
+    PATH, then with the stand-in pvbatch (accepted through the environment's
+    extra lock, so the page says a build this pack did not check drew the
+    stills), then once more. All four figures sit beside every claim
+    cfd.pressure_drop covers, each of the entry the page serves, beside the
+    claims' chips: the two charts with the floor's limit and judged point,
+    the two stills with their scale and the planes' marks. Without ParaView
+    the stills are left out and no status moves; the third build draws
+    nothing (the memo).
 
     The cfd gates are opaque (they read OpenFOAM through subprocesses), so the
     spine reads their entries stale once ``check`` is done, and the figures say
-    the same word as the claims beside them; the stills of P2.3 change none of
-    that."""
+    the same word as the claims beside them."""
 
     @classmethod
     def setUpClass(cls):
@@ -380,24 +407,42 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
         cls.inst, cls.bin = cfd_tests.install_standin(os.path.join(cls.dir, "tool"))
         cls.env = {"PATH": cls.bin + os.pathsep + "/usr/bin:/bin"}
+        cls.stand = pv_standin.install(os.path.join(cls.dir, "pv"))
+        cls.pv_env = {"PATH": os.pathsep.join([cls.stand["bin"], cls.bin, "/usr/bin:/bin"]),
+                      _pv().EXTRA_LOCK_ENV: cls.stand["extra_lock"]}
         cls.root = _projects.wrap_pack_baseline("cfd-openfoam", os.path.join(cls.dir, "proj"))
         cls.procs = [_env.nopekit(argv, cwd=cls.root, env=cls.env, timeout=900)
                      for argv in (["check", "--tier", "2"], ["site", "init"],
                                   ["site", "build", "--json"])]
+        cls.before = cls.baked_file("page.json")
+        cls.procs.append(_env.nopekit(["site", "build", "--json"], cwd=cls.root,
+                                      env=cls.pv_env, timeout=900))
+        cls.scenes = len(cls.scene_calls())
+        cls.again = _env.nopekit(["site", "build", "--json"], cwd=cls.root, env=cls.pv_env,
+                                 timeout=900)
 
     @classmethod
     def tearDownClass(cls):
         _env._rmtree(cls.dir)
 
+    @classmethod
+    def baked_file(cls, name: str) -> dict:
+        with open(os.path.join(cls.root, "site", "data", name), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    @classmethod
+    def scene_calls(cls) -> list[dict]:
+        return [c for c in pv_standin.calls(cls.stand["prefix"]) if "case_files" in c]
+
     def setUp(self):
-        for proc in self.procs:
+        for proc in [*self.procs, self.again]:
             self.assertEqual(proc.returncode, 0, proc.stdout[-3000:] + proc.stderr[-3000:])
         self.assertTrue(os.path.isfile(os.path.join(self.inst, "calls")),
                         "the stand-in OpenFOAM never ran")
+        self.assertTrue(self.scenes, "the stand-in pvbatch never drew a still")
 
     def baked(self, name: str) -> dict:
-        with open(os.path.join(self.root, "site", "data", name), encoding="utf-8") as fh:
-            return json.load(fh)
+        return self.baked_file(name)
 
     def served_entry(self) -> str:
         names = [n[:-len(".json")] for n in os.listdir(
@@ -406,7 +451,13 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         self.assertEqual(len(names), 1, names)
         return names[0]
 
-    def test_both_charts_beside_every_claim_the_gate_covers(self):
+    def summary(self) -> dict:
+        folder = os.path.join(self.root, "site", "assets", "evidence", GATE,
+                              self.served_entry())
+        with open(os.path.join(folder, "summary.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_four_figures_beside_every_claim_the_gate_covers(self):
         doc = self.baked("page.json")
         entry = self.served_entry()
         covered = sorted(doc["claims"])
@@ -414,25 +465,87 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         chips = [{"id": cid, "token": doc["claims"][cid]["token"]} for cid in covered]
         for cid in covered:
             figs = {f["view"]: f for f in doc["claims"][cid].get("figures") or ()}
-            self.assertEqual(sorted(figs), [LADDER, SETTLE], cid)
+            self.assertEqual(sorted(figs), sorted([LADDER, SETTLE, *STILLS]), cid)
             for view_id, fig in figs.items():
                 with self.subTest(cid=cid, view=view_id):
                     self.assertEqual((fig["gate"], fig["entry"], fig["kind"]),
-                                     (GATE, entry, "chart"))
+                                     (GATE, entry, "image" if view_id in STILLS else "chart"))
                     # Opaque gates: the served entry reads stale, and so do the
                     # claims and the figures (the class docstring).
                     self.assertEqual((fig["currency"], doc["claims"][cid]["token"]),
                                      ("stale", "stale"))
                     self.assertEqual([{"id": c["id"], "token": c["token"]}
                                       for c in fig["claims"]], chips)
-                    self.assertTrue(fig["data_src"].startswith(
-                        f"assets/figures/{GATE}/{entry}/"), fig["data_src"])
+                    src = fig["src"] if view_id in STILLS else fig["data_src"]
+                    self.assertTrue(src.startswith(f"assets/figures/{GATE}/{entry}/"), src)
                     self.assertTrue(os.path.isfile(
-                        os.path.join(self.root, "site", *fig["data_src"].split("/"))))
-                    self.assertEqual(page.vega_forbidden(fig["chart"]["spec"]), [])
-        summary = json.loads(self.procs[2].stdout)
+                        os.path.join(self.root, "site", *src.split("/"))))
+                    if view_id not in STILLS:
+                        self.assertEqual(page.vega_forbidden(fig["chart"]["spec"]), [])
+        summary = json.loads(self.procs[3].stdout)
         self.assertEqual({(v["view"], v["entry"]) for v in summary["viewgens"]},
-                         {(LADDER, entry), (SETTLE, entry)})
+                         {(v, entry) for v in (LADDER, SETTLE, *STILLS)})
+
+    def test_each_still_is_the_stand_ins_bytes_with_its_scale_and_marks(self):
+        doc = self.baked("page.json")
+        summary = self.summary()
+        scales = _scales_mod()
+        for view_id, png in ((SPEED, pv_standin.SPEED_PNG), (PRESSURE, pv_standin.PRESSURE_PNG)):
+            with self.subTest(view_id):
+                fig = next(f for f in doc["claims"]["G6"]["figures"] if f["view"] == view_id)
+                with open(os.path.join(self.root, "site", *fig["src"].split("/")), "rb") as fh:
+                    published = fh.read()
+                self.assertEqual(published, png)
+                self.assertEqual(fig["sha256"], hashlib.sha256(png).hexdigest())
+                scale = fig["scale"]
+                for end in ("lo", "hi"):
+                    self.assertAlmostEqual(scale[end], sum(
+                        s[end] * summary[s["key"]] for s in scale["source"]), places=12)
+                self.assertEqual(scale["stops"], scales.stops())
+                self.assertEqual(scale["over"], "#ff00ff")
+                self.assertEqual([m["text"] for m in fig["marks"]],
+                                 ["upstream plane", "downstream plane"])
+                self.assertEqual([m["at"] for m in fig["marks"]], pv_standin.STILL_MARKS)
+                # The stand-in is accepted through the environment: loud, in
+                # the spine's words (the sidecar's ``tool.accepted_by``).
+                self.assertEqual(fig["tool_word"],
+                                 report.HUMAN["site"]["figure"]["tool_unchecked"])
+                self.assertEqual(fig["chart"], {})
+        speed = next(f for f in doc["claims"]["G6"]["figures"] if f["view"] == SPEED)
+        self.assertAlmostEqual(speed["scale"]["hi"], 2.0 * summary["u_upstream_m_s"], places=12)
+
+    def test_paraview_reads_only_the_bound_files(self):
+        summary = self.summary()
+        time = summary["fields"]["time"]
+        for call in self.scene_calls():
+            field = call["job"]["field"]
+            with self.subTest(field):
+                self.assertEqual(call["case_files"], sorted(
+                    [f"{time}/{field}", "system/controlDict",
+                     *(f"constant/polyMesh/{n}" for n in
+                       ("points", "faces", "owner", "neighbour", "boundary"))]))
+                case = os.path.realpath(call["job"]["case"])
+                self.assertFalse(case.startswith(os.path.realpath(self.root) + os.sep), case)
+                self.assertFalse(os.path.exists(case), "the copy outlived the draw")
+
+    def test_without_paraview_the_stills_are_left_out_and_no_status_moves(self):
+        after = self.baked("page.json")
+        for cid, claim in self.before["claims"].items():
+            self.assertEqual(claim["token"], after["claims"][cid]["token"], cid)
+            figs = {f["view"]: f for f in claim.get("figures") or ()}
+            for view_id in STILLS:
+                with self.subTest(cid=cid, view=view_id):
+                    self.assertEqual((figs[view_id]["currency"], figs[view_id]["src"]),
+                                     ("none", ""))
+        notes = {v["view"]: v for v in json.loads(self.procs[2].stdout)["viewgens"]}
+        for view_id in STILLS:
+            self.assertEqual(notes[view_id]["status"], "unavailable", notes[view_id])
+
+    def test_a_build_that_judged_nothing_new_draws_nothing(self):
+        self.assertEqual(len(self.scene_calls()), self.scenes)
+        self.assertEqual(self.baked("page.json"), self.baked_file("page.json"))
+        notes = {v["view"]: v["status"] for v in json.loads(self.again.stdout)["viewgens"]}
+        self.assertEqual({notes[v] for v in STILLS}, {"memo"})
 
     def test_the_ladder_carries_the_floors_limit_and_judged_point(self):
         doc = self.baked("page.json")
@@ -454,6 +567,8 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         published = [os.path.join(folder, n) for n in os.listdir(folder)]
         held = _evidence_numbers(published)
         for fig in doc["claims"]["G5"]["figures"]:
+            if fig["kind"] != "chart":
+                continue
             with self.subTest(fig["view"]):
                 with open(os.path.join(self.root, "site", *fig["data_src"].split("/")),
                           encoding="utf-8") as fh:
@@ -461,7 +576,6 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
                 numbers = _chart_numbers(data)
                 self.assertTrue(numbers)
                 self.assertEqual([n for n in numbers if n not in held], [])
-
 
 
 # --------------------------------------------------------------------------- #
@@ -757,8 +871,8 @@ class TheRendererControlRuns(_OnTheStandInPvbatch):
         self.environ()
         with self.assertRaises(self.pv.Unavailable) as caught:
             self.pv.ready(self.root)
-        self.assertIn("cell 7 (t = 0.5): drew (26, 112, 104), the scale's colour is "
-                      "(33, 145, 140)", str(caught.exception))
+        self.assertIn("cell 7 (t = 0.5): drew (26, 111, 104), the scale's colour is "
+                      "(33, 144, 140)", str(caught.exception))
 
     def test_the_judge_refuses_a_report_that_leaves_cells_out(self):
         good = [{"index": i, "value": v, "where": w, "pixel": list(p), "want": list(q)}
@@ -902,6 +1016,414 @@ class TheRealRendererControl(_env.EnvCase):
         self.assertEqual(len(kept), 1)
         ok, words = self.pv.doctor_check(root)
         self.assertEqual((ok, words), (True, f"found, {self.inst.name}, checked"))
+
+
+
+# --------------------------------------------------------------------------- #
+# P2.3: the stills (views/_scene.py, views/_scales.py, flow.py)
+# --------------------------------------------------------------------------- #
+def _run_in_project(root: str, path: str):
+    """cfd.pressure_drop on the baseline with ``root``'s ``.nopekit/out`` as
+    its out directory, as ``check`` runs it: the summary's ``<out>/...`` stage
+    is then where ``BoundContext.bind`` looks."""
+    from nopekit import gates as gates_mod
+    from nopekit.models import Ledger, ProjectMeta
+    registry = cfd_tests._registry()
+    spec_fn = registry.get(GATE)
+    ctx = gates_mod.GateContext(
+        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd")), model=None,
+        params=dict(cfd_tests._baseline()), out_dir=store.out_dir(root), tier=2,
+        log=lambda _m: None, extra={})
+    with mock.patch.dict(os.environ, {"PATH": path}):
+        return gates_mod.run_gate(*spec_fn, ctx)
+
+
+def _bound_context(root: str, verdict, view_id: str, scratch: str) -> site_mod.BoundContext:
+    """The BoundContext the spine hands a bound viewgen for ``verdict``'s
+    entry: its evidence as ``files``, their digests set (`site._bound_entry`)."""
+    out = store.out_dir(root)
+    files = {os.path.relpath(p, out).replace(os.sep, "/"): p for p in verdict.evidence}
+    entry = site_mod.BoundEntry(gate=GATE, name="0" * 16 + "-" + "0" * 8, fresh=True,
+                                files=files)
+    shutil.rmtree(scratch, ignore_errors=True)
+    os.makedirs(scratch)
+    ctx = site_mod.BoundContext(root=root, entry=entry, scratch=scratch, view_id=view_id)
+    ctx.digests = {portable: _sha256(path) for portable, path in files.items()}
+    return ctx
+
+
+def _summary_of(verdict) -> dict:
+    path = next(p for p in verdict.evidence if p.endswith("summary.json"))
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+@unittest.skipIf(os.name == "nt", "the stand-ins are #! scripts")
+class TheStillsOnTheStandIn(_env.EnvCase):
+    """The speed and pressure viewgens through both stand-ins: the gate run
+    once per class into a project's ``.nopekit/out``, then each still drawn
+    by the stand-in pvbatch from a BoundContext as the spine builds it. What
+    is held here is the pack's path to a picture, not the pixels (those are
+    `TheRealStills`): what is bound, what is left out and why, and what is
+    an error."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        cls.foam, foam_bin = cfd_tests.install_standin(os.path.join(cls.dir, "tool"))
+        cls.foam_path = foam_bin + os.pathsep + "/usr/bin:/bin"
+        cls.root = os.path.join(cls.dir, "proj")
+        os.makedirs(cls.root)
+        cls.verdict = _run_in_project(cls.root, cls.foam_path)
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.verdict.outcome, "pass", self.verdict.render())
+        self.pv = _pv()
+        self.pv._identity.cache_clear()
+        self.addCleanup(self.pv._identity.cache_clear)
+        shutil.rmtree(self.pv.cache_dir(self.root), ignore_errors=True)
+        self.stand = pv_standin.install(self.tmp())
+        self.environ(**{"PATH": self.stand["bin"] + os.pathsep + self.foam_path,
+                        self.pv.EXTRA_LOCK_ENV: self.stand["extra_lock"]})
+
+    def environ(self, **env):
+        patch = mock.patch.dict(os.environ, {k: v for k, v in env.items() if v is not None})
+        patch.start()
+        self.addCleanup(patch.stop)
+        for key, value in env.items():
+            if value is None:
+                os.environ.pop(key, None)
+
+    def draw(self, view_id: str):
+        spec, fn = _views().get(view_id)
+        ctx = _bound_context(self.root, self.verdict, view_id, os.path.join(self.dir, "scratch"))
+        view, note = site_mod.run_viewgen(spec, fn, ctx)
+        return spec, view, note, ctx
+
+    def scenes(self) -> list[dict]:
+        return [c for c in pv_standin.calls(self.stand["prefix"]) if "case_files" in c]
+
+    def test_both_stills_draw_and_pass_the_spines_check(self):
+        for view_id, png in ((SPEED, pv_standin.SPEED_PNG), (PRESSURE, pv_standin.PRESSURE_PNG)):
+            with self.subTest(view_id):
+                spec, view, note, ctx = self.draw(view_id)
+                self.assertIsNotNone(view, note + "; ".join(ctx.notes))
+                self.assertEqual(site_mod._figure_refusal(spec, view, ctx,
+                                                          [self.verdict.limit]), "")
+                self.assertEqual(list(ctx.outputs), [view.src])
+                with open(ctx.outputs[view.src][0], "rb") as fh:
+                    self.assertEqual(fh.read(), png)
+                self.assertEqual(spec.requires_tools, ("pvbatch62",))
+                self.assertEqual(spec.recipe, ("views/_scene.py", "views/_scales.py",
+                                               "views/viridis.json"))
+                self.assertEqual(view.meta["tool"]["accepted_by"], "environment")
+                self.assertEqual(page.caption_status(view.meta["caption"]), "")
+        self.assertEqual([c["job"]["field"] for c in self.scenes()], ["mag(U)", "static(p)"])
+
+    def test_the_job_is_the_scale_and_the_pack_constants(self):
+        _spec, view, _note, _ctx = self.draw(PRESSURE)
+        scales = _scales_mod()
+        job = self.scenes()[-1]["job"]
+        summary = _summary_of(self.verdict)
+        dp = summary["p_up_pa"] - summary["p_down_pa"]
+        self.assertAlmostEqual(job["range"][0], summary["p_down_pa"] - dp, places=12)
+        self.assertAlmostEqual(job["range"][1], summary["p_down_pa"] + 2 * dp, places=12)
+        self.assertEqual(job["range"], [view.meta["scale"]["lo"], view.meta["scale"]["hi"]])
+        self.assertEqual((job["preset"], job["over"], job["under"]),
+                         ("Viridis", [255, 0, 255], [128, 128, 128]))
+        self.assertEqual((job["width"], job["line_px"]), (scales.WIDTH_PX, scales.LINE_PX))
+        self.assertEqual(job["planes"], [{"point": p["point"], "normal": p["normal"]}
+                                         for p in summary["planes"]])
+        # The scene's ticks, placed on the gradient from 0 to 1.
+        ticks = view.meta["scale"]["ticks"]
+        self.assertEqual([t["at"] for t in ticks], [0.0, 1.0])
+
+    def test_the_legend_is_the_exported_preset(self):
+        """The stops are the export's points (every STOP_EVERY-th and the last),
+        read here from the file without the pack's code."""
+        with open(os.path.join(PACK, "views", "viridis.json"), encoding="utf-8") as fh:
+            preset = json.load(fh)
+        points = preset["RGBPoints"]
+        rows = [points[i:i + 4] for i in range(0, len(points), 4)]
+        self.assertEqual((preset["Name"], len(rows)), ("Viridis", 256))
+        stops = _scales_mod().stops()
+        self.assertEqual(len(stops), 65)
+        self.assertEqual([s["at"] for s in stops],
+                         [rows[i][0] for i in [*range(0, 256, 4), 255]])
+        self.assertEqual((stops[0]["colour"], stops[-1]["colour"]), ("#440154", "#fde725"))
+
+    def test_another_runs_fields_draw_no_still(self):
+        summary = _summary_of(self.verdict)
+        stage = summary["fields"]["stage"].replace("<out>", store.out_dir(self.root), 1)
+        field = os.path.join(stage, summary["fields"]["time"], "mag(U)")
+        with open(field, "rb") as fh:
+            kept = fh.read()
+        self.addCleanup(lambda: open(field, "wb").write(kept))
+        with open(field, "ab") as fh:
+            fh.write(b"// another run\n")
+        _spec, view, _note, ctx = self.draw(SPEED)
+        self.assertIsNone(view)
+        self.assertTrue(any("is from another run" in n for n in ctx.notes), ctx.notes)
+        self.assertEqual(self.scenes(), [])
+        self.assertEqual(ctx.outputs, {})
+
+    def test_a_preset_that_is_not_the_legends_is_an_error(self):
+        pv_standin.set_mode(self.stand["prefix"], "other-preset")
+        _spec, view, note, ctx = self.draw(SPEED)
+        self.assertIsNone(view)
+        self.assertTrue(note.startswith("error:"), note)
+        self.assertIn("views/viridis.json", note)
+        self.assertEqual(ctx.outputs, {})
+
+    def test_an_unchecked_paraview_draws_nothing_and_says_why(self):
+        self.environ(**{self.pv.EXTRA_LOCK_ENV: None})
+        _spec, view, note, ctx = self.draw(SPEED)
+        self.assertIsNone(view)
+        said = " ".join(ctx.notes)
+        self.assertIn("which this pack did not check", said)
+        self.assertIn(self.pv.NO_PICTURES, said)
+        # Refused on its conda records, before its banner: nothing ran.
+        self.assertEqual(pv_standin.calls(self.stand["prefix"]), [])
+
+    def test_a_failed_renderer_control_draws_nothing(self):
+        pv_standin.set_mode(self.stand["prefix"], "no-overrange")
+        _spec, view, _note, ctx = self.draw(PRESSURE)
+        self.assertIsNone(view)
+        self.assertTrue(any("renderer control failed" in n and "clips" in n
+                            for n in ctx.notes), ctx.notes)
+        self.assertEqual(self.scenes(), [])
+
+    def test_no_paraview_on_path_is_unavailable_before_the_viewgen_runs(self):
+        self.environ(PATH=self.foam_path)
+        _spec, view, note, _ctx = self.draw(SPEED)
+        self.assertIsNone(view)
+        self.assertTrue(note.startswith("unavailable:"), note)
+        self.assertEqual(pv_standin.calls(self.stand["prefix"]), [])
+
+
+def _real_pvbatch():
+    """The checked pvbatch62 Install, or None."""
+    if os.name == "nt" or not shutil.which("pvbatch62"):
+        return None
+    pv = _pv()
+    try:
+        return pv.locate()
+    except pv.Unavailable:
+        return None
+
+
+def _internal_field(path: str) -> list[float]:
+    """The cell values of an ASCII OpenFOAM volScalarField, read here."""
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    body = text.split("internalField", 1)[1].split("(", 1)[1].split(")", 1)[0]
+    return [float(v) for v in body.split()]
+
+
+def _points_bounds(path: str) -> list[float]:
+    """``[xmin, xmax, ymin, ymax, zmin, zmax]`` of a polyMesh points file."""
+    import re
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    pts = [tuple(float(c) for c in m.groups()) for m in
+           re.finditer(r"\(\s*([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s*\)",
+                         text.split("(", 1)[1])]
+    return [f(p[k] for p in pts) for k in range(3) for f in (min, max)]
+
+
+@unittest.skipIf(cfd_tests._real_install() is None or _real_pvbatch() is None,
+                 "not walked: needs ESI OpenFOAM v2606 and the checked pvbatch62")
+class TheRealStills(_env.EnvCase):
+    """W10 on the real tools: cfd.pressure_drop on the baseline (v2606), then
+    each still drawn by the real ParaView 6.2.0 through its viewgen. Every
+    cell's centre pixel is the preset's colour for its value within 2 (read
+    from the committed export here, with no code of the pack), a value past
+    the scale is exactly magenta, two draws are byte-identical, and each
+    plane's line is where the summary's plane and the mesh put it. A copy of
+    the scene with a lit display fails the same colour check, so the check
+    can fail; and the committed preset is what ParaView exports today."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import tempfile
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        cls.root = os.path.join(cls.dir, "proj")
+        os.makedirs(cls.root)
+        cls.verdict = _run_in_project(cls.root, os.environ.get("PATH", ""))
+        cls.drawn = {}
+        for view_id in STILLS:
+            spec, fn = _views().get(view_id)
+            pngs = []
+            for n in range(2):
+                ctx = _bound_context(cls.root, cls.verdict, view_id,
+                                     os.path.join(cls.dir, f"scratch{n}", view_id))
+                view, note = site_mod.run_viewgen(spec, fn, ctx)
+                if view is None:
+                    raise AssertionError(f"{view_id}: {note} {ctx.notes}")
+                with open(ctx.outputs[view.src][0], "rb") as fh:
+                    pngs.append(fh.read())
+            cls.drawn[view_id] = (spec, view, ctx, pngs)
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.verdict.outcome, "pass", self.verdict.render())
+        self.summary = _summary_of(self.verdict)
+        fields = self.summary["fields"]
+        self.stage = fields["stage"].replace("<out>", store.out_dir(self.root), 1)
+        self.time = fields["time"]
+
+    def frame(self, size):
+        """``(x0, x1, y0, y1)`` of the picture: the cut's bounds plus 5% on
+        the side that fills it, as B.3.3 states it, computed here."""
+        b = _points_bounds(os.path.join(self.stage, "constant", "polyMesh", "points"))
+        w, h = size
+        dx, dy = b[1] - b[0], b[3] - b[2]
+        self.assertEqual(h, max(64, round(w * dy / dx)))
+        half_h = max(dx * h / w, dy) * 1.05 / 2
+        half_w = half_h * w / h
+        cx, cy = (b[0] + b[1]) / 2, (b[2] + b[3]) / 2
+        return cx - half_w, cx + half_w, cy - half_h, cy + half_h, b
+
+    def worst_cell(self, png: bytes, field: str, scale: dict) -> tuple[int, dict]:
+        """The largest channel difference between a cell's centre pixel and
+        the preset's colour for its value (OVER and UNDER exact past the
+        scale), over every cell away from the planes' lines; and the count
+        of cells in each place."""
+        from PIL import Image
+        import io
+        image = Image.open(io.BytesIO(png)).convert("RGB")
+        x0, x1, y0, y1, b = self.frame(image.size)
+        level = self.summary["levels"][-1]
+        nx, ny, _nz = level["counts"][0]
+        values = _internal_field(os.path.join(self.stage, self.time, field))
+        self.assertEqual(len(values), nx * ny)
+        with open(os.path.join(PACK, "views", "viridis.json"), encoding="utf-8") as fh:
+            pts = json.load(fh)["RGBPoints"]
+        rows = [pts[i:i + 4] for i in range(0, len(pts), 4)]
+        lo, hi = scale["lo"], scale["hi"]
+        lines = [(p["point"][0] - x0) / (x1 - x0) * image.size[0] for p in self.summary["planes"]]
+        worst, seen = 0, {"in": 0, "over": 0, "under": 0}
+        for i, v in enumerate(values):
+            ix, iy = i % nx, i // nx
+            x = b[0] + (ix + 0.5) * (b[1] - b[0]) / nx
+            y = b[2] + (iy + 0.5) * (b[3] - b[2]) / ny
+            px = int((x - x0) / (x1 - x0) * image.size[0])
+            py = int((y1 - y) / (y1 - y0) * image.size[1])
+            if any(abs(px - line) < 8 for line in lines):
+                continue
+            t = (v - lo) / (hi - lo)
+            if t > 1:
+                want, where = (255, 0, 255), "over"
+            elif t < 0:
+                want, where = (128, 128, 128), "under"
+            else:
+                k = next(j for j in range(len(rows) - 1) if rows[j][0] <= t <= rows[j + 1][0])
+                f = (t - rows[k][0]) / (rows[k + 1][0] - rows[k][0])
+                want, where = tuple(round(255 * (a + (c - a) * f)) for a, c in
+                                    zip(rows[k][1:4], rows[k + 1][1:4])), "in"
+            got = image.getpixel((px, py))
+            seen[where] += 1
+            diff = max(abs(a - c) for a, c in zip(got, want))
+            if where != "in" and diff:
+                diff = 255
+            worst = max(worst, diff)
+        return worst, seen
+
+    def test_every_cell_is_the_presets_colour_for_its_value(self):
+        for view_id, field in ((SPEED, "mag(U)"), (PRESSURE, "static(p)")):
+            with self.subTest(view_id):
+                _spec, view, _ctx, pngs = self.drawn[view_id]
+                worst, seen = self.worst_cell(pngs[0], field, view.meta["scale"])
+                self.assertLessEqual(worst, 2, seen)
+                self.assertGreater(seen["in"], 7000, seen)
+        # On the baseline the inlet's corners are past the pressure scale's
+        # top (_scales.PRESSURE_HI's provenance): they are magenta.
+        _w, seen = self.worst_cell(self.drawn[PRESSURE][3][0], "static(p)",
+                                   self.drawn[PRESSURE][1].meta["scale"])
+        self.assertGreater(seen["over"], 0, seen)
+
+    def test_both_stills_pass_the_spines_check(self):
+        for view_id in STILLS:
+            spec, view, ctx, _pngs = self.drawn[view_id]
+            self.assertEqual(site_mod._figure_refusal(spec, view, ctx, [self.verdict.limit]), "")
+            self.assertEqual(view.meta["tool"]["accepted_by"], "lock")
+
+    def test_two_draws_are_byte_identical(self):
+        for view_id in STILLS:
+            pngs = self.drawn[view_id][3]
+            self.assertEqual(pngs[0], pngs[1], view_id)
+            self.assertTrue(pngs[0].startswith(site_mod.PNG_SIGNATURE))
+            # Pillow wrote it again with no chunk but the image's.
+            self.assertNotIn(b"tEXt", pngs[0])
+
+    def test_the_planes_are_where_the_summary_says(self):
+        from PIL import Image
+        import io
+        for view_id in STILLS:
+            with self.subTest(view_id):
+                _spec, view, _ctx, pngs = self.drawn[view_id]
+                image = Image.open(io.BytesIO(pngs[0])).convert("RGB")
+                w, h = image.size
+                x0, x1, *_rest = self.frame(image.size)
+                want = [(p["point"][0] - x0) / (x1 - x0) for p in self.summary["planes"]]
+                self.assertEqual(len(view.meta["marks"]), 2)
+                for mark, at in zip(view.meta["marks"], want):
+                    self.assertAlmostEqual(mark["at"], at, delta=0.5 / w)
+                dark = [x for x in range(w) if max(image.getpixel((x, h // 2))) < 40]
+                runs = []
+                for x in dark:
+                    if runs and x == runs[-1][-1] + 1:
+                        runs[-1].append(x)
+                    else:
+                        runs.append([x])
+                self.assertEqual(len(runs), 2, runs)
+                for run, at in zip(runs, want):
+                    self.assertGreaterEqual(len(run), _scales_mod().LINE_PX)
+                    self.assertAlmostEqual((run[0] + run[-1] + 1) / 2, at * w, delta=1.0)
+
+    def test_a_lit_scene_fails_the_colour_check(self):
+        spec, fn = _views().get(SPEED)
+        with open(fn.__globals__["SCENE"], encoding="utf-8") as fh:
+            text = fh.read()
+        for old, new in (("display.Ambient = 1.0", "display.Ambient = 0.0"),
+                         ("display.Diffuse = 0.0", "display.Diffuse = 1.0")):
+            self.assertIn(old, text)
+            text = text.replace(old, new)
+        planted = os.path.join(self.tmp(), "planted_scene.py")
+        with open(planted, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        ctx = _bound_context(self.root, self.verdict, SPEED, os.path.join(self.dir, "lit"))
+        with mock.patch.dict(fn.__globals__, {"SCENE": planted}):
+            view, note = site_mod.run_viewgen(spec, fn, ctx)
+        self.assertIsNotNone(view, note)
+        with open(ctx.outputs[view.src][0], "rb") as fh:
+            worst, _seen = self.worst_cell(fh.read(), "mag(U)", view.meta["scale"])
+        self.assertGreater(worst, 2)
+
+    def test_the_committed_preset_is_what_paraview_exports(self):
+        pv = _pv()
+        inst = pv.locate()
+        work = self.tmp()
+        target = os.path.join(work, "viridis.json")
+        scrubbed = {k: v for k, v in pv.environment(work).items() if k != "HOME"}
+        proc = _env.run([inst.pvbatch, "--force-offscreen-rendering",
+                         os.path.join(PACK, "views", "_export_preset.py"), target],
+                        cwd=work, home=work, env=scrubbed, timeout=pv.TIMEOUT_S)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        with open(target, "rb") as fh, \
+                open(os.path.join(PACK, "views", "viridis.json"), "rb") as committed:
+            self.assertEqual(fh.read(), committed.read())
 
 
 if __name__ == "__main__":
