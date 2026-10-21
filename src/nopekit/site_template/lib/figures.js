@@ -393,7 +393,14 @@ function claimCard(row, words, build) {
   const said = words.figure || {};
   const figs = row.figures || [];
   const values = row.values || [];
-  const judging = values.find((v) => v.binding) || values[0] || null;
+  // The claim's own value: the binding one, else the first the bake marks
+  // compared with the claim's acceptance condition, the rule the technical
+  // record's claimRow keeps (panels.js). None compared, none shown. What
+  // slipped through (the walkthrough after P2.6): with no binding value the
+  // card fell back to the first row, so a Stale CFD claim (an opaque gate
+  // reads Stale outside its own check run) headlined its guard cfd.regime's
+  // 0.008696 fraction of limit above the 0.5222 Pa the claim is about.
+  const judging = values.find((v) => v.binding) || values.find((v) => v.compared) || null;
   const others = values.filter((v) => v !== judging);
   const sentences = Array.from(new Set(figs.filter((f) => currencyLook(f.currency).notice)
     .map((f) => [f.currency, `${f.currency_word || ""}${f.drawn_text ? " " + f.drawn_text : ""}`])

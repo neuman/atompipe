@@ -1916,6 +1916,24 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertIn("repeat(2, minmax(0, 1fr))", wide[:120])
         self.assertTrue(any("width: 100%" in b for b in self._rules(css, ".fig-still img")))
 
+    def test_the_card_headlines_only_a_compared_value(self):
+        """(walkthrough after P2.6) A claim card's large value is the binding
+        one, else the first baked as compared with the claim's acceptance
+        condition, else none: the technical record's rule (`claimRow`), never
+        the first row. What slipped through: a Stale CFD claim, its gates all
+        opaque, headlined its guard cfd.regime's fraction of limit, "Value from
+        cfd.regime", above the pressure drop the claim is about."""
+        card = js_function(self.js["lib/figures.js"], "claimCard")
+        judging = re.search(r"const judging = ([^;]*);", card)
+        self.assertTrue(judging, "claimCard no longer names its headline `judging`")
+        self.assertEqual(
+            judging.group(1).replace(" ", ""),
+            "values.find((v)=>v.binding)||values.find((v)=>v.compared)||null",
+            "the card headlines a value no bake marked binding or compared")
+        self.assertNotIn("values[0]", card)
+        panels = js_function(self.js["lib/panels.js"], "claimRow")
+        self.assertIn("const headline = compared.length ? compared[0] : null;", panels)
+
     def test_a_chart_follows_the_theme_and_says_only_baked_words(self):
         """(issue #15, review of P1) Vega writes the theme's colours into the SVG
         it draws, so a chart is drawn again when the theme moves (the button's
