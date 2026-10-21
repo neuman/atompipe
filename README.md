@@ -40,6 +40,17 @@ Or install it directly with Claude Code's plugin commands:
 /plugin install nopekit
 ```
 
+### Or install it in Codex
+
+The same repository is also a Codex plugin (`.codex-plugin/plugin.json`). Add it as a plugin marketplace and install it:
+
+```text
+codex plugin marketplace add neuman/nopekit
+codex plugin add nopekit@nopekit
+```
+
+Codex gets its own copy of the skills (`codex/skills/`, generated from `skills/`) and runs the same Stop hook once you trust the plugin's hooks. Under Codex, a pass or a preference entered from the agent's sandboxed shell counts for nothing, as it does under Claude Code. Run Codex with no sandbox and it sets no marker nopekit can see, so record results in your own terminal.
+
 You'll need Python 3.10 or newer available as `python3`. Nopekit's core has no third-party Python dependencies. Some checks need optional tools or packages; the agent should tell you when one is needed. For mesh checks used in 3D printing and solid-part work, install:
 
 ```sh

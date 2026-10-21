@@ -35,7 +35,8 @@ What a child gets, and why each line:
   ``attributes`` even when ``GIT_CONFIG_GLOBAL`` replaces the config file.
 * ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` only with ``identity=True``; ``EMAIL`` is
   stripped with them, since git falls back to it for an identity.
-* ``NOPEKIT_PACK_PATH`` unset; ``CLAUDE*`` and ``AI_AGENT`` stripped;
+* ``NOPEKIT_PACK_PATH`` unset; ``CLAUDE*``, ``AI_AGENT`` and Codex's sandbox
+  markers stripped;
   ``PYTHONDONTWRITEBYTECODE`` stripped — a user's shell does not set it, and the
   fresh-clone transcript must see the ``__pycache__`` a real run writes.
 
@@ -96,6 +97,9 @@ IDENTITY = {
 _STRIP = frozenset({
     "NOPEKIT_PACK_PATH", "AI_AGENT", "PYTHONDONTWRITEBYTECODE", "EMAIL",
     "XDG_CONFIG_HOME", "HOME", "USERPROFILE", "PYTHONPATH", "PYTHONUSERBASE",
+    # A Codex session's markers (cli.AGENT_MARKERS), so a suite run from Codex
+    # sees a runner's shell too.
+    "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED",
 })
 
 #: Stripped by prefix: every agent-session variable and every git variable.

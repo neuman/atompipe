@@ -554,6 +554,7 @@ layout in full, with each writer.
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (a redirect to `engineering/`), `engineering/index.html` (the outline: the representation, the verdict, the map, a section per board, next steps), `marketing/index.html` (the product in a viewer, its story, what it must do, the choices behind it; SPEC 40) and `technical.html` (today's panels), all four the project's own; `content/` the agent's prose (`story.md` the marketing page's), stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
+| `.codex-plugin/`, `codex/` | the Codex plugin: its manifest, and `codex/skills/`, the Codex copies of `skills/` that `codex/sync.py` writes (outputs: `tests/test_codex.py` goes red until they are current). Codex runs the same `hooks/` |
 | `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |

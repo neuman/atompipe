@@ -3973,10 +3973,20 @@ def cmd_claim_show(args: argparse.Namespace) -> int:
 #: it). The cost, said: a future session marker under a new name reads a
 #: person's shell until it is added here — the seal is drift's catch, and P3's
 #: permission rule the lock (D-13).
+#: Codex (the Codex plugin, 2026-10-21): ``CODEX_SANDBOX`` and
+#: ``CODEX_SANDBOX_NETWORK_DISABLED``, which Codex sets for the commands it runs
+#: under its sandbox to tell them so — from its issue tracker and a published
+#: sandbox analysis, not yet observed in a Codex shell here. What it cannot
+#: see: a Codex session run with no sandbox sets neither, and reads a person's
+#: shell (SPINE_CONTRACT's limits). *Rejected:* ``CODEX_THREAD_ID`` (Codex's
+#: SDK has a person export it to resume a thread, so it is a person's
+#: variable); ``CODEX_HOME`` and the whole ``CODEX_`` prefix (a person's own
+#: configuration, ``CLAUDE_CODE_``'s mistake again).
 AGENT_MARKERS: tuple[str, ...] = (
     "CLAUDECODE", "AI_AGENT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SESSION_ATTENDED",
-    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID")
+    "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID",
+    "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED")
 
 #: Flags `claim physical` still parses only to refuse — any value, before the
 #: project is read — each with what it names instead (P2.5a-D5; A-14 asks to

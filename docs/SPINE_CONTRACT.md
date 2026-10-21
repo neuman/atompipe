@@ -5296,6 +5296,10 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
 - **A new agent marker (review of P2.5a).** The markers are matched by exact name;
   a session marker a later Claude Code adds under a new name reads as a person's
   shell until it is added to `cli.AGENT_MARKERS`.
+- **A Codex session with no sandbox (the Codex plugin).** Codex's markers
+  (`CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`) are set only for the commands
+  it runs under its sandbox; one run with no sandbox sets neither and reads as a
+  person's shell. The seal is drift's catch there too.
 - **An institution as an authority (P2.5a).** The authority's git identity must be
   theirs; an institution with no person's identity cannot record its judgment until
   named delegates exist (on the check-in batch).
