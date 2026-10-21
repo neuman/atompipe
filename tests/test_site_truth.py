@@ -1139,7 +1139,7 @@ def independent_unmatched(blocks: list, docs: list) -> list[str]:
     return out
 
 
-class ANumberNoBakedFileHoldsIsFlagged(unittest.TestCase):
+class ANumberNoBakedFileHoldsIsFlagged(_env.EnvCase):
     """(invariant 14) Every number in prose matches a baked number at its
     precision or is marked; identifiers, code and paths are never scanned; a
     planted matcher that matches everything is caught by an independent pool."""
@@ -1278,6 +1278,37 @@ class ANumberNoBakedFileHoldsIsFlagged(unittest.TestCase):
         runs = [r for b in section["prose"]["blocks"] for r in b.get("runs", ())]
         self.assertIn({"num": "0.41", "unit": "mm", "match": False, "t": "0.41 mm"}, runs)
         self.assertEqual(section["prose"]["unmatched"], ["0.41 mm"])
+
+
+    def test_figure_numbers_vouch_for_nothing(self):
+        """A colour range's end, a tick on its legend and a mark on a picture
+        are the figure's, never a result (issue #15, B.4.3): prose that quotes
+        only one of them is marked, beside a value the floor holds, which
+        matches; and no file of a figure (its sidecar, its chart's series) is
+        pooled. What it closes before it could slip through: a scale of 0.02
+        m/s (a pack factor times a result) vouching for "0.02 m/s" in prose
+        about anything."""
+        import test_figures as tf
+        draw = tf.Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        tf.check_at(self, root, 1.0)
+        tf.draw_settings(root, scale=tf.SCALE, marks=[{"at": 0.37, "text": "the plane"}])
+        tf.run(self, root, "site", "init")
+        _write(os.path.join(root, "site", "content", "intro.md"),
+               "The colour range ends at 3.75 Pa. A tick reads 1.5 Pa. The plane sits at "
+               "0.37 of the strip. The value is 2 Pa.\n")
+        summary = tf.build_in(self, root, draw.env)
+        [piece] = [p for p in summary["prose"] if p["subject"] == "intro"]
+        self.assertEqual(piece["unmatched"], ["3.75 Pa", "1.5 Pa", "0.37"])
+        self.assertEqual(tf.page_figure(root, tf.PIC)["scale"]["hi"], 3.75)
+        site_dir = os.path.join(root, "site")
+        pool = site.baked_pool(root, tf.baked(root, "map.json"), tf.baked(root, "page.json"))
+        for number in (3.75, 1.5, 0.37):
+            self.assertFalse(pool.near(number, 1e-9), number)
+        self.assertTrue(pool.near(2.0, 1e-9))
+        figure_json = [rel for rel in tf.figure_files(root) if rel.endswith(".json")]
+        self.assertTrue(any(rel.endswith(".chart.json") for rel in figure_json), figure_json)
+        self.assertEqual(site._kept_json(site_dir, figure_json), [])
 
 
 # --------------------------------------------------------------------------- #

@@ -3770,6 +3770,21 @@ def figure_currency_word(currency) -> str    # HUMAN["site"]["figure"][currency]
 def read_sidecar(root, gate, entry, view) -> tuple   # (sidecar | None, why): its folder's,
                                              #   an entry the cache holds, each file's bytes
 def figure_for(root, gate, view, served, fresh) -> Figure   # current | stale | older | none
+CAPTION_STATUS_PHRASES: tuple; FIGURE_CONTROLS = ("spin",)
+def caption_status(caption) -> str           # the status word a caption says, or ""
+class BoundFigure(NamedTuple): view; kind; gate; title; provenance; figure
+def entry_verdict(root, gate, entry) -> dict | None   # a cache entry's verdict
+def entry_outcome(verdict) -> str            # error | pass | fail | unrun
+def drawn_text(verdict) -> str               # an older figure's line about its result
+def binding_text(figures) -> str             # which result each gate's figures are of
+def margin_text(margin) -> str               # the margin's words alone
+def chart_block(claim, row, payload) -> tuple   # ({limit, current}, warning): the floor's
+def figure_chips(cids, toks, marks) -> list  # the chips beside a figure
+def figure_row(root, bound, *, claim, floor_row, chips, outcome, warnings=None) -> dict
+def gate_cover(cover) -> dict                # {gate: [claim ids]}: effective_gates inverted
+class FigureFacts(NamedTuple): root; served; outcomes; floor; cover; claims; shown; kept
+def figure_facts(root, resolution, payload, view, composed, registry, *, kept=None,
+                 shown=None) -> FigureFacts  # what _figure_problems holds a figure against
 def settle(claim, composed, *, milestone=None, cover=(), tiers=None) -> dict  # {text, commands}
 def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of prose is
                                              #   stamped against: a board's claims, and
@@ -3782,7 +3797,9 @@ def stamp_state(as_of, current) -> str       # current | stale | unstamped
 def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, current_as_of}]
 def content_digest(root) -> str              # a seal over site/content/
 def seal(doc) -> str                         # map.json's and page.json's `self`
-def representation(views) -> dict            # the first model3d, else image or diagram
+def representation(views, root="", figures=()) -> dict   # the first model3d, else a
+                                             #   figure with a committed 3D file, else a
+                                             #   bound still, else image or diagram
 def alternates(views, root="", first=None) -> list   # [{view, title, bytes}]: model3d and
                                              #   field views, first one first, one per asset
 def requirement_nodes(view, lay, toks, marks) -> list   # the map's requirement nodes: the one
@@ -3799,13 +3816,15 @@ def bake_map(view, lay, built, toks, composed, *, projection, params=(), registr
              payload=None, name="", records_digest="", resolution_digest="", amber=None,
              trace=None) -> dict
 def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
-              plan=(), records_digest="", resolution_digest="", amber=None) -> dict
+              plan=(), records_digest="", resolution_digest="", amber=None, figures=(),
+              warnings=None) -> dict
 def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
 def figure_misplaced(path) -> str            # why a prose figure's path is no place for
                                              #   one ("" if it is): under assets/, it reads
                                              #   missing, by its path alone
 def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
-                    pool=None, amber=None, feeds=None) -> list[str]   # invariant 14: tokens,
+                    pool=None, amber=None, feeds=None,
+                    figures=None) -> list[str]   # invariant 14: tokens,
                                              #   words, marks, ready, amber, feeds,
                                              #   a compared value's words, prose stamps;
                                              #   with prose_as_of and pool, each as_of
@@ -3814,6 +3833,7 @@ def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None
                                              #   rejection words, the headline, required,
                                              #   the tally, the limits line, and amber on
                                              #   requirement, section, chip and step rows)
+                                             #   and, with figures (FigureFacts), G1-G8
 ```
 **Order is baked, geometry is rendered**: nodes carry a lane, an `order`, a `row` and a
 `column` (greedy interval packing over the rows their lines span), never a position, and
@@ -3847,6 +3867,20 @@ forged `type_word` or `returns` token. *What slipped through the plan:* the rows
 first built in `site.build` after `bake_page`, where the checker had already run; and a
 rejection's reason sat under `why`, a word key, so the scan read record text (the
 bracket's PLA reason has an em-dash). It is `reason` now, a record key.
+
+**Figures on the page** (issue #15, P1.4): `site.build` hands `bake_page` the bound
+figures its bound pass resolved (`BoundFigure`, one per bound viewgen, `none` included),
+and each claim bakes `figures` (`figure_row`, one per figure whose gate covers it) and
+`binding_text`. An older figure's outcome and `drawn_text` are its own cache entry's
+(`entry_verdict`); a chart's limit and point are the floor row's (`chart_block`); the
+chips are `graph.tokens`' with `_marks`. `status_problems` with `figures` (built by
+`figure_facts`) holds each figure (`_figure_problems`, G1-G8): the build passes its keep
+set and the figures it resolved; `cli._site_state` passes neither, so the checker reads
+the disk (`figure_for`, `read_sidecar`) and a swapped file, a forged currency or a
+planted chip reads *edited by hand*. The build's caption refusal and G7 read one rule,
+`caption_status` (moved here from `site`). *What slipped through before it:* a picture
+beside a status said nothing of the result it showed (F10: and a field was never the
+hero).
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure

@@ -301,11 +301,9 @@ CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now"}
 #: number of the payload (axis bounds and tick steps are presentation).
 CHART_NUMBER_KEYS = ("series", "band", "estimates", "rule")
 
-#: Phrases a bound figure's caption may not hold, beside the page's word for
-#: every status token (`_caption_status`): a caption says what the picture
-#: shows, and the claim's chip beside it says the status. *Rejected:* a caption
-#: free to say "passes" (it would outlive the result it described).
-CAPTION_STATUS_PHRASES = ("inside the limit", "past the limit", "checked", "failing")
+#: Phrases a bound figure's caption may not hold: `page.CAPTION_STATUS_PHRASES`,
+#: where the build's refusal and the page's checker (G7) read one rule.
+CAPTION_STATUS_PHRASES = page_logic.CAPTION_STATUS_PHRASES
 
 #: The bytes a PNG and a GLB start with (B.2.3's format check, stdlib).
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -2418,16 +2416,9 @@ def _keys(node: Any) -> set[str]:
 
 
 def _caption_status(caption: str) -> str:
-    """The first status word or phrase ``caption`` holds, or ``""``: the page's
-    word for every status token (`report._site_status_word`) and
-    `CAPTION_STATUS_PHRASES`, whole words, any case."""
-    words = {report_logic._site_status_word(token) for token in
-             set(claim_logic.STATUS_KEY.values())} | set(CAPTION_STATUS_PHRASES)
-    lowered = " ".join(str(caption or "").lower().split())
-    for word in sorted(words, key=lambda w: (-len(w), w)):
-        if word and re.search(rf"(?<![a-z]){re.escape(word.lower())}(?![a-z])", lowered):
-            return word
-    return ""
+    """`page.caption_status`: the first status word or phrase ``caption``
+    holds, or ``""``."""
+    return page_logic.caption_status(caption)
 
 
 def _png_ok(payload: bytes) -> bool:
@@ -2618,7 +2609,8 @@ class _Bound(NamedTuple):
     """What the bound pass hands `build`: the views, one note row per bound
     viewgen, the files the cleaner keeps, the live files (``{figure id: site
     path}``, for ``build.json`` only), each view's extra ``state.json`` keys
-    (``binding``, ``data_url``, ``field_src``), and what it wrote."""
+    (``binding``, ``data_url``, ``field_src``), what it wrote, and one
+    `page.BoundFigure` per bound viewgen for ``page.json`` (``found``)."""
 
     views: list
     notes: list
@@ -2626,6 +2618,7 @@ class _Bound(NamedTuple):
     live: dict
     rows: dict
     written: list
+    found: list
 
 
 def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution: Any,
@@ -2643,7 +2636,7 @@ def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution:
     stripped = Ledger.from_dict(ledger.to_dict())
     stripped = dataclasses.replace(stripped, claims=[
         dataclasses.replace(c, acceptance=Acceptance()) for c in stripped.claims])
-    out = _Bound([], [], [], {}, {}, [])
+    out = _Bound([], [], [], {}, {}, [], [])
     for spec, fn in view_registry.pairs():
         if not spec.evidence_of:
             continue
@@ -2718,6 +2711,14 @@ def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution:
         out.notes.append({"view": spec.id, "pack": spec.pack, "kind": ViewKind(spec.kind).value,
                           "status": status, "note": note, "gate": gate_id, "entry": served,
                           "currency": figure.currency if sidecar is not None else "none"})
+        # What page.json bakes (P1.4): the figure as shown, ``none`` when the
+        # disk's sidecar is refused here for its kind.
+        out.found.append(page_logic.BoundFigure(
+            view=spec.id, kind=ViewKind(spec.kind).value, gate=gate_id,
+            title=str(spec.title or ""),
+            provenance=" ".join(str(spec.description or "").split()),
+            figure=figure if sidecar is not None else figure._replace(
+                entry="", currency="none", sidecar=None)))
         if sidecar is None:
             continue
         folder = figure.folder
@@ -2954,10 +2955,15 @@ def build(
     page_doc = page_logic.bake_page(root, view, lay, built, tokens, composed,
                                     registry=registry, payload=payload, plan=plan,
                                     records_digest=records, resolution_digest=judged,
-                                    amber=amber)
+                                    amber=amber, figures=figures.found, warnings=warnings)
+    # The figures (issue #15, B.5) are held against the figures the bound pass
+    # resolved and the files it keeps: a page that links a file the cleaner
+    # removes below, or says another currency, is refused whole.
     problems_found = page_logic.status_problems(
         map_doc, page_doc, view, composed, tokens, amber=amber,
-        feeds=page_logic.live_feeds(lay, built, tokens))
+        feeds=page_logic.live_feeds(lay, built, tokens),
+        figures=page_logic.figure_facts(root, resolution, payload, view, composed, registry,
+                                        kept=figures.keep, shown=figures.found))
     if problems_found:
         raise NopekitError(
             f"the page would say more than the resolution, so nothing under "

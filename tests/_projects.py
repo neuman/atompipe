@@ -758,7 +758,7 @@ def big(ctx):
 #: process may have imported already: ``mode`` (the stand-in's,
 #: `tests/_draw_standin.py`), ``timeout_s``, ``glb`` (the still writes a 3D
 #: file too: ``"asset"`` with `write_asset`, ``"live"`` with `write_live`),
-#: ``caption`` and ``scale`` (the still's), and ``chart`` (``ok``,
+#: ``caption``, ``scale`` and ``marks`` (the still's), and ``chart`` (``ok``,
 #: ``planted-limit``: a limit in the payload, ``computed``: a number no
 #: evidence file holds).
 #:
@@ -835,7 +835,7 @@ def pic(ctx):
                 meta={"caption": cfg.get("caption", "The field of the demo, from the run "
                                                     "that wrote this result."),
                       "alt": "A strip of colour", "scale": scale,
-                      "marks": [{"at": 0.5, "text": "the middle"}]})
+                      "marks": cfg.get("marks", [{"at": 0.5, "text": "the middle"}])})
 '''
 
 _FIGURE_CHART = _FIGURE_DRAW_COMMON + '''

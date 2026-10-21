@@ -805,8 +805,9 @@ class AFigureIsItsEntrysEvidence(_env.EnvCase):
         self.assertEqual(dangling(root), [])
 
     def test_a_swapped_file_is_never_shown(self):
-        """The still replaced under its own name: not shown (its bytes are not
-        the sidecar's), and drawn again where the tool is."""
+        """The still replaced under its own name: `site status` reads the page
+        as edited by hand (P1.4), the next build does not show it (its bytes
+        are not the sidecar's), and it is drawn again where the tool is."""
         draw = Draw(self)
         root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
         a = check_at(self, root, 1.0)
@@ -814,6 +815,9 @@ class AFigureIsItsEntrysEvidence(_env.EnvCase):
         src = view_row(root, PIC)["src"]
         with open(os.path.join(root, "site", *src.split("/")), "wb") as fh:
             fh.write(b"\x89PNG\r\n\x1a\n another picture")
+        edited = site_status(self, root)["edited"]
+        self.assertTrue(edited and "edited by hand" in edited[0]
+                        and f"figure {PIC} reads current" in edited[0], edited)
         summary = build_in(self, root, no_tool_env())
         self.assertIsNone(view_row(root, PIC))
         self.assertTrue(any("not the bytes the sidecar names" in w for w in summary["warnings"]),
@@ -967,6 +971,455 @@ class OnePictureSetPerGate(_env.EnvCase):
         self.assertEqual(view_row(root, PIC)["field_src"], committed[0])
         self.assertFalse([p for p in figure_files(root) if p.startswith("assets/live/")])
         self.assertFalse(sidecar_of(root, a, PIC)["files"]["field"]["live"])
+
+
+# --------------------------------------------------------------------------- #
+# The page's figures: which result, beside which status (issue #15, P1.4)
+# --------------------------------------------------------------------------- #
+CLAIM = "D1"
+
+
+def page_figure(root: str, view_id: str, cid: str = CLAIM) -> dict | None:
+    """``page.json``'s figure of ``view_id`` under claim ``cid``, or None."""
+    return next((fig for fig in baked(root, "page.json")["claims"][cid].get("figures") or ()
+                 if fig["view"] == view_id), None)
+
+
+def claim_chip(root: str, cid: str = CLAIM) -> dict:
+    """The claim's own chip on the page, as a figure carries it."""
+    row = baked(root, "page.json")["claims"][cid]
+    return {"id": cid, "token": row["token"], "word": row["word"], "errored": row["errored"],
+            "marks": row["marks"]}
+
+
+def plant_page(root: str, edit) -> None:
+    """``page.json`` edited by ``edit(doc)`` and resealed: a forgery the seal
+    alone does not catch."""
+    from nopekit import page
+    path = os.path.join(root, "site", "data", "page.json")
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    edit(doc)
+    doc["self"] = page.seal(doc)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+
+
+def site_status(case: _env.EnvCase, root: str) -> dict:
+    """`nopekit site status --json`, in this process."""
+    from test_site_truth import _fresh_registry, _main
+    _fresh_registry(case)
+    code, said = _main("site", "status", "-C", root, "--json")
+    case.assertEqual(code, 0, said[-3000:])
+    return json.loads(said[said.index("{"):])
+
+
+def set_limit(root: str, limit: float) -> None:
+    """Claim D1's limit, rewritten in its record."""
+    path = os.path.join(root, "claims", CLAIM + ".json")
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc["acceptance"]["limit"] = limit
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2)
+
+
+def refused_build(case: _env.EnvCase, root: str, env: dict | None = None) -> str:
+    """``site build`` in this process, which must refuse the page whole."""
+    from test_site_truth import _fresh_registry, _main
+    _fresh_registry(case)
+    with mock.patch.dict(os.environ, dict(env or {})):
+        code, said = _main("site", "build", "-C", root, "--json")
+    case.assertEqual(code, 2, said[-3000:])
+    case.assertIn("the page would say more than the resolution", said)
+    return said
+
+
+class AFigureSaysWhichResultItIs(_env.EnvCase):
+    """(Invariant 14) A figure on the page says which result it is: current
+    only beside the fresh served entry, stale beside a served entry that is
+    not current, older (with that other result's own outcome and value) when
+    it is of another entry, and none when no single picture can be chosen. The
+    build refuses, and `site status`, `status` and `doctor` read as edited by
+    hand, a page that says another. What slipped through before this: a
+    picture beside a status said nothing of the result it showed, so a still
+    of an earlier design read as the current one's."""
+
+    def test_a_new_entry_with_no_renderer_reads_older(self):
+        """Drawn at A, then B checked with no renderer: the still reads older,
+        of A, with A's own outcome and value and A's picture linked, beside the
+        chips of B's composition; the chart, which needs no tool, reads current
+        of B; and `site status` reads the page as current."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        b = check_at(self, root, 2.0)
+        build_in(self, root, no_tool_env())
+        pic, chart = page_figure(root, PIC), page_figure(root, CHART)
+        self.assertEqual((pic["entry"], pic["currency"]), (a, "older"))
+        self.assertEqual(pic["currency_word"], "This picture is from another result. The "
+                         "result on this page has no picture yet.")
+        self.assertEqual(pic["drawn_text"], "That other result: pass, 2 Pa.")
+        self.assertEqual(pic["outcome"], "pass")
+        self.assertTrue(pic["src"].startswith(f"assets/figures/{GATE}/{a}/"), pic["src"])
+        self.assertTrue(os.path.isfile(os.path.join(root, "site", *pic["src"].split("/"))))
+        self.assertEqual((chart["entry"], chart["currency"], chart["drawn_text"]),
+                         (b, "current", ""))
+        for fig in (pic, chart):
+            self.assertEqual(fig["claims"], [claim_chip(root)])
+        text = baked(root, "page.json")["claims"][CLAIM]["binding_text"]
+        self.assertIn(f"its result {b}. This page shows that result.", text)
+        self.assertIn(f"its result {a}. This page shows another result of {GATE}.", text)
+        self.assertEqual(site_status(self, root)["edited"], [])
+
+    def test_a_design_edit_reads_stale(self):
+        """The design moved and nothing checked it again: the served entry is
+        not current, and its figures say so, beside the evaluator's outcome."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        _projects.set_figure_x(root, 3.0)
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1, "a stale entry was drawn again")
+        page_doc = baked(root, "page.json")
+        [row] = [e for e in page_doc["claims"][CLAIM]["evaluators"] if e["id"] == GATE]
+        for view_id in (PIC, CHART):
+            with self.subTest(view_id):
+                fig = page_figure(root, view_id)
+                self.assertEqual((fig["entry"], fig["currency"]), (a, "stale"))
+                self.assertEqual(fig["currency_word"], "This picture is from the result on "
+                                 "this page. That result is not current.")
+                self.assertEqual((fig["outcome"], fig["outcome_word"]),
+                                 (row["outcome"], row["outcome_word"]))
+
+    def test_a_planted_currency_is_refused(self):
+        """A bake that says current for an older picture is refused whole, and
+        nothing under site/data/ moves; the same lie written into page.json and
+        resealed reads edited by hand in `site status`, `status` and `doctor`."""
+        from nopekit import page
+        from test_site_truth import _fresh_registry, _main, _snapshot
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        check_at(self, root, 2.0)
+        build_in(self, root, no_tool_env())
+        self.assertEqual(page_figure(root, PIC)["currency"], "older")
+        data = os.path.join(root, "site", "data")
+        before = {k: v for k, v in _snapshot(data).items() if not k.endswith("build.json")}
+        real = page.figure_row
+
+        def lying(*a, **kw):
+            fig = real(*a, **kw)
+            if fig["currency"] == "older":
+                fig.update(currency="current", currency_word=page.figure_currency_word(
+                    "current"), drawn_text="")
+            return fig
+
+        with mock.patch.object(page, "figure_row", lying):
+            said = refused_build(self, root, no_tool_env())
+        self.assertIn(f"figure {PIC} reads current", said)
+        self.assertEqual({k: v for k, v in _snapshot(data).items()
+                          if not k.endswith("build.json")}, before)
+
+        def forged(doc):
+            for fig in [*doc["claims"][CLAIM]["figures"], doc["representation"]["figure"]]:
+                if fig and fig["view"] == PIC:
+                    fig.update(currency="current",
+                               currency_word=page.figure_currency_word("current"))
+
+        plant_page(root, forged)
+        info = site_status(self, root)
+        self.assertTrue(info["edited"] and "edited by hand" in info["edited"][0], info)
+        self.assertIn(f"figure {PIC} reads current", info["edited"][0])
+        _fresh_registry(self)
+        code, said = _main("doctor", "-C", root, "--json")
+        [row] = [r for r in json.loads(said[said.index("{"):])["checks"]
+                 if r["check"] == "site"]
+        self.assertEqual(row["status"], "FAIL", row)
+        _fresh_registry(self)
+        _code, said = _main("status", "-C", root)
+        self.assertIn("edited by hand", [t for t in said.splitlines()
+                                         if t.startswith("site:")][0])
+
+    def test_site_status_reads_behind_after_a_check_that_moved_only_the_entry(self):
+        """A check at another design moves no record, only the entry the
+        resolution serves: the page is behind, never current."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        self.assertEqual(site_status(self, root)["stale"], False)
+        check_at(self, root, 2.0)
+        info = site_status(self, root)
+        self.assertTrue(info["stale"], info)
+        self.assertIn("what the page shows has changed since the site was built",
+                      info["stale_reason"])
+
+    def test_two_older_renders_after_a_merge_show_none(self):
+        """Two earlier folders of the still and none of the served result (two
+        branches merged): which is newer is a clock's question, so neither is
+        shown; the page says no picture, and the build names both."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        base = os.path.join(root, "site", "assets", "figures", GATE)
+        aside = os.path.join(self.tmp(), "a")
+        shutil.copytree(os.path.join(base, a), aside)
+        b = check_at(self, root, 2.0)
+        build_in(self, root, draw.env)
+        shutil.copytree(aside, os.path.join(base, a))
+        check_at(self, root, 3.0)
+        summary = build_in(self, root, no_tool_env())
+        fig = page_figure(root, PIC)
+        self.assertEqual((fig["currency"], fig["entry"], fig["src"]), ("none", "", ""))
+        self.assertEqual(fig["currency_word"], "No picture of this result is on the page.")
+        self.assertIsNone(view_row(root, PIC))
+        self.assertTrue(any(a in w and b in w and "none is shown" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertNotIn(PIC, baked(root, "page.json")["representation"]["view"] or "")
+        self.assertEqual(dangling(root), [])
+
+    def test_the_technical_page_says_the_same_word(self):
+        """`state.json`'s binding of each bound view is the page's figure: its
+        gate, entry, currency and sentence."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        check_at(self, root, 2.0)
+        build_in(self, root, no_tool_env())
+        for view_id in (PIC, CHART):
+            with self.subTest(view_id):
+                fig = page_figure(root, view_id)
+                self.assertEqual(binding(root, view_id),
+                                 {k: fig[k] for k in ("gate", "entry", "currency",
+                                                      "currency_word")})
+
+
+class TheClaimsStatusSitsBesideEveryFigure(_env.EnvCase):
+    """(Invariant 14) Every figure carries the chips of exactly the claims its
+    gate covers, each the resolution's token, word and marks; a chart's limit
+    and point are the floor's, never the pack's; a caption says no status. A
+    page that says otherwise is refused by the build and read as edited by
+    hand. What slipped through before this (F9): a chart took its margin from
+    its own limit, so a pack's limit beside the claim's was a second limit on
+    the page."""
+
+    def test_every_figure_carries_its_claims_chips(self):
+        """With a disagreement and an amber flip planted on D1, every figure
+        and the representation's carry D1's chip with both marks, as the claim
+        does, and the build's checker accepts the page."""
+        from nopekit import derivation, graph
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        real = graph.tokens
+
+        def disagreeing(*a, **kw):
+            found = real(*a, **kw)
+            return found._replace(disagree={**found.disagree, "claims": [CLAIM]})
+
+        flips = {CLAIM: derivation.Amber("flips", (), (), (), "")}
+        with mock.patch.object(graph, "tokens", disagreeing), \
+                mock.patch.object(derivation, "amber_now", lambda *a, **kw: flips):
+            build_in(self, root, draw.env)
+        chip = claim_chip(root)
+        self.assertEqual(chip["marks"], ["disagree", "amber"])
+        figures = baked(root, "page.json")["claims"][CLAIM]["figures"]
+        self.assertEqual(sorted(f["view"] for f in figures), [CHART, PIC])
+        for fig in [*figures, baked(root, "page.json")["representation"]["figure"]]:
+            with self.subTest(fig["id"]):
+                self.assertEqual(fig["claims"], [chip])
+
+    def test_a_planted_chip_is_refused(self):
+        """A figure's chip, the representation's and its copy, each planted
+        and resealed: each reads edited by hand."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        page_path = os.path.join(root, "site", "data", "page.json")
+        with open(page_path, "rb") as fh:
+            honest = fh.read()
+
+        def figure_token(doc):
+            doc["claims"][CLAIM]["figures"][0]["claims"][0].update(token="failing",
+                                                                   word="failing")
+
+        def hero_marks(doc):
+            hero = doc["representation"]["figure"]
+            hero["claims"][0]["marks"] = ["disagree"]
+            for fig in doc["claims"][CLAIM]["figures"]:
+                if fig["id"] == hero["id"]:
+                    fig["claims"][0]["marks"] = ["disagree"]
+
+        def hero_copy(doc):
+            doc["representation"]["figure"]["caption"] = "Another picture."
+
+        for label, edit, said in (("figure", figure_token, "chip D1 token reads failing"),
+                                  ("hero", hero_marks, "chip D1 marks reads ['disagree']"),
+                                  ("copy", hero_copy, "differs from the copy under D1")):
+            with self.subTest(label):
+                with open(page_path, "wb") as fh:
+                    fh.write(honest)
+                self.assertEqual(site_status(self, root)["edited"], [])
+                plant_page(root, edit)
+                edited = site_status(self, root)["edited"]
+                self.assertTrue(edited and said in edited[0], edited)
+
+    def test_a_missing_or_extra_claim_is_refused(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        build_in(self, root, draw.env)
+        page_path = os.path.join(root, "site", "data", "page.json")
+        with open(page_path, "rb") as fh:
+            honest = fh.read()
+        extra = {"id": "D2", "token": "checked", "word": "checked", "errored": False,
+                 "marks": []}
+        for label, claims in (("missing", []), ("extra", None)):
+            with self.subTest(label):
+                with open(page_path, "wb") as fh:
+                    fh.write(honest)
+
+                def edit(doc, claims=claims):
+                    fig = doc["claims"][CLAIM]["figures"][0]
+                    fig["claims"] = claims if claims is not None else [*fig["claims"], extra]
+
+                plant_page(root, edit)
+                edited = site_status(self, root)["edited"]
+                self.assertTrue(edited and f"and {GATE} covers ['{CLAIM}']" in edited[0],
+                                edited)
+
+    def test_a_chart_limit_and_margin_are_the_floors(self):
+        """The chart's limit and point are the floor row's for (D1, demo.drop):
+        the claim's limit, which an edit moves while the evaluator's own limit
+        stays 10 Pa, and the margin against it; a planted limit reads edited by
+        hand."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        for limit, margin in ((10.0, "80% inside the limit"), (20.0, "90% inside the limit")):
+            with self.subTest(limit=limit):
+                set_limit(root, limit)
+                build_in(self, root, draw.env)
+                fig = page_figure(root, CHART)
+                [row] = [v for v in baked(root, "page.json")["claims"][CLAIM]["values"]
+                         if v["gate"] == GATE]
+                self.assertEqual(row["limit"], 10.0, "the evaluator's own limit moved")
+                self.assertEqual(fig["chart"], {
+                    "limit": {"value": limit, "comparator": "<=", "units": "Pa",
+                              "label": f"Limit {limit:g} Pa"},
+                    "current": {"x": 1.0, "y": 2.0, "margin_text": margin}})
+                self.assertEqual(fig["chart"]["current"]["margin_text"], row["margin_text"])
+        plant_page(root, lambda doc: page_figure_of(doc, CHART)["chart"]["limit"].update(
+            value=10.0))
+        edited = site_status(self, root)["edited"]
+        self.assertTrue(edited and f"figure {CHART} chart reads" in edited[0], edited)
+
+    def test_a_pack_limit_in_a_chart_is_refused(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, chart="planted-limit")
+        summary = build_in(self, root, draw.env)
+        self.assertTrue(any(CHART in w and "a chart's limit and its point are the claim's"
+                            in w for w in summary["warnings"]), summary["warnings"])
+        fig = page_figure(root, CHART)
+        self.assertEqual((fig["currency"], fig["data_src"], fig["chart"]), ("none", "", {}))
+
+    def test_a_caption_with_a_status_word_is_refused(self):
+        """A caption that says a status is never published; one planted on the
+        page reads edited by hand."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, caption="The field, checked against the limit.")
+        summary = build_in(self, root, draw.env)
+        self.assertTrue(any(PIC in w and "a caption may not say a status" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(page_figure(root, PIC)["currency"], "none")
+        draw_settings(root)
+        build_in(self, root, draw.env)
+
+        def edit(doc):
+            for fig in [page_figure_of(doc, PIC), doc["representation"]["figure"]]:
+                fig["caption"] = "The field is inside the limit."
+
+        plant_page(root, edit)
+        edited = site_status(self, root)["edited"]
+        self.assertTrue(edited and "caption says 'inside the limit', a status" in edited[0],
+                        edited)
+
+
+def page_figure_of(doc: dict, view_id: str, cid: str = CLAIM) -> dict:
+    return next(f for f in doc["claims"][cid]["figures"] if f["view"] == view_id)
+
+
+#: A colour scale of the shape the CFD pack bakes (B.3.4), for the figure
+#: project's still: ``hi`` a pack factor times the summary's ``u_ref``, never a
+#: limit.
+SCALE = {"quantity": "value", "units": "Pa", "lo": 0.0, "hi": 3.75,
+         "stops": [{"at": 0.0, "colour": "#440154"}, {"at": 1.0, "colour": "#fde725"}],
+         "over": "#ff00ff", "under": "#808080",
+         "over_word": "Magenta shows a value over the top of the scale.",
+         "under_word": "Grey shows a value under the bottom of the scale.",
+         "ticks": [{"at": 0.4, "value": 1.5, "text": "1.5 Pa"}],
+         "source": [{"key": "u_ref", "factor": 3.75}],
+         "source_text": "The scale is 3.75 times the reference value of the run."}
+
+
+class TheScaleIsAPackConstant(_env.EnvCase):
+    """(Invariant 14) A figure's colour range is a pack constant times a value
+    of its evidence, never a claim's limit: a limit edit moves no scale, and a
+    range keyed to a limit or ending at one is refused; every number a chart
+    draws is one its evidence holds."""
+
+    def test_the_scale_never_moves_with_the_limit(self):
+        """D1's limit doubled and the still drawn again (its scene edited): the
+        sidecar's scale and the page's are the same bytes, while the chart's
+        limit moved with the claim."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, scale=SCALE)
+        build_in(self, root, draw.env)
+        scale = json.dumps(sidecar_of(root, a, PIC)["scale"], sort_keys=True)
+        set_limit(root, 20.0)
+        edit_scene(root, "scene 2")
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 2, "the still was not drawn again")
+        self.assertEqual(json.dumps(sidecar_of(root, a, PIC)["scale"], sort_keys=True), scale)
+        self.assertEqual(json.dumps(page_figure(root, PIC)["scale"], sort_keys=True), scale)
+        self.assertEqual(page_figure(root, CHART)["chart"]["limit"]["value"], 20.0)
+
+    def test_a_scale_keyed_to_a_limit_is_refused(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        for label, scale in (("source", {**SCALE, "source": [{"key": "limit_pa",
+                                                              "factor": 1.0}]}),
+                             ("end", {**SCALE, "hi": 10.0})):
+            with self.subTest(label):
+                draw_settings(root, scale=scale)
+                summary = build_in(self, root, draw.env)
+                self.assertTrue(any(PIC in w and "a colour range taken from a limit" in w
+                                    for w in summary["warnings"]), summary["warnings"])
+                self.assertEqual(page_figure(root, PIC)["currency"], "none")
+
+    def test_every_chart_number_is_in_the_evidence(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, chart="computed")
+        summary = build_in(self, root, draw.env)
+        self.assertTrue(any(CHART in w and "which no evidence file of this result holds" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual(page_figure(root, CHART)["currency"], "none")
 
 
 if __name__ == "__main__":

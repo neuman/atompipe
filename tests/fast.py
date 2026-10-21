@@ -23,6 +23,10 @@ is; no idle run was had. Its P1.3 (bound viewgens) added two rows and moved P1.2
 unbound row to the gate (~2.2 s net); one unpaired run at load 1.3-4.2: 176.3 s wall
 (137.5 s user) for its 704 tests, against 229.4 s (181.5 s user) for 2f52893's 703,
 run just before it while another session raised the load to 10; still no idle run.
+Its P1.4 (the page's figures) added three rows (~5 s user: each one to two checks and a
+build in process) and test_style's figure keys (in process, ~0.05 s). One pair at load
+2.4-3.7, head then base: 217.5 s wall (164.6 s user) for its 708 tests, against 209.6 s
+(159.5 s user) for b95b7f4's 704. Over the line as its base is; no idle run.
 The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
@@ -1071,6 +1075,16 @@ FAST: list[str] = [
     # comment said: ~2.2 s added in all.
     "test_figures.AFigureIsItsEntrysEvidence.test_a_render_from_another_runs_inputs_is_never_drawn",
     "test_figures.AMissingRendererMovesNoStatus.test_statuses_equal_with_absent_crashing_hanging_oversize_renderer",
+    # Issue #15, P1.4 (the page's figures): the design's three rows, each one to
+    # two checks as cold processes and one or two builds in process (~1.5-2.5 s
+    # each at load 2-4): a new entry with no renderer reads older beside the
+    # new composition's chips; a disagreement and an amber flip planted on the
+    # claim reach every figure's chip and the hero's, and the build's checker
+    # (G1-G8) accepts the page; a limit doubled and the still drawn again move
+    # no colour range while the chart's limit moves with the claim.
+    "test_figures.AFigureSaysWhichResultItIs.test_a_new_entry_with_no_renderer_reads_older",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_every_figure_carries_its_claims_chips",
+    "test_figures.TheScaleIsAPackConstant.test_the_scale_never_moves_with_the_limit",
 ]
 
 
@@ -1126,6 +1140,33 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.AFigureIsItsEntrysEvidence.test_a_render_naming_an_entry_the_cache_lacks_is_never_shown",
     "test_figures.AFigureIsItsEntrysEvidence.test_a_swapped_file_is_never_shown",
     "test_figures.AFigureIsItsEntrysEvidence.test_a_file_over_two_mib_is_never_written_or_linked",
+    # Issue #15, P1.4: the rest of the page's figures, each one to three checks
+    # as cold processes and one to three builds and `site status` runs in
+    # process (~2-5 s each, ~40 s in all): a design edit reading stale, a
+    # planted currency (a lying bake refused, a resealed page read as edited
+    # by hand by `site status`, `status` and `doctor`), a check that moved
+    # only the entry, two older pictures after a merge, the technical page's
+    # word, planted chips, a missing or extra claim, the chart's limit and
+    # margin, a pack limit, a status in a caption, a scale keyed to a limit, a
+    # number no evidence holds; and the pool's figure numbers (one check, one
+    # build). The FAST rows above run the same bake, the same checker in the
+    # build and the same refusals' producer. An iteration touching
+    # `page.figure_row`, `chart_block`, `figure_facts`, `_figure_problems`,
+    # `representation` or `site._bound_pass` runs test_figures, test_site_truth
+    # and test_style whole.
+    "test_figures.AFigureSaysWhichResultItIs.test_a_design_edit_reads_stale",
+    "test_figures.AFigureSaysWhichResultItIs.test_a_planted_currency_is_refused",
+    "test_figures.AFigureSaysWhichResultItIs.test_site_status_reads_behind_after_a_check_that_moved_only_the_entry",
+    "test_figures.AFigureSaysWhichResultItIs.test_two_older_renders_after_a_merge_show_none",
+    "test_figures.AFigureSaysWhichResultItIs.test_the_technical_page_says_the_same_word",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_planted_chip_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_missing_or_extra_claim_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_chart_limit_and_margin_are_the_floors",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_pack_limit_in_a_chart_is_refused",
+    "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_caption_with_a_status_word_is_refused",
+    "test_figures.TheScaleIsAPackConstant.test_a_scale_keyed_to_a_limit_is_refused",
+    "test_figures.TheScaleIsAPackConstant.test_every_chart_number_is_in_the_evidence",
+    "test_site_truth.ANumberNoBakedFileHoldsIsFlagged.test_figure_numbers_vouch_for_nothing",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

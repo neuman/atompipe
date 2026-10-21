@@ -6981,10 +6981,15 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
                     as_of[subject] = prose.parse_front_matter(fh.read()).as_of
             except OSError:
                 continue
+        # The figures (issue #15, B.5) against the disk: each file the page
+        # links hashed against its sidecar, the currency read again from the
+        # served entry, a chart's limit against the floor.
         found = page.status_problems(map_doc, page_doc, view, composed, tokens,
                                      prose_as_of=as_of,
                                      pool=site.baked_pool(root, map_doc, page_doc),
-                                     amber=live_amber, feeds=live_feeds)
+                                     amber=live_amber, feeds=live_feeds,
+                                     figures=page.figure_facts(root, resolution, now, view,
+                                                               composed, registry))
         if found:
             info["edited"].append(f"the page data (data/{site.PAGE_NAME}, "
                                   f"data/{site.MAP_NAME}) was edited by hand: {found[0]}")

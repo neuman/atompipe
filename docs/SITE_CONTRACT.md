@@ -1109,7 +1109,9 @@ The outline's data (SPEC 28, 30), baked by `page.bake_page` and `page.bake_prose
   "representation": { "view": "assembly", "kind": "model3d", "title": "Assembly",
                       "notice": "",
                       "alternates": [ { "view": "assembly", "title": "Assembly",
-                                        "bytes": 6155468 } ] },
+                                        "bytes": 6155468 } ],
+                      "figure": null, "controls": null },   // issue #15: a figure hero
+                      // bakes its figure object and "controls": ["spin"]
   "verdict": { "token": "not-ready", "ready": false,
                "headline": "v0.1 is NOT ready.",
                "sentence": "<the readiness sentence, register='site'>",
@@ -1163,7 +1165,8 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
   "values": [ { "gate": "bracket.deflection", "measured": 0.6997, "units": "mm",
                 "limit": 0.5, "limit_hi": null, "comparator": "<=", "margin": -0.3994,
                 "compared": true, "binding": true,
-                "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit" } ],
+                "value_text": "0.6997 mm against a limit of 0.5 mm, 40% past the limit",
+                "margin_text": "40% past the limit" } ],
   "evaluators": [ { "id": "bracket.deflection", "basis": "sourced", "basis_word": "...",
                     "outcome": "fail", "outcome_word": "fail", "order": 0,
                     "current": true, "stale_reason": "", "detail": "...",
@@ -1176,10 +1179,36 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
                       //   "heading": "Test on a built part" } — the site's words
   "rests_on": ["C6"], "resolves": [], "resolved_by": [],
   "settle": { "text": "...", "commands": ["nopekit why C1", "nopekit check"] },
-  "amber": null }   // architecture phase 3b, a Checked claim resting on an unconfirmed
-                    // assumption: { "state": "flips", "word": "...", "items": [
-                    //   { "assumption": "C6", "choice": "load_n", "sign": "+",
-                    //     "evaluator": "bracket.bearing", "text": "..." } ] }
+  "amber": null,   // architecture phase 3b, a Checked claim resting on an unconfirmed
+                   // assumption: { "state": "flips", "word": "...", "items": [
+                   //   { "assumption": "C6", "choice": "load_n", "sign": "+",
+                   //     "evaluator": "bracket.bearing", "text": "..." } ] }
+  "figures": [ <figure> ],   // issue #15: one per bound figure whose gate covers it
+  "binding_text": "The pictures of cfd.pressure_drop come from its result ... " }
+```
+
+A figure (issue #15, `page.figure_row`): a bound viewgen's picture, chart or 3D file,
+as the disk resolved it (`page.figure_for`), under each claim its gate covers:
+
+```jsonc
+{ "id": "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed",
+  "view": "cfd-openfoam.speed", "kind": "image", "gate": "cfd.pressure_drop",
+  "entry": "9c1e04d2b7a35f60-3a7b19e2",      // the entry it was drawn from ("" for none)
+  "currency": "current",                     // current | stale | older | none
+  "currency_word": "This picture is from the result on this page.",
+  "drawn_text": "",                          // older: "That other result: pass, 2 Pa."
+  "outcome": "pass", "outcome_word": "pass", // the evaluator row's; older: its own entry's
+  "claims": [ { "id": "C1", "token": "checked", "word": "checked", "errored": false,
+                "marks": [] } ],             // every claim the gate covers
+  "title": "...", "caption": "...", "alt": "...", "provenance": "...", "tool_word": "",
+  "src": "assets/figures/<gate>/<entry>/<view>.<sha12>.png", "sha256": "<64>",
+  "bytes": 10800, "field_src": "", "data_src": "",
+  "marks": [ { "at": 0.25, "text": "upstream plane" } ],
+  "scale": { ... },                          // the sidecar's, a pack constant
+  "chart": {},                               // a chart: { "limit": { "value", "comparator",
+                                             //   "units", "label" } | null, "current":
+                                             //   { "x", "y", "margin_text" } | null }
+  "turn": {} }                               // a 3D file: { "word", "live_word" }
 ```
 
 A step group (one per milestone, natural order; `project` with no milestone, over the
@@ -1236,6 +1265,19 @@ value; a decision's `values` and the top-level `losers`):
   `--authority <name>`). A test on a built part with no milestone has no `export`
   command: its text says how to build the part and to name the claim in a milestone
   file. A step carries its claim's `marks`, as the floor row does.
+- `figures` (issue #15): the words depend on the records, the cache and the committed
+  figure files alone, never on this computer's tools, so a clone bakes the same object.
+  A chart's `limit` and `current` are the floor row's for (claim, gate), the claim's
+  limit where the row is compared with it, set by the spine (`page.chart_block`); a
+  chart whose y units are not the limit's bakes no limit, and the build says so. A live
+  3D file is never named here (`build.json`'s `live_figures`). The representation is a
+  `model3d` view, else a figure whose 3D file is committed (as `field`), else the first
+  bound still, else an `image` or `diagram` view. `page.status_problems` holds each
+  figure (G1-G8 of the design): its claims exactly the gate's cover and each chip the
+  resolution's; its entry and currency the disk's and the served entry's; its
+  sentences and outcome; its files under its own folder, the build's keep set or the
+  bytes its sidecar names; a chart's limit and point; a caption with no status word;
+  and the representation's figure the claim's own copy.
 - **The checker** (`page.status_problems`, invariant 14) holds every token, *ready*,
   word and mark above to the resolution: a claim's, a section's and a step's `word` is
   its token's; a milestone's and the project's `ready`, `token` and `word` are

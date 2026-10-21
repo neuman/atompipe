@@ -252,7 +252,14 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Issue #15, P1.3: a bound figure is drawn only from its entry's
          # verified evidence, published under that entry, and shown only at
          # the bytes its sidecar names, under an entry the cache holds.
-         "test_figures.AFigureIsItsEntrysEvidence"],
+         "test_figures.AFigureIsItsEntrysEvidence",
+         # Issue #15, P1.4: a figure on the page says which result it is and
+         # sits beside the chips of every claim its gate covers, a chart's
+         # limit and point are the floor's, and a colour range is a pack
+         # constant, never a limit.
+         "test_figures.AFigureSaysWhichResultItIs",
+         "test_figures.TheClaimsStatusSitsBesideEveryFigure",
+         "test_figures.TheScaleIsAPackConstant"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",
