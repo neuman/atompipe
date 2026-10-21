@@ -49,7 +49,24 @@ the real v2606 and ParaView 6.2.0:
   byte-identical, each plane's line is where the summary puts it, and a lit
   copy of the scene fails the same check.
 
-The 3D view is P2.4.
+The 3D view (P2.4: the pressure still's pvbatch run writes ParaView's own
+glTF of the cut, and the page turns it in the viewer's field mode):
+
+- the glTF reaches the page as ParaView wrote it, its buffers inside it, with
+  no conversion: on the stand-in, the still's run publishes it on this
+  computer only until an export re-runs the entry, and then commits it; one
+  over the cap is left out and the still is drawn; one that is not the run's
+  is an error;
+- the Khronos glTF validator (2.0.0-dev.3.10, through node, where it is)
+  passes ParaView's faceted export and refuses its default export of the same
+  cut, so the check can fail;
+- on the real tools every cell's ``COLOR_0`` is the preset's colour for its
+  value, two exports are byte-identical, and the committed band fixture is
+  what ParaView writes today;
+- end to end (``TheRealPipeline``): ``check --tier 2`` and ``site build`` on
+  the real v2606 and ParaView put every figure beside every claim, bound to
+  the served entry, the glTF live, then committed by an export, and a
+  headless Chromium draws the published file in its own colours.
 
 Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_cfd_views.py -v
 """
@@ -395,7 +412,9 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
     claims' chips: the two charts with the floor's limit and judged point,
     the two stills with their scale and the planes' marks. Without ParaView
     the stills are left out and no status moves; the third build draws
-    nothing (the memo).
+    nothing (the memo). The pressure still's glTF is live (on this computer
+    only) until an export re-runs the entry; the build after the export
+    commits it, and draws nothing.
 
     The cfd gates are opaque (they read OpenFOAM through subprocesses), so the
     spine reads their entries stale once ``check`` is done, and the figures say
@@ -420,6 +439,19 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         cls.scenes = len(cls.scene_calls())
         cls.again = _env.nopekit(["site", "build", "--json"], cwd=cls.root, env=cls.pv_env,
                                  timeout=900)
+        # Before the export: what this computer shows of the 3D file.
+        cls.live_page = cls.baked_file("page.json")
+        cls.live_build = cls.baked_file("build.json")
+        cls.live_files = cls.site_files("assets/live")
+        names = [n[:-len(".json")] for n in os.listdir(
+            os.path.join(cls.root, ".nopekit", "verdicts", GATE))
+            if n.endswith(".json") and not n.startswith("control-")]
+        rho16, out8 = names[0].split("-") if len(names) == 1 else ("", "")
+        store.append_sealed(cls.root, "exports", "m", "exports",
+                            {"milestone": "m", "reran": [{"gate": GATE, "rho": rho16,
+                                                          "out8": out8}]})
+        cls.exported = _env.nopekit(["site", "build", "--json"], cwd=cls.root,
+                                    env=cls.pv_env, timeout=900)
 
     @classmethod
     def tearDownClass(cls):
@@ -434,8 +466,21 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
     def scene_calls(cls) -> list[dict]:
         return [c for c in pv_standin.calls(cls.stand["prefix"]) if "case_files" in c]
 
+    @classmethod
+    def site_files(cls, top: str) -> dict[str, bytes]:
+        """Every file under ``site/<top>``, by its path under ``site/``."""
+        out = {}
+        base = os.path.join(cls.root, "site", *top.split("/"))
+        for directory, _dirs, names in os.walk(base):
+            for name in names:
+                path = os.path.join(directory, name)
+                with open(path, "rb") as fh:
+                    out[os.path.relpath(path, os.path.join(cls.root, "site"))
+                        .replace(os.sep, "/")] = fh.read()
+        return out
+
     def setUp(self):
-        for proc in [*self.procs, self.again]:
+        for proc in [*self.procs, self.again, self.exported]:
             self.assertEqual(proc.returncode, 0, proc.stdout[-3000:] + proc.stderr[-3000:])
         self.assertTrue(os.path.isfile(os.path.join(self.inst, "calls")),
                         "the stand-in OpenFOAM never ran")
@@ -546,6 +591,49 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
         self.assertEqual(self.baked("page.json"), self.baked_file("page.json"))
         notes = {v["view"]: v["status"] for v in json.loads(self.again.stdout)["viewgens"]}
         self.assertEqual({notes[v] for v in STILLS}, {"memo"})
+
+    def test_the_3d_field_is_live_until_an_export_commits_it(self):
+        entry = self.served_entry()
+        with open(pv_standin.FIELD_GLTF, "rb") as fh:
+            gltf = fh.read()
+        figure_id = f"{GATE}/{entry}/{PRESSURE}"
+        live = self.live_build["live_figures"]
+        self.assertEqual(sorted(live), [figure_id])
+        path = live[figure_id]
+        self.assertTrue(path.startswith(f"assets/live/{GATE}/{entry}/{PRESSURE}.")
+                        and path.endswith(".gltf"), path)
+        self.assertEqual(self.live_files, {path: gltf})
+        # The wrapped baseline is no git repository: the ignore line itself.
+        with open(os.path.join(self.root, "site", ".gitignore"), encoding="utf-8") as fh:
+            self.assertIn("assets/live/", fh.read().splitlines(),
+                          "the live glTF is not ignored")
+        self.assertNotIn(path, json.dumps(self.live_page))
+        for cid, claim in self.live_page["claims"].items():
+            figs = {f["view"]: f for f in claim["figures"]}
+            with self.subTest(cid=cid):
+                self.assertEqual(figs[PRESSURE]["id"], figure_id)
+                self.assertEqual(figs[PRESSURE]["field_src"], "")
+                self.assertTrue(figs[PRESSURE]["turn"]["word"])
+                self.assertTrue(figs[PRESSURE]["turn"]["live_word"])
+                self.assertEqual(figs[SPEED]["turn"], {})
+        # The export re-ran the entry: the build commits the same bytes, under
+        # the entry's folder, and draws nothing.
+        doc = self.baked("page.json")
+        for cid, claim in doc["claims"].items():
+            fig = next(f for f in claim["figures"] if f["view"] == PRESSURE)
+            with self.subTest(cid=cid):
+                self.assertTrue(fig["field_src"].startswith(
+                    f"assets/figures/{GATE}/{entry}/{PRESSURE}.")
+                    and fig["field_src"].endswith(".gltf"), fig["field_src"])
+                self.assertEqual(fig["turn"]["live_word"], "")
+                with open(os.path.join(self.root, "site", *fig["field_src"].split("/")),
+                          "rb") as fh:
+                    self.assertEqual(fh.read(), gltf)
+        self.assertEqual(self.baked("build.json")["live_figures"], {})
+        self.assertEqual(self.site_files("assets/live"), {})
+        notes = {v["view"]: v["status"] for v in json.loads(self.exported.stdout)["viewgens"]}
+        self.assertEqual({notes[v] for v in STILLS}, {"memo"})
+        self.assertEqual(len(self.scene_calls()), self.scenes)
 
     def test_the_ladder_carries_the_floors_limit_and_judged_point(self):
         doc = self.baked("page.json")
@@ -1116,7 +1204,8 @@ class TheStillsOnTheStandIn(_env.EnvCase):
                 self.assertIsNotNone(view, note + "; ".join(ctx.notes))
                 self.assertEqual(site_mod._figure_refusal(spec, view, ctx,
                                                           [self.verdict.limit]), "")
-                self.assertEqual(list(ctx.outputs), [view.src])
+                solid = ["pressure.gltf"] if view_id == PRESSURE else []
+                self.assertEqual(list(ctx.outputs), [view.src, *solid])
                 with open(ctx.outputs[view.src][0], "rb") as fh:
                     self.assertEqual(fh.read(), png)
                 self.assertEqual(spec.requires_tools, ("pvbatch62",))
@@ -1125,6 +1214,36 @@ class TheStillsOnTheStandIn(_env.EnvCase):
                 self.assertEqual(view.meta["tool"]["accepted_by"], "environment")
                 self.assertEqual(page.caption_status(view.meta["caption"]), "")
         self.assertEqual([c["job"]["field"] for c in self.scenes()], ["mag(U)", "static(p)"])
+        # Only the pressure still's run asks for the 3D file.
+        self.assertEqual([c["job"].get("gltf") for c in self.scenes()], [None, "field.gltf"])
+
+    def test_the_3d_file_is_paraviews_glTF_unchanged(self):
+        """The pressure still's run writes ParaView's glTF, and the viewgen
+        hands its bytes to write_asset as they are: no conversion."""
+        spec, view, note, ctx = self.draw(PRESSURE)
+        self.assertIsNotNone(view, note + "; ".join(ctx.notes))
+        path, live = ctx.outputs["pressure.gltf"]
+        self.assertFalse(live, "the spine, not the pack, decides that a 3D file is live")
+        with open(path, "rb") as fh, open(pv_standin.FIELD_GLTF, "rb") as want:
+            self.assertEqual(fh.read(), want.read())
+        self.assertEqual(site_mod._figure_refusal(spec, view, ctx, [self.verdict.limit]), "")
+
+    def test_a_3d_file_over_the_cap_is_left_out_and_the_still_is_drawn(self):
+        pv_standin.set_mode(self.stand["prefix"], "huge-field")
+        spec, view, note, ctx = self.draw(PRESSURE)
+        self.assertIsNotNone(view, note + "; ".join(ctx.notes))
+        self.assertEqual(list(ctx.outputs), [view.src])
+        self.assertTrue(any("over the 2 MiB cap" in n and "drawn without it" in n
+                            for n in ctx.notes), ctx.notes)
+        self.assertEqual(site_mod._figure_refusal(spec, view, ctx, [self.verdict.limit]), "")
+
+    def test_a_3d_file_that_is_not_the_runs_is_an_error(self):
+        pv_standin.set_mode(self.stand["prefix"], "other-field")
+        _spec, view, note, ctx = self.draw(PRESSURE)
+        self.assertIsNone(view)
+        self.assertTrue(note.startswith("error:"), note)
+        self.assertIn("the glTF on disk is not the one pvbatch's result names", note)
+        self.assertEqual(ctx.outputs, {})
 
     def test_the_job_is_the_scale_and_the_pack_constants(self):
         _spec, view, _note, _ctx = self.draw(PRESSURE)
@@ -1207,6 +1326,180 @@ class TheStillsOnTheStandIn(_env.EnvCase):
         self.assertEqual(pv_standin.calls(self.stand["prefix"]), [])
 
 
+# --------------------------------------------------------------------------- #
+# P2.4: the 3D file
+# --------------------------------------------------------------------------- #
+#: The committed glTF files: what ParaView 6.2.0 exported of seven bands of
+#: known values on the baseline's coarsest mesh, through the pack's own
+#: ``views/_scene.py`` (``bands.gltf``) and through its default (the cut
+#: coloured by ``CELLS``, ``bands_cells.gltf``). ``make_bands.py`` made both.
+FIELDS = os.path.join(REPO, "tests", "cfd_fields")
+
+#: The Khronos glTF validator, pinned: 2.0.0-dev.3.10 (npm, published
+#: 2024-10-22), the newest on npm on 2026-10-21. Its package has no command
+#: line (no ``bin``), so ``npx gltf-validator`` runs nothing: it is installed
+#: once into the system's temporary folder and called through node
+#: (`khronos`). *Rejected:* checks of accessors in the spine or the pack (the
+#: design's ``_gltf.py``; the author's rule of 2026-10-21: a validator is a
+#: tool a trusted party already wrote).
+GLTF_VALIDATOR = ("gltf-validator", "2.0.0-dev.3.10")
+
+_VALIDATE_JS = """\
+const fs = require("fs");
+const validator = require(process.argv[2]);
+const data = new Uint8Array(fs.readFileSync(process.argv[3]));
+validator.validateBytes(data, { maxIssues: 100 }).then((report) => {
+  const issues = report.issues;
+  console.log(JSON.stringify({ errors: issues.numErrors, warnings: issues.numWarnings,
+    codes: issues.messages.map((m) => m.code), vertices: report.info.totalVertexCount,
+    draws: report.info.drawCallCount }));
+}, (err) => { console.error(String(err)); process.exit(2); });
+"""
+
+
+def _make_bands():
+    """``tests/cfd_fields/make_bands.py``, loaded from its file."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("nopekit_test_make_bands",
+                                                  os.path.join(FIELDS, "make_bands.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _gltf_validator() -> str | None:
+    """The pinned validator's module folder, installed once into the
+    system's temporary folder with npm, or None (no node or npm, offline)."""
+    node, npm = shutil.which("node"), shutil.which("npm")
+    if not node or not npm:
+        return None
+    name, version = GLTF_VALIDATOR
+    cache = os.path.join(tempfile.gettempdir(), f"nopekit-test-{name}-{version}")
+    module = os.path.join(cache, "node_modules", name)
+
+    def installed() -> bool:
+        try:
+            with open(os.path.join(module, "package.json"), encoding="utf-8") as fh:
+                return json.load(fh).get("version") == version
+        except (OSError, ValueError):
+            return False
+
+    if installed():
+        return module
+    staging = tempfile.mkdtemp(prefix="nopekit-gltf-validator-")
+    proc = _env.run([npm, "install", "--prefix", staging, "--no-audit", "--no-fund",
+                     "--ignore-scripts", f"{name}@{version}"], cwd=staging, timeout=300)
+    if proc.returncode != 0:
+        shutil.rmtree(staging, ignore_errors=True)
+        return None
+    with open(os.path.join(staging, "validate.js"), "w", encoding="utf-8") as fh:
+        fh.write(_VALIDATE_JS)
+    try:
+        os.replace(staging, cache)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+    return module if installed() else None
+
+
+def khronos(case: _env.EnvCase, path: str) -> dict:
+    """The validator's report of ``path``: ``{errors, warnings, codes,
+    vertices, draws}``. Skips the test ("not walked") with no validator."""
+    module = _gltf_validator()
+    if module is None:
+        raise unittest.SkipTest("not walked: no node and npm, or the Khronos glTF validator "
+                                "did not install")
+    script = os.path.join(os.path.dirname(os.path.dirname(module)), "validate.js")
+    proc = _env.run([shutil.which("node"), script, module, path], cwd=case.tmp(), timeout=120)
+    case.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+    return json.loads(proc.stdout)
+
+
+def _cells_of(gltf_path: str):
+    """``[(centre x, centre y, rgb)]`` of each cell of a faceted glTF: four
+    vertices in one colour each, read with trimesh (no code of the pack)."""
+    import numpy
+    import trimesh
+    scene = trimesh.load(gltf_path, process=False)
+    (mesh,) = scene.geometry.values()
+    points = numpy.asarray(mesh.vertices).reshape(-1, 4, 3)
+    colours = numpy.asarray(mesh.visual.vertex_attributes["color"])[:, :3].reshape(-1, 4, 3)
+    out = []
+    for quad, rgb in zip(points, colours):
+        if not (rgb == rgb[0]).all():
+            raise AssertionError(f"a cell of {gltf_path} has more than one colour: {rgb}")
+        out.append((float(quad[:, 0].mean()), float(quad[:, 1].mean()), tuple(int(c) for c in rgb[0])))
+    return out
+
+
+def _trimesh_missing() -> str:
+    for module in ("trimesh", "numpy"):
+        try:
+            __import__(module)
+        except ImportError:
+            return f"{module} is not installed"
+    return ""
+
+
+class TheFieldFiles(_env.EnvCase):
+    """The committed glTF files ParaView exported (``tests/cfd_fields``), as
+    the page takes them: the spine publishes a glTF only when its bytes are
+    inside it, the Khronos validator passes ParaView's faceted export and
+    refuses its default one (so the check can fail), and each band is the
+    preset's colour for its value. No ParaView needed."""
+
+    def read(self, name: str) -> bytes:
+        with open(os.path.join(FIELDS, name), "rb") as fh:
+            return fh.read()
+
+    def test_the_spine_takes_a_gltf_only_with_its_bytes_inside(self):
+        bands = self.read("bands.gltf")
+        self.assertEqual(site_mod._solid_problem("pressure.gltf", bands), "")
+        doc = json.loads(bands)
+        doc["buffers"][0]["uri"] = "field.bin"
+        self.assertIn("names a file outside it ('field.bin')", site_mod._solid_problem(
+            "pressure.gltf", json.dumps(doc).encode()))
+        doc = json.loads(bands)
+        doc["asset"]["version"] = "1.0"
+        self.assertEqual(site_mod._solid_problem("pressure.gltf", json.dumps(doc).encode()),
+                         "pressure.gltf is not a glTF 2.0")
+        self.assertEqual(site_mod._solid_problem("pressure.gltf", b"glTF\x02\x00"),
+                         "pressure.gltf is not a glTF: it is not JSON")
+        # The spine checks no accessor: ParaView's default export passes it,
+        # and only the validator refuses it (the test below).
+        self.assertEqual(site_mod._solid_problem("x.gltf", self.read("bands_cells.gltf")), "")
+
+    def test_the_validator_passes_paraviews_faceted_export(self):
+        report = khronos(self, os.path.join(FIELDS, "bands.gltf"))
+        self.assertEqual((report["errors"], report["warnings"], report["codes"]), (0, 0, []))
+        self.assertEqual((report["vertices"], report["draws"]), (2000, 1))
+
+    def test_the_validator_refuses_paraviews_default_export(self):
+        """The control: the same cut coloured by its cells, as ParaView
+        exports it by default, holds fewer colours than vertices."""
+        report = khronos(self, os.path.join(FIELDS, "bands_cells.gltf"))
+        self.assertGreater(report["errors"], 0)
+        self.assertIn("MESH_PRIMITIVE_UNEQUAL_ACCESSOR_COUNT", report["codes"])
+
+    @unittest.skipIf(_trimesh_missing(), f"not walked: {_trimesh_missing()}")
+    def test_each_band_is_the_presets_colour_for_its_value(self):
+        import test_field_browser as browser
+        bands = _make_bands()
+        cells = _cells_of(os.path.join(FIELDS, "bands.gltf"))
+        self.assertEqual(len(cells), 500)
+        x0 = min(c[0] for c in cells)
+        x1 = max(c[0] for c in cells)
+        columns = 50
+        seen = set()
+        for x, _y, rgb in cells:
+            column = round((x - x0) / (x1 - x0) * (columns - 1))
+            value = bands.VALUES[bands.band_of(column, columns)]
+            self.assertEqual(rgb, browser.preset_colour(value, bands.LO, bands.HI), (x, value))
+            seen.add(rgb)
+        self.assertIn(browser.OVER, seen)
+        self.assertIn(browser.UNDER, seen)
+        self.assertEqual(len(seen), len(bands.VALUES))
+
+
 def _real_pvbatch():
     """The checked pvbatch62 Install, or None."""
     if os.name == "nt" or not shutil.which("pvbatch62"):
@@ -1258,6 +1551,7 @@ class TheRealStills(_env.EnvCase):
         os.makedirs(cls.root)
         cls.verdict = _run_in_project(cls.root, os.environ.get("PATH", ""))
         cls.drawn = {}
+        cls.fields = []
         for view_id in STILLS:
             spec, fn = _views().get(view_id)
             pngs = []
@@ -1269,6 +1563,9 @@ class TheRealStills(_env.EnvCase):
                     raise AssertionError(f"{view_id}: {note} {ctx.notes}")
                 with open(ctx.outputs[view.src][0], "rb") as fh:
                     pngs.append(fh.read())
+                if "pressure.gltf" in ctx.outputs:
+                    with open(ctx.outputs["pressure.gltf"][0], "rb") as fh:
+                        cls.fields.append(fh.read())
             cls.drawn[view_id] = (spec, view, ctx, pngs)
 
     @classmethod
@@ -1411,6 +1708,57 @@ class TheRealStills(_env.EnvCase):
             worst, _seen = self.worst_cell(fh.read(), "mag(U)", view.meta["scale"])
         self.assertGreater(worst, 2)
 
+    def field_file(self) -> str:
+        path = os.path.join(self.tmp(), "pressure.gltf")
+        with open(path, "wb") as fh:
+            fh.write(self.fields[0])
+        return path
+
+    @unittest.skipIf(_trimesh_missing(), f"not walked: {_trimesh_missing()}")
+    def test_every_cell_of_the_3d_file_is_the_presets_colour_for_its_value(self):
+        """ParaView's glTF holds each cell's colour as the preset's sRGB bytes
+        for its value (read with trimesh and the committed export, no code of
+        the pack); magenta past the scale at the inlet's corners."""
+        import test_field_browser as browser
+        scale = self.drawn[PRESSURE][1].meta["scale"]
+        level = self.summary["levels"][-1]
+        nx, ny, _nz = level["counts"][0]
+        values = _internal_field(os.path.join(self.stage, self.time, "static(p)"))
+        b = _points_bounds(os.path.join(self.stage, "constant", "polyMesh", "points"))
+        cells = _cells_of(self.field_file())
+        self.assertEqual(len(cells), nx * ny)
+        worst, over = 0, 0
+        for x, y, rgb in cells:
+            ix = min(nx - 1, int((x - b[0]) / (b[1] - b[0]) * nx))
+            iy = min(ny - 1, int((y - b[2]) / (b[3] - b[2]) * ny))
+            want = browser.preset_colour(values[iy * nx + ix], scale["lo"], scale["hi"])
+            if want in (browser.OVER, browser.UNDER):
+                self.assertEqual(rgb, want)
+                over += want == browser.OVER
+            worst = max(worst, max(abs(a - c) for a, c in zip(rgb, want)))
+        self.assertLessEqual(worst, 1)
+        self.assertGreater(over, 0)
+
+    def test_two_exports_are_byte_identical_and_under_the_cap(self):
+        self.assertEqual(len(self.fields), 2)
+        self.assertEqual(self.fields[0], self.fields[1])
+        self.assertLess(len(self.fields[0]), page.EVIDENCE_MAX_BYTES)
+        self.assertEqual(site_mod._solid_problem("pressure.gltf", self.fields[0]), "")
+
+    def test_the_khronos_validator_passes_the_real_export(self):
+        level = self.summary["levels"][-1]
+        report = khronos(self, self.field_file())
+        self.assertEqual((report["errors"], report["warnings"]), (0, 0), report["codes"])
+        # One draw: the cut. The planes' lines are not in the 3D file.
+        self.assertEqual((report["draws"], report["vertices"]), (1, 4 * level["cells"]))
+
+    def test_the_committed_band_files_are_what_paraview_writes(self):
+        level0 = os.path.join(os.path.dirname(self.stage), "level0")
+        made = _make_bands().make(level0)
+        for name, data in made.items():
+            with self.subTest(name), open(os.path.join(FIELDS, name), "rb") as fh:
+                self.assertEqual(data, fh.read())
+
     def test_the_committed_preset_is_what_paraview_exports(self):
         pv = _pv()
         inst = pv.locate()
@@ -1425,6 +1773,171 @@ class TheRealStills(_env.EnvCase):
                 open(os.path.join(PACK, "views", "viridis.json"), "rb") as committed:
             self.assertEqual(fh.read(), committed.read())
 
+
+
+def _site_files(root: str, top: str) -> dict[str, bytes]:
+    """Every file under ``<root>/site/<top>``, by its path under ``site/``."""
+    out = {}
+    base = os.path.join(root, "site", *top.split("/"))
+    for directory, _dirs, names in os.walk(base):
+        for name in names:
+            path = os.path.join(directory, name)
+            with open(path, "rb") as fh:
+                out[os.path.relpath(path, os.path.join(root, "site")).replace(os.sep, "/")] = \
+                    fh.read()
+    return out
+
+
+@unittest.skipIf(cfd_tests._real_install() is None or _real_pvbatch() is None,
+                 "not walked: needs ESI OpenFOAM v2606 and the checked pvbatch62")
+class TheRealPipeline(_env.EnvCase):
+    """B.6 end to end on the real tools: the pack's baseline wrapped as a
+    project, ``check --tier 2`` on ESI v2606, ``site init`` and ``site build``
+    with the checked ParaView 6.2.0. Every figure sits beside every claim
+    cfd.pressure_drop covers, bound to the served entry: its sidecar valid,
+    its files the bytes it names, drawn by the checked build. The glTF is on
+    this computer only; after an export of the entry the next build commits
+    it and draws nothing. The Khronos validator passes the published file,
+    and a headless Chromium draws it in its own colours (where they are)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        cls.env = {"PATH": os.environ.get("PATH", "")}
+        cls.root = _projects.wrap_pack_baseline("cfd-openfoam", os.path.join(cls.dir, "proj"))
+        cls.procs = [_env.nopekit(argv, cwd=cls.root, env=cls.env, timeout=1800)
+                     for argv in (["check", "--tier", "2"], ["site", "init"],
+                                  ["site", "build", "--json"])]
+        cls.page = cls.baked("page.json")
+        cls.build = cls.baked("build.json")
+        cls.live = _site_files(cls.root, "assets/live")
+        cls.entry = cls.served()
+        rho16, out8 = cls.entry.split("-") if cls.entry else ("", "")
+        store.append_sealed(cls.root, "exports", "m", "exports",
+                            {"milestone": "m", "reran": [{"gate": GATE, "rho": rho16,
+                                                          "out8": out8}]})
+        cls.exported = _env.nopekit(["site", "build", "--json"], cwd=cls.root, env=cls.env,
+                                    timeout=1800)
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+        super().tearDownClass()
+
+    @classmethod
+    def baked(cls, name: str) -> dict:
+        try:
+            with open(os.path.join(cls.root, "site", "data", name), encoding="utf-8") as fh:
+                return json.load(fh)
+        except OSError:
+            return {}
+
+    @classmethod
+    def served(cls) -> str:
+        folder = os.path.join(cls.root, ".nopekit", "verdicts", GATE)
+        names = [n[:-len(".json")] for n in os.listdir(folder)
+                 if n.endswith(".json") and not n.startswith("control-")] \
+            if os.path.isdir(folder) else []
+        return names[0] if len(names) == 1 else ""
+
+    def setUp(self):
+        super().setUp()
+        for proc in [*self.procs, self.exported]:
+            self.assertEqual(proc.returncode, 0, proc.stdout[-3000:] + proc.stderr[-3000:])
+        self.assertTrue(self.entry, "cfd.pressure_drop wrote no single entry")
+
+    def test_every_figure_is_present_and_bound(self):
+        doc = self.page
+        self.assertEqual(sorted(doc["claims"]), [f"G{n}" for n in range(1, 7)])
+        notes = {v["view"]: v for v in json.loads(self.procs[2].stdout)["viewgens"]}
+        for view_id in (LADDER, SETTLE, *STILLS):
+            self.assertNotIn(notes[view_id]["status"], ("unavailable", "error", "refused"),
+                             notes[view_id])
+        for cid, claim in doc["claims"].items():
+            figs = {f["view"]: f for f in claim.get("figures") or ()}
+            self.assertEqual(sorted(figs), sorted([LADDER, SETTLE, *STILLS]), cid)
+            chips = [{"id": c, "token": doc["claims"][c]["token"]} for c in sorted(doc["claims"])]
+            for view_id, fig in figs.items():
+                with self.subTest(cid=cid, view=view_id):
+                    self.assertEqual((fig["gate"], fig["entry"]), (GATE, self.entry))
+                    self.assertIn(fig["currency"], ("current", "stale"))
+                    self.assertEqual([{"id": c["id"], "token": c["token"]}
+                                      for c in fig["claims"]], chips)
+                    sidecar, why = page.read_sidecar(self.root, GATE, self.entry, view_id)
+                    self.assertIsNotNone(sidecar, why)
+                    src = fig["src"] if view_id in STILLS else fig["data_src"]
+                    self.assertTrue(src.startswith(f"assets/figures/{GATE}/{self.entry}/"), src)
+                    path = os.path.join(self.root, "site", *src.split("/"))
+                    if view_id in STILLS:
+                        self.assertEqual(_sha256(path), fig["sha256"])
+                        self.assertEqual(fig["tool_word"], "")
+                        self.assertEqual(sidecar["tool"]["accepted_by"], "lock")
+                        self.assertEqual(fig["scale"]["stops"], _scales_mod().stops())
+                    else:
+                        self.assertTrue(os.path.isfile(path), path)
+
+    def test_the_3d_field_is_live_then_committed_by_an_export(self):
+        figure_id = f"{GATE}/{self.entry}/{PRESSURE}"
+        self.assertEqual(sorted(self.build["live_figures"]), [figure_id])
+        live = self.build["live_figures"][figure_id]
+        self.assertEqual(sorted(self.live), [live])
+        self.assertTrue(live.endswith(".gltf"), live)
+        self.assertNotIn(live, json.dumps(self.page))
+        doc = self.baked("page.json")
+        for cid, claim in doc["claims"].items():
+            fig = next(f for f in claim["figures"] if f["view"] == PRESSURE)
+            with self.subTest(cid=cid):
+                self.assertTrue(fig["field_src"].startswith(
+                    f"assets/figures/{GATE}/{self.entry}/{PRESSURE}.")
+                    and fig["field_src"].endswith(".gltf"), fig["field_src"])
+                with open(os.path.join(self.root, "site", *fig["field_src"].split("/")),
+                          "rb") as fh:
+                    self.assertEqual(fh.read(), self.live[live])
+        self.assertEqual(self.baked("build.json")["live_figures"], {})
+        notes = {v["view"]: v["status"] for v in json.loads(self.exported.stdout)["viewgens"]}
+        self.assertEqual({notes[v] for v in STILLS}, {"memo"})
+
+    def committed_field(self) -> str:
+        fig = next(f for f in self.baked("page.json")["claims"]["G1"]["figures"]
+                   if f["view"] == PRESSURE)
+        return os.path.join(self.root, "site", *fig["field_src"].split("/"))
+
+    def test_the_khronos_validator_passes_the_published_file(self):
+        report = khronos(self, self.committed_field())
+        self.assertEqual((report["errors"], report["warnings"]), (0, 0), report["codes"])
+
+    @unittest.skipIf(_trimesh_missing(), f"not walked: {_trimesh_missing()}")
+    def test_the_browser_draws_the_published_file_in_its_own_colours(self):
+        """Each pixel the field mode draws is within 2 of a colour the file
+        holds (the cells are smaller than a pixel in places, so the test asks
+        this of 95% of them); in the model mode, under its lights, fewer than
+        half as many pixels are (measured: none, the cut draws black)."""
+        import test_field_browser as browser
+        missing = browser._missing_paraview_page()
+        if missing:
+            self.skipTest(f"not walked: {missing}")
+        path = self.committed_field()
+        near = set()
+        for _x, _y, rgb in _cells_of(path):
+            for dr in range(-browser.TOLERANCE, browser.TOLERANCE + 1):
+                for dg in range(-browser.TOLERANCE, browser.TOLERANCE + 1):
+                    for db in range(-browser.TOLERANCE, browser.TOLERANCE + 1):
+                        near.add((rgb[0] + dr, rgb[1] + dg, rgb[2] + db))
+        with open(path, "rb") as fh:
+            site, server = browser.serve_viewer({"field.gltf": fh.read()})
+        try:
+            drawn, hits = {}, {}
+            for mode in ("field", "lit"):
+                shot = browser.shoot(self, server, mode, "field.gltf", size=(960, 720))
+                pixels = [p for p in browser._pixels(shot) if p != (0, 0, 0)]
+                drawn[mode] = len(pixels)
+                hits[mode] = sum(1 for p in pixels if p in near)
+        finally:
+            browser.stop_viewer(site, server)
+        self.assertGreater(drawn["field"], 5000, drawn)
+        self.assertGreaterEqual(hits["field"] / drawn["field"], 0.95, (hits, drawn))
+        self.assertLess(hits["lit"], 0.5 * hits["field"], (hits, drawn))
 
 if __name__ == "__main__":
     unittest.main()

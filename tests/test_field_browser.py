@@ -18,6 +18,13 @@ screenshot are within `TOLERANCE` of it in every channel. The same file drawn
 in the model mode (three lights, the material's own shading) must fail that
 check, so the test can fail.
 
+`TheBrowserDrawsAParaViewField` (P2.4) does the same with ParaView's own
+glTF, as cfd-openfoam publishes it: ``tests/cfd_fields/bands.gltf``, seven
+bands of known values that ParaView 6.2.0 exported through the pack's
+``views/_scene.py``. Each band must be drawn in the colour the exported
+Viridis preset (``packs/cfd-openfoam/views/viridis.json``) gives its value,
+within 2, magenta above the scale and grey below it.
+
 Skipped, saying "not walked", when a piece is absent: the headless Chromium
 under ``~/.cache/ms-playwright/`` (build 1228), trimesh and numpy, Pillow (to
 read the PNG), or three.js 0.169.0 (fetched once from the CDN into a cache in
@@ -90,9 +97,11 @@ canvas { display: block; width: 100%; height: 100%; }</style>
 </head><body><div id="v"></div>
 <script type="module">
 import { createViewer } from "./lib/viewer3d.js";
-const lit = new URLSearchParams(location.search).get("mode") === "lit";
+const query = new URLSearchParams(location.search);
+const lit = query.get("mode") === "lit";
 createViewer({ host: document.getElementById("v"),
-  view: { id: "f", kind: lit ? "model3d" : "field", src: "field.glb", meta: {} },
+  view: { id: "f", kind: lit ? "model3d" : "field", src: query.get("src") || "field.glb",
+          meta: {} },
   field: !lit,
   onError: () => { document.body.style.background = "#ff0000"; } });
 </script></body></html>
@@ -171,62 +180,127 @@ def _pixels(png: str) -> list[tuple]:
     return [tuple(raw[i:i + 3]) for i in range(0, len(raw), 3)]
 
 
-def drawn_counts(png: str) -> list[int]:
-    """For each colour of `RAMP`, the pixels of ``png`` within `TOLERANCE`."""
+def drawn_counts(png: str, colours=RAMP) -> list[int]:
+    """For each of ``colours``, the pixels of ``png`` within `TOLERANCE`."""
     pixels = _pixels(png)
     return [sum(1 for p in pixels if all(abs(a - b) <= TOLERANCE for a, b in zip(p, rgb)))
-            for rgb in RAMP]
+            for rgb in colours]
 
 
-@unittest.skipIf(_missing(), f"not walked: {_missing()}")
-class TheBrowserDrawsTheField(_env.EnvCase):
-    """(issue #15, B.6) A field drawn in the browser shows the bytes its file
-    holds, within 2, and the lit mode does not."""
+#: The colour past each end of a field's scale, as the legend says them
+#: (cfd-openfoam's ``_scales.OVER`` and ``UNDER``), typed here so that the
+#: test reads no code of the pack.
+OVER, UNDER = (255, 0, 255), (128, 128, 128)
+
+#: ParaView's Viridis preset as it exported it (the legend's source).
+PRESET = os.path.join(ROOT, "packs", "cfd-openfoam", "views", "viridis.json")
+
+
+def preset_colour(value: float, lo: float, hi: float) -> tuple[int, int, int]:
+    """The sRGB bytes the exported preset gives ``value`` on [lo, hi]: the
+    two points of ``RGBPoints`` around it, linear between them in RGB (the
+    table's ``ColorSpace``), each channel rounded; `OVER` above, `UNDER`
+    below. Read here from the file, with no code of the pack."""
+    import json
+    with open(PRESET, encoding="utf-8") as fh:
+        pts = json.load(fh)["RGBPoints"]
+    rows = [pts[i:i + 4] for i in range(0, len(pts), 4)]
+    t = (value - lo) / (hi - lo)
+    if t > 1:
+        return OVER
+    if t < 0:
+        return UNDER
+    k = next(j for j in range(len(rows) - 1) if rows[j][0] <= t <= rows[j + 1][0])
+    f = (t - rows[k][0]) / (rows[k + 1][0] - rows[k][0])
+    return tuple(round(255 * (a + (c - a) * f)) for a, c in zip(rows[k][1:4], rows[k + 1][1:4]))
+
+
+def serve_viewer(files: dict[str, bytes]):
+    """``(folder, server)``: ``lib/viewer3d.js`` on a page of its own
+    (`HARNESS`), with three.js 0.169.0 and ``files``, served on a free port of
+    127.0.0.1. Raises SkipTest ("not walked") when three.js cannot be had."""
+    three = _three()
+    if three is None:
+        raise unittest.SkipTest("not walked: three.js 0.169.0 did not download")
+    site = tempfile.mkdtemp(prefix="nopekit-field-")
+    shutil.copytree(os.path.join(three, "vendor"), os.path.join(site, "vendor"))
+    lib = os.path.join(site, "lib")
+    os.makedirs(lib)
+    for name in ("viewer3d.js", "dom.js"):
+        with open(os.path.join(lib, name), "w", encoding="utf-8") as fh:
+            fh.write(_template.template_files(".js")[f"lib/{name}"])
+    with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(HARNESS)
+    for name, data in files.items():
+        with open(os.path.join(site, name), "wb") as fh:
+            fh.write(data)
+    handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+    server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return site, server
+
+
+def stop_viewer(site: str, server) -> None:
+    server.shutdown()
+    server.server_close()
+    shutil.rmtree(site, ignore_errors=True)
+
+
+def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
+          size: tuple[int, int] = (480, 360)) -> str:
+    """The path of a headless Chromium screenshot of ``src`` drawn in the
+    field mode, or in the model mode (lights, shading) when ``mode`` is
+    ``lit``. The page goes red when the viewer reports an error."""
+    out = os.path.join(case.tmp(), f"{mode}.png")
+    profile = case.tmp()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html?mode={mode}&src={src}"
+    browser = _browser()
+    shell = browser.endswith("chrome-headless-shell")
+    _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+              "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+              "--force-color-profile=srgb", "--force-device-scale-factor=1",
+              "--hide-scrollbars", f"--window-size={size[0]},{size[1]}",
+              "--virtual-time-budget=10000", f"--user-data-dir={profile}",
+              f"--screenshot={out}", url], cwd=case.tmp(), timeout=120)
+    case.assertTrue(os.path.isfile(out), "the browser wrote no screenshot")
+    red = sum(1 for p in _pixels(out) if p == (255, 0, 0))
+    case.assertLess(red, 1000, "the viewer reported an error (the page went red)")
+    return out
+
+
+class _ViewerPage(_env.EnvCase):
+    """`serve_viewer` for the class, with the files `files` names, and
+    `shot`: a screenshot of one of them (`shoot`)."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        raise NotImplementedError
 
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        three = _three()
-        if three is None:
-            raise unittest.SkipTest("not walked: three.js 0.169.0 did not download")
-        cls.site = tempfile.mkdtemp(prefix="nopekit-field-")
-        shutil.copytree(os.path.join(three, "vendor"), os.path.join(cls.site, "vendor"))
-        lib = os.path.join(cls.site, "lib")
-        os.makedirs(lib)
-        for name in ("viewer3d.js", "dom.js"):
-            with open(os.path.join(lib, name), "w", encoding="utf-8") as fh:
-                fh.write(_template.template_files(".js")[f"lib/{name}"])
-        with open(os.path.join(cls.site, "index.html"), "w", encoding="utf-8") as fh:
-            fh.write(HARNESS)
-        with open(os.path.join(cls.site, "field.glb"), "wb") as fh:
-            fh.write(strip_glb())
-        handler = lambda *a, **kw: _Quiet(*a, directory=cls.site, **kw)  # noqa: E731
-        cls.server = socketserver.TCPServer(("127.0.0.1", 0), handler)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.site, cls.server = serve_viewer(cls.files())
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.server.shutdown()
-        cls.server.server_close()
-        shutil.rmtree(cls.site, ignore_errors=True)
+        stop_viewer(cls.site, cls.server)
         super().tearDownClass()
 
-    def shot(self, mode: str) -> list[int]:
-        out = os.path.join(self.tmp(), f"{mode}.png")
-        profile = self.tmp()
-        url = f"http://127.0.0.1:{self.server.server_address[1]}/index.html?mode={mode}"
-        browser = _browser()
-        shell = browser.endswith("chrome-headless-shell")
-        _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
-                  "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                  "--force-color-profile=srgb", "--force-device-scale-factor=1",
-                  "--hide-scrollbars", "--window-size=480,360", "--virtual-time-budget=10000",
-                  f"--user-data-dir={profile}", f"--screenshot={out}", url],
-                 cwd=self.tmp(), timeout=120)
-        self.assertTrue(os.path.isfile(out), "the browser wrote no screenshot")
-        red = sum(1 for p in _pixels(out) if p == (255, 0, 0))
-        self.assertLess(red, 1000, "the viewer reported an error (the page went red)")
-        return drawn_counts(out)
+    def shot(self, mode: str, src: str = "field.glb") -> str:
+        return shoot(self, self.server, mode, src)
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsTheField(_ViewerPage):
+    """(issue #15, B.6) A field drawn in the browser shows the bytes its file
+    holds, within 2, and the lit mode does not."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"field.glb": strip_glb()}
+
+    def shot(self, mode: str, src: str = "field.glb") -> list[int]:
+        return drawn_counts(super().shot(mode, src))
 
     def test_the_field_mode_draws_the_bytes_the_file_holds(self):
         counts = self.shot("field")
@@ -239,6 +313,64 @@ class TheBrowserDrawsTheField(_env.EnvCase):
         counts = self.shot("lit")
         self.assertTrue(any(n < MIN_PIXELS for n in counts),
                         f"the lit drawing kept every colour of the ramp: {counts}")
+
+
+#: ParaView 6.2.0's own glTF of seven bands of known values on the
+#: baseline's coarsest mesh (`tests/cfd_fields/make_bands.py` made it with
+#: the pack's ``views/_scene.py``; `test_cfd_views.TheRealStills` holds it to
+#: what ParaView writes today).
+BANDS = os.path.join(ROOT, "tests", "cfd_fields", "bands.gltf")
+
+
+def _bands():
+    """``make_bands`` (the band values and the scale), loaded from its file."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "nopekit_test_make_bands", os.path.join(ROOT, "tests", "cfd_fields", "make_bands.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _missing_paraview_page() -> str:
+    if _browser() is None:
+        return "no headless Chromium under ~/.cache/ms-playwright/ (build 1228)"
+    try:
+        __import__("PIL")
+    except ImportError:
+        return "PIL is not installed"
+    return ""
+
+
+@unittest.skipIf(_missing_paraview_page(), f"not walked: {_missing_paraview_page()}")
+class TheBrowserDrawsAParaViewField(_ViewerPage):
+    """(issue #15, P2.4) The page turns ParaView's own glTF as ParaView wrote
+    it: each band of `BANDS` drawn in the field mode is the preset's colour
+    for its value within 2, magenta above the scale and grey below it,
+    as the legend says them. The model mode's lights move the colours, so
+    the check can fail. Needs no ParaView: the file is the one it wrote."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        with open(BANDS, "rb") as fh:
+            return {"bands.gltf": fh.read()}
+
+    def colours(self) -> list[tuple]:
+        bands = _bands()
+        return [preset_colour(v, bands.LO, bands.HI) for v in bands.VALUES]
+
+    def test_each_band_is_the_presets_colour_for_its_value(self):
+        colours = self.colours()
+        self.assertIn(OVER, colours)
+        self.assertIn(UNDER, colours)
+        counts = drawn_counts(self.shot("field", "bands.gltf"), colours)
+        for rgb, n in zip(colours, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+    def test_a_lit_mode_differs(self):
+        counts = drawn_counts(self.shot("lit", "bands.gltf"), self.colours())
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the lit drawing kept every band's colour: {counts}")
 
 
 if __name__ == "__main__":

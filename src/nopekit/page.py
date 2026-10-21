@@ -1094,8 +1094,9 @@ SIDECAR_SCHEMA = 1
 SIDECAR_KEYS = ("schema", "view", "gate", "entry", "kind", "recipe", "files", "title",
                 "caption", "alt", "scale", "marks", "tool")
 
-#: The roles a sidecar's files play: the still (a PNG), the 3D field (a GLB,
-#: ``live`` when it is under `LIVE_DIR`) and the chart's series (JSON).
+#: The roles a sidecar's files play: the still (a PNG), the 3D field (a GLB or
+#: a self-contained glTF, ``live`` when it is under `LIVE_DIR`) and the
+#: chart's series (JSON).
 FIGURE_ROLES = ("image", "field", "chart")
 
 #: The four words a bound figure's currency can take (B.1.5), each with its

@@ -1072,6 +1072,49 @@ class OnePictureSetPerGate(_env.EnvCase):
         self.assertFalse([p for p in figure_files(root) if p.startswith("assets/live/")])
         self.assertFalse(sidecar_of(root, a, PIC)["files"]["field"]["live"])
 
+    def test_a_gltf_with_its_bytes_inside_is_published_as_a_glb_is(self):
+        """(P2.4) ParaView writes glTF, not GLB: a glTF whose buffers are
+        ``data:`` URIs takes the GLB's path, live, then committed by an
+        export, under its own suffix and bytes."""
+        from nopekit import store
+        import _draw_standin
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, glb="asset", solid="gltf")
+        build_in(self, root, draw.env)
+        live = [p for p in figure_files(root) if p.startswith("assets/live/")]
+        self.assertEqual(len(live), 1, figure_files(root))
+        self.assertTrue(live[0].endswith(".gltf"), live)
+        self.assertEqual(figure_files(root)[live[0]], _draw_standin.GLTF)
+        with open(os.path.join(root, "site", "data", "build.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["live_figures"], {f"{GATE}/{a}/{PIC}": live[0]})
+        rho16, out8 = a.split("-")
+        store.append_sealed(root, "exports", "m", "exports",
+                            {"milestone": "m", "reran": [{"gate": GATE, "rho": rho16,
+                                                          "out8": out8}]})
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1)
+        committed = [p for p in figure_files(root)
+                     if p.startswith(f"assets/figures/{GATE}/{a}/") and p.endswith(".gltf")]
+        self.assertEqual(len(committed), 1, figure_files(root))
+        self.assertEqual(figure_files(root)[committed[0]], _draw_standin.GLTF)
+        self.assertEqual(view_row(root, PIC)["field_src"], committed[0])
+
+    def test_a_gltf_that_names_a_file_outside_it_is_refused(self):
+        """A glTF whose buffers are files beside it would make the page fetch
+        bytes nothing published or hashed: the figure is refused whole."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        draw_settings(root, glb="asset", solid="gltf", mode="gltf-outside")
+        summary = build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 1)
+        self.assertTrue(any("names a file outside it ('gltf_buffer_0.bin')" in w
+                            for w in summary["warnings"]), summary["warnings"])
+        self.assertEqual([p for p in figure_files(root) if f"/{PIC}." in p], [])
+        self.assertEqual(binding(root, PIC), None)
+
 
 # --------------------------------------------------------------------------- #
 # The page's figures: which result, beside which status (issue #15, P1.4)

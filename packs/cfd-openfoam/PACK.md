@@ -133,10 +133,17 @@ from one pressure drop below the downstream plane's pressure to two pressure
 drops above it. Magenta shows a value above the scale, and grey a value below
 it. The page draws the legend from the same scale.
 
-The stills need ParaView 6.2.0, run through a `pvbatch62` launcher on PATH
+Below the pressure still, "Turn it in 3D" shows the same cut in 3D, with the
+same colours and legend. The file is the glTF that ParaView exported in the
+same run, and the page shows it with no change. The 3D file stays on this
+computer (git ignores it) until `nopekit export` runs the result again. The
+next build then commits it.
+
+The stills and the 3D view need ParaView 6.2.0, run through a `pvbatch62` launcher on PATH
 (`references/rendering.md`). The pack uses only the ParaView build it checked,
 and a renderer control runs once on each build before it draws. `nopekit
-doctor` shows a `pvbatch62` row. Without ParaView the stills are not drawn,
+doctor` shows a `pvbatch62` row. Without ParaView the stills and the 3D view
+are not drawn,
 the charts are drawn, and no status changes. When the page says that the
 solved fields on this computer are from another run, `nopekit check --force
 --only cfd.pressure_drop` solves them again.

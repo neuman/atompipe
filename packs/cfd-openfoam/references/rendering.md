@@ -154,6 +154,30 @@ sha256 of the preset it used, and the pack uses the picture only when that
 sha256 is the sha256 of `viridis.json`. If another ParaView build changes the
 preset, export it again and examine the stills.
 
+## The 3D view
+
+The pressure still's run also writes the 3D file. After the screenshot,
+ParaView hides the lines of the planes and exports the same view with its own
+glTF exporter: `InlineData` 1 (the buffers are in the file as `data:` URIs),
+and `SaveNormal`, `SaveBatchId` and `SaveNaNValues` 0. ParaView 6.2 has no GLB
+export. The run reports the sha256 of the file, and the pack uses the file
+only when it has that sha256.
+
+The page shows this file with no change, in the field mode of its viewer:
+the colours of the file with no light and no colour conversion. The faceted
+recipe of step 2 makes the file valid: each cell has its own four vertices,
+all in its colour, so `POSITION` and `COLOR_0` have the same count.
+
+A file larger than 2 MiB is not published. The still is published without it,
+and the build gives a warning. A file that is not the file of the run is an
+error of the picture.
+
+The tests make two small files with the real ParaView,
+`tests/cfd_fields/make_bands.py`: seven bands of known values on the
+coarsest mesh of the baseline (500 cells), one export with `_scene.py` and
+one with ParaView's default export. The Khronos glTF validator
+2.0.0-dev.3.10 must accept the first and refuse the second.
+
 ## What was measured
 
 On ParaView 6.2.0 (`py312ha24fc4a_1`), WSL2, 2026-10-21:
@@ -180,6 +204,17 @@ On ParaView 6.2.0 (`py312ha24fc4a_1`), WSL2, 2026-10-21:
   1 px of its plane.
 - A black line in the plane of the cells is drawn over them. A line moved
   toward the camera gave the same bytes.
+- The glTF of the baseline (8000 cells) is 940 KB. The Khronos validator
+  gives no error and no warning. In each cell, `COLOR_0` is the preset's
+  colour for the cell's value, with no difference in any channel. Two runs
+  write files with the same bytes. The file is one line with no line end,
+  so the line-end rules of git do not change it.
+- ParaView's default export (the cut, coloured by its cells) gives more
+  vertices than colours. The validator refuses it with
+  `MESH_PRIMITIVE_UNEQUAL_ACCESSOR_COUNT`.
+- In headless Chromium (SwiftShader), the field mode draws each of the seven
+  bands of the test file in its preset colour, in 2 of each channel. The lit
+  mode of the viewer draws none of them.
 - On the baseline, 6 cells at the corners of the inlet are above the
   pressure scale (to 2.62 pressure drops above the downstream plane), where
   the uniform inlet flow meets the walls. They are magenta. This pressure

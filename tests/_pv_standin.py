@@ -14,7 +14,10 @@ PNG and the cell readings that ParaView 6.2.0 (conda-forge
 2026-10-21, and, for the planted faults, what the same ParaView drew with a lit
 display and with no above-range colour; for a scene job (``views/_scene.py``,
 a job with a ``case``), the still the same ParaView drew of the job's field on
-the pack's baseline.
+the pack's baseline and, when the job names a ``gltf``, the glTF the same
+ParaView exported with ``views/_scene.py`` (``tests/cfd_fields/bands.gltf``:
+seven bands of known values on the baseline's coarsest mesh, made by
+``tests/cfd_fields/make_bands.py``).
 
 Its install is ``<prefix>/bin/pvbatch`` (a three-line Python launcher that
 calls ``main``), ``<prefix>/conda-meta/*.json`` and ``<prefix>/standin.json``,
@@ -31,8 +34,10 @@ timeout); ``noise`` (stderr junk, exit 0, a good result); ``no-done`` (a result
 whose ``done`` is another job's); ``gpu`` (reports a GL renderer other than
 llvmpipe); ``crash`` (a traceback, exit 1); ``no-result`` (exit 0, nothing
 written); ``dirty-home`` (writes into its HOME, then a good result);
-``other-preset`` (a scene job reports another preset than viridis). Its
-``--version`` banner is ``standin.json``'s ``banner``.
+``other-preset`` (a scene job reports another preset than viridis);
+``huge-field`` (the glTF padded with spaces past the 2 MiB cap: still JSON);
+``other-field`` (the result names another glTF's sha256). Its ``--version``
+banner is ``standin.json``'s ``banner``.
 """
 from __future__ import annotations
 
@@ -243,6 +248,11 @@ STILLS = {"mag(U)": SPEED_PNG, "static(p)": PRESSURE_PNG}
 #: (``views/viridis.json``).
 STILL_SIZE = [1600, 160]
 STILL_MARKS = [0.2619047619047619, 0.7380952558347154]
+#: The glTF a scene job gets when it names one: what ParaView 6.2.0 exported.
+FIELD_GLTF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cfd_fields",
+                          "bands.gltf")
+#: The ``huge-field`` mode's size: past the 2 MiB cap of a figure.
+HUGE = int(2.1 * 1024 * 1024)
 PRESET_SHA256 = "5b8b8756066f371cf291618a5fe31e60a23e3bb7e620cc3c4167e00dfe625f68"
 
 
@@ -337,12 +347,23 @@ def _still(job: dict, raw: bytes, out_dir: str, kind: str) -> int:
         fh.write(png)
     lo, hi = job["range"]
     preset = PRESET_SHA256 if kind != "other-preset" else hashlib.sha256(b"Plasma").hexdigest()
+    solid = None
+    if job.get("gltf"):
+        with open(FIELD_GLTF, "rb") as fh:
+            solid = fh.read()
+        if kind == "huge-field":
+            solid += b" " * HUGE
+        with open(os.path.join(out_dir, job["gltf"]), "wb") as fh:
+            fh.write(solid)
     result = {"done": hashlib.sha256(raw if kind != "no-done" else raw + b" ").hexdigest(),
               "gl_renderer": "D3D12 (NVIDIA GeForce RTX 4070)" if kind == "gpu" else GL,
               "paraview": "paraview version 6.2.0", "png_sha256": hashlib.sha256(png).hexdigest(),
               "size": STILL_SIZE, "preset_sha256": preset,
               "marks": [{"at": at, "px": at * STILL_SIZE[0]} for at in STILL_MARKS],
               "ticks": [lo, hi], "tick_texts": [f"{lo:g}", f"{hi:g}"]}
+    if solid is not None:
+        result["gltf_sha256"] = hashlib.sha256(
+            solid if kind != "other-field" else solid + b" ").hexdigest()
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=1, sort_keys=True)
     return 0

@@ -1964,8 +1964,9 @@ and while building it:
   and publishes only checked files.** *Rejected:* `write_asset` straight into `site/`
   (a half-checked or oversize file is published until the check runs, and an input
   that moved is not seen).
-- **The format checks are the stdlib minimum:** the PNG signature and IHDR, and the
-  GLB magic. *Rejected:* a PNG codec or a glTF accessor check of our own (the author's
+- **The format checks are the stdlib minimum:** the PNG signature and IHDR, the GLB
+  magic, and, for a glTF (from P2.4), JSON whose every buffer and image is a `data:`
+  URI, so the page fetches no file the spine did not see. *Rejected:* a PNG codec or a glTF accessor check of our own (the author's
   rule of 2026-10-21: build as little as possible, use trusted libraries); the Khronos
   validator stays a skipIf test for phase 2.
 - **A chart's numbers are its evidence's; its limit and point are the floor's.** *What
@@ -1991,8 +1992,8 @@ and while building it:
   gives the pixels and the HTML legend.** *Rejected:* absolute constants,
   auto-rescale, the claim's limit; a colour bar inside the PNG (two legends that can
   disagree, unreadable on a phone).
-- **D6:** one PNG per scene per served entry; a GLB is committed only for an entry an
-  export re-ran; any other GLB is ignored, under `assets/live/`, and named only in
+- **D6:** one PNG per scene per served entry; a 3D file (GLB or glTF) is committed
+  only for an entry an export re-ran; any other is ignored, under `assets/live/`, and named only in
   `build.json`'s `live_figures`. *Rejected:* a `HEAD` probe for the live file (a static
   host shows a button that leads nowhere); a `.live.glb` name in a tracked folder.
 - **At most one older folder per view** while the served entry is undrawn; several
@@ -2080,6 +2081,30 @@ and while building it:
   dp (paints the baseline's ends out of range), [-1, 3] dp (half the scale for the
   rest, and a finer mesh passes it again), a line moved toward the camera (measured:
   the same bytes), and a tick picker of the pack's own.
+- **Phase 2, P2.4 (built):** the 3D view. The pressure still's pvbatch run also writes
+  ParaView's own glTF of the same cut (`ExportView`, `InlineData` 1, no normals, batch
+  ids or NaN texture, the planes' lines hidden), and the page turns that file as
+  ParaView wrote it, in the viewer's field mode, with the still's legend. The spine
+  now takes a `.gltf` whose buffers are inside it beside a `.glb`
+  (`site.SOLID_SUFFIXES`, `_solid_problem`), and publishes it as it publishes a GLB:
+  on this computer only (`assets/live/`, named in `build.json`) until an export
+  re-runs the entry, then committed. A glTF over the 2 MiB cap is left out with a
+  warning, and the still is drawn. Measured on the real tools: 940 KB for the
+  baseline's 8000 cells, no error and no warning from the Khronos validator
+  2.0.0-dev.3.10, every cell's `COLOR_0` the preset's colour for its value, two
+  exports byte-identical; ParaView's default export of the cut (coloured by cells)
+  fails the validator (`MESH_PRIMITIVE_UNEQUAL_ACCESSOR_COUNT`), and is the tests'
+  control. In headless Chromium, ParaView's file in field mode draws each band of a
+  planted field in its preset colour within 2, and the lit mode draws none of them.
+  `tests/cfd_fields/` holds two small exports ParaView made (500 cells, seven bands
+  of known values) and the script that made them; a real-tool test makes them again
+  and compares bytes. *Rejected:* the design's `views/_gltf.py` (a GLB repacker of
+  our own: the author's rule of 2026-10-21); trimesh to convert to GLB (another tool
+  that rewrites ParaView's colours, for 25% fewer bytes the cap did not need); a
+  check of accessors in the spine or the pack (the validator is a trusted tool, run
+  in the tests where node is); the planes' lines in the 3D file (WebGL draws a glTF
+  line 1 px wide); a 3D file for the speed still too (a second file of up to 2 MiB
+  for the same geometry).
 - **Phase 2, decided here and not yet built:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 

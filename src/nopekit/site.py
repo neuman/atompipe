@@ -288,7 +288,8 @@ FIGURE_SCRATCH = ".nopekit/out/figures"
 FIGURE_RECIPE_SALT = "nopekit-figure-v1"
 
 #: The kinds a bound viewgen draws: a still (``image``, a PNG), a chart (its
-#: series as its payload) and a 3D field (``model3d`` or ``field``, a GLB).
+#: series as its payload) and a 3D field (``model3d`` or ``field``, a GLB or
+#: a self-contained glTF: `SOLID_SUFFIXES`).
 #: *Rejected:* ``table`` (rows are a gate's evidence already, linked as such).
 BOUND_KINDS = (ViewKind.IMAGE, ViewKind.CHART, ViewKind.MODEL3D, ViewKind.FIELD)
 
@@ -313,6 +314,23 @@ CAPTION_STATUS_PHRASES = page_logic.CAPTION_STATUS_PHRASES
 #: The bytes a PNG and a GLB start with (B.2.3's format check, stdlib).
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 GLB_MAGIC = b"glTF"
+
+#: The 3D files a bound figure may write: a GLB, or a glTF 2.0 JSON whose
+#: every buffer and image is a ``data:`` URI (`_solid_problem`). three.js's
+#: GLTFLoader reads both. Issue #15, P2.4, under the author's rule of
+#: 2026-10-21 (use the trusted tool's output, build as little as possible):
+#: ParaView 6.2 writes glTF and no GLB (``ExportView`` with ``InlineData``),
+#: and its faceted export passes the Khronos validator as it is (measured;
+#: `tests/test_cfd_views.py`), so the page takes ParaView's file unchanged.
+#: What a self-contained glTF closes: one that names a ``.bin`` or a texture
+#: beside it would make the page fetch a file the spine never saw, hashed or
+#: published. *Rejected:* a GLB repacker in the pack (the design's
+#: ``_gltf.py``: a codec of our own between ParaView and three.js); trimesh
+#: to convert (a second tool that rewrites the colours ParaView wrote, for
+#: 25% fewer bytes the 2 MiB cap did not need: 940 KB for the baseline's 8000
+#: cells); checking accessors here (the Khronos validator does that, in the
+#: tests, where node is).
+SOLID_SUFFIXES = (".glb", ".gltf")
 
 #: The line `ensure_site_ignore` adds once a bound viewgen is registered: the
 #: live 3D files of entries no export re-ran (`page.LIVE_DIR`) are on one
@@ -592,7 +610,8 @@ class BoundContext(ViewContext):
       it returns None and says why. After the call the spine hashes every
       bound input and every verified evidence file again, and discards the
       picture if one moved.
-    * ``write_asset(name, bytes)`` writes a PNG or a GLB into the scratch; over
+    * ``write_asset(name, bytes)`` writes a PNG or a 3D file (a GLB, or a
+      glTF that holds its buffers inside it) into the scratch; over
       `page.EVIDENCE_MAX_BYTES` it raises and writes nothing.
     * ``write_live(name, bytes)`` the same, for a file published only to the
       ignored live folder.
@@ -2644,6 +2663,34 @@ def _png_ok(payload: bytes) -> bool:
     return length == 13 and kind == b"IHDR" and width > 0 and height > 0
 
 
+def _solid_problem(name: str, payload: bytes) -> str:
+    """Why ``payload`` is not the 3D file its ``name`` says, or ``""``. A
+    ``.glb`` starts with `GLB_MAGIC`. A ``.gltf`` is a JSON object whose
+    ``asset.version`` is ``2.0`` and whose every buffer and image holds its
+    bytes as a ``data:`` URI (`SOLID_SUFFIXES`): the page then fetches this
+    one file and nothing else. The geometry is the tool's; the Khronos
+    validator holds it in the tests."""
+    if name.lower().endswith(".glb"):
+        return "" if payload.startswith(GLB_MAGIC) else f"{name} is not a GLB"
+    try:
+        doc = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return f"{name} is not a glTF: it is not JSON"
+    asset = doc.get("asset") if isinstance(doc, dict) else None
+    if not isinstance(asset, dict) or asset.get("version") != "2.0":
+        return f"{name} is not a glTF 2.0"
+    for group in ("buffers", "images"):
+        rows = doc.get(group) or []
+        if not isinstance(rows, list):
+            return f"{name} is not a glTF: its {group} is not a list"
+        for row in rows:
+            uri = row.get("uri") if isinstance(row, dict) else None
+            if uri is not None and not (isinstance(uri, str) and uri.startswith("data:")):
+                return (f"{name} names a file outside it ({str(uri)[:60]!r}); a glTF on the "
+                        f"page holds its bytes inside it")
+    return ""
+
+
 def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
                     limits: Iterable[Any]) -> str:
     """Why the spine refuses to publish what a bound viewgen returned (B.2.3),
@@ -2657,20 +2704,22 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
             return f"{name} is over the 2 MiB cap"
     kind = ViewKind(spec.kind)
     pngs = [n for n in ctx.outputs if n.lower().endswith(".png")]
-    glbs = [n for n in ctx.outputs if n.lower().endswith(".glb")]
+    glbs = [n for n in ctx.outputs if n.lower().endswith(SOLID_SUFFIXES)]
     others = [n for n in ctx.outputs if n not in pngs and n not in glbs]
     if others:
-        return f"{others[0]} is not a PNG or a GLB; a bound figure writes nothing else"
+        return (f"{others[0]} is not a PNG, a GLB or a glTF; a bound figure writes nothing "
+                f"else")
     if len(pngs) > 1 or len(glbs) > 1:
-        return "a bound figure writes at most one PNG and one GLB"
+        return "a bound figure writes at most one PNG and one 3D file (a GLB or a glTF)"
     for name in pngs:
         if not _png_ok(_file_bytes(ctx.outputs[name][0]) or b""):
             return f"{name} is not a PNG"
         if ctx.outputs[name][1]:
-            return f"{name} is a still written with write_live; only a GLB is live"
+            return f"{name} is a still written with write_live; only a 3D file is live"
     for name in glbs:
-        if not (_file_bytes(ctx.outputs[name][0]) or b"").startswith(GLB_MAGIC):
-            return f"{name} is not a GLB"
+        problem = _solid_problem(name, _file_bytes(ctx.outputs[name][0]) or b"")
+        if problem:
+            return problem
     if kind is ViewKind.CHART:
         if view.src or pngs:
             return "a chart names no file; its series are its payload"
@@ -2692,7 +2741,7 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
         want = pngs if kind is ViewKind.IMAGE else glbs
         if view.src not in want:
             return (f"its src {view.src!r} names no "
-                    f"{'PNG' if kind is ViewKind.IMAGE else 'GLB'} it wrote")
+                    f"{'PNG' if kind is ViewKind.IMAGE else '3D file'} it wrote")
     moved = ctx.moved()
     if moved:
         return f"the inputs moved while the picture was drawn ({moved[0]})"
@@ -2743,8 +2792,9 @@ def _put_figure_file(site: str, folder: str, view_id: str, payload: bytes, ext: 
 def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
                     recipe: str, exported: bool, written: list[str]) -> dict:
     """Publish what `_figure_refusal` passed into ``assets/figures/<gate>/
-    <entry>/``, with its sidecar, and a GLB of an entry no export re-ran (or one
-    written with `write_live`) into the ignored ``assets/live/<gate>/<entry>/``.
+    <entry>/``, with its sidecar, and a 3D file (a GLB or a glTF) of an entry no
+    export re-ran (or one written with `write_live`) into the ignored
+    ``assets/live/<gate>/<entry>/``.
     Returns the sidecar. Every file is written only when its bytes differ."""
     gate_id, entry = ctx.entry.gate, ctx.entry.name
     folder = page_logic.figure_folder(gate_id, entry)
@@ -2756,7 +2806,8 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
         else:
             committed = exported and not live
             where = folder if committed else page_logic.live_folder(gate_id, entry)
-            files["field"] = {**_put_figure_file(site, where, spec.id, payload, "glb",
+            files["field"] = {**_put_figure_file(site, where, spec.id, payload,
+                                                 _solid_suffix(name),
                                                  written if committed else []),
                               "live": not committed}
     if ViewKind(spec.kind) is ViewKind.CHART:
@@ -2782,9 +2833,15 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
     return sidecar
 
 
+def _solid_suffix(name: str) -> str:
+    """``gltf`` for a ``.gltf`` name, else ``glb``: a published 3D file keeps
+    the format the viewgen wrote (`SOLID_SUFFIXES`)."""
+    return "gltf" if name.lower().endswith(".gltf") else "glb"
+
+
 def _promote_live(site: str, sidecar: dict, written: list[str]) -> dict | None:
-    """The sidecar of an entry an export has re-ran since its GLB was drawn
-    live: the live GLB copied into the committed folder (``live`` false), or
+    """The sidecar of an entry an export has re-ran since its 3D file was drawn
+    live: the live file copied into the committed folder (``live`` false), or
     None when the live file is not here with its bytes (draw it again)."""
     field_row = (sidecar.get("files") or {}).get("field") or {}
     gate_id, entry, view_id = sidecar["gate"], sidecar["entry"], sidecar["view"]
@@ -2794,7 +2851,9 @@ def _promote_live(site: str, sidecar: dict, written: list[str]) -> dict | None:
     if payload is None or hashlib.sha256(payload).hexdigest() != field_row.get("sha256"):
         return None
     folder = page_logic.figure_folder(gate_id, entry)
-    row = {**_put_figure_file(site, folder, view_id, payload, "glb", written), "live": False}
+    row = {**_put_figure_file(site, folder, view_id, payload,
+                              _solid_suffix(str(field_row.get("name") or "")), written),
+           "live": False}
     promoted = {**sidecar, "files": {**sidecar["files"], "field": row}}
     target = os.path.join(site, *folder.split("/"), view_id + page_logic.SIDECAR_SUFFIX)
     if write_json_if_changed(target, promoted):

@@ -86,7 +86,7 @@ site/
                       the marketing page's story, requirements and decisions
     views/<id>.json   per-view payloads too big for state.json
     build.json        IGNORED: the build time, each verdict's age, the live flag
-  assets/             GENERATED — what viewgens wrote (GLB, PNG, SVG, CSV)
+  assets/             GENERATED — what viewgens wrote (GLB, glTF, PNG, SVG, CSV)
     evidence/<gate>/<entry>/<file>   evidence copied from .nopekit/out/, by content
     figures/<gate>/<entry>/          a bound figure and its sidecar <view>.view.json
                       (issue #15; "Figures bound to verdicts")
@@ -610,8 +610,8 @@ an agent can read the site's state without a browser.
   with other bytes as edited by hand.
 - A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
   verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
-  view, its GLB; `data_url` is a chart's series file; `field_src` a committed GLB
-  beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
+  view, its 3D file (a GLB or a glTF); `data_url` is a chart's series file;
+  `field_src` a committed 3D file beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
   the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
   currency, currency_word}`, where `entry` is the result the picture was drawn from
   and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
@@ -1552,7 +1552,8 @@ name, so a design that went A, B, A (the last a cache hit, with B's files still 
 
 ## Figures bound to verdicts
 
-Issue #15. A **figure** is a still (a PNG), a chart or a 3D field (a GLB) that a pack
+Issue #15. A **figure** is a still (a PNG), a chart or a 3D field (a GLB, or a glTF
+with its buffers inside it) that a pack
 draws from the evidence of one verdict entry: the pressure field of the CFD run that
 judged a pressure drop, beside the claim it judged. A picture is persuasive, so it is
 held as the numbers are (invariant 14): it says which result it is, it sits beside the
@@ -1610,8 +1611,8 @@ it.
 | Check | Refusal |
 |---|---|
 | each output at most 2 MiB (`write_asset` raises over it) | over the 2 MiB cap |
-| a still starts with the PNG signature and its IHDR parses; a 3D file starts with `glTF` | not a PNG, not a GLB |
-| one PNG and one GLB at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one GLB |
+| a still starts with the PNG signature and its IHDR parses; a `.glb` starts with `glTF`; a `.gltf` is JSON with `asset.version` `2.0` and every buffer and image a `data:` URI (`site._solid_problem`) | not a PNG, not a GLB, not a glTF 2.0, names a file outside it |
+| one PNG and one 3D file at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one 3D file |
 | a picture carries no payload, and its `src` names a file it wrote | its numbers are its evidence's; its src names no file it wrote |
 | a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`) | a chart's limit and its point are the claim's |
 | every number under `series`, `band`, `estimates` and `rule` is a JSON leaf or a CSV cell of a verified evidence file | the chart holds a number no evidence file holds |
@@ -1624,10 +1625,12 @@ it.
 ```
 site/assets/figures/<gate>/<entry>/<view>.<sha12>.png         tracked: a still
 site/assets/figures/<gate>/<entry>/<view>.<sha12>.chart.json  tracked: a chart's payload
-site/assets/figures/<gate>/<entry>/<view>.<sha12>.glb         tracked: a 3D file, once an
-                                                              export re-ran the entry
+site/assets/figures/<gate>/<entry>/<view>.<sha12>.gltf        tracked: a 3D file (.glb or
+                                                              .gltf, as the viewgen wrote
+                                                              it), once an export re-ran
+                                                              the entry
 site/assets/figures/<gate>/<entry>/<view>.view.json           tracked: the sidecar
-site/assets/live/<gate>/<entry>/<view>.<sha12>.glb            IGNORED: any other 3D file
+site/assets/live/<gate>/<entry>/<view>.<sha12>.gltf           IGNORED: any other 3D file
 ```
 
 ```jsonc
@@ -1635,7 +1638,7 @@ site/assets/live/<gate>/<entry>/<view>.<sha12>.glb            IGNORED: any other
   "entry": "9c1e04d2b7a35f60-3a7b19e2", "kind": "image", "recipe": "<sha256>",
   "files": { "image": { "name": "cfd-openfoam.speed.1a2b3c4d5e6f.png",
                         "sha256": "<64>", "bytes": 10800 },
-             "field": { "name": "...glb", "sha256": "<64>", "bytes": 734012,
+             "field": { "name": "...gltf", "sha256": "<64>", "bytes": 940212,
                         "live": false },
              "chart": { "name": "...chart.json", "sha256": "<64>", "bytes": 2210 } },
   "title": "...", "caption": "...", "alt": "...",
@@ -1707,8 +1710,8 @@ every figure (G1-G8, listed under `page.json`).
   "verdicts": { "bracket.deflection": { "when": "...", "age_s": 412.0, "aged": false } },
   "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] },
   "tracing": false,    // architecture phase 3b: a trace holds its lock now
-  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed":
-                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed.1a2b3c4d5e6f.glb" } }
+  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.pressure":
+                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.pressure.1a2b3c4d5e6f.gltf" } }
                        // issue #15: each live 3D file of a bound figure on this computer
 ```
 

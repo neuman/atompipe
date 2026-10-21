@@ -30,8 +30,15 @@ those bytes and no other file of the run. ``_scene.py`` draws it in pvbatch,
 on a scale of ``_scales.py`` (a pack constant times a value of the summary,
 never a limit); the PNG is published only when the run says it applied the
 preset the legend is made from. Without a checked ParaView the stills are
-left out, said in the build's warnings, and no status moves. The 3D view is
-P2.4.
+left out, said in the build's warnings, and no status moves.
+
+**The 3D view** (P2.4) is the pressure still's: the same pvbatch run writes
+ParaView's own glTF of the cut, and the page turns it in the viewer's field
+mode beside the still ("Turn it in 3D", with the still's legend). It goes to
+the page as ParaView wrote it, its buffers inside it, with no conversion.
+The spine publishes it on this computer only (``assets/live/``, ignored)
+until an export re-runs the entry, and then commits it. A glTF over the 2
+MiB cap is left out with a warning, and the still is drawn.
 
 **Captions** are site text (ASD-STE100) and say what a figure shows, never a
 status: the chips beside the figure say that. "Open" is a status word, so the
@@ -49,6 +56,7 @@ import sys
 import tempfile
 
 from nopekit.models import View, ViewKind
+from nopekit.page import EVIDENCE_MAX_BYTES as _MAX_BYTES
 from nopekit.site import viewgen
 
 GATE = "cfd.pressure_drop"
@@ -298,15 +306,18 @@ def _case(ctx, summary: dict, field: str, work: str) -> tuple[str, str] | None:
     return case, time
 
 
-def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str):
+def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str,
+           gltf: str = ""):
     """One still: the summary, its scale, the bound case, a checked ParaView,
-    one pvbatch run of ``_scene.py``, and the PNG through ``write_asset``.
+    one pvbatch run of ``_scene.py``, and the PNG through ``write_asset``;
+    with ``gltf``, the same run's glTF of the cut too (the 3D view).
 
     A ParaView this pack cannot use (none, an unchecked build, a failed
     renderer control, a run past its time) leaves the still out with a
     warning; a run that did not finish as asked, or that applied another
     preset than the legend's, raises (an error of the picture). Neither moves
-    a status."""
+    a status. A glTF over the cap is left out with a warning; one that is not
+    the file the run names raises, as a PNG does."""
     summary = _summary(ctx)
     if summary is None:
         return None
@@ -334,6 +345,8 @@ def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str):
                "planes": [{"point": p.get("point"), "normal": p.get("normal")} for p in planes],
                "width": _scales.WIDTH_PX, "min_height": _scales.MIN_HEIGHT_PX,
                "line_px": _scales.LINE_PX, "ticks": _scales.TICK_BINS, "png": png}
+        if gltf:
+            job["gltf"] = "field.gltf"
         try:
             result = _pv.run(inst, SCENE, job, os.path.join(work, "run"))
         except _pv.Unavailable as exc:
@@ -352,7 +365,20 @@ def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str):
                 _number(m.get("at")) and 0 < m["at"] < 1 for m in marks):
             raise _pv.RunError(f"pvbatch placed {len(marks)} plane lines in the picture for "
                                f"{len(planes)} planes")
+        solid = None
+        if gltf:
+            with open(os.path.join(work, "run", job["gltf"]), "rb") as fh:
+                solid = fh.read()
+            if hashlib.sha256(solid).hexdigest() != result.get("gltf_sha256"):
+                raise _pv.RunError("the glTF on disk is not the one pvbatch's result names")
         src = ctx.write_asset(f"{view_id.rsplit('.', 1)[-1]}.png", data)
+        # Measured before the write: over the cap, write_asset refuses, and the
+        # spine then refuses the whole figure, the still with it.
+        if solid is not None and len(solid) > _MAX_BYTES:
+            ctx.note(f"its 3D file is {len(solid)} bytes, over the 2 MiB cap of a figure: "
+                     f"the still is drawn without it")
+        elif solid is not None:
+            ctx.write_asset(gltf, solid)
     scale = _scales.with_ticks(scale, result.get("ticks") or (), result.get("tick_texts") or ())
     words = [PLANE_WORDS[i] if i < len(PLANE_WORDS) else f"plane {i + 1}"
              for i in range(len(marks))]
@@ -376,6 +402,10 @@ def speed(ctx):
          requires_tools=[_pv.WRAPPER], order=30)
 def pressure(ctx):
     """Static p in Pa on the finest mesh, from OpenFOAM's own ``static(p)``
-    (the ``pressure`` function object, rho the project's density)."""
+    (the ``pressure`` function object, rho the project's density), and its
+    3D file: ParaView's glTF of the same cut, on the same scale. One 3D view
+    is enough to turn: the speed still has none. *Rejected:* a 3D file for
+    each still (a second file of up to 2 MiB per entry, for the same
+    geometry)."""
     return _still(ctx, "cfd-openfoam.pressure", _scales.PRESSURE, _scales.pressure,
-                  PRESSURE_CAPTION, PRESSURE_ALT)
+                  PRESSURE_CAPTION, PRESSURE_ALT, gltf="pressure.gltf")

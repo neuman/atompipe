@@ -1129,7 +1129,8 @@ def speed(ctx: BoundContext) -> View | None:
 
 - **`evidence_of="<gate id>"`** binds the viewgen to one gate. Name a gate of your own
   pack. The kind is `image` (a PNG still), `chart` (its series as the payload), or
-  `model3d` or `field` (a GLB); `table` is refused (a gate's rows are its evidence
+  `model3d` or `field` (a GLB, or a glTF that holds its buffers inside it as
+  `data:` URIs: ParaView's own export, as it writes it); `table` is refused (a gate's rows are its evidence
   already). A bound viewgen is never called with a `ViewContext`.
 - **`recipe=(...)`** names the files, beside the module, whose bytes key the memo
   (paths inside the pack or project). The spine draws a figure again only when the
@@ -1163,7 +1164,7 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
                                              #   after the call: a move discards the picture
     def write_asset(self, name, data) -> str # into the scratch; returns the name View.src
                                              #   takes; over 2 MiB it raises, writes nothing
-    def write_live(self, name, data) -> str  # a GLB published only under the ignored
+    def write_live(self, name, data) -> str  # a 3D file published only under the ignored
                                              #   assets/live/ (on this computer only)
     def note(self, text) -> None             # a build warning, under the view's id
     def asset_path(self, name)               # raises: nothing reaches site/ unchecked
@@ -1172,7 +1173,14 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
 - **What it returns.** A still or a 3D view: `src` is the name `write_asset` returned,
   and `data` is empty. A chart: no `src`, and its payload in `data`. `meta` may hold
   `caption` (ASD-STE100 site text, scanned as such), `alt`, `scale`, `marks` and
-  `tool` (written into the sidecar as given). Write at most one PNG and one GLB.
+  `tool` (written into the sidecar as given). Write at most one PNG and one 3D file
+  (`.glb`, or a `.gltf` whose every buffer and image is a `data:` URI: one that names
+  a file beside it is refused, because the page would fetch bytes nothing checked). A
+  still may carry its 3D file beside it: write both with `write_asset`, and the spine
+  publishes the 3D file on this computer only until an export re-runs the entry, then
+  commits it (cfd-openfoam's pressure still does this). Hand over your tool's file as
+  it wrote it: the spine checks no accessor, so hold your files to the Khronos glTF
+  validator in your tests.
 - **The colour scale** is one object that gives both your pixels and the page's HTML
   legend, so the two cannot disagree. Draw no colour bar into the PNG.
 
@@ -1219,7 +1227,8 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
   hangs. A crash, a timeout, `None` or a refusal publishes nothing, keeps the figure the
   page had, and moves no status.
 - **Byte-stable output.** The same entry draws the same bytes on every machine, or every
-  teammate's build commits a new picture. Stamp no clock or random id into a PNG or GLB.
+  teammate's build commits a new picture. Stamp no clock or random id into a PNG or a
+  3D file.
 - **List the view id in `provides_views`**, as for any viewgen.
 
 ### Attaching locators to a verdict

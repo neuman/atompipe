@@ -3541,7 +3541,7 @@ class BoundContext(ViewContext):             # a bound viewgen's argument: no mo
                                              #   held by a verified evidence file, each file
                                              #   at it; re-hashed after the call
     def write_asset(self, name, data) -> str # into .nopekit/out/figures/<g>/<E>/<view>/; a PNG
-    def write_live(self, name, data) -> str  #   or a GLB, at most 2 MiB (raises over it)
+    def write_live(self, name, data) -> str  #   or a 3D file, at most 2 MiB (raises over it)
     def note(self, text) -> None             # a build warning, under the view's id
     def asset_path(self, name)               # raises: nothing reaches site/ unchecked
 @dataclass
@@ -3701,7 +3701,10 @@ the tool's identity) is the memo, and the viewgen is not called; else, when it i
 available, it is called with a `BoundContext` whose `entry.files` are only the evidence
 files whose bytes the entry's manifest names (`verdicts.evidence_manifest`). What it
 returns is refused, with a warning and nothing published, when (`_figure_refusal`): an
-output is over 2 MiB; a still is no PNG (its signature and IHDR) or a 3D file no GLB; a
+output is over 2 MiB; a still is no PNG (its signature and IHDR), a `.glb` no GLB, or a
+`.gltf` no glTF 2.0 JSON whose every buffer and image is a `data:` URI (`_solid_problem`,
+`SOLID_SUFFIXES`; the spine checks no accessor: the Khronos validator does, in the
+tests); a
 bound picture carries a payload, or its `src` names no file it wrote; a chart holds a
 key of `CHART_FORBIDDEN_KEYS`, or a number under `CHART_NUMBER_KEYS` that no verified
 JSON leaf or CSV cell of the entry holds; a bound input or a verified file moved during
@@ -3709,15 +3712,16 @@ the call; a colour range's end equals a limit of a claim the gate covers or the 
 verdict limit (relative 1e-9), or a `scale.source` key names a limit; a caption holds a
 status word. Else it is published (`_publish_figure`) under
 `assets/figures/<gate>/<entry>/` as `<view>.<sha12>.<ext>` beside the tracked sidecar
-`<view>.view.json` (`page.read_sidecar`), and a GLB of an entry no export re-ran (or
+`<view>.view.json` (`page.read_sidecar`), and a 3D file of an entry no export re-ran (or
 written with `write_live`) under the ignored `assets/live/<gate>/<entry>/`, named only
 in `build.json`'s `live_figures`; once an export re-ran the entry, the next build copies
 it into the committed folder. The figure the page shows is then read from the disk
 (`page.figure_for`): current or stale under the served entry, else the one older folder
 of the gate (several: none), and its files, sidecar and the served entry's live file
 are the only bound files the cleaner keeps; an older folder goes once the served one is
-drawn. Its `state.json` row has `src` (the still, or the GLB of a 3D view), `data_url`
-(the chart's series file), `field_src` (a committed GLB beside a still), `binding`
+drawn. Its `state.json` row has `src` (the still, or the 3D file of a 3D view),
+`data_url` (the chart's series file), `field_src` (a committed 3D file beside a still),
+`binding`
 (`{gate, entry, currency, currency_word}`) and `data` empty. A bound viewgen that is
 unavailable, crashes, hangs past its own timeout, returns nothing or is refused moves
 no status (no view reaches the resolution) and deletes no picture; a picture of the

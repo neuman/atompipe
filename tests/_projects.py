@@ -758,6 +758,7 @@ def big(ctx):
 #: process may have imported already: ``mode`` (the stand-in's,
 #: `tests/_draw_standin.py`), ``timeout_s``, ``glb`` (the still writes a 3D
 #: file too: ``"asset"`` with `write_asset`, ``"live"`` with `write_live`),
+#: ``solid`` (that file's format: ``"glb"``, the default, or ``"gltf"``),
 #: ``caption``, ``scale`` and ``marks`` (the still's), ``bind`` (``disk``: the
 #: still binds the field at the digest of the file on disk, which no evidence
 #: file need hold), ``chart`` (``ok``, ``planted-limit``: a limit in the
@@ -822,7 +823,8 @@ def pic(ctx):
     glb = cfg.get("glb", "")
     with tempfile.TemporaryDirectory() as tmp:
         png_path = os.path.join(tmp, "pic.png")
-        glb_path = os.path.join(tmp, "pic.glb")
+        solid_name = "pic." + cfg.get("solid", "glb")
+        glb_path = os.path.join(tmp, solid_name)
         argv = [shutil.which("nopekit-test-draw"), "--png", png_path,
                 "--field", bound["<out>/demo/field.txt"], "--entry", ctx.entry.name,
                 "--value", repr(found["value"]), "--mode", cfg.get("mode", "ok")]
@@ -834,7 +836,7 @@ def pic(ctx):
             src = ctx.write_asset("pic.png", fh.read())
         if glb:
             with open(glb_path, "rb") as fh:
-                (ctx.write_live if glb == "live" else ctx.write_asset)("pic.glb", fh.read())
+                (ctx.write_live if glb == "live" else ctx.write_asset)(solid_name, fh.read())
     hi = 4.0 * float(found["u_ref"])
     scale = cfg.get("scale", {
         "quantity": "value", "units": "Pa", "lo": 0.0, "hi": hi,

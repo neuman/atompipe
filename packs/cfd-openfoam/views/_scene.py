@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A still of one solved field, run by pvbatch (never imported by nopekit).
+"""A still of one solved field, and its 3D file, run by pvbatch (never imported
+by nopekit).
 
 ``pvbatch --force-offscreen-rendering _scene.py <job.json>`` reads the case
 the job names (a copy that ``flow.py`` made of the bound files: the mesh,
 the field at its time and a controlDict of its own), cuts it at the middle of
 its thickness, colours each cell of the cut by the field with ParaView's own
 preset on the job's range, draws the trace of each measuring plane as a black
-line, and writes the PNG and ``result.json`` beside the job::
+line, and writes the PNG, the glTF of the cut when the job names one
+(``gltf``), and ``result.json`` beside the job::
 
     {"done": <sha256 of job.json>, "gl_renderer": <the GL renderer string>,
      "paraview": <version>, "png_sha256": <sha256 of the PNG>, "size": [w, h],
      "preset_sha256": <sha256 of the preset as ParaView exports it>,
      "marks": [{"at": <x of the plane's line / image width>, "px": <x in px>}],
      "ticks": [<tick value>, ...], "tick_texts": [<its text>, ...],
-     "window": [x0, x1, y0, y1]}
+     "window": [x0, x1, y0, y1], "gltf_sha256": <sha256 of the glTF, when asked>}
 
 What each step is, and what was measured on ParaView 6.2.0 while it was
 written:
@@ -48,9 +50,23 @@ written:
 - **The ticks.** matplotlib's ``MaxNLocator`` picks round values inside the
   range and its ``ScalarFormatter`` writes them, so the legend's numbers come
   from a library and not from code of this pack.
+- **The 3D file** (P2.4) is ParaView's own glTF exporter on the same view,
+  after the still, with the planes' lines hidden: ``InlineData`` 1 (its
+  buffers inside it as ``data:`` URIs; ParaView writes no GLB), and no
+  normals, batch ids or NaN texture. The faceted recipe is what makes it a
+  valid glTF: each cell owns its four vertices, all in its own colour, so
+  ``POSITION`` and ``COLOR_0`` have one count. Measured on the baseline's
+  8000 cells: 940 KB, no error and no warning from the Khronos validator
+  2.0.0-dev.3.10, every cell's ``COLOR_0`` the preset's sRGB bytes for its
+  value to the byte, two exports byte-identical. ParaView's default export
+  (the cut coloured by ``CELLS``) fails the validator
+  (``MESH_PRIMITIVE_UNEQUAL_ACCESSOR_COUNT``). The page draws the file as it
+  is, in the viewer's field mode (``lib/viewer3d.js``).
 
 *Rejected:* a colour bar in the PNG (two legends can disagree; the page draws
-one from the same scale, C7); the stops of the committed export as the lookup
+one from the same scale, C7); the planes' lines in the 3D file (WebGL draws a
+glTF line 1 px wide whatever ParaView's width, and the field mode gives a
+line no colour of the legend); the stops of the committed export as the lookup
 table (the pixels would then not be the preset's own, and an edited file
 would colour the picture to match itself); ParaView's ``Magnitude`` of U or a
 Calculator for static pressure (OpenFOAM computed both: no arithmetic of a
@@ -192,6 +208,16 @@ def main(job_path):
     half_w = view.CameraParallelScale * width / height
     half_h = view.CameraParallelScale
 
+    gltf_sha = None
+    if job.get("gltf"):
+        for trace in lines:
+            pv.Hide(trace, view)
+        target = os.path.join(out_dir, job["gltf"])
+        pv.ExportView(target, view=view, InlineData=1, SaveNormal=0, SaveBatchId=0,
+                      SaveNaNValues=0)
+        with open(target, "rb") as fh:
+            gltf_sha = _sha256(fh.read())
+
     caps = view.GetRenderWindow().ReportCapabilities() or ""
     gl = ""
     for line in caps.splitlines():
@@ -205,6 +231,8 @@ def main(job_path):
               "preset_sha256": _sha256(_preset_text(job["preset"]).encode("utf-8")),
               "marks": marks, "ticks": ticks, "tick_texts": texts,
               "window": [cx - half_w, cx + half_w, cy - half_h, cy + half_h]}
+    if gltf_sha is not None:
+        result["gltf_sha256"] = gltf_sha
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=1, sort_keys=True)
 
