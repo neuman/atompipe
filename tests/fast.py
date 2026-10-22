@@ -1053,6 +1053,13 @@ FAST: list[str] = [
     "test_derivation.APartialTraceIsNeverWritten.test_choices_alone_write_no_tracked_file",
     "test_derivation.UntracedIsNeverIndependent",
     "test_derivation.AmberChangesNoStatus.test_claims_never_imports_the_trace",
+    # Issue #15, D1: `unseen` moves no status (in process, ~0.01 s for six rows).
+    "test_unseen.UnseenMovesNoStatus.test_its_own_cause_beside_the_same_status",
+    "test_unseen.UnseenMovesNoStatus.test_ready_and_blocking_are_the_same",
+    "test_unseen.UnseenMovesNoStatus.test_a_moved_gate_leads",
+    "test_unseen.UnseenMovesNoStatus.test_the_all_stale_alias_is_never_unseen",
+    "test_unseen.UnseenMovesNoStatus.test_a_current_gate_is_never_made_stale",
+    "test_unseen.UnseenMovesNoStatus.test_a_fail_stays_failing",
     "test_derivation.AmberOnlyWhileCurrent.test_an_acceptance_edit_beside_the_committed_amber",
     "test_derivation.TheMapDrawsWhatTheTraceObserved",
     # The review of phase 3b, in process and cheap (~0.3 s): the reason amber

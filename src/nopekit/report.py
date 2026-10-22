@@ -310,7 +310,12 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "skipped": "An evaluator did not run. A tool that it needs is missing.",
         "gap": "Nothing can settle this claim yet.",
         "open": "An evaluator can settle this claim. It did not run on the current design.",
-        "stale": "The design changed after the result.",
+        # Both of Stale's evaluator causes (issue #15, D1): a moved design, or
+        # an evaluator nopekit cannot see into. What slipped through: the hint
+        # said "The design changed" beside a solver's result on an untouched
+        # design.
+        "stale": "The design changed after the result, or nopekit cannot see if the result "
+                 "is current.",
         "pending_build": "Only a test on a built part can settle this claim.",
         "assumed": "A person accepts this claim for now.",
     }),
@@ -333,6 +338,12 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "no-reason": "This assumption has no reason.",
         "unrun": "An evaluator did not run on the current design.",
         "invalidated": "The design changed after the result.",
+        # Issue #15, D1: a solver's own reads happen in a program that
+        # nopekit does not watch, so between check runs nothing can say that
+        # its result is current. *Rejected:* "The design changed" (false: it
+        # did not); "is not current" (nopekit does not know that either).
+        "unseen": "An evaluator reads inputs that nopekit cannot see. Only a check run can "
+                  "show that its result is current.",
         "no-article": "No test on a built part is recorded.",
         "owned": "Its owner accepts this assumption for now.",
         "physical-pass": "A pass is recorded. It does not count for the current design.",
@@ -367,6 +378,8 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
                 "again.",
         "run": "Run the check. It runs the evaluators and shows that each one can fail.",
+        "unseen": "{gate} reads inputs that nopekit cannot see. Run the check. Only a check "
+                  "run can show that its result is current.",
         "outside": "The design is outside the range that the evaluator was tested on.",
         "find": "No evaluator checks {id} yet. Find one or write one.",
         "owner": "{id} is an assumption. Its owner records it in their own shell.",
@@ -435,10 +448,17 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "no_story": "Add site/content/story.md to tell the story of the design.",
         "invalidated": "Some results are older than the design. Run nopekit check, then "
                        "build the site again.",
+        # Issue #15, D1: every result that is not current reads inputs that
+        # nopekit cannot see. The command carries the tier that reaches them
+        # (a plain `nopekit check` is tier 0 and runs no solver).
+        "unseen": "Some evaluators read inputs that nopekit cannot see. Only a check run "
+                  "can show that their results are current. Run nopekit check{tier_flag}, "
+                  "then build the site again.",
         # The marketing page's stale notice: the fact without the command. A
         # reader of that page is not the person who runs `nopekit check`, and
         # the engineering page one link away says what to run.
         "stale_public": "Some results are older than the design.",
+        "unseen_public": "This page cannot show that some results are current.",
         "reads_all": "This evaluator reads every value of the design.",
         "disagree": "The status and the evidence of this claim disagree. This is a defect "
                     "in nopekit. Report it.",
@@ -514,6 +534,12 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
     "figure": MappingProxyType({
         "current": "This picture is from the result on this page.",
         "stale": "This picture is from the result on this page. That result is not current.",
+        # Issue #15, D1: the served result's evaluator reads inputs nopekit
+        # cannot see; the picture is that result's, and only a check run can
+        # say if it is current.
+        "unseen": "This picture is from the result on this page. Its evaluator reads inputs "
+                  "that nopekit cannot see, so only a check run can show that the result "
+                  "is current.",
         "older": "This picture is from another result. The result on this page has no "
                  "picture yet.",
         "none": "No picture of this result is on the page.",
@@ -690,6 +716,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         ClaimCause.NO_REASON: "no reason recorded",
         ClaimCause.UNRUN: "unrun",
         ClaimCause.INVALIDATED: "invalidated",
+        # Issue #15, D1: not "invalidated" — nothing moved that nopekit sees.
+        ClaimCause.UNSEEN: "unseen inputs",
         ClaimCause.NO_ARTICLE: "needs an article",
         ClaimCause.OWNED: "assumed by {owner}",
         ClaimCause.PHYSICAL_PASS: "a pass {recorded}, not bound to an article",
@@ -979,7 +1007,9 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         # P2.5a design: a moved article was told `nopekit check` re-runs what
         # moved, which a check run cannot do).
         "stale_advice": MappingProxyType({
-            "invalidated": "`nopekit check` re-runs what moved.",
+            # `{check}` is `nopekit check` with the tier that reaches the gates.
+            "invalidated": "`{check}` re-runs what moved.",
+            "unseen": "Only a check run can show that it is current: `{check}`.",
             "article-moved": "A new article is needed — a check run cannot restore it.",
             "claim-moved": "Test it again on an article — a check run cannot restore it.",
             "judgment-moved": "{authority} judges it again — a check run cannot restore it.",
@@ -1018,6 +1048,33 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         "fallback_unattributed": "{owner} is named with a fallback in claims/{id}.json and "
                                  "has not recorded it — {owner} records it in their own shell: "
                                  "nopekit claim physical {id} assume",
+    }),
+    # Issue #15, D1 ("own word, keep stale"): an evaluator whose entry read
+    # through a channel nopekit cannot see — a solver's own reads in a
+    # subprocess — is never current outside the check run that ran it. Each
+    # reader says so in these words, never "the design changed". The channel
+    # list itself (often 2 KB of paths) is `doctor`'s `opaque-inputs` row;
+    # every other reader prints a count and one example. *Rejected:* the list
+    # in full on `status` and `site build` (the line the eye needs was below
+    # it); hiding it entirely (a person who asks "which files?" gets no
+    # answer).
+    "unseen": MappingProxyType({
+        "only": "only a check run can show that the result is current",
+        "status": "unseen inputs: {shown} — {n} {evaluators} {read} inputs that nopekit "
+                  "cannot see ({k} in all, for example {example}; the full list: "
+                  "nopekit doctor). Only a check run can show that {their} {results} {are} "
+                  "current: nopekit check{tier_flag}",
+        # `meta.stale_reason`'s clause for them (`site._stale_reason`), which
+        # `site build`, `site status`, `doctor` and the technical page print.
+        "meta": "{shown} {read} inputs that nopekit cannot see ({k} in all, for example "
+                "{example}), so only a check run can show that {their} {results} {are} current",
+        "ready": "note: this ready holds for this check run only. {n} {evaluators} that it "
+                 "rests on {read} inputs that nopekit cannot see ({shown}), so status, the "
+                 "report and the site read {their} claims stale: only a check run can show "
+                 "that {their} {results} {are} current",
+        "doctor": "{n} {evaluators} {read} inputs that nopekit cannot see, so {their} "
+                  "claims read stale between check runs, and only a check run can show "
+                  "that {their} {results} {are} current: {rows}",
     }),
     # The claim comparison and the goalposts (P2.4-D9-D13): the Failing
     # reason's body, the checked table's columns (GLOSSARY §9: the value column
@@ -2562,6 +2619,12 @@ def reason(composed: Any, ledger: Ledger, claim: Claim, *, full: bool = False,
         shown = ", ".join(composed.cites[:3])
         more = f", +{len(composed.cites) - 3} more" if len(composed.cites) > 3 else ""
         return f"{lead}: {shown}{more}"
+    if cause is ClaimCause.UNSEEN:
+        # Issue #15, D1: the gate, then the one remedy. Never its channel
+        # list, which is `doctor`'s (often 2 KB of solver paths).
+        more = (f" (+{len(composed.cites) - 1} more)" if len(composed.cites) > 1 else "")
+        return (f"{lead}: {', '.join(composed.cites[:1]) or 'every verdict'}{more}; "
+                f"{HUMAN['unseen']['only']}")
     if cause is ClaimCause.INVALIDATED:
         named = [g for g in composed.cites if stale_reasons.get(g)]
         if named:
@@ -3940,7 +4003,8 @@ def _claim_text(claim: Claim) -> str:
 # ledger / registry queries
 # --------------------------------------------------------------------------- #
 def _compositions(ledger: Ledger, registry: Any, stale: bool,
-                  stale_gates: Collection[str] = ()) -> dict[str, Any]:
+                  stale_gates: Collection[str] = (),
+                  unseen_gates: Collection[str] = ()) -> dict[str, Any]:
     """Every claim's `claims.Composed` — status AND cause — judged against the
     LIVE registry, not the cache.
 
@@ -3951,10 +4015,11 @@ def _compositions(ledger: Ledger, registry: Any, stale: bool,
     Open ("the evaluator is right there, run it"). Those two send an agent in
     opposite directions, and only one of them is true. No `owners`: nothing in
     P2.1 attributes an owner (the signing channel is later in Phase 2), so every
-    assumption reads Gap here, as everywhere.
+    assumption reads Gap here, as everywhere. `unseen_gates` as for
+    `claims.compose`: the words of a Stale claim, never its status.
     """
     return claim_logic.compositions(ledger, registry=registry, stale=stale,
-                                    stale_gates=stale_gates)
+                                    stale_gates=stale_gates, unseen_gates=unseen_gates)
 
 
 def _statuses(ledger: Ledger, registry: Any, stale: bool,
@@ -5164,18 +5229,71 @@ def _section_assumed(ledger: Ledger, composed: Mapping[str, Any],
 
 
 def _stale_suffix(claim: Claim, cover: dict[str, list[str]],
-                  stale_gates: Collection[str]) -> str:
+                  stale_gates: Collection[str], *, unseen: bool = False) -> str:
     """`: `g.one` is invalidated` — which covering gates made a claim Stale, when
     the caller said (``stale_gates``); ``""`` under the all-gates alias. The
     reason each gate moved is the resolver's and lives in `nopekit status`; the
-    report names the gate so the reader knows which result to re-check."""
+    report names the gate so the reader knows which result to re-check. With
+    ``unseen`` (the claim's cause is `unseen`, issue #15 D1): `: `g.one` reads
+    inputs that nopekit cannot see` — never "invalidated" of a gate whose
+    inputs, as far as nopekit sees, did not move."""
     stale = [gid for gid in (cover.get(claim.id) or list(claim.gates or []))
              if gid in set(stale_gates)]
     if not stale:
         return ""
+    if unseen:
+        return (": " + ", ".join(_code(g) for g in stale)
+                + f" {_plural(len(stale), 'reads', 'read')} inputs that nopekit cannot see")
     return (": " + ", ".join(_code(g) for g in stale)
             + f" {_plural(len(stale), 'is', 'are')} "
             + HUMAN["lead"][ClaimCause.INVALIDATED])
+
+
+def _tier_flag(registry: Any, gates_: Iterable[str]) -> str:
+    """`` --tier N`` for the costliest of ``gates_`` above `nopekit check`'s
+    default tier (0), else ``""`` — the flag a suggested check run needs to
+    reach them (`page.settle` keeps the same rule for a claim's evaluators).
+    What slipped through (review of P2, and again in issue #15's D1): a reader
+    advised a plain `nopekit check` for a tier-2 solver it cannot run."""
+    wanted = set(gates_ or ())
+    tier = max((int(spec.tier) for spec in _specs(registry) if spec.id in wanted), default=0)
+    return f" --tier {tier}" if tier > 0 else ""
+
+
+#: Programs a gate runs only to start another (`bash -c`, `sh -c`): a poor
+#: example of what nopekit cannot see, so `unseen_words` names another first.
+_LAUNCHERS = frozenset({"subprocess:bash", "subprocess:sh", "subprocess:env"})
+
+
+def unseen_words(key: str, resolution: Any, unseen: Iterable[str], *,
+                 registry: Any = None, rows: str = "") -> str:
+    """``HUMAN["unseen"][key]`` for the gates in ``unseen`` (`claims.unseen_gates`),
+    in the resolution's order: how many, the first by name, how many channels
+    their entries recorded and one of them — a program first, never a launcher
+    shell (`_LAUNCHERS`) — and the tier flag that reaches them; ``""`` when
+    there are none. ``rows`` is `doctor`'s per-gate list. One producer for
+    `status`, `site build`, `check` and `doctor` (issue #15, D1)."""
+    wanted = set(unseen or ())
+    order = [g for g in (getattr(resolution, "rows", None) or {}) if g in wanted]
+    order += sorted(wanted - set(order))
+    if not order:
+        return ""
+    channels: list[str] = []
+    for gid in order:
+        row = (getattr(resolution, "rows", None) or {}).get(gid)
+        reads = getattr(getattr(row, "entry", None), "reads", None)
+        for name in (reads.get("opaque") or () if isinstance(reads, Mapping) else ()):
+            if name not in channels:
+                channels.append(str(name))
+    programs = [c for c in channels if c.startswith("subprocess:") and c not in _LAUNCHERS]
+    example = (programs or channels or ["?"])[0]
+    n = len(order)
+    shown = order[0] + (f", +{n - 1}" if n > 1 else "")
+    return HUMAN["unseen"][key].format(
+        shown=shown, n=n, evaluators=_plural(n, "evaluator"), read=_plural(n, "reads", "read"),
+        their=_plural(n, "its", "their"), results=_plural(n, "result"),
+        are=_plural(n, "is", "are"), k=len(channels), example=example,
+        tier_flag=_tier_flag(registry, order), rows=rows)
 
 
 #: The statuses listed one by one under the failing section: GLOSSARY §9's
@@ -5256,10 +5374,19 @@ def _section_failing(ledger: Ledger, composed: Mapping[str, Any],
                 advice = HUMAN["physical"]["stale_advice"].get(key, advice)
                 # Two sentences, never a clause run into a capitalised one
                 # (review of P2.5a: "… *now* — A new article is needed — …").
-                out.append("- Passed, but not against the current inputs"
-                           + _stale_suffix(claim, cover, stale_gates)
+                # The command carries the tier that reaches the gates it names:
+                # what slipped through (review of P2), a plain `nopekit check`
+                # is tier 0, which runs no solver.
+                head = ("- Passed, but nopekit cannot see if the result is current"
+                        if found.cause is ClaimCause.UNSEEN
+                        else "- Passed, but not against the current inputs")
+                out.append(head
+                           + _stale_suffix(claim, cover, stale_gates,
+                                           unseen=found.cause is ClaimCause.UNSEEN)
                            + f". Nothing here is {word(ClaimStatus.PASS)} *now*. "
-                           + advice.format(authority=_one(getattr(claim, "authority", ""))))
+                           + advice.format(authority=_one(getattr(claim, "authority", "")),
+                                           check="nopekit check"
+                                           + _tier_flag(registry, found.cites)))
             if claim.physical_result and claim.physical_result.passed is not True:
                 res = claim.physical_result
                 article = article12(getattr(res, "article", None) or {})
@@ -5464,7 +5591,8 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
                     stale_reasons: Mapping[str, str] | None = None,
                     milestone: Any = None, boundary: bool = False,
                     article: str = "", test_card: Sequence[str] = (),
-                    amber: Sequence[str] | None = None) -> str:
+                    amber: Sequence[str] | None = None,
+                    unseen_gates: Collection[str] = ()) -> str:
     """The full readiness report as markdown — the project's public deliverable.
 
     Sections, in the order a sceptical reader needs them: the readiness
@@ -5531,7 +5659,7 @@ def render_markdown(ledger: Ledger, registry: Any, *, stale: bool = False,
     following the package's REPORT.md recorded on a design article no reprint
     could ever answer).
     """
-    composed = _compositions(ledger, registry, stale, stale_gates)
+    composed = _compositions(ledger, registry, stale, stale_gates, unseen_gates)
     cover = _coverage(ledger, registry)
 
     name = ledger.meta.name or "(unnamed project)"
@@ -5618,7 +5746,8 @@ def _section_amber(amber: Sequence[str] | None) -> list[str]:
 def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
                     stale_gates: Collection[str] = (),
                     params: Sequence[Any] | None = None,
-                    stale_reasons: Mapping[str, str] | None = None) -> str:
+                    stale_reasons: Mapping[str, str] | None = None,
+                    unseen_gates: Collection[str] = ()) -> str:
     """The same report compressed to something an agent can hold in context.
 
     Under ~40 lines for a healthy project, which is the point: this is what
@@ -5640,7 +5769,7 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
     `modelio.undefended_params` over it, and says nothing about parameters
     without it (a model that does not load is `status`'s `model:` line).
     """
-    composed = _compositions(ledger, registry, stale, stale_gates)
+    composed = _compositions(ledger, registry, stale, stale_gates, unseen_gates)
     lines: list[str] = []
 
     name = ledger.meta.name or "(unnamed)"
@@ -5713,8 +5842,14 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
     unrun = _unrun_specs(ledger, registry)
     gate_bits = [f"{len(ran)} ran"]
     moved = sorted({v.gate for v in ledger.verdicts} & set(stale_gates))
-    if moved:
-        gate_bits.append(f"{len(moved)} {HUMAN['lead'][ClaimCause.INVALIDATED]}")
+    # Issue #15, D1: a gate not current only for a channel nopekit cannot see
+    # is counted under its own words, never as "invalidated".
+    unseen_moved = [g for g in moved if g in set(unseen_gates or ())]
+    if len(moved) > len(unseen_moved):
+        gate_bits.append(f"{len(moved) - len(unseen_moved)} "
+                         f"{HUMAN['lead'][ClaimCause.INVALIDATED]}")
+    if unseen_moved:
+        gate_bits.append(f"{len(unseen_moved)} with {HUMAN['lead'][ClaimCause.UNSEEN]}")
     if skipped:
         gate_bits.append(f"{len(skipped)} {HUMAN['outcome']['skipped']}")
     if errored:
@@ -5777,7 +5912,8 @@ def write_report(root: str, ledger: Ledger, registry: Any, *,
                  stale: bool = False, stale_gates: Collection[str] = (),
                  model_error: str = "", params: Sequence[Any] | None = None,
                  stale_reasons: Mapping[str, str] | None = None,
-                 amber: Sequence[str] | None = None) -> str:
+                 amber: Sequence[str] | None = None,
+                 unseen_gates: Collection[str] = ()) -> str:
     """Render the markdown report to `REPORT.md` at the project root — an output
     git ignores (P2.5b-D17, PLAN D-14) — and return its path. What slipped
     through while it was the tracked `docs/readiness.md` (S-41): it drifted from
@@ -5805,7 +5941,8 @@ def write_report(root: str, ledger: Ledger, registry: Any, *,
     atomic_write_text(path, render_markdown(ledger, registry, stale=stale,
                                             stale_gates=stale_gates, root=root,
                                             model_error=model_error, params=params,
-                                            stale_reasons=stale_reasons, amber=amber))
+                                            stale_reasons=stale_reasons, amber=amber,
+                                            unseen_gates=unseen_gates))
     return path
 
 
@@ -6038,7 +6175,8 @@ def render_junit(ledger: Ledger, verdicts: Iterable[Verdict], registry: Any, *,
                  not_run: Any = None, cached: Iterable[str] = frozenset(),
                  stale: bool = False, spine: str = "",
                  stale_gates: Collection[str] = (),
-                 stale_reasons: Mapping[str, str] | None = None) -> str:
+                 stale_reasons: Mapping[str, str] | None = None,
+                 unseen_gates: Collection[str] = ()) -> str:
     """This command's run as JUnit XML — never greener than its exit code.
 
     A CI system renders this file, not the exit code, so the file carries the
@@ -6083,7 +6221,7 @@ def render_junit(ledger: Ledger, verdicts: Iterable[Verdict], registry: Any, *,
     import xml.etree.ElementTree as ET        # ~6 ms; only `--junit` pays it
 
     code = int(exit_code)
-    composed = _compositions(ledger, registry, stale, stale_gates)
+    composed = _compositions(ledger, registry, stale, stale_gates, unseen_gates)
     root = ET.Element("testsuites", {"name": "nopekit check"})
     props = [("spine_version", __version__), ("exit_code", str(code)),
              ("tier", str(_int_or(tier))), ("ready", "true" if ready else "false"),
@@ -6239,6 +6377,7 @@ __all__ = [
     "recorded_by",
     "readiness",
     "not_ready_line",
+    "unseen_words",
     "render_terminal",
     "render_markdown",
     "write_report",

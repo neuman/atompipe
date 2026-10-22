@@ -163,7 +163,9 @@ WORD_KEYS = frozenset({
     "quantity",
     # review of P2: a chart's baked table (`chart_table`), its cells and the
     # sentence that counts the rows left out
-    "rows"})
+    "rows",
+    # issue #15, D1: the marketing page's stale notice, baked beside `notice`
+    "notice_public"})
 RECORD_KEYS = frozenset({
     "schema", "name", "summary", "revision", "records_digest", "resolution_digest",
     "content_digest", "trace", "view", "kind", "title", "token", "id", "key", "lane",
@@ -1104,12 +1106,15 @@ SIDECAR_KEYS = ("schema", "view", "gate", "entry", "kind", "recipe", "files", "t
 #: chart's series (JSON).
 FIGURE_ROLES = ("image", "field", "chart")
 
-#: The four words a bound figure's currency can take (B.1.5), each with its
+#: The words a bound figure's currency can take (B.1.5), each with its
 #: sentence in ``report.HUMAN["site"]["figure"]``: ``current`` beside the fresh
 #: served entry, ``stale`` beside a served entry that is not current,
-#: ``older`` when the picture is of another entry of the gate, ``none`` when
-#: there is no picture to show.
-FIGURE_CURRENCIES = ("current", "stale", "older", "none")
+#: ``unseen`` beside one that is not current only because its evaluator reads
+#: inputs nopekit cannot see (issue #15, D1: `claims.unseen_gates`), ``older``
+#: when the picture is of another entry of the gate, ``none`` when there is no
+#: picture to show. *Rejected* for ``unseen``: ``stale``'s sentence, "That
+#: result is not current" — nopekit does not know that either.
+FIGURE_CURRENCIES = ("current", "stale", "unseen", "older", "none")
 
 _ENTRY_NAME = re.compile(r"^[0-9a-f]{16}-[0-9a-f]{8}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -1144,6 +1149,12 @@ def figure_folder(gate: str, entry: str) -> str:
 def live_folder(gate: str, entry: str) -> str:
     """``assets/live/<gate>/<entry>``, under ``site/``."""
     return posixpath.join(LIVE_DIR, _component(gate), _component(entry))
+
+
+def _served_currency(fresh: bool, unseen: bool) -> str:
+    """The currency of a picture of the served entry: ``current``, ``unseen``
+    or ``stale`` — one rule for the build (`figure_for`) and the checker (G2)."""
+    return "current" if fresh else "unseen" if unseen else "stale"
 
 
 def figure_currency_word(currency: str) -> str:
@@ -1224,7 +1235,8 @@ def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | No
     return doc, ""
 
 
-def figure_for(root: str, gate: str, view: str, served: str, fresh: bool) -> Figure:
+def figure_for(root: str, gate: str, view: str, served: str, fresh: bool,
+               unseen: bool = False) -> Figure:
     """The figure a bound view shows (B.1.5), read from the disk: the valid
     sidecar under the served entry (``current`` when the entry is fresh, else
     ``stale``); else the one other entry's folder of the gate that holds a
@@ -1238,8 +1250,8 @@ def figure_for(root: str, gate: str, view: str, served: str, fresh: bool) -> Fig
     if served:
         found, why = read_sidecar(root, gate, served, view)
         if found is not None:
-            return Figure(view, gate, served, served, "current" if fresh else "stale", found,
-                          ())
+            return Figure(view, gate, served, served, _served_currency(fresh, unseen),
+                          found, ())
         if why != "no sidecar":
             problems.append(f"view {view}: the picture under {gate}/{served} is not shown: "
                             f"{why}")
@@ -2144,6 +2156,7 @@ _SETTLE: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "unqualified": ("run", ("nopekit check{tier_flag}",)),
     "unrun": ("run", ("nopekit check{tier_flag}",)),
     "invalidated": ("run", ("nopekit check{tier_flag}",)),
+    "unseen": ("unseen", ("nopekit check{tier_flag}",)),
     "outside-context": ("outside", ("nopekit why {id}",)),
     "fallback": ("outside", ("nopekit why {id}",)),
     "no-evaluator": ("find", ("nopekit gap --propose",)),
@@ -3188,6 +3201,17 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
 
     unresolved = claim_logic.unresolved(view, composed)
     stale = bool((payload.get("meta") or {}).get("stale"))
+    # Issue #15, D1: when every Stale claim is Stale only for evaluators
+    # nopekit cannot see into, the notice says so — never "older than the
+    # design" of an untouched design — with the tier that reaches them.
+    stale_claims = [c for c in composed.values() if c.status is ClaimStatus.STALE]
+    unseen_only = bool(stale_claims) and all(c.cause is ClaimCause.UNSEEN
+                                             for c in stale_claims)
+    unseen_tier = max((tiers.get(g, 0) for c in stale_claims for g in c.cites), default=0)
+    notice = ("" if not stale
+              else said["notices"]["unseen"].format(
+                  tier_flag=f" --tier {unseen_tier}" if unseen_tier > 0 else "")
+              if unseen_only else said["notices"]["invalidated"])
     verdict = {"token": toks.readiness, "ready": bool(unresolved.ready),
                "sentence": report_logic._verdict_sentence(view, composed, registry, stale=False,
                                                           markdown=False, register="site"),
@@ -3196,7 +3220,10 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                "headline": report_logic.site_headline(view, composed),
                "limits": report_logic.limits_line(view, register="site"),
                "tally": report_logic.count_bits(composed), "stale": stale,
-               "notice": said["notices"]["invalidated"] if stale else ""}
+               "notice": notice,
+               # The marketing page's notice, baked (the page computes no word).
+               "notice_public": ("" if not stale else said["notices"]["unseen_public"]
+                                 if unseen_only else said["notices"]["stale_public"])}
 
     milestones = sorted(getattr(view, "milestones", None) or (), key=lambda m: _natural(m.id))
     groups = []
@@ -3744,8 +3771,8 @@ def _amber_problems(map_doc: Mapping[str, Any] | None, page_doc: Mapping[str, An
 # --------------------------------------------------------------------------- #
 class FigureFacts(NamedTuple):
     """What `_figure_problems` holds a baked figure against, from one producer
-    (`figure_facts`): ``served`` ``{gate: (entry name, fresh)}`` (the
-    resolution's), ``outcomes`` ``{gate: status}`` (``state.json``'s verdict
+    (`figure_facts`): ``served`` ``{gate: (entry name, fresh, unseen)}`` (the
+    resolution's; ``unseen`` is `claims.unseen_gates`'), ``outcomes`` ``{gate: status}`` (``state.json``'s verdict
     rows, as `bake_page`'s evaluators read them), ``floor`` ``{(claim, gate):
     row}`` (`_floor_values`), ``cover`` ``{gate: [claim ids]}`` (`gate_cover`),
     ``claims`` the claims by id, ``shown`` ``{(gate, view): (entry, currency)}``
@@ -3777,10 +3804,12 @@ def figure_facts(root: str, resolution: Any, payload: Mapping[str, Any] | None, 
     the page was baked with (``state.json``'s, which a reader passes from the
     disk); none given, ``payload``'s."""
     rows = getattr(resolution, "rows", None) or {}
+    unseen = claim_logic.unseen_gates(resolution)
     served = {}
     for gid, row in rows.items():
         entry = getattr(row, "entry", None)
-        served[gid] = (str(getattr(entry, "name", "") or ""), bool(getattr(row, "fresh", False)))
+        served[gid] = (str(getattr(entry, "name", "") or ""), bool(getattr(row, "fresh", False)),
+                       gid in unseen)
     outcomes = {str(r.get("gate")): str(r.get("status") or "unrun")
                 for r in (payload or {}).get("verdicts") or () if isinstance(r, Mapping)}
     floor: dict[tuple, dict] = {}
@@ -3804,8 +3833,8 @@ def figure_facts(root: str, resolution: Any, payload: Mapping[str, Any] | None, 
 def _disk_shown(facts: FigureFacts, gate: str, view: str, kind: str) -> tuple[str, str]:
     """``(entry, currency)`` the disk resolves (gate, view) to, as the bound
     pass does: a sidecar of another kind shows nothing."""
-    served, fresh = facts.served.get(gate, ("", False))
-    found = figure_for(facts.root, gate, view, served, fresh)
+    served, fresh, unseen = facts.served.get(gate, ("", False, False))
+    found = figure_for(facts.root, gate, view, served, fresh, unseen)
     if found.sidecar is None or found.sidecar.get("kind") != kind:
         return "", "none"
     return found.entry, found.currency
@@ -3864,8 +3893,8 @@ def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
             if (gate, view_id, kind) not in shown_cache:
                 shown_cache[(gate, view_id, kind)] = _disk_shown(facts, gate, view_id, kind)
             disk = shown_cache[(gate, view_id, kind)]
-        served, fresh = facts.served.get(gate, ("", False))
-        expected = ("none" if not entry else ("current" if fresh else "stale")
+        served, fresh, unseen = facts.served.get(gate, ("", False, False))
+        expected = ("none" if not entry else _served_currency(fresh, unseen)
                     if entry == served else "older")
         if (entry, currency) != disk or currency != expected:
             out.append(f"{where} reads {currency} from {entry or 'no result'}, the resolution "

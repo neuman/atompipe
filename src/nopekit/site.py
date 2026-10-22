@@ -2909,11 +2909,12 @@ def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution:
     is the memo, and the viewgen is not called; else, when it is available, it
     draws from a `BoundContext` and the spine checks (`_figure_refusal`) and
     publishes (`_publish_figure`). Then the figure the page shows is read from
-    the disk (`page.figure_for`): current, stale, older or none. A viewgen that
+    the disk (`page.figure_for`): current, stale, unseen, older or none. A viewgen that
     is unavailable, crashes, returns nothing or is refused moves no status (no
     view reaches the resolution) and deletes no picture: the cleaner keeps the
     figure it resolved to."""
     rows = getattr(resolution, "rows", None) or {}
+    unseen = claim_logic.unseen_gates(resolution)
     stripped = Ledger.from_dict(ledger.to_dict())
     stripped = dataclasses.replace(stripped, claims=[
         dataclasses.replace(c, acceptance=Acceptance()) for c in stripped.claims])
@@ -2979,7 +2980,8 @@ def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution:
                 note += ("; " if note else "") + ("the picture of this result was drawn by an "
                                                   "older scene and is kept: build where its "
                                                   "tools are to draw it again")
-        figure = page_logic.figure_for(root, gate_id, spec.id, served, fresh)
+        figure = page_logic.figure_for(root, gate_id, spec.id, served, fresh,
+                                       gate_id in unseen)
         warnings.extend(figure.problems)
         sidecar = figure.sidecar
         if sidecar is not None and sidecar.get("kind") != ViewKind(spec.kind).value:
@@ -3862,6 +3864,7 @@ def state(
     cover = report_logic._coverage(view, registry)
     stale_reasons = {gid: (resolution.rows[gid].stale_reason if gid in resolution.rows
                            else "") for gid in stale_gates}
+    unseen = claim_logic.unseen_gates(resolution)
 
     from . import packs as pack_logic             # a reader's module: not at import
     found_proposers = (pack_logic.proposers(root)
@@ -3898,6 +3901,10 @@ def state(
         row["cached"] = bool(how is not None and how.cached)
         row["fresh"] = bool(how is not None and how.fresh) and not everything
         reason = how.stale_reason if how is not None else ""
+        if verdict.gate in unseen and not everything:
+            # Issue #15, D1: in its own words, a count and one example — the
+            # whole channel list (often 2 KB of solver paths) is `doctor`'s.
+            reason = report_logic.unseen_words("meta", resolution, {verdict.gate})
         row["stale_reason"] = reason or (_MARKED_STALE if everything else "")
         # No clock here (architecture phase 5, SPEC 32): a verdict's `when` and
         # age go to `data/build.json` (`ages`), which git ignores, so a rebuild
@@ -4146,7 +4153,8 @@ def _composed(view: Any, registry: Any, resolution: Any, everything: bool = Fals
     """The compositions `state` and the front page share — one
     `claims.compositions` call per build."""
     return claim_logic.compositions(view, registry=registry, stale=everything,
-                                    stale_gates=frozenset(resolution.stale_gates))
+                                    stale_gates=frozenset(resolution.stale_gates),
+                                    unseen_gates=claim_logic.unseen_gates(resolution))
 
 
 def _chart_margins(row: dict) -> dict:
@@ -4440,13 +4448,22 @@ def _stale_reason(resolution: Any, stale_gates: frozenset) -> str:
     which result it touched, and was the same sentence for a comment edit and a
     changed load case.
     """
+    unseen = claim_logic.unseen_gates(resolution)
     named = [(gid, resolution.rows[gid].stale_reason)
-             for gid in resolution.rows if gid in stale_gates]
-    named += [(gid, "") for gid in sorted(stale_gates - {gid for gid, _ in named})]
+             for gid in resolution.rows if gid in stale_gates and gid not in unseen]
+    named += [(gid, "") for gid in sorted(stale_gates - unseen - {gid for gid, _ in named})]
     shown = [f"{gid}: {why}" if why else gid
              for gid, why in named[:verdict_logic.MAX_STALE_REASONS]]
     more = len(named) - len(shown)
-    return "; ".join(shown) + (f" (+{more} more)" if more > 0 else "")
+    text = "; ".join(shown) + (f" (+{more} more)" if more > 0 else "")
+    if unseen:
+        # Issue #15, D1: the gates not current only for a channel nopekit
+        # cannot see, in one clause of their own — a count and one example.
+        # What slipped through: each gate's whole channel list (~2 KB of
+        # solver paths) under "verdicts are STALE", for an untouched design.
+        clause = report_logic.unseen_words("meta", resolution, unseen)
+        text = f"{text}; {clause}" if text else clause
+    return text
 
 
 def _parse_iso(text: str) -> datetime | None:

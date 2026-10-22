@@ -635,7 +635,9 @@ an agent can read the site's state without a browser.
   the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
   currency, currency_word}`, where `entry` is the result the picture was drawn from
   and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
-  not current), or `older` (another entry of the gate, not always an earlier one:
+  not current), `unseen` (the served entry, not current only because its evaluator
+  reads inputs nopekit cannot see: `claims.unseen_gates`, issue #15 D1), or `older`
+  (another entry of the gate, not always an earlier one:
   after A, B, A the picture beside A is B's, the later run; the served one has no
   picture yet), with its fixed sentence. A bound view with no picture has no row. A
   bound view is never the page's representation or a marketing alternate as a plain
@@ -941,7 +943,8 @@ in Python. Top to bottom:
    is `words.headings.unsettled` and which holds `verdict.sentence`, then a link to
    `marketing/#story` (only when there is a story or an intro) and one to `engineering/`
    labelled `words.headings.evidence`. The headline, the chips,
-   `words.notices.stale_public` (while `verdict.stale` is true) and `verdict.limits`
+   `verdict.notice_public` (while `verdict.stale` is true; `words.notices.stale_public`
+   for a page.json from before it) and `verdict.limits`
    (small) are one block, `#verdict`; the fold and the links come after it. The
    build-failed banner sits under the menu, above the hero. Narrower than 980 px the
    name and that block come FIRST, then the viewer at 50svh at most, then the summary
@@ -989,7 +992,10 @@ never on it: an absent story or representation leaves its part out. With neither
 `story.md` nor `intro.md`, `site build` warns `site/content/story.md is missing: the
 marketing page has no story`; with `intro.md` alone it says, as a notice that is no
 warning, that the page shows `intro.md` as its story until `story.md` is written. It says no
-CLI instruction: `verdict.notice` is the engineering page's, `stale_public` this one's.
+CLI instruction: `verdict.notice` is the engineering page's, `verdict.notice_public` this
+one's (`stale_public`, or `unseen_public` when every Stale claim reads Stale only for
+evaluators nopekit cannot see into — issue #15 D1, the same choice as `notice`'s
+`invalidated` or `unseen`).
 
 **The customizer** is presentation only (SPEC 29's in-browser what-if stays rejected).
 A glass toolbar (`role="toolbar"`) at the bottom of the viewer: Explode (Assembled to
@@ -1192,7 +1198,7 @@ The outline's data (SPEC 28, 30), baked by `page.bake_page` and `page.bake_prose
                "limits": "<the limits line, register='site'>",
                "tally": [ { "key": "checked", "label": "3 checked", "n": 3,
                             "status": "pass", "errored": 0 } ],   // report.count_bits
-               "stale": false, "notice": "" },
+               "stale": false, "notice": "", "notice_public": "" },
   "intro": <prose> | null,
   "story": <prose> | null,                     // site/content/story.md (SPEC 40)
   "description": { "summary": "...", "notice": "" },
@@ -1268,7 +1274,7 @@ as the disk resolved it (`page.figure_for`), under each claim its gate covers:
 { "id": "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed",
   "view": "cfd-openfoam.speed", "kind": "image", "gate": "cfd.pressure_drop",
   "entry": "9c1e04d2b7a35f60-3a7b19e2",      // the entry it was drawn from ("" for none)
-  "currency": "current",                     // current | stale | older | none
+  "currency": "current",                     // current | stale | unseen | older | none
   "currency_word": "This picture is from the result on this page.",
   "drawn_text": "",                          // older: "That other result: pass, 2 Pa."
   "outcome": "pass", "outcome_word": "pass", // the evaluator row's; older: its own entry's
@@ -1872,5 +1878,5 @@ there is no block.
   the ingested evidence that grounds it.
 - **How old the results are, and which are not current.** A stale result must look
   stale, on its own row and in the banner. The marketing page says
-  `words.notices.stale_public` while any result is older than the design, and links to
+  `verdict.notice_public` while any result is not current, and links to
   the engineering page, where each claim and its evidence are one link away.

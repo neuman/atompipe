@@ -220,7 +220,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Architecture phase 5: next steps on the page are the predicate's.
          "test_site_truth.NextStepsAreThePredicate",
          # Architecture phase 3b: amber is display only.
-         "test_derivation.AmberChangesNoStatus"],
+         "test_derivation.AmberChangesNoStatus",
+         # Issue #15, D1: a claim Stale only for inputs nopekit cannot see has
+         # its own cause, which moves no status, readiness or blocking.
+         "test_unseen.UnseenMovesNoStatus"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and

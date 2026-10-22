@@ -46,7 +46,10 @@ convergence criteria; any difference is an error. Every tool runs with a
 private HOME that turns off `allowSystemOperations` and with floating-point
 trapping forced on, and a log whose banner does not show both is an error. These gates read inside a
 subprocess, so they are **opaque**: they re-run on every check where OpenFOAM
-exists (the baseline's six gates take about 10 s in all). Each gate runs its
+exists (the baseline's six gates take about 10 s in all). Between check runs their
+claims read Stale with the cause *unseen inputs*: nopekit cannot see the inputs
+OpenFOAM reads, so only a check run can show that a result is current. `check`
+says this on the line after its *ready*; `nopekit doctor` lists every input. Each gate runs its
 own meshes: nothing is shared between gates, because the spine empties caches
 before every run.
 

@@ -456,8 +456,10 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
     commits it, and draws nothing.
 
     The cfd gates are opaque (they read OpenFOAM through subprocesses), so the
-    spine reads their entries stale once ``check`` is done, and the figures say
-    the same word as the claims beside them."""
+    spine reads their entries stale once ``check`` is done: the claims read
+    Stale, and the figures say why in their own word, ``unseen`` — never
+    ``stale``'s "That result is not current", which nopekit does not know
+    either (issue #15, D1)."""
 
     @classmethod
     def setUpClass(cls):
@@ -554,10 +556,10 @@ class TheCfdFiguresOnTheStandIn(_env.EnvCase):
                 with self.subTest(cid=cid, view=view_id):
                     self.assertEqual((fig["gate"], fig["entry"], fig["kind"]),
                                      (GATE, entry, "image" if view_id in STILLS else "chart"))
-                    # Opaque gates: the served entry reads stale, and so do the
-                    # claims and the figures (the class docstring).
+                    # Opaque gates: the served entry is not current, the claims
+                    # read Stale and the figures `unseen` (the class docstring).
                     self.assertEqual((fig["currency"], doc["claims"][cid]["token"]),
-                                     ("stale", "stale"))
+                                     ("unseen", "stale"))
                     self.assertEqual([{"id": c["id"], "token": c["token"]}
                                       for c in fig["claims"]], chips)
                     src = fig["src"] if view_id in STILLS else fig["data_src"]
@@ -2180,7 +2182,9 @@ class TheRealPipeline(_env.EnvCase):
             for view_id, fig in figs.items():
                 with self.subTest(cid=cid, view=view_id):
                     self.assertEqual((fig["gate"], fig["entry"]), (GATE, self.entry))
-                    self.assertIn(fig["currency"], ("current", "stale"))
+                    # An opaque gate's served entry is never `stale` on the page:
+                    # nothing nopekit sees moved (issue #15, D1).
+                    self.assertIn(fig["currency"], ("current", "unseen"))
                     self.assertEqual([{"id": c["id"], "token": c["token"]}
                                       for c in fig["claims"]], chips)
                     sidecar, why = page.read_sidecar(self.root, GATE, self.entry, view_id)

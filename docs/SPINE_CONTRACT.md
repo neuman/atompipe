@@ -2541,6 +2541,11 @@ class ClaimCause(StrEnum): FAILED | PHYSICAL_FAIL | ERRORED | PREREQUISITE_ERROR
                          | CONTRADICTION | JUDGED_FAIL | NO_AUTHORITY | AUTHORITY_UNATTRIBUTED
                          | ARTICLE_MOVED | CLAIM_MOVED | JUDGMENT_MOVED | ARTICLE_UNJUDGED
                          | AWAITING_JUDGMENT | ON_ARTICLE | JUDGED      # P2.5a
+                         | UNSEEN       # issue #15 D1: Stale for an opaque channel alone
+OPAQUE_REASON = "opaque inputs: "    # the head of the resolver's reason for an opaque entry
+def unseen_gates(resolution) -> frozenset    # stale ONLY through a channel nopekit cannot see
+                                             #   (the row's reason and its entry's opaque list,
+                                             #   or a prerequisite mark that ends in one)
 class Attribution(NamedTuple): owner: str; reason: str     # the signing channel's record of an owner
 @dataclass(frozen=True)
 class Composed: status: ClaimStatus; cause: ClaimCause; cites: tuple; verdict: Verdict | None
@@ -2555,10 +2560,13 @@ def outcome_key(verdict) -> str                              # phase 3a: its OUT
                                                              #   for None — the round record's
 def covers(spec, claim) -> bool                              # claim id OR any claim tag in spec.claims
 def covering_verdicts(claim, verdicts) -> list[Verdict]      # the same id-or-tag rule, on verdicts
-def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None) -> Composed
-def compositions(ledger, *, registry=None, stale=False, stale_gates=(), owners=None) -> dict[str, Composed]
+def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None,
+            unseen_gates=()) -> Composed     # unseen_gates: unseen_gates(resolution); words only
+def compositions(ledger, *, registry=None, stale=False, stale_gates=(), owners=None,
+                 unseen_gates=()) -> dict[str, Composed]
 def resolve_status(claim, verdicts, *, stale: bool = False,
-                   stale_gates: Collection[str] = (), owners=None) -> ClaimStatus  # compose(...).status
+                   stale_gates: Collection[str] = (), owners=None,
+                   unseen_gates=()) -> ClaimStatus  # compose(...).status
 def explaining_verdict(claim, verdicts) -> Verdict | None    # failed > errored > skipped > unqualified
 def statuses(ledger, *, stale=False, registry=None, stale_gates=(), owners=None) -> dict[str, ClaimStatus]
 def coverage(ledger, registry) -> dict[str, list[str]]       # claim id -> LIVE gate ids
@@ -3089,17 +3097,20 @@ def result_facts(claim, entry, *, register="cli") -> dict  # {counts, token, why
 def latency_words(claim, exports) -> str     # "measured 26 h on article <a12> (expected 1 day)" |
                                              #   "expected 1 day (declared)" | that none is declared
 def not_ready_line(ledger, composed) -> str  # `check`'s line when nothing blocks it
+def unseen_words(key, resolution, unseen, *, registry=None, rows="") -> str
+                                            # issue #15 D1: HUMAN["unseen"][key] for the gates
+                                            #   claims.unseen_gates found: a count, one example
 RATIONALE_UNKNOWN = "Parameter rationales are not known"  # + ": <why>" — no view, or no model
 def render_terminal(ledger, registry, *, stale=False, stale_gates=(), params=None,
-                    stale_reasons=None) -> str
+                    stale_reasons=None, unseen_gates=()) -> str
 def render_markdown(ledger, registry, *, stale=False, stale_gates=(), model_error="",
                     title="", root="", params=None, stale_reasons=None,
-                    milestone=None) -> str  # milestone: the report for that spend (P2.5b)
+                    milestone=None, unseen_gates=()) -> str  # milestone: that spend's (P2.5b)
 def write_report(root, ledger, registry, *, stale=False, stale_gates=(), model_error="",
-                 params=None, stale_reasons=None) -> str   # REPORT.md, ignored (P2.5b)
+                 params=None, stale_reasons=None, unseen_gates=()) -> str  # REPORT.md (P2.5b)
 def render_junit(ledger, verdicts, registry, *, tier, ready, exit_code, when,
                  not_run=None, cached=frozenset(), stale=False, spine="",
-                 stale_gates=(), stale_reasons=None) -> str
+                 stale_gates=(), stale_reasons=None, unseen_gates=()) -> str
     # `check --junit`: suites gates / claims.critical / claims.not-critical
 def render_selftest_junit(results, *, exit_code, when, baselines=None) -> str
     # `gate selftest --junit`: suite controls, plus baselines in pack mode
@@ -3784,14 +3795,15 @@ def evidence_source(root, text, *, ignored=None) -> tuple   # (source, outside, 
 FIGURES_DIR = "assets/figures"; LIVE_DIR = "assets/live"     # a bound figure's folders
 SIDECAR_SUFFIX = ".view.json"; SIDECAR_SCHEMA = 1; SIDECAR_KEYS: tuple
 FIGURE_ROLES = ("image", "field", "chart")
-FIGURE_CURRENCIES = ("current", "stale", "older", "none")
+FIGURE_CURRENCIES = ("current", "stale", "unseen", "older", "none")
 class Figure(NamedTuple): view; gate; served; entry; currency; sidecar; problems
 def figure_folder(gate, entry) -> str        # assets/figures/<gate>/<entry>
 def live_folder(gate, entry) -> str          # assets/live/<gate>/<entry>
 def figure_currency_word(currency) -> str    # HUMAN["site"]["figure"][currency]
 def read_sidecar(root, gate, entry, view) -> tuple   # (sidecar | None, why): its folder's,
                                              #   an entry the cache holds, each file's bytes
-def figure_for(root, gate, view, served, fresh) -> Figure   # current | stale | older | none
+def figure_for(root, gate, view, served, fresh, unseen=False) -> Figure
+                                             # current | stale | unseen | older | none
 CAPTION_STATUS_PHRASES: tuple; FIGURE_CONTROLS = ("spin",)
 def caption_status(caption) -> str           # the status word a caption says, or ""
 class BoundFigure(NamedTuple): view; kind; gate; title; provenance; figure

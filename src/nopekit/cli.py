@@ -964,7 +964,8 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
     # A requirement's status from the view as `status` judges it (SPEC
     # decision 12): the caller's compositions, never the raw opinion.
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     # SPEC 14, 38: each rejection's condition and preference from the same
     # view and compositions, and each input's basis from its proposer.
     # Architecture phase 5: each prose file's stamp state, for a board's line.
@@ -1260,14 +1261,22 @@ def _stale_lines(resolution: verdicts.Resolution, registry: gates.Registry | Non
     stale = _stale_gate_list(resolution)
     if not stale:
         return [f"invalidated: none{counts}"]
+    # Issue #15, D1: the gates not current only for a channel nopekit cannot
+    # see share ONE line in their own words — a count and one example, the
+    # full channel list being `doctor`'s. What slipped through: one line per
+    # gate, each its whole channel list, ~2 KB above the counts, every one
+    # under "invalidated" for a design nobody had touched.
+    unseen = claims.unseen_gates(resolution)
     lines = []
-    for index, gate_id in enumerate(stale):
+    for gate_id in [g for g in stale if g not in unseen]:
         row = resolution.rows.get(gate_id)
         why = (row.stale_reason if row is not None else "") or "invalidated"
         if model_error:
             why = why.replace(f": {model_error}", "")
         why = (why.splitlines() or ["invalidated"])[0]
-        lines.append(f"{'invalidated: ' if index == 0 else '             '}{gate_id} — {why}")
+        lines.append(f"{'invalidated: ' if not lines else '             '}{gate_id} — {why}")
+    if unseen:
+        lines.append(report.unseen_words("status", resolution, unseen, registry=registry))
     lines[-1] += counts
     return lines
 
@@ -1390,8 +1399,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     params = _shown_params(root, ledger, model, model_error, resolution, registry,
                            projection=projection)
     undefended = modelio.undefended_params(params)
+    unseen = claims.unseen_gates(resolution)
     summary = claims.summarise(view, registry, stale_gates=stale_gates)
-    composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+    composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                   unseen_gates=unseen)
     resolved = {cid: c.status for cid, c in composed.items()}
     stale_reasons = _stale_reasons(resolution)
     site_info = _site_state(root, resolved=(view, registry, resolution, params, model,
@@ -1468,7 +1479,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
     sys.stdout.write(report.render_terminal(view, registry, stale_gates=stale_gates,
-                                            params=params, stale_reasons=stale_reasons))
+                                            params=params, stale_reasons=stale_reasons,
+                                            unseen_gates=unseen))
     if view.milestones:
         # Each milestone's line, as last evaluated (D17; review of P2.5b,
         # finding 5: SPINE_CONTRACT and the skill said `status` listed them, and
@@ -1942,9 +1954,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         projection, elapsed = ran.projection, ran.elapsed
 
         stale_gates = resolution.stale_gates
+        unseen = claims.unseen_gates(resolution)
         blockers = claims.blocking(view, registry, stale_gates=stale_gates)
         summary = claims.summarise(view, registry, stale_gates=stale_gates)
-        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                       unseen_gates=unseen)
 
     rows = list(result.rows)
     selected = {row.verdict.gate for row in rows}
@@ -1994,7 +2008,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         view, [row.verdict for row in rows], registry, tier=tier, ready=ready,
         exit_code=code, when=now, not_run=result.not_run,
         cached={row.verdict.gate for row in rows if row.cached}, spine=spine,
-        stale_gates=stale_gates, stale_reasons=stale_reasons))
+        stale_gates=stale_gates, stale_reasons=stale_reasons, unseen_gates=unseen))
 
     if args.json:
         _dump({
@@ -2092,9 +2106,15 @@ def cmd_check(args: argparse.Namespace) -> int:
     if carried:
         shown = ", ".join(v.gate for v in carried[:4])
         more = f", +{len(carried) - 4}" if len(carried) > 4 else ""
-        stale_n = sum(1 for v in carried if v.gate in stale_gates)
+        # Issue #15, D1: one not current only for a channel nopekit cannot see
+        # is counted in its own words, never as "invalidated".
+        unseen_n = sum(1 for v in carried if v.gate in stale_gates and v.gate in unseen)
+        stale_n = sum(1 for v in carried if v.gate in stale_gates) - unseen_n
+        tail = [f"{stale_n} of them invalidated"] if stale_n else []
+        tail += [f"{unseen_n} of them with {report.HUMAN['lead'][claims.ClaimCause.UNSEEN]}"
+                 ] if unseen_n else []
         _say(f"note: {len(carried)} gate(s) outside this sweep keep their last verdict "
-             f"({shown}{more})" + (f" — {stale_n} of them invalidated" if stale_n else ""))
+             f"({shown}{more})" + (f" — {', '.join(tail)}" if tail else ""))
 
     if not view.claims:
         # "ready" on a project that has never stated what must be true is the
@@ -2110,6 +2130,15 @@ def cmd_check(args: argparse.Namespace) -> int:
         # `ready: no critical claim is blocking` printed while a claim waited
         # for an article and an assumption had no owner.
         _say(report.not_ready_line(view, composed))
+        # Invariant 12: every reader but `export` says *ready* as last
+        # evaluated. A ready that rests on evaluators nopekit cannot see into
+        # holds in this run only — `status`, the report and the site read those
+        # claims Stale the moment it ends — so it says so on the next line
+        # (issue #15, D1). What slipped through: `check` said ready and every
+        # other reader, a second later, NOT ready, with nothing to join them.
+        rests = _unseen_in_run(rows, view, composed)
+        if rests and claims.unresolved(view, composed).ready:
+            _say(report.unseen_words("ready", resolution, rests, registry=registry))
     else:
         # In severity order (P2.1-D16): what slipped through (P2.0 F-2), record
         # order put a missing tool's `[skip ]` above a crash's row.
@@ -2118,7 +2147,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             found = composed[claim.id]
             _say(_blocking_line(claim, found.status,
                                 _blocking_reason(view, claim, found.status,
-                                                 stale=stale_reasons),
+                                                 stale=stale_reasons, unseen=unseen),
                                 errored=found.errored))
     # The rebuild prediction (P2.5a-D16), after the claim rows: one line per
     # article whose design moved — a prediction, never a refusal.
@@ -2489,7 +2518,8 @@ def _round_run(root: str, *, commit: bool, wait_s: float, now: str) -> RoundOutc
                                                shown=shown, built=built, traced=traced)
             done = rounds.write(root, content)
             composed = claims.compositions(view, registry=registry,
-                                           stale_gates=resolution.stale_gates)
+                                           stale_gates=resolution.stale_gates,
+                                           unseen_gates=claims.unseen_gates(resolution))
             text = report.round_paragraph(
                 _round_shape(done), done.round, done.changes, view=view, composed=composed,
                 check=check, site=site_info, wrote=done.written,
@@ -2760,8 +2790,28 @@ def _blocking_line(claim: Claim, status: ClaimStatus, reason: str, *,
             f"{report._one(claim.statement)} — {reason}")
 
 
+def _unseen_in_run(rows: Iterable[verdicts.SweepRow], view: Ledger,
+                   composed: Mapping[str, Any]) -> list[str]:
+    """The gates of this sweep, in its row order, that settled a required claim
+    on a current verdict whose reads went through a channel nopekit cannot see
+    — the ones every reader after this run will read Stale (issue #15, D1;
+    `claims.unseen_gates` is the same fact read back from the cache). From the
+    row's own reads: the run's `Reads` or the served entry's block."""
+    cited = {g for cid in claims.required_ids(view) if cid in composed
+             for g in composed[cid].cites}
+    out = []
+    for row in rows:
+        reads = row.reads
+        channels = (reads.get("opaque") if isinstance(reads, Mapping)
+                    else getattr(reads, "opaque", None))
+        if row.fresh and channels and row.verdict.gate in cited:
+            out.append(row.verdict.gate)
+    return out
+
+
 def _blocking_reason(ledger: Ledger, claim: Claim, status: ClaimStatus, *,
-                     stale: Mapping[str, str] | None = None) -> str:
+                     stale: Mapping[str, str] | None = None,
+                     unseen: Iterable[str] = ()) -> str:
     """The shortest true sentence about why one claim blocks: `report.reason`,
     in full, for the claim composed over `ledger` — the one producer every
     channel's reason comes from (P2.1-D15; `ReasonsAgree` holds this and
@@ -2782,10 +2832,11 @@ def _blocking_reason(ledger: Ledger, claim: Claim, status: ClaimStatus, *,
     `stale` is `{gate: why}` for the gates whose verdict is not current (the
     resolution's). A FAIL whose inputs moved stays FAIL (D-08) and says so —
     `gate : body (invalidated: why)` — and a Stale claim names its moved gate
-    with what moved.
+    with what moved. `unseen` is `claims.unseen_gates` of that resolution.
     """
     stale = dict(stale or {})
-    found = claims.compose(claim, ledger.verdicts, stale_gates=set(stale))
+    found = claims.compose(claim, ledger.verdicts, stale_gates=set(stale),
+                           unseen_gates=set(unseen or ()))
     return report.reason(found, ledger, claim, cut=False, stale_reasons=stale)
 
 
@@ -2846,7 +2897,8 @@ def _export_list(root: str, ledger: Ledger, *, as_json: bool) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     said = report.HUMAN["milestone"]
     declared = list(view.milestones)
     if as_json:
@@ -2987,7 +3039,8 @@ def _export_locked(args: argparse.Namespace, root: str, ledger: Ledger, mileston
     view, resolution = _resolved(root, ledger, registry, projection, model_error, now=now,
                                  model=model, sweep=result)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     found = milestones.disagreements(before, result, set(closure)) if result is not None \
         else []
     extra = list(preconditions)
@@ -3166,7 +3219,8 @@ def _export_build(root: str, ledger: Ledger, milestone: Any, view: Ledger, regis
                                        milestone=milestone,
                                        stale_reasons=_stale_reasons(resolution),
                                        boundary=True, article=built.article["hash"],
-                                       test_card=card)
+                                       test_card=card,
+                                       unseen_gates=claims.unseen_gates(resolution))
     required = claims.required_ids(view, milestone)
     manifest = {"milestone": name, "revision": built.article.get("revision", ""),
                 "records_digest": store.records_digest(root, exclude=("exports",)),
@@ -3839,7 +3893,8 @@ def cmd_claim_list(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     resolved = {cid: c.status for cid, c in composed.items()}
     cover = claims.coverage(view, registry)
     stale_reasons = _stale_reasons(resolution)
@@ -3922,7 +3977,8 @@ def cmd_claim_show(args: argparse.Namespace) -> int:
     # no registry at all — `claim list` said PENDING while `claim show` said
     # UNCLAIMED for the same claim, one command apart.
     claim = view.claim(args.id)
-    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates)
+    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates,
+                           unseen_gates=claims.unseen_gates(resolution))
     status = found.status
 
     why = _why_text(root, ledger, registry, model, model_error, view, resolution, claim.id,
@@ -4229,7 +4285,8 @@ def cmd_claim_physical(args: argparse.Namespace) -> int:
         view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                      now=now, model=model)
         current = view.claim(claim.id)
-        reads = claims.compose(current, view.verdicts, stale_gates=resolution.stale_gates)
+        reads = claims.compose(current, view.verdicts, stale_gates=resolution.stale_gates,
+                               unseen_gates=claims.unseen_gates(resolution))
         required = said["required"] if claim.critical else said["not_required"]
         head = [f"{claim.id} {report._one(claim.statement)}",
                 "  " + said["prompt_status"].format(terminal=report.terminal_word(claim),
@@ -4275,7 +4332,8 @@ def cmd_claim_physical(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=now, model=model)
     claim = view.claim(args.id)
-    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates)
+    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates,
+                           unseen_gates=claims.unseen_gates(resolution))
     shown = report.status_view(found, view, claim, stale_reasons=_stale_reasons(resolution))
     contradicts = [item for item in entry.get("contradicts") or ()
                    if item.get("inside") is True]
@@ -4567,7 +4625,8 @@ def cmd_gap(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     stale_reasons = _stale_reasons(resolution)
     waiting = report.in_severity(view, composed, claims.yet_to_run(view, composed))
     gaps = claims.find_gaps(view, registry)
@@ -5728,7 +5787,8 @@ def cmd_report(args: argparse.Namespace) -> int:
                 f"written into its package by `nopekit export {milestone.id}`")
 
     if args.json:
-        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                       unseen_gates=claims.unseen_gates(resolution))
         extra: dict[str, Any] = {}
         if milestone is not None:
             # The milestone's own predicate (review of P2.5b, finding 10: the
@@ -5775,7 +5835,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             store.ensure_ignore_blocks(root)
             path = report.write_report(root, view, registry, stale_gates=stale_gates,
                                        model_error=model_error, params=params,
-                                       stale_reasons=stale_reasons, amber=amber_lines)
+                                       stale_reasons=stale_reasons, amber=amber_lines,
+                                       unseen_gates=claims.unseen_gates(resolution))
             if view.decisions:
                 decisions.write_log(root, view)
         _say(rel(path, root))
@@ -5789,7 +5850,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         report.render_markdown(view, registry, stale_gates=stale_gates,
                                model_error=model_error, root=root, params=params,
                                stale_reasons=stale_reasons, milestone=milestone,
-                               amber=amber_lines), banner))
+                               amber=amber_lines,
+                               unseen_gates=claims.unseen_gates(resolution)), banner))
     return 0
 
 
@@ -6131,7 +6193,8 @@ def cmd_prefer(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=now, model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     row = next(r for r in claims.rejection_rows(view, composed)
                if r.decision == args.id and r.index == index)
     ledger = view
@@ -6810,7 +6873,8 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         return stale(f"what the page would show now cannot be worked out "
                      f"({exc}) — fix that, then `nopekit site build`")
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=frozenset(resolution.stale_gates))
+                                   stale_gates=frozenset(resolution.stale_gates),
+                                   unseen_gates=claims.unseen_gates(resolution))
     tokens = graph.tokens(view, resolution, registry, composed=composed)
     try:
         info["prose"] = [{"file": row["file"], "subject": row["subject"], "stamp": row["stamp"]}
@@ -7185,7 +7249,10 @@ def cmd_site_build(args: argparse.Namespace) -> int:
              f"that thinks it is drawing and is not looks exactly like a gate that found "
              f"nothing — fix the gate's locator or the view's node names.")
     if summary["stale"]:
-        _say(f"verdicts are STALE: {summary['stale_reason']} — `nopekit check`")
+        # The tier that reaches the gates it names: a plain `nopekit check` is
+        # tier 0, and advised it for a solver's results (issue #15, D1).
+        command = "nopekit check" + report._tier_flag(registry, resolution.stale_gates)
+        _say(f"verdicts are STALE: {summary['stale_reason']} — `{command}`")
     return 0
 
 
@@ -7839,7 +7906,8 @@ def cmd_site_stamp(args: argparse.Namespace) -> int:
         view, resolution = _resolved(root, ledger, registry, projection, "", now=utcnow_iso(),
                                      model=model)
         composed = claims.compositions(view, registry=registry,
-                                       stale_gates=resolution.stale_gates)
+                                       stale_gates=resolution.stale_gates,
+                                       unseen_gates=claims.unseen_gates(resolution))
         tokens = graph.tokens(view, resolution, registry, composed=composed)
         boards = page.boards_of(view)
         known = page.subjects(boards)
@@ -8735,9 +8803,16 @@ def _doctor_cache_rows(results: list[dict], root: str, registry: gates.Registry,
                          "installed here")
 
     found = notes.get("opaque-inputs", [])
+    # The full channel list lives here and nowhere else (issue #15, D1):
+    # `status`, `site build` and the page print a count and one example.
+    n_opaque = len(found)
     _check(results, "opaque-inputs", "warn" if found else "ok",
-           _listed(found) + " — never served from the cache: re-run on every check, "
-                            "stale between checks"
+           report.HUMAN["unseen"]["doctor"].format(
+               n=n_opaque, evaluators=report._plural(n_opaque, "evaluator"),
+               read=report._plural(n_opaque, "reads", "read"),
+               their=report._plural(n_opaque, "its", "their"),
+               results=report._plural(n_opaque, "result"),
+               are=report._plural(n_opaque, "is", "are"), rows=_listed(found))
            if found else "no cached verdict read through a channel the tracer cannot see")
 
     found = notes.get("cache-entries", [])

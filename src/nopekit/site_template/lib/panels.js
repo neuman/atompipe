@@ -103,7 +103,10 @@ export function staleBanner(state) {
   return el("aside", { class: "banner banner-stale", role: "status" },
     el("span", { class: "banner-glyph", "aria-hidden": "true", text: "≈" }),
     el("div", {},
-      el("b", { text: "Some results are older than the design." }),
+      // True of both of Stale's evaluator causes (issue #15, D1): a design that
+      // moved, and an evaluator whose inputs nopekit cannot see; the baked
+      // `meta.stale_reason` beside it says which.
+      el("b", { text: "Some results are not shown as current." }),
       " ",
       el("span", { text: meta.stale_reason || "The inputs of a verdict changed after it ran." }),
       el("p", { class: "banner-fix" }, "Run ", code("nopekit check"),

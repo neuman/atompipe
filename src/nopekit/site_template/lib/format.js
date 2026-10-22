@@ -178,6 +178,7 @@ export function outcomeLook(key) {
 const CURRENCY_LOOK = {
   current: { glyph: "✓", tone: "ok",    notice: false },
   stale:   { glyph: "≈", tone: "dim",   notice: true },
+  unseen:  { glyph: "≈", tone: "dim",   notice: true },
   older:   { glyph: "≈", tone: "warn",  notice: true },
   none:    { glyph: "◌", tone: "muted", notice: false },
 };

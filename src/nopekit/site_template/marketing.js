@@ -190,9 +190,13 @@ function verdictHead(verdict, words) {
           el("span", { text: headline }))
       : null,
     tallyList(verdict, { cls: "tally mk-tally" }),
-    verdict.stale && notices.stale_public
+    // The notice is baked (`verdict.notice_public`, issue #15 D1): "older than
+    // the design" is false of a solver's result on an untouched design. A
+    // page.json from before it falls back to the one sentence it had.
+    verdict.stale && (verdict.notice_public || notices.stale_public)
       ? el("p", { class: "nk-notice mk-stale", role: "status" },
-          el("span", { class: "nk-glyph", "aria-hidden": "true", text: "≈" }), notices.stale_public)
+          el("span", { class: "nk-glyph", "aria-hidden": "true", text: "≈" }),
+          verdict.notice_public || notices.stale_public)
       : null,
     verdict.limits ? el("p", { class: "limits mk-limits", text: verdict.limits }) : null,
   ];
