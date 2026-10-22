@@ -47,9 +47,16 @@
     "cfd.mesh_independence",
     "cfd.pressure_drop"
   ],
+  "provides_views": [
+    "cfd-openfoam.ladder",
+    "cfd-openfoam.speed",
+    "cfd-openfoam.pressure",
+    "cfd-openfoam.settle"
+  ],
   "provides_generators": [],
   "requires_tools": [
-    "openfoam2606"
+    "openfoam2606",
+    "pvbatch62"
   ],
   "requires_python": [],
   "max_tier": 2,

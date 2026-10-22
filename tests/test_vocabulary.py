@@ -704,6 +704,38 @@ def routing_problems(channel: str, lines: list[str]) -> list[str]:
     return out
 
 
+class StatusNamesTheTierThatReaches(unittest.TestCase):
+    """(review of P2) `status`'s next line names the tier that runs every
+    invalidated and unrun evaluator. What slipped through: it always said
+    `nopekit check --tier 0`, so a project whose stale claim rests on a
+    tier-2 solver was told to run a check that cannot reach it."""
+
+    class _Tiered:
+        def __init__(self, registry, tiers):
+            self.registry, self.tiers = registry, tiers
+
+        def specs(self):
+            return [dataclasses.replace(s, tier=self.tiers.get(s.id, s.tier))
+                    for s in self.registry.specs()]
+
+        def __getattr__(self, name):
+            return getattr(self.registry, name)
+
+    def next_line(self, registry, stale) -> str:
+        root = tempfile.mkdtemp(prefix="nopekit-vocab-tier-")
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        ledger = test_louder._probe_ledger(test_louder._probe_registry(), root)
+        text = report_mod.render_terminal(ledger, registry, stale_gates=stale)
+        return next(line for line in text.splitlines() if line.startswith("next: "))
+
+    def test_the_next_line_names_the_tier_of_the_stale_evaluator(self):
+        registry = test_louder._probe_registry()
+        self.assertIn("nopekit check --tier 0 ;", self.next_line(registry, set()))
+        tiered = self._Tiered(registry, {"probe.moved": 2})
+        self.assertIn("nopekit check --tier 2 ;", self.next_line(tiered, {"probe.moved"}))
+        self.assertIn("nopekit check --tier 0 ;", self.next_line(tiered, set()))
+
+
 class StatusWordsComeFromOneTable(unittest.TestCase):
     """(V11) Patching `report.HUMAN` moves every channel: no renderer holds a
     status word of its own. A Never-say scan cannot see a renderer that prints

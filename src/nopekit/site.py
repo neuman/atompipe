@@ -89,6 +89,7 @@ import csv
 import dataclasses
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -121,7 +122,9 @@ from .util import (
     atomic_write_json,
     atomic_write_text,
     ensure_dir,
+    rel,
     sha256_text,
+    short_hash,
     write_json_if_changed,
 )
 
@@ -139,6 +142,8 @@ __all__ = [
     "viewgen",
     "active_view_registry",
     "use_view_registry",
+    "load_viewgens",
+    "view_tool_rows",
     "availability",
     "run_viewgen",
     "run_all_viewgens",
@@ -283,7 +288,8 @@ FIGURE_SCRATCH = ".nopekit/out/figures"
 FIGURE_RECIPE_SALT = "nopekit-figure-v1"
 
 #: The kinds a bound viewgen draws: a still (``image``, a PNG), a chart (its
-#: series as its payload) and a 3D field (``model3d`` or ``field``, a GLB).
+#: series as its payload) and a 3D field (``model3d`` or ``field``, a GLB or
+#: a self-contained glTF: `SOLID_SUFFIXES`).
 #: *Rejected:* ``table`` (rows are a gate's evidence already, linked as such).
 BOUND_KINDS = (ViewKind.IMAGE, ViewKind.CHART, ViewKind.MODEL3D, ViewKind.FIELD)
 
@@ -293,7 +299,9 @@ BOUND_KINDS = (ViewKind.IMAGE, ViewKind.CHART, ViewKind.MODEL3D, ViewKind.FIELD)
 #: margin from the view's own limit, so a pack limit beside the claim's was a
 #: second limit on the page. *Rejected:* stripping such a key silently (a pack
 #: bug would read as a working chart).
-CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now"})
+#: ``markers`` too, since an unbound view's ``markers`` became its point
+#: (review of P2, `page.CHART_CURRENT_KEYS`).
+CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now", "markers"})
 
 #: The parts of a bound chart whose every number must be one a verified
 #: evidence file of the entry holds (a JSON leaf or a CSV cell): a chart draws
@@ -308,6 +316,23 @@ CAPTION_STATUS_PHRASES = page_logic.CAPTION_STATUS_PHRASES
 #: The bytes a PNG and a GLB start with (B.2.3's format check, stdlib).
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 GLB_MAGIC = b"glTF"
+
+#: The 3D files a bound figure may write: a GLB, or a glTF 2.0 JSON whose
+#: every buffer and image is a ``data:`` URI (`_solid_problem`). three.js's
+#: GLTFLoader reads both. Issue #15, P2.4, under the author's rule of
+#: 2026-10-21 (use the trusted tool's output, build as little as possible):
+#: ParaView 6.2 writes glTF and no GLB (``ExportView`` with ``InlineData``),
+#: and its faceted export passes the Khronos validator as it is (measured;
+#: `tests/test_cfd_views.py`), so the page takes ParaView's file unchanged.
+#: What a self-contained glTF closes: one that names a ``.bin`` or a texture
+#: beside it would make the page fetch a file the spine never saw, hashed or
+#: published. *Rejected:* a GLB repacker in the pack (the design's
+#: ``_gltf.py``: a codec of our own between ParaView and three.js); trimesh
+#: to convert (a second tool that rewrites the colours ParaView wrote, for
+#: 25% fewer bytes the 2 MiB cap did not need: 940 KB for the baseline's 8000
+#: cells); checking accessors here (the Khronos validator does that, in the
+#: tests, where node is).
+SOLID_SUFFIXES = (".glb", ".gltf")
 
 #: The line `ensure_site_ignore` adds once a bound viewgen is registered: the
 #: live 3D files of entries no export re-ran (`page.LIVE_DIR`) are on one
@@ -328,6 +353,14 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_te
 #: make the file that answers "what is the status of this project?" unreadable
 #: for the 99% of readers who did not want the table.
 VIEW_INLINE_MAX = 8192
+
+#: The suffix of a chart view's spec split out of ``state.json`` (P2.5):
+#: ``data/views/<id>~chart.json``, beside its payload's ``<id>.json``, named
+#: in its row as ``chart_url``. ``~`` is no character of a view id
+#: (`_ID_OK`), so no view's payload file can be another view's chart file.
+#: *Rejected:* ``.chart.json`` (the view ``a.chart``'s payload would be the
+#: view ``a``'s chart); a folder of its own (a second folder to clean).
+CHART_FILE_SUFFIX = "~chart.json"
 
 #: Characters allowed in a view id. Ids become filenames (``data/views/<id>.json``)
 #: and query fragments, and a locator addresses a view by this string, so a slash
@@ -587,7 +620,8 @@ class BoundContext(ViewContext):
       it returns None and says why. After the call the spine hashes every
       bound input and every verified evidence file again, and discards the
       picture if one moved.
-    * ``write_asset(name, bytes)`` writes a PNG or a GLB into the scratch; over
+    * ``write_asset(name, bytes)`` writes a PNG or a 3D file (a GLB, or a
+      glTF that holds its buffers inside it) into the scratch; over
       `page.EVIDENCE_MAX_BYTES` it raises and writes nothing.
     * ``write_live(name, bytes)`` the same, for a file published only to the
       ignored live folder.
@@ -804,6 +838,7 @@ class ViewRegistry:
 
     def __init__(self) -> None:
         self._views: dict[str, tuple[ViewSpec, Callable[[ViewContext], Any]]] = {}
+        self._tool_checks: dict[str, tuple[str, Callable[[str], Any]]] = {}
 
     # -- registration ------------------------------------------------------ #
     def register(
@@ -876,6 +911,28 @@ class ViewRegistry:
     def clear(self) -> None:
         """Empty the registry. Tests and isolated pack validation use a scratch one."""
         self._views.clear()
+        self._tool_checks.clear()
+
+    # -- the tools the views draw with ------------------------------------- #
+    def add_tool_check(self, tool: str, fn: Callable[[str], Any], *, pack: str = "") -> None:
+        """Register a view module's check of one tool it draws with
+        (`TOOL_CHECKS_NAME`). A second check of the same tool from the same
+        function is a no-op; from another, the first stays (``doctor`` shows
+        one row a tool)."""
+        self._tool_checks.setdefault(str(tool), (pack, fn))
+
+    def tool_checks(self) -> dict[str, tuple[str, Callable[[str], Any]]]:
+        """``{tool: (pack, check)}``, in registration order."""
+        return dict(self._tool_checks)
+
+    def view_tools(self) -> list[str]:
+        """Every tool a view draws with: each viewgen's ``requires_tools``,
+        then each tool a module checks, in order, once each."""
+        out: list[str] = []
+        for spec in self.specs():
+            out.extend(t for t in spec.requires_tools if t and t not in out)
+        out.extend(t for t in self._tool_checks if t not in out)
+        return out
 
     # -- lookup ------------------------------------------------------------ #
     def get(self, view_id: str) -> tuple[ViewSpec, Callable[[ViewContext], Any]] | None:
@@ -1021,6 +1078,145 @@ def use_view_registry(registry: ViewRegistry):
 
 
 # --------------------------------------------------------------------------- #
+# loading views/*.py
+# --------------------------------------------------------------------------- #
+def _shown(path: str, root: str | None) -> str:
+    """``path`` as a message names it: relative to the project, or whole when
+    there is none (`pack validate` loads a pack with no project)."""
+    return rel(path, root) if root else path
+
+
+def load_viewgens(directory: str, registry: ViewRegistry, *,
+                  pack: str, root: str | None) -> list[ViewSpec]:
+    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
+
+    Deliberately the same shape as `gates.load_project_gates`, because a viewgen is a
+    gate's twin: same directory convention, same `sys.path` handling, same
+    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
+    problem and must not print as a spine traceback". A pack author who has
+    written `gates/clash.py` writes `views/assembly.py` with nothing new to
+    learn, which is the whole reason `site.py` mirrors `gates.py` field for
+    field.
+
+    Two details carry weight:
+
+    * **Module names are salted with a hash of the file's absolute path**, so a
+      pack's `views/assembly.py` and a project's `views/assembly.py` are
+      different modules. Without the salt the second one to load silently reuses
+      the first one's code while every message names the second file.
+    * **Already-imported modules are re-registered from `fn.view_spec`**, not
+      re-executed. Python will not run a module twice, so a second build in one
+      process (a test, an agent that builds after every edit, `site status`
+      after `site build`) would decorate nothing and find an EMPTY registry —
+      reporting "this project has no views" about a project with six. The
+      decorator attaches `view_spec` to the function precisely so a loader can
+      recover the registration without re-running the module.
+
+    Registering the same function under the same id twice is a no-op in
+    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
+    the two paths stay one path rather than two that can drift.
+    """
+    if not os.path.isdir(directory):
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        raise NopekitError(f"cannot read {_shown(directory, root)}: {exc}") from exc
+    files = [os.path.join(directory, name) for name in names
+             if name.endswith(".py") and not name.startswith("_")]
+    if not files:
+        return []
+
+    where = f"pack {pack!r}: " if pack else ""
+    before = set(registry.ids())
+    # The directory ABOVE views/ — the pack root, or the project root. On
+    # sys.path so a viewgen can `import _geom` and share the helper the gate
+    # next door already uses, and set as PACK_DIR so pack-relative fixtures
+    # resolve the same way they do for gates.
+    base = os.path.dirname(directory)
+    sys.path.insert(0, base)
+    try:
+        with use_view_registry(registry):
+            for path in files:
+                module = _import_viewgen_module(
+                    path, pack=pack, base=base, root=root, where=where)
+                # The attribute walk, always — see the docstring. On a fresh
+                # import it re-registers what the decorator just registered
+                # (a no-op); on a reused one it is the only thing that registers
+                # anything at all.
+                for value in list(vars(module).values()):
+                    spec = getattr(value, "view_spec", None)
+                    if not isinstance(spec, ViewSpec) or not callable(value):
+                        continue
+                    try:
+                        registry.register(spec, value)
+                    except NopekitError as exc:
+                        raise NopekitError(
+                            f"{where}{_shown(path, root)}: {exc}") from exc
+                checks = getattr(module, TOOL_CHECKS_NAME, None)
+                if checks is None:
+                    continue
+                if not isinstance(checks, Mapping) or not all(
+                        isinstance(t, str) and t and callable(fn) for t, fn in checks.items()):
+                    raise NopekitError(
+                        f"{where}{_shown(path, root)}: {TOOL_CHECKS_NAME} must map each "
+                        f"tool's name to a function of the project root that returns "
+                        f"(ok, words)")
+                for tool, fn in checks.items():
+                    registry.add_tool_check(tool, fn, pack=pack)
+    finally:
+        try:
+            sys.path.remove(base)       # removes OUR insertion (the first match)
+        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
+            pass
+    return [spec for spec in registry.specs() if spec.id not in before]
+
+
+def _import_viewgen_module(path: str, *, pack: str, base: str,
+                           root: str | None, where: str) -> Any:
+    """Import one `views/*.py`, or raise an NopekitError naming the file."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    module_name = f"nopekit_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing                 # ordinary import semantics; see load_viewgens
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:         # pragma: no cover - defensive
+        raise NopekitError(f"{where}{_shown(path, root)}: no import machinery accepted this file")
+    module = importlib.util.module_from_spec(spec)
+    # Set BEFORE execution, which `module_from_spec` makes possible by handing
+    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
+    # defining module at decoration time so twenty decorators do not each retype
+    # the pack name — a mistyped one orphans a view in the site's grouping with
+    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
+    # that has to find a template or a material table shipped beside it; for a
+    # project's `views/` it is the project root, which is where those things are.
+    module.PACK = pack
+    module.PACK_DIR = base
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except NopekitError as exc:
+        # A registry refusal (duplicate view id, unknown kind) is already phrased
+        # for a human. Keep the phrasing and add the location.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(f"{where}{_shown(path, root)}: {exc}") from exc
+    except KeyboardInterrupt:
+        sys.modules.pop(module_name, None)
+        raise
+    except BaseException as exc:
+        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
+        # module whose exporter guards its own absence with `sys.exit()` at
+        # import time must not be able to end the command with that exit code.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(
+            f"{where}{_shown(path, root)} failed to import: {type(exc).__name__}: {exc}"
+        ) from exc
+    return module
+
+
+# --------------------------------------------------------------------------- #
 # the decorator
 # --------------------------------------------------------------------------- #
 def viewgen(
@@ -1120,6 +1316,51 @@ def availability(spec: ViewSpec) -> tuple[bool, str]:
     not learned any of that yet.
     """
     return _gate_availability(spec)      # type: ignore[arg-type]
+
+
+#: A view module may define ``TOOL_CHECKS = {"<tool>": check}``: ``check(root)``
+#: returns ``(ok, words)``, the words after ``"<tool>: "`` on ``doctor``'s row
+#: for that tool. For a tool whose presence on PATH says too little (the CFD
+#: pack checks that ``pvbatch62`` is the ParaView build it checked, and that
+#: its renderer control passed). A tool with no check reads found or not on
+#: PATH. *Rejected:* a ``ViewSpec`` field (a check is per tool, and a pack
+#: checks its tool before any viewgen needs it); doctor rows from the pack
+#: manifest's ``requires_tools`` alone (that list mixes gate and view tools,
+#: and ``doctor`` already shows the gates').
+TOOL_CHECKS_NAME = "TOOL_CHECKS"
+
+#: What a missing view tool changes, said on its row.
+NO_STATUS_WORDS = "No status depends on them."
+
+
+def view_tool_rows(registry: ViewRegistry, root: str, *,
+                   skip: Iterable[str] = ()) -> list[tuple[bool, str]]:
+    """``[(ok, "<tool>: <words>")]`` for every tool a view draws with, less
+    ``skip`` (the gates' tools, which have rows of their own): ``doctor``'s
+    rows. A check that raises reads as a problem of the check, never as the
+    tool found."""
+    skipped = set(skip)
+    rows: list[tuple[bool, str]] = []
+    checks = registry.tool_checks()
+    for tool in registry.view_tools():
+        if tool in skipped:
+            continue
+        users = [s.id for s in registry.specs() if tool in s.requires_tools]
+        if tool in checks:
+            pack, fn = checks[tool]
+            try:
+                ok, words = fn(root)
+            except Exception as exc:              # noqa: BLE001 - pack code
+                rows.append((False, f"{tool}: {pack or 'the'} check of it raised "
+                                    f"{type(exc).__name__}: {exc}"))
+                continue
+            rows.append((bool(ok), f"{tool}: {' '.join(str(words).split())}"))
+            continue
+        found = shutil.which(tool)
+        rows.append((bool(found), f"{tool}: found at {found}" if found else
+                     f"{tool}: not on PATH. These views are not drawn: "
+                     f"{', '.join(users)}. {NO_STATUS_WORDS}"))
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -2432,6 +2673,34 @@ def _png_ok(payload: bytes) -> bool:
     return length == 13 and kind == b"IHDR" and width > 0 and height > 0
 
 
+def _solid_problem(name: str, payload: bytes) -> str:
+    """Why ``payload`` is not the 3D file its ``name`` says, or ``""``. A
+    ``.glb`` starts with `GLB_MAGIC`. A ``.gltf`` is a JSON object whose
+    ``asset.version`` is ``2.0`` and whose every buffer and image holds its
+    bytes as a ``data:`` URI (`SOLID_SUFFIXES`): the page then fetches this
+    one file and nothing else. The geometry is the tool's; the Khronos
+    validator holds it in the tests."""
+    if name.lower().endswith(".glb"):
+        return "" if payload.startswith(GLB_MAGIC) else f"{name} is not a GLB"
+    try:
+        doc = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return f"{name} is not a glTF: it is not JSON"
+    asset = doc.get("asset") if isinstance(doc, dict) else None
+    if not isinstance(asset, dict) or asset.get("version") != "2.0":
+        return f"{name} is not a glTF 2.0"
+    for group in ("buffers", "images"):
+        rows = doc.get(group) or []
+        if not isinstance(rows, list):
+            return f"{name} is not a glTF: its {group} is not a list"
+        for row in rows:
+            uri = row.get("uri") if isinstance(row, dict) else None
+            if uri is not None and not (isinstance(uri, str) and uri.startswith("data:")):
+                return (f"{name} names a file outside it ({str(uri)[:60]!r}); a glTF on the "
+                        f"page holds its bytes inside it")
+    return ""
+
+
 def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
                     limits: Iterable[Any]) -> str:
     """Why the spine refuses to publish what a bound viewgen returned (B.2.3),
@@ -2445,20 +2714,22 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
             return f"{name} is over the 2 MiB cap"
     kind = ViewKind(spec.kind)
     pngs = [n for n in ctx.outputs if n.lower().endswith(".png")]
-    glbs = [n for n in ctx.outputs if n.lower().endswith(".glb")]
+    glbs = [n for n in ctx.outputs if n.lower().endswith(SOLID_SUFFIXES)]
     others = [n for n in ctx.outputs if n not in pngs and n not in glbs]
     if others:
-        return f"{others[0]} is not a PNG or a GLB; a bound figure writes nothing else"
+        return (f"{others[0]} is not a PNG, a GLB or a glTF; a bound figure writes nothing "
+                f"else")
     if len(pngs) > 1 or len(glbs) > 1:
-        return "a bound figure writes at most one PNG and one GLB"
+        return "a bound figure writes at most one PNG and one 3D file (a GLB or a glTF)"
     for name in pngs:
         if not _png_ok(_file_bytes(ctx.outputs[name][0]) or b""):
             return f"{name} is not a PNG"
         if ctx.outputs[name][1]:
-            return f"{name} is a still written with write_live; only a GLB is live"
+            return f"{name} is a still written with write_live; only a 3D file is live"
     for name in glbs:
-        if not (_file_bytes(ctx.outputs[name][0]) or b"").startswith(GLB_MAGIC):
-            return f"{name} is not a GLB"
+        problem = _solid_problem(name, _file_bytes(ctx.outputs[name][0]) or b"")
+        if problem:
+            return problem
     if kind is ViewKind.CHART:
         if view.src or pngs:
             return "a chart names no file; its series are its payload"
@@ -2480,7 +2751,7 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
         want = pngs if kind is ViewKind.IMAGE else glbs
         if view.src not in want:
             return (f"its src {view.src!r} names no "
-                    f"{'PNG' if kind is ViewKind.IMAGE else 'GLB'} it wrote")
+                    f"{'PNG' if kind is ViewKind.IMAGE else '3D file'} it wrote")
     moved = ctx.moved()
     if moved:
         return f"the inputs moved while the picture was drawn ({moved[0]})"
@@ -2531,8 +2802,9 @@ def _put_figure_file(site: str, folder: str, view_id: str, payload: bytes, ext: 
 def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
                     recipe: str, exported: bool, written: list[str]) -> dict:
     """Publish what `_figure_refusal` passed into ``assets/figures/<gate>/
-    <entry>/``, with its sidecar, and a GLB of an entry no export re-ran (or one
-    written with `write_live`) into the ignored ``assets/live/<gate>/<entry>/``.
+    <entry>/``, with its sidecar, and a 3D file (a GLB or a glTF) of an entry no
+    export re-ran (or one written with `write_live`) into the ignored
+    ``assets/live/<gate>/<entry>/``.
     Returns the sidecar. Every file is written only when its bytes differ."""
     gate_id, entry = ctx.entry.gate, ctx.entry.name
     folder = page_logic.figure_folder(gate_id, entry)
@@ -2544,7 +2816,8 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
         else:
             committed = exported and not live
             where = folder if committed else page_logic.live_folder(gate_id, entry)
-            files["field"] = {**_put_figure_file(site, where, spec.id, payload, "glb",
+            files["field"] = {**_put_figure_file(site, where, spec.id, payload,
+                                                 _solid_suffix(name),
                                                  written if committed else []),
                               "live": not committed}
     if ViewKind(spec.kind) is ViewKind.CHART:
@@ -2570,9 +2843,15 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
     return sidecar
 
 
+def _solid_suffix(name: str) -> str:
+    """``gltf`` for a ``.gltf`` name, else ``glb``: a published 3D file keeps
+    the format the viewgen wrote (`SOLID_SUFFIXES`)."""
+    return "gltf" if name.lower().endswith(".gltf") else "glb"
+
+
 def _promote_live(site: str, sidecar: dict, written: list[str]) -> dict | None:
-    """The sidecar of an entry an export has re-ran since its GLB was drawn
-    live: the live GLB copied into the committed folder (``live`` false), or
+    """The sidecar of an entry an export has re-ran since its 3D file was drawn
+    live: the live file copied into the committed folder (``live`` false), or
     None when the live file is not here with its bytes (draw it again)."""
     field_row = (sidecar.get("files") or {}).get("field") or {}
     gate_id, entry, view_id = sidecar["gate"], sidecar["entry"], sidecar["view"]
@@ -2582,7 +2861,9 @@ def _promote_live(site: str, sidecar: dict, written: list[str]) -> dict | None:
     if payload is None or hashlib.sha256(payload).hexdigest() != field_row.get("sha256"):
         return None
     folder = page_logic.figure_folder(gate_id, entry)
-    row = {**_put_figure_file(site, folder, view_id, payload, "glb", written), "live": False}
+    row = {**_put_figure_file(site, folder, view_id, payload,
+                              _solid_suffix(str(field_row.get("name") or "")), written),
+           "live": False}
     promoted = {**sidecar, "files": {**sidecar["files"], "field": row}}
     target = os.path.join(site, *folder.split("/"), view_id + page_logic.SIDECAR_SUFFIX)
     if write_json_if_changed(target, promoted):
@@ -2939,6 +3220,20 @@ def build(
     # (`_UNJUDGED_KEYS`), so no row moves what the page judged.
     for row in payload["views"]:
         row.update(figures.rows.get(str(row.get("id") or ""), {}))
+    # Every chart view's Vega-Lite spec (issue #15, P2.5): the technical
+    # record draws it as the engineering page's cards do, and the hand-drawn
+    # `lib/chart.js` is gone. A bound view's series are its chart file's.
+    anchored: dict[str, list] = {}
+    for verdict_row in sorted(payload["verdicts"], key=lambda r: r.get("order", 0)):
+        for locator in verdict_row.get("locators") or ():
+            if isinstance(locator, dict) and locator.get("view"):
+                anchored.setdefault(str(locator["view"]), []).append((locator, verdict_row))
+    for row in payload["views"]:
+        if str(row.get("kind") or "") == "chart":
+            source = (page_logic._chart_payload(root, str(row.get("data_url") or ""))
+                      if row.get("binding") else row.get("data"))
+            row["chart"] = page_logic.view_chart(row, source,
+                                                 anchored.get(str(row.get("id") or ""), ()))
     stale = bool(payload["meta"]["stale"])
     stale_reason = str(payload["meta"]["stale_reason"])
 
@@ -3014,14 +3309,28 @@ def build(
     for row in payload["views"]:
         view_id = str(row.get("id") or "")
         inline = row.get("data") or {}
-        if not inline:
+        chart = row.get("chart") or {}
+        if not inline and not chart.get("spec"):
             continue
         try:
             _require_view_id(view_id)
         except NopekitError as exc:
             warnings.append(f"view {view_id!r} kept inline: {exc}")
             continue
-        if _rough_size(inline) <= VIEW_INLINE_MAX:
+        # A chart's spec holds its series once more (and its points twice), so
+        # it is split on its own size, into `<id>~chart.json` (P2.5): a bound
+        # chart has no inline data, and its spec alone can be the size of a
+        # settling history. *Rejected:* the spec inline beside a split payload
+        # (state.json would carry the largest chart twice over).
+        if chart.get("spec") and _rough_size(chart) > VIEW_INLINE_MAX:
+            relative = posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX)
+            if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)),
+                                     chart):
+                written.append(posixpath.join(SITE_DIR, relative))
+            row["chart"] = {}
+            row["chart_url"] = relative
+            kept_view_files.append(view_id + CHART_FILE_SUFFIX)
+        if not inline or _rough_size(inline) <= VIEW_INLINE_MAX:
             continue
         relative = posixpath.join(VIEWS_DIR, f"{view_id}.json")
         if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)), inline):
@@ -3194,13 +3503,26 @@ def _views_file_payload(site: str, row: Mapping[str, Any]) -> Any:
     as the build split it out; None for a row with no such file (inline data,
     or a bound view's chart under ``assets/figures/``); the string
     ``"unreadable"`` when the file is missing or does not parse, which no
-    payload the build writes (a dict) equals."""
+    payload the build writes (a dict) equals. A row whose chart spec was split
+    out (``chart_url``) gives ``{"data": that, "chart": the spec}``."""
     view_id = str(row.get("id") or "")
-    if not view_id or row.get("data_url") != posixpath.join(VIEWS_DIR, f"{view_id}.json"):
-        return None
+    data = None
+    if view_id and row.get("data_url") == posixpath.join(VIEWS_DIR, f"{view_id}.json"):
+        data = _view_file(site, row["data_url"])
+    if not row.get("chart_url"):
+        return data
+    # A chart's spec split out (P2.5) is sealed with its row too: a number
+    # edited into it by hand reads *edited by hand*, as one in the payload does,
+    # and a row that names another file reads so as well.
+    chart = (_view_file(site, row["chart_url"]) if view_id and row["chart_url"] ==
+             posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX) else "unreadable")
+    return {"data": data, "chart": chart}
+
+
+def _view_file(site: str, rel: str) -> Any:
+    """The JSON of the site file ``rel``, or ``"unreadable"``."""
     try:
-        with open(os.path.join(site, *row["data_url"].split("/")), "r",
-                  encoding="utf-8") as fh:
+        with open(os.path.join(site, *rel.split("/")), "r", encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return "unreadable"
@@ -3290,7 +3612,7 @@ def _kept_from_last_build(site: str, registry: ViewRegistry,
         if found is None:
             continue
         spec = found[0]
-        named = [str(row.get(key) or "") for key in ("src", "data_url")]
+        named = [str(row.get(key) or "") for key in ("src", "data_url", "chart_url")]
         if not all(_site_file(site, rel) for rel in named if rel):
             continue
         if digests.get(row["id"]) != view_digest(row, _views_file_payload(site, row)):
@@ -3851,11 +4173,13 @@ def _chart_margins(row: dict) -> dict:
         if axis != "x" and _finite(value):
             limit = (float(value), comparator)
             break
-    key = next((k for k in ("current", "marker", "now") if k in data), None)
+    key = next((k for k in page_logic.CHART_CURRENT_KEYS if k in data), None)
     if limit is None or key is None:
         return row
-    y_axis = data.get("y") if isinstance(data.get("y"), dict) else {}
-    units = str(y_axis.get("units") or meta.get("y_units") or "")
+    # The y axis as the chart reads it (`page._view_axis`): the payload's, else
+    # the meta's, where the three analytic packs put it.
+    units = str(page_logic._view_axis(data, meta if isinstance(meta, dict) else {},
+                                      "y").get("units") or "")
     said = report_logic.HUMAN["site"]["chart_margin"]
 
     def one(item: Any) -> Any:

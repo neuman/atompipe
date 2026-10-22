@@ -78,9 +78,18 @@ function script(src) {
  *  what is drawn, and where, is the spec's. */
 function chartTheme() {
   const css = getComputedStyle(document.documentElement);
-  const v = (name, dflt) => (css.getPropertyValue(name) || "").trim() || dflt;
-  const ink = v("--ink", "#0b0b0b"), ink2 = v("--ink-2", "#52514e"), grid = v("--grid", "#e1e0d9");
-  const fail = v("--fail", "#d03b3b"), accent = v("--accent", "#2a78d6"), amber = v("--amber-strong", "#b98000");
+  // The first of ``names`` the page's stylesheet sets: page.css's tokens on
+  // the engineering page, style.css's on the technical record (P2.5: one
+  // chart, two stylesheets), else the default.
+  const v = (names, dflt) => {
+    for (const name of [].concat(names)) {
+      const found = (css.getPropertyValue(name) || "").trim();
+      if (found) return found;
+    }
+    return dflt;
+  };
+  const ink = v("--ink", "#0b0b0b"), ink2 = v("--ink-2", "#52514e"), grid = v(["--grid", "--line-2"], "#e1e0d9");
+  const fail = v(["--fail", "--bad"], "#d03b3b"), accent = v("--accent", "#2a78d6"), amber = v(["--amber-strong", "--warn"], "#b98000");
   const font = v("--sans", "system-ui, sans-serif");
   return {
     background: null,
@@ -105,13 +114,23 @@ function chartTheme() {
       "nk-rule": { color: amber, strokeDash: [2, 3], strokeWidth: 1.5 },
       "nk-rule-label": { color: amber },
       "nk-band": { color: ink2, strokeWidth: 2 },
+      "nk-band-end": { color: ink2, thickness: 2, size: 16, opacity: 1 },
       "nk-hollow": { strokeWidth: 2, opacity: 1 },
       "nk-point": { opacity: 1 },
       "nk-point-label": { color: ink2 },
       "nk-estimate": { color: ink2, size: 90, opacity: 1 },
-      "nk-current": { color: ink, size: 150, opacity: 1 },
+      // A ring: the band and the point under it stay in view (review of P2).
+      "nk-current": { color: ink, size: 300, strokeWidth: 2.5, opacity: 1 },
       "nk-current-rule": { color: ink, strokeDash: [1, 3], strokeWidth: 1.5 },
       "nk-current-label": { color: ink, fontWeight: 600 },
+      // The verdicts' anchors on a chart view of the technical record
+      // (`page.view_chart`): a located series drawn heavier, a located x as
+      // a rule in its severity's colour.
+      "nk-located": { strokeWidth: 4, opacity: 1 },
+      "nk-loc-fail": { color: fail, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-warn": { color: amber, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-info": { color: accent, strokeDash: [4, 4], strokeWidth: 1.5 },
+      "nk-loc-label": { color: ink2 },
     },
   };
 }
@@ -125,8 +144,18 @@ let redrawQueued = false;
 /** Draw ``spec`` into ``host`` in the theme the page has now, and keep it
  *  among the live charts. */
 function embedChart(embed, item) {
+  const config = chartTheme();
+  // An axis title longer than the box ends in an ellipsis instead of running
+  // past its edge. What slipped through (P2.5, the beam's deflection chart at
+  // 390 px): "section depth h (in the bending direction) (mm)" lost its units
+  // off the right edge. Layout only: the words are the spec's.
+  const room = Math.max(120, (item.host.clientWidth || 0) - 60);
+  config.axis = { ...config.axis, titleLimit: room };
+  // And a legend in a narrow box is one entry a line: in a row, the CFD
+  // settling chart's third mesh ran off a 390 px box (P2.5).
+  if (room < 460) config.legend = { ...config.legend, direction: "vertical" };
   return embed(item.host, item.spec, { actions: false, renderer: "svg", mode: "vega-lite",
-    config: chartTheme() }).then((result) => {
+    config }).then((result) => {
     item.view = result && result.view;
     liveCharts.add(item);
   });
@@ -169,50 +198,57 @@ function watchTheme() {
 function chartBox(fig, words) {
   const chart = fig.chart || {};
   const host = el("div", { class: "fig-chart" });
-  const spec = chart.spec;
-  if (!spec) {
+  if (!chart.spec) {
     mount(host, el("p", { class: "muted small", text: fig.currency_word || "" }));
     return host;
   }
+  return drawChart(host, chart, (words.figure || {}).table || "", fig.view);
+}
+
+/** Draw ``chart.spec`` (a spec the spine baked whole: `page.chart_spec`) into
+ *  ``host`` with Vega-Lite, or, where the library does not load, its numbers
+ *  as a table under ``notice``. The engineering page's cards and the
+ *  technical record's chart views (`lib/stage.js`) both draw through here.
+ *  What it replaced on the technical record (P2.5): `lib/chart.js`, a
+ *  hand-drawn SVG whose text fell to about 5 px on a phone. */
+export function drawChart(host, chart, notice, name) {
+  const spec = chart && chart.spec;
+  if (!spec) return host;
   watchTheme();
   loadVega()
     .then((embed) => embedChart(embed, { host, spec, view: null }))
     .catch((err) => {
       // The reason stays in the console: a sentence the page shows is baked
       // (`report.HUMAN`), so the style scans read it.
-      console.warn("chart", fig.view, err);
-      mount(host, chartTable(fig, words));
+      console.warn("chart", name, err);
+      mount(host, chartTable(chart, notice));
     });
   return host;
 }
 
-/** The axis titles the baked spec gives ``x`` and ``y`` (with their units),
- *  read from its layers as they are; "" where it has none. */
-function axisTitle(spec, channel) {
-  for (const layer of [spec, ...((spec && spec.layer) || [])]) {
-    const enc = (layer && layer.encoding && layer.encoding[channel]) || null;
-    if (enc && enc.field === channel && enc.title) return String(enc.title);
-  }
-  return "";
-}
+/** The labels of the baked limit (one, or a list), as they are. */
+const limitLabels = (limit) => [].concat(limit || []).map((l) => (l && l.label) || "").filter(Boolean);
+/** The baked margin words of the judged point (one, or a list), as they are. */
+const marginTexts = (current) => [].concat(current || []).map((c) => (c && c.margin_text) || "").filter(Boolean);
 
-function chartTable(fig, words) {
-  const chart = fig.chart || {};
-  const spec = chart.spec || {};
-  const rows = ((spec.data || {}).values) || [];
-  const said = (words.figure || {});
+/** The chart's numbers as the table the spine baked (`page.chart_table`):
+ *  its head and rows as text, a long series cut to its ends with a row that
+ *  counts the rest, its bands, rules and estimates, and the limit and the
+ *  judged point's words under it. What slipped through (review of P2): this
+ *  printed every row of the spec's data, 250 rows of 17 digits for the CFD
+ *  settling chart, wider than its card, and left out the tolerance and the
+ *  estimates, which are not in that data. */
+function chartTable(chart, notice) {
+  const table = chart.table || { head: [], rows: [] };
   return el("div", { class: "fig-table" },
-    el("p", { class: "nk-notice", role: "note", text: said.table || "" }),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", { text: "" }),
-        el("th", { text: axisTitle(spec, "x") || "x" }),
-        el("th", { text: axisTitle(spec, "y") || "y" }))),
-      el("tbody", {}, ...rows.map((r) => el("tr", {},
-        el("td", { text: r.label || r.series || "" }), el("td", { text: String(r.x) }),
-        el("td", { text: String(r.y) }))))),
-    chart.limit && chart.limit.label ? el("p", { class: "small", text: chart.limit.label }) : null,
-    chart.current && chart.current.margin_text
-      ? el("p", { class: "small", text: chart.current.margin_text }) : null);
+    el("p", { class: "nk-notice", role: "note", text: notice || "" }),
+    el("div", { class: "fig-table-scroll" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, ...(table.head || []).map((h) => el("th", { text: h || "" })))),
+        el("tbody", {}, ...(table.rows || []).map((r) => el("tr", {},
+          ...r.map((cell) => el("td", { text: cell || "" }))))))),
+    ...limitLabels(chart.limit).map((text) => el("p", { class: "small", text })),
+    ...marginTexts(chart.current).map((text) => el("p", { class: "small", text })));
 }
 
 // --------------------------------------------------------------------------- //
@@ -232,8 +268,9 @@ export function scaleLegend(scale) {
     el("div", { class: "fig-legend-bar" },
       scale.under ? el("span", { class: "fig-swatch", style: { background: scale.under }, "aria-hidden": "true" }) : null,
       el("div", { class: "fig-ramp", style: { background: `linear-gradient(to right, ${stops})` } },
-        ...(scale.ticks || []).map((t) => el("span", { class: "fig-tick",
-          style: { left: `${(Number(t.at) * 100).toFixed(2)}%` }, text: t.text || "" }))),
+        ...(scale.ticks || []).map((t) => el("span", { class: `fig-tick${tickEnd(t.at)}`,
+          style: { left: `${(Number(t.at) * 100).toFixed(2)}%` } },
+          el("span", { class: "fig-tick-text", text: t.text || "" })))),
       scale.over ? el("span", { class: "fig-swatch", style: { background: scale.over }, "aria-hidden": "true" }) : null),
     scale.under_word || scale.over_word
       ? el("p", { class: "fig-legend-words small" },
@@ -243,6 +280,18 @@ export function scaleLegend(scale) {
           scale.over_word ? ` ${scale.over_word}` : "")
       : null,
     scale.source_text ? el("p", { class: "small muted", text: scale.source_text }) : null);
+}
+
+/** Where a tick's words sit on its mark: centred, or from the mark inward
+ *  near an end of the ramp, so they stay inside the legend. Layout alone: the
+ *  mark itself is always at the baked position (``.fig-tick::before`` at the
+ *  tick's own left). What slipped through (review of P2): the first and last
+ *  ticks' words were moved by `:first-child` and `:last-child` rules and the
+ *  mark moved with them, up to 17 px off its value on the speed legend, and an
+ *  interior first tick (the pressure's 0.0, at 0.165) too. */
+function tickEnd(at) {
+  const where = Number(at);
+  return where < 0.1 ? " fig-tick--start" : where > 0.9 ? " fig-tick--end" : "";
 }
 
 /** The chips of every claim the figure's gate covers, as baked. */
@@ -255,15 +304,25 @@ function figureChips(fig, words) {
       notices: words.notices, trace: words.trace }))));
 }
 
-/** A still: the picture linked to its full file, its marks as HTML labels at
- *  the baked positions, its legend and its caption. */
-function still(fig) {
+/** A still: its marks' words in a row above the picture, each over its baked
+ *  position with a short line down to the picture's edge, and the picture
+ *  linked to its full file. Nothing is drawn over the picture: the lines in it
+ *  are the tool's own. What slipped through (review of P2): the words sat on
+ *  the picture, and on a phone a 10 to 1 strip 29 px high was mostly hidden
+ *  by them; a white line drawn over each plane hid the black line ParaView
+ *  drew there. Exported for the hero of both pages, with ``src`` the hero's
+ *  own file. */
+export function figureStill(fig, src) {
+  const marks = fig.marks || [];
   return el("div", { class: "fig-still-box" },
-    el("a", { class: "fig-still", href: fig.src, target: "_blank", rel: "noopener" },
-      el("img", { src: fig.src, alt: fig.alt || fig.title || "", loading: "lazy" }),
-      ...(fig.marks || []).map((m) => el("span", { class: "fig-mark",
-        style: { left: `${(Number(m.at) * 100).toFixed(2)}%` } },
-        el("span", { class: "fig-mark-text", text: m.text || "" })))));
+    marks.length
+      ? el("div", { class: "fig-marks", "aria-hidden": "true" },
+          ...marks.map((m) => el("span", { class: `fig-mark${tickEnd(m.at)}`,
+            style: { left: `${(Number(m.at) * 100).toFixed(2)}%` } },
+            el("span", { class: "fig-mark-text", text: m.text || "" }))))
+      : null,
+    el("a", { class: "fig-still", href: src || fig.src, target: "_blank", rel: "noopener" },
+      el("img", { src: src || fig.src, alt: fig.alt || fig.title || "", loading: "lazy" })));
 }
 
 const viewers = new Set();
@@ -311,7 +370,7 @@ function figureBlock(fig, words, build) {
   const look = currencyLook(fig.currency);
   const drawn = fig.src || fig.data_src || fig.field_src;
   const body = fig.kind === "chart" && fig.data_src ? chartBox(fig, words)
-    : fig.kind === "image" && fig.src ? still(fig) : null;
+    : fig.kind === "image" && fig.src ? figureStill(fig) : null;
   return el("figure", { class: `fig fig-${fig.kind} currency-${fig.currency}`, id: `figure-${fig.id}` },
     el("figcaption", { class: "fig-head" },
       el("span", { class: "fig-title", text: fig.title || fig.view }),
@@ -319,9 +378,12 @@ function figureBlock(fig, words, build) {
     drawn ? null : el("p", { class: `fig-none tone-${look.tone}` },
       el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }), ` ${fig.currency_word || ""}`),
     body,
-    turnButton(fig, build, words),
+    // The legend and the caption under the picture they explain, then the 3D
+    // view, which the same legend explains (review of P2: the button sat
+    // between the still and its legend).
     fig.kind === "image" ? scaleLegend(fig.scale) : null,
     fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null,
+    turnButton(fig, build, words),
     fig.tool_word ? el("p", { class: "nk-notice", role: "note", text: fig.tool_word }) : null);
 }
 
@@ -353,7 +415,14 @@ function claimCard(row, words, build) {
   const said = words.figure || {};
   const figs = row.figures || [];
   const values = row.values || [];
-  const judging = values.find((v) => v.binding) || values[0] || null;
+  // The claim's own value: the binding one, else the first the bake marks
+  // compared with the claim's acceptance condition, the rule the technical
+  // record's claimRow keeps (panels.js). None compared, none shown. What
+  // slipped through (the walkthrough after P2.6): with no binding value the
+  // card fell back to the first row, so a Stale CFD claim (an opaque gate
+  // reads Stale outside its own check run) headlined its guard cfd.regime's
+  // 0.008696 fraction of limit above the 0.5222 Pa the claim is about.
+  const judging = values.find((v) => v.binding) || values.find((v) => v.compared) || null;
   const others = values.filter((v) => v !== judging);
   const sentences = Array.from(new Set(figs.filter((f) => currencyLook(f.currency).notice)
     .map((f) => [f.currency, `${f.currency_word || ""}${f.drawn_text ? " " + f.drawn_text : ""}`])
@@ -374,6 +443,12 @@ function claimCard(row, words, build) {
           judging.gate && said.judged
             ? el("p", { class: "small muted", text: said.judged.replace("{gate}", judging.gate) }) : null)
       : null,
+    // Why the claim reads what it reads, in the bake's sentence (review of
+    // P2: a failing card said its value and margin and never why it failed).
+    // Not beside Checked (the value says it) or Stale (the card's currency
+    // sentence says it).
+    row.cause_text && !["checked", "stale"].includes(row.token)
+      ? el("p", { class: "fig-cause", text: row.cause_text }) : null,
     others.length
       ? el("div", { class: "fig-tiles", "aria-label": said.others || "" },
           ...others.map((v) => el("div", { class: "fig-tile" },

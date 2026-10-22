@@ -1040,6 +1040,18 @@ in the data, never in shipped code: a pack does not ship JavaScript, because the
 artifact whose job is to be trusted when a gate says something is wrong must not
 depend on code nobody reviewed.
 
+A chart view with no `evidence_of` states its own numbers. Its `series` takes the
+bound chart's spellings (below), and a point can also be an `{x, y}` object or a bare
+number (its x is then its index). Put its axes in `data.x` and `data.y`, or in
+`meta.x` and `meta.y`. Its `limit` is `{value, comparator, label, axis}` (or a list);
+the spine draws the first limit on each axis. Its `current` is `{x, y}` (or a list),
+and the build writes the distance to the y limit beside it. `marker`, `now` and
+`markers` (`[{x, y, label}]`, as the analytic packs write their current design) are
+read as `current`, the first of them present; a marker's own `label` is not drawn,
+as the build writes the distance beside the point. The spine bakes the Vega-Lite spec
+of this chart too (`page.view_chart`). It does not draw a series' `style`. A verdict's locator on the chart draws its `target` series heavier,
+or a line at its `position[0]`.
+
 Rules:
 
 - **Returning `None` is normal.** A CAD viewgen in a project with no geometry has
@@ -1049,7 +1061,16 @@ Rules:
 - **Declare `requires_python` / `requires_tools` the way a gate does.** A viewgen
   whose exporter is missing is reported as *unavailable* with the module named. A
   view that is absent because trimesh is not installed otherwise looks exactly like
-  a view the project never had.
+  a view the project never had. List each tool in the manifest's `requires_tools`
+  too: that list holds the tools of the gates and of the views.
+- **A tool that PATH says too little about gets a check.** A view module may define
+  `TOOL_CHECKS = {"<tool>": check}`, where `check(root)` returns `(ok, words)`.
+  `nopekit doctor` prints `<tool>: <words>` on the tool's row, a warning when `ok`
+  is false. Without a check the row says found, or not on PATH with the views it
+  leaves out and that no status depends on them. cfd-openfoam's check
+  (`views/_pv.py`) says which ParaView build `pvbatch62` is and whether its renderer
+  control passed. A check must be quick and draw nothing: `doctor` calls it on every
+  run.
 - **Write assets through `ctx.write_asset`**, never by hand into `site/assets/`.
   Only what the context recorded is known to be live, so a file written behind its
   back either survives forever or gets swept the first time the cleaner is made
@@ -1097,7 +1118,7 @@ from nopekit.models import View, ViewKind
 def speed(ctx: BoundContext) -> View | None:
     path = ctx.entry.path("summary.json")     # a verified evidence file, or None
     if path is None:
-        ctx.note("the solved fields on this computer are from another run: "
+        ctx.note("summary.json: the file on this computer is from another run: "
                  "`nopekit check --force --only flow.pressure_drop` solves it again")
         return None
     with open(path, encoding="utf-8") as fh:
@@ -1120,7 +1141,8 @@ def speed(ctx: BoundContext) -> View | None:
 
 - **`evidence_of="<gate id>"`** binds the viewgen to one gate. Name a gate of your own
   pack. The kind is `image` (a PNG still), `chart` (its series as the payload), or
-  `model3d` or `field` (a GLB); `table` is refused (a gate's rows are its evidence
+  `model3d` or `field` (a GLB, or a glTF that holds its buffers inside it as
+  `data:` URIs: ParaView's own export, as it writes it); `table` is refused (a gate's rows are its evidence
   already). A bound viewgen is never called with a `ViewContext`.
 - **`recipe=(...)`** names the files, beside the module, whose bytes key the memo
   (paths inside the pack or project). The spine draws a figure again only when the
@@ -1154,7 +1176,7 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
                                              #   after the call: a move discards the picture
     def write_asset(self, name, data) -> str # into the scratch; returns the name View.src
                                              #   takes; over 2 MiB it raises, writes nothing
-    def write_live(self, name, data) -> str  # a GLB published only under the ignored
+    def write_live(self, name, data) -> str  # a 3D file published only under the ignored
                                              #   assets/live/ (on this computer only)
     def note(self, text) -> None             # a build warning, under the view's id
     def asset_path(self, name)               # raises: nothing reaches site/ unchecked
@@ -1163,7 +1185,14 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
 - **What it returns.** A still or a 3D view: `src` is the name `write_asset` returned,
   and `data` is empty. A chart: no `src`, and its payload in `data`. `meta` may hold
   `caption` (ASD-STE100 site text, scanned as such), `alt`, `scale`, `marks` and
-  `tool` (written into the sidecar as given). Write at most one PNG and one GLB.
+  `tool` (written into the sidecar as given). Write at most one PNG and one 3D file
+  (`.glb`, or a `.gltf` whose every buffer and image is a `data:` URI: one that names
+  a file beside it is refused, because the page would fetch bytes nothing checked). A
+  still may carry its 3D file beside it: write both with `write_asset`, and the spine
+  publishes the 3D file on this computer only until an export re-runs the entry, then
+  commits it (cfd-openfoam's pressure still does this). Hand over your tool's file as
+  it wrote it: the spine checks no accessor, so hold your files to the Khronos glTF
+  validator in your tests.
 - **The colour scale** is one object that gives both your pixels and the page's HTML
   legend, so the two cannot disagree. Draw no colour bar into the PNG.
 
@@ -1173,11 +1202,13 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
     "over": "#ff00ff", "under": "#808080",          // past an end: never the end colour
     "over_word": "...", "under_word": "...",
     "ticks": [ { "at": 0.5, "value": 0.01, "text": "0.01 m/s" } ],
-    "source": [ { "key": "u_upstream_m_s", "factor": 2.0 } ],   // what the range is
+    "source": [ { "key": "u_upstream_m_s", "lo": 0, "hi": 2.0 } ],   // what the range is
     "source_text": "The scale is twice the measured upstream speed." }
   ```
 
-  Its ends are a pack constant times a value the evidence names (`source`). The spine
+  Its ends are a pack constant times a value the evidence names (`source`; in
+  cfd-openfoam each end is the sum of its factor times each named value, and the
+  stops are a colour map preset as the drawing tool exported it). The spine
   refuses an end equal to a limit of a claim the gate covers or to the entry's verdict
   limit, and a `source` key that holds `limit`. A doubled limit leaves the scale
   byte-identical.
@@ -1187,16 +1218,25 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
   { "series": { "dp": [[1, 0.531], [2, 0.524], [3, 0.5222]] },   // or a list of
               // { "key", "label", "points": [[x, y], ...], "labels": [str], "hollow": bool }
     "x": { "label": "mesh level" },
-    "y": { "label": "pressure drop", "units": "Pa", "scale": "log" },  // scale: optional
+    "y": { "label": "pressure drop", "units": "Pa", "scale": "log" },  // scale: optional;
+              // "zero": false: a linear y that does not start at zero
     "band": [ { "x": 3, "lo": 0.52, "hi": 0.525, "label": "GCI band" } ],
     "rule": { "value": 0.1, "label": "tolerance" },               // never called a limit
-    "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated" } ] }
+    "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated",
+                     "series": "dp" } ],   // series: drawn in that series' colour
+    "legend": false,      // optional: each point is named on the chart, so no legend
+    "judged": false }     // optional: not of the judged quantity (a change in %)
   ```
+
+  The judged point is a ring at the series point or the band end (`hi` or `lo`)
+  whose y is the floor's value. A payload that says `"judged": false` gets no limit
+  line and no ring, and the build says nothing of its units: say it for a chart of
+  another quantity than the claim's, such as a settling history.
 
   Every number under `series`, `band`, `estimates` and `rule` must be a JSON leaf or a
   CSV cell of a verified evidence file of the entry: write the numbers you want to
   plot into the gate's evidence. A payload that holds `limit`, `limits`, `current`,
-  `marker` or `now` is refused: the limit line and the judged point are the claim's,
+  `marker`, `now` or `markers` is refused: the limit line and the judged point are the claim's,
   which the spine takes from the floor. State `y.units` as the claim's units, or the
   page draws no limit line and the build says why. The spine bakes the whole Vega-Lite
   spec from this payload (`page.chart_spec`); the pack ships no chart code.
@@ -1207,7 +1247,8 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
   hangs. A crash, a timeout, `None` or a refusal publishes nothing, keeps the figure the
   page had, and moves no status.
 - **Byte-stable output.** The same entry draws the same bytes on every machine, or every
-  teammate's build commits a new picture. Stamp no clock or random id into a PNG or GLB.
+  teammate's build commits a new picture. Stamp no clock or random id into a PNG or a
+  3D file.
 - **List the view id in `provides_views`**, as for any viewgen.
 
 ### Attaching locators to a verdict
@@ -1283,6 +1324,10 @@ every prerequisite in its `needs` closure passes that same known-bad control
 (isolation: `<gate>: control not isolated — its prerequisite <id> does not pass
 <gate>'s known-bad control (…)`). A `needs` entry that is not one of the pack's own
 gates is a problem too.
+It loads `views/` through the loader a site build uses, and holds `provides_views`
+to the view ids that register (both ways), every view's `requires_tools` and every
+`TOOL_CHECKS` tool to the manifest's `requires_tools`, and every `evidence_of` to a
+gate of the pack.
 A gate whose declared tooling is absent on this machine is printed as a `note:` and
 not demonstrated — not a problem, and not a pass either; so is an isolation check whose
 prerequisite's tooling is absent (`<gate>: isolation not checked — its prerequisite

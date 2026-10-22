@@ -197,7 +197,17 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     scene.add(root);
     indexNodes();
     readExplodeManifest();
-    frameAll();
+    if (isField) {
+      // A field is a cut, flat across its thinnest side: the first view looks
+      // down on it, tilted 20 degrees so it reads as 3D, and fills the frame
+      // (`fitField`). What slipped through (review of P2): the general
+      // framing showed the 10 to 1 CFD strip edge-on at an angle, small in
+      // its frame. Layout only: no colour and no number moves.
+      resize();
+      fitField();
+    } else {
+      frameAll();
+    }
     home = camera.position.clone().sub(controls.target).normalize();
     state.ready = true;
     resize();
@@ -428,7 +438,38 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     invalidate();
   }
 
-  function frameAll() { frameObjects(null); }
+  function frameAll() { if (isField && state.ready) fitField(); else frameObjects(null); }
+
+  /** A field's first view: along its box's thinnest side, tilted 20 degrees
+   *  about the longest, at the distance that fits the box's two other sides
+   *  in the canvas with 8% to spare. */
+  function fitField() {
+    const box = boundsOf(null);
+    if (box.isEmpty()) return;
+    const size = box.getSize(new THREE.Vector3());
+    const centre = box.getCenter(new THREE.Vector3());
+    const sides = [size.x, size.y, size.z];
+    const thin = sides.indexOf(Math.min(...sides));
+    const long = [0, 1, 2].filter((i) => i !== thin).sort((a, b) => sides[b] - sides[a]);
+    const look = new THREE.Vector3().setComponent(thin, 1);
+    const across = new THREE.Vector3().setComponent(long[1], 1);
+    const tilt = (20 * Math.PI) / 180;
+    const direction = look.clone().multiplyScalar(Math.cos(tilt))
+      .add(across.clone().multiplyScalar(-Math.sin(tilt)));
+    camera.up.copy(across);
+    const vfov = (camera.fov * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * (camera.aspect || 1));
+    const half = Math.max(sides[long[0]] / 2 / Math.tan(hfov / 2),
+      sides[long[1]] / 2 / Math.tan(vfov / 2), 1e-3);
+    const distance = half * 1.08 + sides[thin];
+    camera.near = Math.max(distance / 1000, 1e-4);
+    camera.far = distance * 100;
+    camera.updateProjectionMatrix();
+    controls.target.copy(centre);
+    camera.position.copy(centre).add(direction.multiplyScalar(distance));
+    controls.update();
+    invalidate();
+  }
 
   /** Back to the first framing's angle and distance. */
   function goHome() {

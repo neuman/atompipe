@@ -1558,8 +1558,8 @@ EXPORT_SENTENCE = re.compile(
     r"^\S+ is (?:NOT )?ready for \S+: .+ (?:Checked on an article: \d+ \([^)]+\)\."
     r"|No claim is checked on any article\.)$")
 LIMITS = re.compile(r"^Checked does not mean true: its evaluators have shown they can "
-                    r"fail, not that they are right or enough, and nothing outside these \d+ "
-                    r"claims? has been evaluated\.$")
+                    r"fail, not that they are right or enough, and nothing outside the \d+ "
+                    r"claims? here has been evaluated\.$")
 DECIDED = re.compile(r"^(?:decided by .+: go ahead over .+|nothing to decide: every required "
                      r"claim is checked)$")
 OUTCOME = re.compile(

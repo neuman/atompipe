@@ -39,7 +39,7 @@ import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
-import { figureTag, scaleLegend } from "./lib/figures.js";
+import { figureTag, scaleLegend, figureStill } from "./lib/figures.js";
 
 const PHONE = window.matchMedia ? window.matchMedia("(max-width: 759px)") : null;
 
@@ -213,9 +213,15 @@ async function representation(rep, words) {
     });
     return;
   }
+  // A figure still as the hero is drawn as on its card: its plane words over
+  // their lines, and its caption, the one text that says what the lines are.
+  // What slipped through (review of P2): the hero drew the bare picture, two
+  // black lines across it and nothing on the page that named them.
   if (rep.kind === "image") {
-    mount(host, el("div", { class: fig ? "rep-flat rep-figure" : "rep-flat" }, renderImage(view, [], null)), caption, tag,
-      fig ? scaleLegend(fig.scale) : null);
+    mount(host, el("div", { class: fig ? "rep-flat rep-figure" : "rep-flat" },
+      fig ? figureStill(fig, view.src) : renderImage(view, [], null)), caption, tag,
+      fig ? scaleLegend(fig.scale) : null,
+      fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null);
     return;
   }
   const flat = el("div", { class: "rep-flat" });

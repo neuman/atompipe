@@ -294,9 +294,11 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "pending": "{Pending}: {n} {claims} {need} a test on a built part ({ids})",
         "on_article": "{Checked} on a built part: {n} ({ids}).",
         "none_on_article": "No claim is {checked} on any built part.",
+        # "the {n} {claims} on this page", never "these {n}": "these 1 claim"
+        # (review of P2, the one-claim demo project).
         "limits": "{Checked} does not mean true. Its evaluators have shown that they can "
                   "fail. They have not shown that they are correct or sufficient. Nothing "
-                  "outside these {n} {claims} is evaluated.",
+                  "outside the {n} {claims} on this page is evaluated.",
     }),
     # Each status token's hint on the page. The checked hint does not say
     # "does not mean true": the page says that once, in `verdict.limits`.
@@ -533,7 +535,10 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
                  "another result of {gate}.",
         "limit_label": "Limit {limit}",
         "turn": "Turn it in 3D",
-        "live": "This 3D view is on this computer only.",
+        # Where the 3D file is, and when the site keeps it (review of P2:
+        # "on this computer only" said nothing a reader could act on).
+        "live": "This 3D view is on this computer only. The site keeps it after nopekit "
+                "export runs this result again.",
         # O10: a renderer accepted by an environment bypass, not by the pack's
         # lock (Phase 2's test stand-in), says so beside its picture.
         "tool_unchecked": "The tool that drew this picture is not the build that the pack "
@@ -553,6 +558,11 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "others": "Other evaluators",
         "pictures": "Pictures: {n}. Show them.",
         "table": "The chart did not load. This table shows its numbers.",
+        # The rows of a long series a chart's table leaves out, and a band's
+        # two ends, in `page.chart_table` (review of P2).
+        "table_more": "{n} more rows are not in this table.",
+        "table_band": "{lo} to {hi}",
+        "chart_empty": "This chart has no series. There is nothing to draw.",
         "turn_failed": "The 3D view did not load.",
     }),
     # A rejected alternative on the marketing page (`rejection_words(register=
@@ -1154,8 +1164,8 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
         # Its evaluators "have shown they can fail": qualification's own words
         # are its table's alone (`HUMAN["qualification"]`).
         "limits": "{Checked} does not mean true: its evaluators have shown they can fail, "
-                  "not that they are right or enough, and nothing outside these {n} "
-                  "{claims} has been evaluated.",
+                  "not that they are right or enough, and nothing outside the {n} "
+                  "{claims} here has been evaluated.",
         "title_for": "{name} — readiness for {m} ({rev})",
         "as_last_evaluated": "Claims {m} does not require are shown as last evaluated: "
                              "`nopekit export {m}` re-runs only the evaluators of the {n} "
@@ -3829,6 +3839,11 @@ def page_phrases() -> dict[str, Any]:
             "judgment_blurb": "Each stays with the person or institution it names, who "
                               "settles it in their own shell — no evaluator here does. Each "
                               "row says whether its authority has recorded it.",
+            # A chart view on the technical record (issue #15, P2.5): what
+            # its box says when the chart library does not load, and when
+            # the view holds nothing to draw. The engineering page's words.
+            "chart_table": HUMAN["site"]["figure"]["table"],
+            "chart_empty": HUMAN["site"]["figure"]["chart_empty"],
             "result_counts": "it counts",
             "result_not_counted": "it does not count",
             "need": {str(status.value): said for status, said in HUMAN["need"].items()},
@@ -5728,7 +5743,13 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
     if constraints:
         lines.append("standing: " + ", ".join(constraints))
 
-    lines.append("next: nopekit check --tier 0 ; nopekit gap --propose ; "
+    # The tier that runs every invalidated and unrun evaluator. What slipped
+    # through (review of P2): the line always said `--tier 0`, so a project
+    # whose stale claims rest on a tier-2 solver was told to run a check that
+    # cannot reach them.
+    reach = set(moved) | {s.id for s in unrun}
+    tier = max((int(s.tier) for s in _specs(registry) if s.id in reach), default=0)
+    lines.append(f"next: nopekit check --tier {tier} ; nopekit gap --propose ; "
                  "nopekit report --write")
     return "\n".join(lines) + "\n"
 

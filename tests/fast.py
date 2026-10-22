@@ -33,6 +33,9 @@ source scans and one spec in process, ~0.05 s); its browser test
 (test_field_browser, ~2.5 s, a headless Chromium) is the full suite's. One unpaired
 run at load 2.1-2.9: 211.4 s wall (163.3 s user) for its 711 tests. Over the line as
 its base is; no idle run.
+Its P2.5 (the technical record's charts as baked specs) added one row to
+TheBrowserComputesNoTruth (source scans and two specs in process, ~0.01 s); its build
+class, test_figures.ChartViewsAreBakedSpecs (~1.7 s), is the full suite's.
 The merge of phase 3b into phase 6 keeps both lists whole (both paid with test_meta.NoGitOutsideVcs;
 test_meta.InvariantClassesNeverSkip, which phase 6's review made 0.6 s, is out of the
 tier as phase 3b left it). Measured on 2026-10-15 as two interleaved pairs against
@@ -1165,6 +1168,10 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.AFigureSaysWhichResultItIs.test_site_status_reads_behind_after_a_check_that_moved_only_the_entry",
     "test_figures.AFigureSaysWhichResultItIs.test_two_older_renders_after_a_merge_show_none",
     "test_figures.AFigureSaysWhichResultItIs.test_the_technical_page_says_the_same_word",
+    # The review of P2: an older chart draws its own run alone, never the
+    # served row's point and limit (two checks and two builds, ~1.4 s; the
+    # FAST row above runs the same bake of an older figure).
+    "test_figures.AFigureSaysWhichResultItIs.test_an_older_chart_draws_its_own_run_alone",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_planted_chip_is_refused",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_missing_or_extra_claim_is_refused",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_chart_limit_and_margin_are_the_floors",

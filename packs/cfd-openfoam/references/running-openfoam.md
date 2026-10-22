@@ -16,6 +16,12 @@ Every line here was measured on ESI OpenFOAM v2606 while the pack was written.
      (`planeType pointAndNormal`, the point inside `pointAndNormalDict`, as v2606
      requires; `interpolate true`), written every iteration at `writePrecision
      12` (13 significant digits, whatever the case's own controlDict says);
+   - in `cfd.pressure_drop`'s ladder only, add `nopekit_magU` (`type mag` of
+     `U`) and `nopekit_static` (`type pressure`, `mode static`, `rho rhoInf`,
+     `rhoInf` the project's `cfd_density_kg_m3`), each written at the write time:
+     OpenFOAM writes `mag(U)` in m/s and `static(p)` in Pa beside `U` and `p` at
+     the last iteration. Measured on v2606: `static(p)` is the density times
+     `p`, cell for cell. The other gates do not read the density;
    - replace `SIMPLE/residualControl` in `system/fvSolution` with `p` and `U` at
      `cfd_residual_target`;
    - for a refined level, multiply each block's cell counts in
@@ -206,6 +212,24 @@ last value (in `levels` for a ladder, one for each mesh), and the tolerance as
 estimate. A chart of the history uses these numbers and calculates none. The
 history is a CSV file because the site's prose check reads each number in a
 JSON evidence file as a match for a number in the text, in any unit.
+
+`cfd.pressure_drop`'s `summary.json` also holds what the site's pictures draw,
+so that a picture calculates nothing:
+
+- in each item of `levels`: `h_rel`, the cell size relative to the finest mesh,
+  (cells of the finest / cells)^(1/dim), and `dp_pa`, the pressure drop in Pa;
+- `h_rel_ext`: 0, the cell size of the Richardson value `dp_ext_pa`;
+- `u_upstream_m_s`: the mean velocity along the upstream plane's normal, on the
+  finest mesh at its last iteration (the value `cfd.converged` holds to
+  `cfd_velocity_m_s`);
+- `p_up_pa` and `p_down_pa`: the density times each plane's average `p`, on the
+  same row;
+- `planes`: the two planes, each a point and a unit normal;
+- `fields`: the finest level's stage (`<out>/cfd-openfoam/cfd_pressure_drop/level2`),
+  its last time directory, and the sha256 of `U`, `p`, `mag(U)` and `static(p)`
+  there and of the five `constant/polyMesh` files. A picture draws these files
+  only while their bytes are these. They are not cited as evidence, so the site
+  never copies them.
 
 ## Where the planes sit
 

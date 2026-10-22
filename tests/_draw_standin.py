@@ -15,7 +15,8 @@ mode), so a test can say which result a picture was drawn from.
 ``--mode`` plants each fault the spine must survive:
 ``ok``; ``crash`` (exit 3); ``hang`` (sleeps past any timeout);
 ``oversize`` (a PNG of 2.1 MiB, over the 2 MiB cap); ``move-inputs`` (appends
-to the bound field file while it draws). Run:
+to the bound field file while it draws); ``gltf-outside`` (the ``.gltf`` it
+writes names its buffers as files beside it). Run:
 ``python3 tests/_draw_standin.py --png OUT --entry E --value V [--glb OUT]
 [--field PATH] [--mode MODE]``.
 """
@@ -54,6 +55,41 @@ GLB = base64.b64decode(
     "AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAAAPw=="
 )
 
+#: The same box as a glTF that holds its buffers inside it (``data:`` URIs),
+#: written by trimesh 5.1.0 (``trimesh.Scene(trimesh.creation.box()).export(
+#: file_type="gltf", embed_buffers=True)["model.gltf"]``): ParaView's form of
+#: a 3D file. Written when ``--glb`` names a ``.gltf``.
+GLTF = (
+    '{"scene":0,"scenes":[{"nodes":[0]}],"asset":{"version":"2.0","generator":"https://github'
+    '.com/mikedh/trimesh"},"accessors":[{"componentType":5125,"type":"SCALAR","bufferView":0,'
+    '"count":36,"max":[7],"min":[0]},{"componentType":5126,"type":"VEC3","byteOffset":0,"buff'
+    'erView":1,"count":8,"max":[0.5,0.5,0.5],"min":[-0.5,-0.5,-0.5]}],"meshes":[{"name":"geom'
+    'etry_0","extras":{"shape":"box","extents":[1.0,1.0,1.0]},"primitives":[{"attributes":{"P'
+    'OSITION":1},"indices":0,"mode":4}]}],"nodes":[{"name":"geometry_0","mesh":0}],"buffers":'
+    '[{"uri":"data:application/octet-stream;base64,AQAAAAMAAAAAAAAABAAAAAEAAAAAAAAAAAAAAAMAAA'
+    'ACAAAAAgAAAAQAAAAAAAAAAQAAAAcAAAADAAAABQAAAAEAAAAEAAAABQAAAAcAAAABAAAAAwAAAAcAAAACAAAABg'
+    'AAAAQAAAACAAAAAgAAAAcAAAAGAAAABgAAAAUAAAAEAAAABwAAAAUAAAAGAAAA","byteLength":144},{"uri"'
+    ':"data:application/octet-stream;base64,AAAAvwAAAL8AAAC/AAAAvwAAAL8AAAA/AAAAvwAAAD8AAAC/A'
+    'AAAvwAAAD8AAAA/AAAAPwAAAL8AAAC/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAC/AAAAPwAAAD8AAAA/","byteLe'
+    'ngth":96}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":144},{"buffer":1,"byte'
+    'Offset":0,"byteLength":96}]}'
+).encode("utf-8")
+
+#: The ``gltf-outside`` mode's file: the same box with its buffers in files
+#: beside it (``export(file_type="gltf")["model.gltf"]``), which the page would
+#: fetch unchecked, so the spine refuses it.
+GLTF_OUTSIDE = (
+    '{"scene":0,"scenes":[{"nodes":[0]}],"asset":{"version":"2.0","generator":"https://github'
+    '.com/mikedh/trimesh"},"accessors":[{"componentType":5125,"type":"SCALAR","bufferView":0,'
+    '"count":36,"max":[7],"min":[0]},{"componentType":5126,"type":"VEC3","byteOffset":0,"buff'
+    'erView":1,"count":8,"max":[0.5,0.5,0.5],"min":[-0.5,-0.5,-0.5]}],"meshes":[{"name":"geom'
+    'etry_0","extras":{"shape":"box","extents":[1.0,1.0,1.0]},"primitives":[{"attributes":{"P'
+    'OSITION":1},"indices":0,"mode":4}]}],"nodes":[{"name":"geometry_0","mesh":0}],"buffers":'
+    '[{"uri":"gltf_buffer_0.bin","byteLength":144},{"uri":"gltf_buffer_1.bin","byteLength":96'
+    '}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":144},{"buffer":1,"byteOffset":'
+    '0,"byteLength":96}]}'
+).encode("utf-8")
+
 #: The oversize mode's size: 2.1 MiB, past the spine's 2 MiB cap
 #: (`page.EVIDENCE_MAX_BYTES`), so the write is refused, never truncated.
 OVERSIZE = int(2.1 * 1024 * 1024)
@@ -86,8 +122,11 @@ def main(argv: list[str]) -> int:
     with open(args.png, "wb") as fh:
         fh.write(payload)
     if args.glb:
+        solid = GLB
+        if args.glb.endswith(".gltf"):
+            solid = GLTF_OUTSIDE if args.mode == "gltf-outside" else GLTF
         with open(args.glb, "wb") as fh:
-            fh.write(GLB)
+            fh.write(solid)
     return 0
 
 

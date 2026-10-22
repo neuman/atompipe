@@ -1790,9 +1790,13 @@ it:
   functools, which the spine empties before each run).
 - **Every run is the pack's, on a staged copy.** The copy holds the case's `0/`,
   `constant/` but its mesh, and `system/`. The pack replaces every `functions` entry
-  with two `surfaceFieldValue` planes of its own and `residualControl` with its
-  target. Before the run, OpenFOAM's own reading of the copy (`foamDictionary
-  -expand`) must hold exactly those, and the nu, laminar model, budget and schemes
+  with function objects of its own and `residualControl` with its target: two
+  `surfaceFieldValue` planes, and in `cfd.pressure_drop`'s ladder four, with
+  OpenFOAM's `mag` of U and `pressure` (static, times the density) for the site's
+  pictures (GitHub #15, Phase 2; *rejected:* the two field objects in every ladder,
+  where the density would re-key the guards for a picture). Before the run,
+  OpenFOAM's own reading of the copy (`foamDictionary -expand`) must hold exactly
+  those, and the nu, laminar model, budget and schemes
   the guard read; simpleFoam's own convergence-criteria block must name the pack's
   target; checkMesh's direction count must be the case's dimension. Each tool runs
   with a private HOME whose user controlDict turns off `allowSystemOperations`, and
@@ -1960,8 +1964,9 @@ and while building it:
   and publishes only checked files.** *Rejected:* `write_asset` straight into `site/`
   (a half-checked or oversize file is published until the check runs, and an input
   that moved is not seen).
-- **The format checks are the stdlib minimum:** the PNG signature and IHDR, and the
-  GLB magic. *Rejected:* a PNG codec or a glTF accessor check of our own (the author's
+- **The format checks are the stdlib minimum:** the PNG signature and IHDR, the GLB
+  magic, and, for a glTF (from P2.4), JSON whose every buffer and image is a `data:`
+  URI, so the page fetches no file the spine did not see. *Rejected:* a PNG codec or a glTF accessor check of our own (the author's
   rule of 2026-10-21: build as little as possible, use trusted libraries); the Khronos
   validator stays a skipIf test for phase 2.
 - **A chart's numbers are its evidence's; its limit and point are the floor's.** *What
@@ -1974,9 +1979,9 @@ and while building it:
   table. *Rejected:* growing `lib/chart.js` (the author's rule); the ESM builds through
   the import map (`vega.module.js` imports 27 bare names, jsdelivr's `+esm` of
   vega-embed 7.1.0 pulls vega-lite 6.4.3, which nobody pinned, and an existing site's
-  shells are never regenerated, so they would never get the line). `lib/chart.js`
-  stays for the technical record's unbound charts and their locators, which a baked
-  spec would need every verdict's overlay to draw.
+  shells are never regenerated, so they would never get the line). From P2.5 the
+  technical record's chart views draw from a baked spec too, and `lib/chart.js` is
+  gone.
 - **A field draws its colours as the file holds them** (`lib/viewer3d.js` field mode:
   `MeshBasicMaterial` with vertex colours, `toneMapped` false, no lights,
   `LinearSRGBColorSpace` output, `NoToneMapping`). Measured with pvbatch: ParaView
@@ -1987,8 +1992,8 @@ and while building it:
   gives the pixels and the HTML legend.** *Rejected:* absolute constants,
   auto-rescale, the claim's limit; a colour bar inside the PNG (two legends that can
   disagree, unreadable on a phone).
-- **D6:** one PNG per scene per served entry; a GLB is committed only for an entry an
-  export re-ran; any other GLB is ignored, under `assets/live/`, and named only in
+- **D6:** one PNG per scene per served entry; a 3D file (GLB or glTF) is committed
+  only for an entry an export re-ran; any other is ignored, under `assets/live/`, and named only in
   `build.json`'s `live_figures`. *Rejected:* a `HEAD` probe for the live file (a static
   host shows a button that leads nowhere); a `.live.glb` name in a tracked folder.
 - **At most one older folder per view** while the served entry is undrawn; several
@@ -2015,11 +2020,139 @@ and while building it:
   every spine edit with a real v2606, which CI lacks.
 - **Invariant 14 grows** the figure sentence, held by the `test_figures.py` classes in
   its row.
-- **Phase 2, decided here and not yet built:** pvbatch's identity is its conda package
-  records against a pack lock, with a renderer control once per identity (*rejected:*
-  the banner alone, which fits another build; the launcher's 28 KB digest alone); the
-  pressure range is [p_down - 1.0 dp, p_down + 2.0 dp] (*rejected:* [-0.25, 1.25] dp,
-  which paints the baseline's ends out of range); a solver history is CSV evidence,
+- **Phase 2, P2.1 (built):** `cfd.pressure_drop`'s summary holds every number the
+  pictures draw, each the gate's or OpenFOAM's: per mesh `h_rel` and `dp_pa`,
+  `h_rel_ext` (0, where the Richardson value sits), `u_upstream_m_s`, `p_up_pa`,
+  `p_down_pa`, the `planes`, and `fields` (the finest level's time and the sha256 of
+  its `U`, `p`, `mag(U)`, `static(p)` and mesh files, which a picture binds and the
+  site never copies). Two charts need no tool: `cfd-openfoam.ladder` and
+  `cfd-openfoam.settle` (`views/flow.py`), payloads of those numbers that the spine
+  bakes into Vega-Lite. A chart payload may ask for a y axis that does not start at
+  zero (`"zero": false`): the ladder's meshes differ by 0.4% of the drop and drew as
+  one point (*rejected:* a log y, whose domain rounds to powers of ten). The settling
+  chart leaves out a change of zero (no place on a log axis) and the first row
+  (*rejected:* a floor value, a number no evidence file holds).
+- **Phase 2, P2.2 (built):** cfd-openfoam finds ParaView only through a `pvbatch62`
+  launcher on PATH, whose exec line names the prefix (`views/_pv.py`;
+  `references/rendering.md` has the launcher and the install). Its identity is its
+  conda records: the paraview record must list the `bin/pvbatch` on disk by its sha256,
+  the sha256 of the paraview, Mesa and Pillow packages must be an entry of
+  `views/paraview.lock.json`, and `pvbatch --version` must agree. Another build is
+  unavailable, named; `NOPEKIT_PVBATCH_EXTRA_LOCK` adds a build, loudly. A run gets an
+  environment built from nothing (a new empty HOME outside the project each time,
+  llvmpipe pinned), a timeout, and its output only when its `result.json` is this job's
+  and names llvmpipe. A renderer control, once per build, draws `views/fixture/strip.vtk`
+  (15 cells, -0.2 to 1.2 of the scale) with ParaView's own `Viridis` preset; Pillow
+  inside pvbatch reads each cell's centre pixel, and nopekit judges them: within 1 of
+  the lookup table's colour inside the scale, exactly magenta above and grey below, and
+  viridis's (33, 145, 140) at 0.5. *Rejected:* the banner alone, which fits another
+  build; the launcher's 28 KB digest alone; a PNG decoder of our own (the author's rule:
+  Pillow reads the pixels where ParaView drew them); judging inside pvbatch only (a
+  fault in that script would pass any renderer); a HOME under the project (`doctor`
+  would write into it). `doctor` has a row for each tool the views draw with, from the
+  pack's `TOOL_CHECKS`, and runs no control; `pack validate` loads `views/` through the
+  build's loader (`site.load_viewgens`) and holds `provides_views` to the views that
+  register, their tools to `requires_tools` (which now lists `pvbatch62`), and
+  `evidence_of` to a gate of the pack.
+- **Phase 2, P2.3 (built):** two stills bound to `cfd.pressure_drop`,
+  `cfd-openfoam.speed` (OpenFOAM's `mag(U)`) and `cfd-openfoam.pressure` (its
+  `static(p)`). Each binds the finest level's field and mesh by the sha256 the verified
+  summary names, copies those bytes into a case of its own outside the project (with a
+  controlDict of its own, so ParaView reads no other file of the run), and runs
+  `views/_scene.py` in pvbatch: a cut at the middle of the thickness, each cell its own
+  flat colour from ParaView's own `Viridis` preset, a continuous lookup table, unlit,
+  magenta above the scale and grey below, each measuring plane's trace as a 6 px line,
+  a parallel camera on the whole cut plus 5%, 1600 px wide, and the PNG written again
+  by Pillow with no chunk but the image's. Scales (`views/_scales.py`): speed on [0,
+  2 x the upstream plane's mean speed], static p on [p_down - 1.0 dp, p_down + 2.0 dp];
+  each end is factors times summary values, named in the scale's `source`. The
+  legend's stops come from `views/viridis.json`, the preset as ParaView exports it
+  (`views/_export_preset.py`), and a still is drawn only when the scene says it applied
+  that preset; its ticks are matplotlib's (`MaxNLocator`, in pvbatch). Measured on the
+  real tools: every one of 7840 cells away from the lines is the preset's colour for
+  its value to the byte, two draws are byte-identical, and each line is within a pixel
+  of its plane. On the baseline 6 cells at the inlet's corners pass the pressure
+  scale's top (to p_down + 2.62 dp) and are magenta: that rise grows as the mesh is
+  refined, so no fixed top holds it. The renderer control now draws with a continuous
+  table as the stills do (ParaView's default quantises the map to 256 colours).
+  *Rejected:* colour stops typed by hand (the design's draft), matplotlib's own viridis
+  table for the legend (another program's copy of the map), the export's stops as the
+  lookup table (an edited file would colour the picture to match itself), [-0.25, 1.25]
+  dp (paints the baseline's ends out of range), [-1, 3] dp (half the scale for the
+  rest, and a finer mesh passes it again), a line moved toward the camera (measured:
+  the same bytes), and a tick picker of the pack's own.
+- **Phase 2, P2.4 (built):** the 3D view. The pressure still's pvbatch run also writes
+  ParaView's own glTF of the same cut (`ExportView`, `InlineData` 1, no normals, batch
+  ids or NaN texture, the planes' lines hidden), and the page turns that file as
+  ParaView wrote it, in the viewer's field mode, with the still's legend. The spine
+  now takes a `.gltf` whose buffers are inside it beside a `.glb`
+  (`site.SOLID_SUFFIXES`, `_solid_problem`), and publishes it as it publishes a GLB:
+  on this computer only (`assets/live/`, named in `build.json`) until an export
+  re-runs the entry, then committed. A glTF over the 2 MiB cap is left out with a
+  warning, and the still is drawn. Measured on the real tools: 940 KB for the
+  baseline's 8000 cells, no error and no warning from the Khronos validator
+  2.0.0-dev.3.10, every cell's `COLOR_0` the preset's colour for its value, two
+  exports byte-identical; ParaView's default export of the cut (coloured by cells)
+  fails the validator (`MESH_PRIMITIVE_UNEQUAL_ACCESSOR_COUNT`), and is the tests'
+  control. In headless Chromium, ParaView's file in field mode draws each band of a
+  planted field in its preset colour within 2, and the lit mode draws none of them.
+  `tests/cfd_fields/` holds two small exports ParaView made (500 cells, seven bands
+  of known values) and the script that made them; a real-tool test makes them again
+  and compares bytes. *Rejected:* the design's `views/_gltf.py` (a GLB repacker of
+  our own: the author's rule of 2026-10-21); trimesh to convert to GLB (another tool
+  that rewrites ParaView's colours, for 25% fewer bytes the cap did not need); a
+  check of accessors in the spine or the pack (the validator is a trusted tool, run
+  in the tests where node is); the planes' lines in the 3D file (WebGL draws a glTF
+  line 1 px wide); a 3D file for the speed still too (a second file of up to 2 MiB
+  for the same geometry).
+- **Phase 2, P2.5 (built):** the hand-drawn chart is retired. Every chart view on
+  the technical record draws from a Vega-Lite spec the spine bakes
+  (`page.view_chart` over `chart_spec`), through the `drawChart` the engineering
+  page's cards use, and `lib/chart.js` is deleted. An unbound view keeps its own
+  limit (on y, or on x as a vertical line) and its points with the margin words the
+  build bakes; a bound view on the record draws its chart file's series alone; the
+  verdicts' anchors on a chart are baked into its spec (a located series heavier, a
+  located x a rule in its severity's colour). A spec over 8 KB is its own file,
+  `data/views/<id>~chart.json`, sealed with its row. Without the library the box
+  shows the spec's numbers as a table. A layer of constants (a limit, a rule, a
+  label, the judged point) now draws from one empty row of its own: before, it was
+  drawn once per row of the chart, so on the first chart of 42 points the shaded
+  side of the limit read solid red and each label was 42 copies (the cards' charts
+  had it too, at three rows, unseen). On a box under about 520 px the legend stacks
+  and an axis title ends in an ellipsis. *Rejected:* keeping `lib/chart.js` for the
+  record's unbound charts and their locators (P1.5's choice: the anchors are a fact
+  the bake can carry, and its text was about 5 px high on a phone); composing the
+  anchors' layers in the browser; reading an analytic pack's `markers` (the
+  hand-drawn chart never drew them, and their labels hold the pack's own margin
+  words).
+- **Phase 2, P2.6 (built):** the docs and the README's picture of the pack.
+  `PACK.md` has "Pictures on the site" (each view, the result it is of, the scales
+  and why, what git keeps, "from another run" and its command, and what a missing
+  `pvbatch62` does); `references/rendering.md` has every measured fact; the skill
+  has two lines. `docs/img/packs/cfd-openfoam.png` is the two stills a real
+  `site build` published for the pack's baseline, with their scales, put
+  together by `views/_gallery.py` in ParaView's Python: the stills' pixels with
+  no change, and matplotlib's colour bars from the sidecars' stops and ticks.
+  *Rejected:* a screenshot of the page (its chips are one build's statuses, and
+  go out of date in the README); a new run of the scene for the README (a second
+  drawing of the field, which can differ from the published one).
+- **Phase 2, review (built):** the stills look along the case's thin axis
+  (the gate's `thin_normal`, the normal of its `empty` patches) with the flow
+  from left to right, refuse a cut that is not the whole finest mesh and plane
+  lines out of order, and are at most as tall as wide; a 3D case gets the
+  charts and no still. An older chart draws its own run alone. The ladder's
+  judged point is a ring over a band with end bars, named on the chart and in
+  its caption; the settling chart's diamonds take their mesh's colour, its log
+  axis one notation, and it says `"judged": false`, so the build no longer
+  warns six times about its units. Every chart carries a baked table for a page
+  where Vega does not load. On the page, a still's plane words sit above the
+  picture, a legend's tick marks sit on their values, a hero still shows its
+  words and caption, the card says its claim's cause sentence, and the 3D view
+  looks down on the cut. The analytic packs' `markers` are drawn as their point.
+  *Rejected:* a cut of a 3D case (no one middle stands for a duct); the thin
+  axis found in the scene from the mesh's bounds (the thinnest side is not
+  always the empty one).
+- **Phase 2, built in P0.2 and P2.1:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 
 ## 9. Retired

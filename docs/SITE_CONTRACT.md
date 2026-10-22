@@ -86,7 +86,7 @@ site/
                       the marketing page's story, requirements and decisions
     views/<id>.json   per-view payloads too big for state.json
     build.json        IGNORED: the build time, each verdict's age, the live flag
-  assets/             GENERATED — what viewgens wrote (GLB, PNG, SVG, CSV)
+  assets/             GENERATED — what viewgens wrote (GLB, glTF, PNG, SVG, CSV)
     evidence/<gate>/<entry>/<file>   evidence copied from .nopekit/out/, by content
     figures/<gate>/<entry>/          a bound figure and its sidecar <view>.view.json
                       (issue #15; "Figures bound to verdicts")
@@ -438,6 +438,7 @@ was the one a reader of the contract would never look for.
                 "disagree": "the resolver and the verdicts disagree — a defect to report",
                 "result_recorded": …, "result_counts": …, "result_not_counted": …,
                 "judgment_title": "Expert judgments", "judgment_blurb": …,
+                "chart_table": …, "chart_empty": …,
                 "need": { "open": "identified", "proposed": "proposed", … },
                 "outcome_hint": { "pass": "the evaluator ran and passed", … } }
 }
@@ -458,8 +459,11 @@ an agent can read the site's state without a browser.
   words (`report.page_phrases`): `invalidated`, the flag on a verdict whose read set
   moved and on the top bar when `meta.stale` (a verdict invalidated, which is not a
   claim reading Stale: an invalidated fail stays Failing), and `need`, each gap
-  record's state (`identified` for `open`, GLOSSARY §6), and `outcome_hint`, each
-  verdict chip's title. A claim row's `reason` is why
+  record's state (`identified` for `open`, GLOSSARY §6), `outcome_hint`, each
+  verdict chip's title, and `chart_table` and `chart_empty`, what a chart view's box
+  says where the chart library did not load and where the view has no series (the
+  engineering page's `words.figure.table` and `chart_empty`, issue #15 P2.5). A
+  claim row's `reason` is why
   it reads what it reads — no evaluator, unrun, no owner recorded, needs an article —
   and the page prints it, never a sentence of its own; a Checked row (`cause:
   "checked"`) prints none. What slipped through (review of P2.1): the page said "No
@@ -608,10 +612,26 @@ an agent can read the site's state without a browser.
   (`site.view_digest`). A viewgen that is unavailable or crashed keeps its row from
   the last build only at those bytes, and `site status` reads a row or a view file
   with other bytes as edited by hand.
+- A chart view's row (issue #15, P2.5) gains `chart`: `{limit, current, spec}` from
+  `page.view_chart`, where `spec` is the whole Vega-Lite spec `page.chart_spec`
+  bakes (its series, its limit and points, and the verdicts' anchors on it: a
+  located series drawn heavier, a located x a rule in its severity's look), with none
+  of `page.VEGA_FORBIDDEN_KEYS`, or null for a view with nothing to draw. The
+  technical record hands it to `lib/figures.js`'s `drawChart`, as the engineering
+  page's cards do, and reads no chart's payload; where the library does not load it
+  shows the spec's numbers as a table. An unbound view keeps the limit and the points
+  it states itself (the first limit on each axis, its `current`, `marker` or `now`
+  with the `margin_text` the build bakes beside it in `data`); its axes are its
+  `data.x` / `data.y`, else its `meta.x` / `meta.y`, else `meta.x_label` and the
+  rest. A spec over the same 8 KB is split into `data/views/<id>~chart.json`: the
+  row keeps `"chart": {}` and gains `chart_url`, and the file is sealed with the row
+  as a view file is. *Rejected:* `lib/chart.js`, the hand-drawn SVG it replaced (the
+  author's rule of 2026-10-21: draw with a trusted library; its text fell to about
+  5 px on a phone, and it read no `markers` and no axis in `meta.x`).
 - A bound view (issue #15: a viewgen with `evidence_of`, drawn from its gate's served
   verdict entry) keeps `"data": {}` too. Its `src` is its still (a PNG) or, for a 3D
-  view, its GLB; `data_url` is a chart's series file; `field_src` a committed GLB
-  beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
+  view, its 3D file (a GLB or a glTF); `data_url` is a chart's series file;
+  `field_src` a committed 3D file beside a still; every one of them is under `assets/figures/<gate>/<entry>/`, beside
   the tracked sidecar `<view>.view.json`. It gains `binding`: `{gate, entry,
   currency, currency_word}`, where `entry` is the result the picture was drawn from
   and `currency` is `current` (the served entry, fresh), `stale` (the served entry,
@@ -622,8 +642,9 @@ an agent can read the site's state without a browser.
   view: it shows there only as its figure (`representation.figure`), with its chips
   and its currency (G8). The
   technical record prints the sentence and the gate and entry under the view
-  (`stage.js`); it draws a bound chart's series with `lib/chart.js`, with no limit
-  (the chart file holds none, and the limit is the claim's, on the engineering page).
+  (`stage.js`); it draws a bound chart's series alone, from the row's `chart.spec`,
+  with no limit (the chart file holds none, and the limit is the claim's, on the
+  engineering page).
   Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
   which vouches for a number in prose.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
@@ -881,8 +902,9 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   the three documents again and draws them in place, keeping the scroll, the drawer,
   the zoom and the selection. `ok: false` shows `words.notices.build_failed` and the
   error in a banner; the data stays.
-- **What the browser stopped computing** (SPEC 32): `chart.js` reads each current
-  point's `margin_text`; the technical record sorts verdict rows and anchored
+- **What the browser stopped computing** (SPEC 32): a chart draws each current
+  point's baked `margin_text` (`lib/chart.js` did, until P2.5 retired it for the
+  baked Vega-Lite spec); the technical record sorts verdict rows and anchored
   locators by the baked `order`; the mixed-age banner is `build.json`'s
   `mixed_age`; each row's age and its *aged* mark are `build.json`'s `verdicts`; a
   recorded result's word is its `outcome` (baked beside `passed`, phase 5) and its
@@ -1361,7 +1383,10 @@ value; a decision's `values` and the top-level `losers`):
   `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
   claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
   drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
-  not load; its columns take the baked spec's axis titles) and `turn_failed` (where
+  not load, above the chart's baked `table`), `table_more` and `table_band` (the words
+  `page.chart_table` bakes into that table: the rows of a long series left out, and a
+  band's two ends; review of P2), `chart_empty` (a chart
+  view with no series, on the technical record, from P2.5) and `turn_failed` (where
   the 3D view did not load). The card prints no error text of its own.
 
 **The marketing page's keys** (SPEC 40), all baked by `page.bake_page` or a helper it
@@ -1552,7 +1577,8 @@ name, so a design that went A, B, A (the last a cache hit, with B's files still 
 
 ## Figures bound to verdicts
 
-Issue #15. A **figure** is a still (a PNG), a chart or a 3D field (a GLB) that a pack
+Issue #15. A **figure** is a still (a PNG), a chart or a 3D field (a GLB, or a glTF
+with its buffers inside it) that a pack
 draws from the evidence of one verdict entry: the pressure field of the CFD run that
 judged a pressure drop, beside the claim it judged. A picture is persuasive, so it is
 held as the numbers are (invariant 14): it says which result it is, it sits beside the
@@ -1575,7 +1601,10 @@ that result.
 4. A colour range is a pack constant times a named evidence value, never a claim's
    limit. One `scale` object gives the pixels and the HTML legend.
 5. A chart draws only numbers its entry's verified evidence holds. Its limit and its
-   judged point are the floor row's, set by the spine.
+   judged point are the floor row's, set by the spine, and only on a chart of the
+   served entry: an `older` chart draws its own run's series with no limit and no
+   judged point (review of P2: the served value was drawn as a line across the other
+   run's series, with the served margin words).
 6. No figure file is over 2 MiB (`page.EVIDENCE_MAX_BYTES`).
 
 **The viewgen** declares the gate whose served entry it draws, `evidence_of`, and the
@@ -1610,10 +1639,10 @@ it.
 | Check | Refusal |
 |---|---|
 | each output at most 2 MiB (`write_asset` raises over it) | over the 2 MiB cap |
-| a still starts with the PNG signature and its IHDR parses; a 3D file starts with `glTF` | not a PNG, not a GLB |
-| one PNG and one GLB at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one GLB |
+| a still starts with the PNG signature and its IHDR parses; a `.glb` starts with `glTF`; a `.gltf` is JSON with `asset.version` `2.0` and every buffer and image a `data:` URI (`site._solid_problem`) | not a PNG, not a GLB, not a glTF 2.0, names a file outside it |
+| one PNG and one 3D file at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one 3D file |
 | a picture carries no payload, and its `src` names a file it wrote | its numbers are its evidence's; its src names no file it wrote |
-| a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`) | a chart's limit and its point are the claim's |
+| a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`, `markers`) | a chart's limit and its point are the claim's |
 | every number under `series`, `band`, `estimates` and `rule` is a JSON leaf or a CSV cell of a verified evidence file | the chart holds a number no evidence file holds |
 | every bound input and verified evidence file hashes the same after the call | the inputs moved while the picture was drawn |
 | `scale.lo` and `scale.hi` equal no `limit` or `limit_hi` of a claim the gate covers, nor the entry's verdict limit (relative 1e-9); no `scale.source[].key` holds `limit` | a colour range taken from a limit |
@@ -1624,10 +1653,12 @@ it.
 ```
 site/assets/figures/<gate>/<entry>/<view>.<sha12>.png         tracked: a still
 site/assets/figures/<gate>/<entry>/<view>.<sha12>.chart.json  tracked: a chart's payload
-site/assets/figures/<gate>/<entry>/<view>.<sha12>.glb         tracked: a 3D file, once an
-                                                              export re-ran the entry
+site/assets/figures/<gate>/<entry>/<view>.<sha12>.gltf        tracked: a 3D file (.glb or
+                                                              .gltf, as the viewgen wrote
+                                                              it), once an export re-ran
+                                                              the entry
 site/assets/figures/<gate>/<entry>/<view>.view.json           tracked: the sidecar
-site/assets/live/<gate>/<entry>/<view>.<sha12>.glb            IGNORED: any other 3D file
+site/assets/live/<gate>/<entry>/<view>.<sha12>.gltf           IGNORED: any other 3D file
 ```
 
 ```jsonc
@@ -1635,7 +1666,7 @@ site/assets/live/<gate>/<entry>/<view>.<sha12>.glb            IGNORED: any other
   "entry": "9c1e04d2b7a35f60-3a7b19e2", "kind": "image", "recipe": "<sha256>",
   "files": { "image": { "name": "cfd-openfoam.speed.1a2b3c4d5e6f.png",
                         "sha256": "<64>", "bytes": 10800 },
-             "field": { "name": "...glb", "sha256": "<64>", "bytes": 734012,
+             "field": { "name": "...gltf", "sha256": "<64>", "bytes": 940212,
                         "live": false },
              "chart": { "name": "...chart.json", "sha256": "<64>", "bytes": 2210 } },
   "title": "...", "caption": "...", "alt": "...",
@@ -1694,8 +1725,17 @@ else B's as `older`, else `none`.
 `representation.figure` and `controls` for a figure hero ("`page.json`"); `state.json`'s
 bound row `binding`, `data_url` and `field_src` (`state.json`, "views"); `build.json`'s
 `live_figures` (below); the claim card in `lib/figures.js` ("The renderer"). The chart is
-a Vega-Lite spec the spine bakes whole (`page.chart_spec`), and a field is drawn as
-the file holds its colours (`lib/viewer3d.js` field mode). `page.status_problems` holds
+a Vega-Lite spec the spine bakes whole (`page.chart_spec`), with a table of its numbers
+(`page.chart_table`: a long series cut to its first and last rows, numbers as the page
+writes them) that the card shows where the chart library does not load; and a field is
+drawn as the file holds its colours (`lib/viewer3d.js` field mode, its first view
+looking down on the cut). A still's marks are its plane words in a row above the
+picture, each over its baked position with a short line down to the picture's edge:
+nothing is drawn over the picture (review of P2: on a phone the words hid most of a
+10 to 1 strip, and a white line hid the tool's own black line). A figure still as the
+hero of either page is drawn the same way, with its caption. A legend's tick mark is
+always at its baked position; its words run inward near an end of the ramp. The card
+says the claim's cause sentence (`cause_text`) under its value. `page.status_problems` holds
 every figure (G1-G8, listed under `page.json`).
 
 ## `build.json`, live and published
@@ -1707,8 +1747,8 @@ every figure (G1-G8, listed under `page.json`).
   "verdicts": { "bracket.deflection": { "when": "...", "age_s": 412.0, "aged": false } },
   "mixed_age": { "shown": false, "oldest_s": 412.0, "newest_s": 3.0, "gates": [] },
   "tracing": false,    // architecture phase 3b: a trace holds its lock now
-  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed":
-                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.speed.1a2b3c4d5e6f.glb" } }
+  "live_figures": { "cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.pressure":
+                    "assets/live/cfd.pressure_drop/9c1e04d2b7a35f60-3a7b19e2/cfd-openfoam.pressure.1a2b3c4d5e6f.gltf" } }
                        // issue #15: each live 3D file of a bound figure on this computer
 ```
 

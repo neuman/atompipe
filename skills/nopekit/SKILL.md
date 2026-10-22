@@ -124,14 +124,15 @@ Change the design, run `nopekit check`, read the verdict lines. Tier 0 takes sec
   now and the heavy solver when the geometry stops moving; say its real cost.
 - **Basis.** Use an `established` evaluator (an existing non-AI tool's own answer) when
   one exists, then a `sourced` one, then `model-only`, and say why when you go lower.
-- **Proposers.** `nopekit propose` lists them; `nopekit propose <id>` runs one and files
-  each file it writes as an input (`ingest --proposer <id>` for one you ran by hand).
-  A proposal settles nothing: `extract` what you read from it, and keep or drop each
-  option it found in a `decide` record.
+- **Proposers.** `nopekit propose <id>` runs one (bare, it lists them) and files what it
+  writes as inputs (`ingest --proposer <id>` for one you ran by hand). A proposal settles
+  nothing: `extract` what you read; keep or drop each option in a `decide` record.
 - **Before you change a number,** run `nopekit why <claim|value|decision>`: what reads
   it, what it rests on, and what lost to it.
 - **Decisions keep their losers.** `nopekit decide` with each rejected alternative's
   `--type` and, where you can say it, `--returns-if`.
+- **Pictures.** `site build` draws `cfd-openfoam`'s flow pictures only with `pvbatch62`;
+  no status needs them. On "from another run", run `nopekit check --force --only <gate>`.
 - **The trace.** `round` starts `nopekit model trace` in the background; run it yourself
   after a gate or acceptance edit, before your turn ends. Never edit `.nopekit/trace/`.
 - **Review.** Before anything is built, review the design along each live pack's lenses
@@ -178,8 +179,7 @@ action, not a resting state, and its reason says which action:
   `nopekit packs show <pack>` for the install recipe, install the tool, and re-run.
   If it is heavy or needs root, say what it costs and ask.
 - `skipped: <gate> : <its own words>` with the tool present — the gate skipped itself
-  on its input, usually a parameter the model does not publish. Add it to the model;
-  installing changes nothing.
+  on its input, usually a parameter the model lacks. Add it; installing changes nothing.
 - `skipped: <gate> : prerequisite failed: <evaluator>` — a validity guard the gate needs
   failed, so its number would mean nothing here; installing changes nothing. Fix what
   that evaluator failed (its own row says what), and the gate runs again.

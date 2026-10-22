@@ -36,8 +36,9 @@ subset it can read exactly as OpenFOAM does (see "Pointing a project at its
 case"): a directive, a macro or a file it would not evaluate is a fail, never a
 guess. The others copy the case's `0/`, `constant/` (not its mesh) and
 `system/` under the gate's out directory and run OpenFOAM there. On that copy the
-pack writes its own residual targets and its own two function objects, and
-removes the case's: the numbers come from the pack, never from the project's
+pack writes its own residual targets and its own function objects (two
+planes; in `cfd.pressure_drop` also OpenFOAM's `mag` of U and its static
+pressure in Pa, which the site's pictures draw), and removes the case's: the numbers come from the pack, never from the project's
 `controlDict`. Before the run, OpenFOAM's own reading of the copy
 (`foamDictionary -expand`) must hold exactly the pack's function objects and
 residual targets and the case's nu, and the solver's log must report the pack's
@@ -100,6 +101,15 @@ is an error; a timeout is a skip.
 | `convergence` | `cfd.converged` |
 | `mesh-independence` | `cfd.mesh_independence` |
 
+**The claim's quantity.** nopekit compares a value with a claim's limit only
+when the claim's `acceptance.quantity` is the quantity the gate settles, word
+for word. For the pressure drop, write `"quantity": "pressure drop from cfd"`
+and `"units": "Pa"`. With another word, such as `"pressure drop"`, the value
+of `cfd.pressure_drop` is not compared with the claim's limit, and the card on
+the page shows no large value. The quantities of the other gates are
+`cfd case readability`, `cfd flow regime`, `cfd mesh quality`, `cfd solver
+convergence` and `cfd mesh independence`.
+
 ## Units
 
 SI. Metres, m/s, kg/m^3, Pa, seconds. OpenFOAM's incompressible `p` is kinematic
@@ -114,6 +124,74 @@ beside its `summary.json`, one for each mesh, and the summary holds the
 estimated remaining change as `iterative_error_pct`. A chart of the history
 calculates nothing (`references/running-openfoam.md`, "What the evidence
 holds").
+
+## Pictures on the site
+
+Each picture is of `cfd.pressure_drop`'s result, the result that the page
+shows beside the claim. A picture changes no status.
+
+| View | What it shows | Tool |
+|---|---|---|
+| `cfd-openfoam.ladder` | the pressure drop on each mesh against its cell size, the value at zero cell size, and the GCI band | none |
+| `cfd-openfoam.settle` | how much the pressure drop changed after each iteration on each mesh, the tolerance, and the estimate of the change still to come | none |
+| `cfd-openfoam.speed` | OpenFOAM's `mag(U)` on the finest mesh, cut at the middle of its thickness | `pvbatch62` |
+| `cfd-openfoam.pressure` | OpenFOAM's `static(p)` in Pa on the same cut; "Turn it in 3D" shows the cut in 3D | `pvbatch62` |
+
+A chart draws the numbers of the result and no other number. On the ladder,
+the site adds the claim's limit and a ring at the judged value, the top of the
+GCI band. The band is a vertical line with a short bar at each end; when the
+band is small, the two bars touch. The settling chart is of a change in
+percent, so it has no limit and no ring. In a still, each cell shows its own
+value, and the two lines are the measuring planes. Their names are above the
+picture. OpenFOAM computed each field, and ParaView only gives it colours.
+
+**Which cut.** The stills show a planar 2D case only. The gate writes the
+normal of the case's `empty` patches into the summary (`thin_normal`), and
+ParaView cuts the case across it, at the middle of its thickness, so the cut
+holds every cell of the finest mesh. The flow, from the upstream plane to the
+downstream plane, goes from left to right in the picture, whatever the axis
+of the case. The pack refuses a still whose cut does not hold every cell of
+the finest mesh, and one whose plane lines are not in that order. A 3D case
+gets the two charts and no still: no one cut shows a 3D duct, and the caption
+would not be true. A picture is at most as tall as it is wide.
+
+**The scales.** Each colour scale is a constant of the pack times a value of
+the result. It is never the claim's limit: a colour set by the limit would be
+a second verdict on the claim, so an edit of the limit changes no colour.
+
+- Speed: from 0 to two times the mean speed through the upstream plane.
+  Developed laminar flow has a peak of 1.5 times its mean between plates and
+  2 times its mean in a round pipe, so the core of the flow is in the scale. A
+  jet that is faster is magenta.
+- Static pressure: from one pressure drop below the pressure on the
+  downstream plane to two pressure drops above it. On the baseline this holds
+  the outlet (0.5 drops below) and the inlet (1.5 drops above). At the corners
+  of the inlet the pressure is above the scale (2.6 drops on the finest mesh,
+  and more on a finer mesh), so those cells are magenta.
+- The colour map is ParaView's `Viridis`. Magenta is above the scale and grey
+  is below it. The page draws the legend from the same scale.
+
+**What git keeps.** A round commits the two stills (about 4 KB each on the
+baseline) and the files of the charts. The 3D file (940 KB on the baseline)
+stays on this computer, in a folder that git ignores, until `nopekit export`
+runs the result again. The next build then commits it.
+
+**"From another run".** A still is drawn only from the field files whose
+sha256 the result's `summary.json` names. The files on this computer can be
+from another run: for example, a check of another design wrote over them
+after the result on the page. Then the build draws no new picture, and its
+warning says "the file on this computer is from another run: `nopekit check
+--force --only cfd.pressure_drop` solves it again", after the name of the
+file. The charts say the same when `summary.json` is from another run. The page keeps a still of
+another result, and says so, or shows no still. Run that command, then
+`nopekit site build`.
+
+**Without ParaView.** The stills and the 3D view need ParaView 6.2.0 through
+a `pvbatch62` launcher on PATH (`references/rendering.md`). The pack uses
+only the ParaView build it checked, and a renderer control runs one time on
+that build before the first still. `nopekit doctor` shows a `pvbatch62` row.
+Without ParaView, the charts are drawn and the stills and the 3D view are
+not. No status changes, and the build warnings say why.
 
 ## Pointing a project at its case
 
@@ -186,6 +264,8 @@ for this oil: check the units first.
 ## Where to look next
 
 - `references/installing.md`: getting ESI OpenFOAM v2606, and checking it.
+- `references/rendering.md`: getting ParaView 6.2.0 for the pictures, the
+  `pvbatch62` launcher, and the renderer control.
 - `references/running-openfoam.md`: how the gates run each tool, and every
   failure mode they read.
 - `references/gci.md`: Celik et al.'s procedure, the traps in it, and the

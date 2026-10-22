@@ -3541,7 +3541,7 @@ class BoundContext(ViewContext):             # a bound viewgen's argument: no mo
                                              #   held by a verified evidence file, each file
                                              #   at it; re-hashed after the call
     def write_asset(self, name, data) -> str # into .nopekit/out/figures/<g>/<E>/<view>/; a PNG
-    def write_live(self, name, data) -> str  #   or a GLB, at most 2 MiB (raises over it)
+    def write_live(self, name, data) -> str  #   or a 3D file, at most 2 MiB (raises over it)
     def note(self, text) -> None             # a build warning, under the view's id
     def asset_path(self, name)               # raises: nothing reaches site/ unchecked
 @dataclass
@@ -3555,9 +3555,19 @@ CHART_FORBIDDEN_KEYS = {"limit", "limits", "current", "marker", "now"}   # a bou
 CHART_NUMBER_KEYS = ("series", "band", "estimates", "rule")  # every number: in the evidence
 CAPTION_STATUS_PHRASES: tuple                # with every status word: never in a caption
 class ViewRegistry:                          # register / unregister / clear / get / specs / ids / pairs
+    def add_tool_check(self, tool, fn, *, pack="") -> None   # a module's TOOL_CHECKS entry
+    def tool_checks(self) -> dict            # {tool: (pack, check)}
+    def view_tools(self) -> list[str]        # every requires_tools of a view, then each checked tool
 VIEW_REGISTRY: ViewRegistry                  # module-level default
 def active_view_registry() -> ViewRegistry   # the registry `@viewgen` decorates into right now
 def use_view_registry(registry)              # context manager, as gates.use_registry
+def load_viewgens(directory, registry, *, pack, root) -> list[ViewSpec]   # import views/*.py:
+                                             #   the one loader of a build, `site status`,
+                                             #   `doctor` and `pack validate` (P2.2)
+TOOL_CHECKS_NAME = "TOOL_CHECKS"             # a view module's {tool: check(root) -> (ok, words)}
+NO_STATUS_WORDS = "No status depends on them."
+def view_tool_rows(registry, root, *, skip=()) -> list[tuple[bool, str]]   # doctor's rows for
+                                             #   the tools the views draw with
 def viewgen(*, id, kind, title="", description="", requires_python=(), requires_tools=(),
             pack="", order=100, gates=(), registry=None, evidence_of="", recipe=())
                                                             # decorator -> registers, returns fn
@@ -3691,7 +3701,10 @@ the tool's identity) is the memo, and the viewgen is not called; else, when it i
 available, it is called with a `BoundContext` whose `entry.files` are only the evidence
 files whose bytes the entry's manifest names (`verdicts.evidence_manifest`). What it
 returns is refused, with a warning and nothing published, when (`_figure_refusal`): an
-output is over 2 MiB; a still is no PNG (its signature and IHDR) or a 3D file no GLB; a
+output is over 2 MiB; a still is no PNG (its signature and IHDR), a `.glb` no GLB, or a
+`.gltf` no glTF 2.0 JSON whose every buffer and image is a `data:` URI (`_solid_problem`,
+`SOLID_SUFFIXES`; the spine checks no accessor: the Khronos validator does, in the
+tests); a
 bound picture carries a payload, or its `src` names no file it wrote; a chart holds a
 key of `CHART_FORBIDDEN_KEYS`, or a number under `CHART_NUMBER_KEYS` that no verified
 JSON leaf or CSV cell of the entry holds; a bound input or a verified file moved during
@@ -3699,15 +3712,16 @@ the call; a colour range's end equals a limit of a claim the gate covers or the 
 verdict limit (relative 1e-9), or a `scale.source` key names a limit; a caption holds a
 status word. Else it is published (`_publish_figure`) under
 `assets/figures/<gate>/<entry>/` as `<view>.<sha12>.<ext>` beside the tracked sidecar
-`<view>.view.json` (`page.read_sidecar`), and a GLB of an entry no export re-ran (or
+`<view>.view.json` (`page.read_sidecar`), and a 3D file of an entry no export re-ran (or
 written with `write_live`) under the ignored `assets/live/<gate>/<entry>/`, named only
 in `build.json`'s `live_figures`; once an export re-ran the entry, the next build copies
 it into the committed folder. The figure the page shows is then read from the disk
 (`page.figure_for`): current or stale under the served entry, else the one older folder
 of the gate (several: none), and its files, sidecar and the served entry's live file
 are the only bound files the cleaner keeps; an older folder goes once the served one is
-drawn. Its `state.json` row has `src` (the still, or the GLB of a 3D view), `data_url`
-(the chart's series file), `field_src` (a committed GLB beside a still), `binding`
+drawn. Its `state.json` row has `src` (the still, or the 3D file of a 3D view),
+`data_url` (the chart's series file), `field_src` (a committed 3D file beside a still),
+`binding`
 (`{gate, entry, currency, currency_word}`) and `data` empty. A bound viewgen that is
 unavailable, crashes, hangs past its own timeout, returns nothing or is refused moves
 no status (no view reaches the resolution) and deletes no picture; a picture of the
@@ -3786,8 +3800,13 @@ def entry_outcome(verdict) -> str            # error | pass | fail | unrun
 def drawn_text(verdict) -> str               # an older figure's line about its result
 def binding_text(figures) -> str             # which result each gate's figures are of
 def margin_text(margin) -> str               # the margin's words alone
-def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec}, warning): the floor's
-def chart_spec(payload, limit, current) -> dict   # P1.5: a bound chart's whole Vega-Lite spec
+def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec, table}, warning): the floor's
+def chart_spec(payload, limit, current, *, locators=()) -> dict   # P1.5: a chart's whole Vega-Lite spec
+def chart_table(payload) -> dict | None      # review of P2: {head, rows}, the chart's numbers as text
+def view_chart(row, payload, anchored=()) -> dict   # P2.5: {limit, current, spec, table} of a chart view on the record
+CHART_CURRENT_KEYS = ("current", "marker", "now", "markers")   # an unbound view's point, first present
+CHART_PAD = 14                               # px a continuous axis keeps inside each end
+CHART_TABLE_ROWS = 8                         # rows of one series in a chart's table
 VEGA_FORBIDDEN_KEYS: frozenset               # keys a baked spec never holds (Vega computes)
 def vega_forbidden(spec) -> list             # the forbidden keys a spec holds, sorted
 CHART_HEIGHT = 260                           # the chart's CSS height; its width is the card's
@@ -3903,8 +3922,28 @@ planted. The page's theme gives each mark `style` its look; the spec says where 
 label sits (Vega-Lite writes a text mark's alignment into the mark, over a theme's).
 *Rejected:* growing `lib/chart.js` (log y, bands, rules, estimates, hollow points),
 which the author's rule to build as little as possible and draw with a trusted
-library replaces; `lib/chart.js` stays for the technical record's unbound charts and
-their locators.
+library replaces. From P2.5 every chart view on the technical record is a baked spec
+too: `view_chart` reads an unbound view's own limit (y, or x as a vertical line) and
+points in each spelling the hand-drawn chart read, a bound view's chart file's series
+alone, and the verdicts' anchors (a located series drawn heavier, a located x a rule
+in its severity's look), and `chart_spec` takes lists of limits and points and the
+anchors as `locators`. `site.build` puts it in each chart row as `chart`, split into
+`data/views/<id>~chart.json` (`site.CHART_FILE_SUFFIX`, `chart_url`) over
+`VIEW_INLINE_MAX` and sealed with the row (`view_digest`). A layer that places only
+constants draws from one empty row of its own. *What slipped through:* such a layer
+inherited the chart's rows and was drawn once per row, so at 42 rows the shaded side
+of a limit read solid and each label was 42 copies. `lib/chart.js` is deleted.
+In the review of P2: an `older` figure's chart gets no floor row (`figure_row`, and
+G6 the same), so it draws its own run's series alone; the judged point is a ring,
+found at a series point or a band's end (`_series_x`), drawn over the band, whose two
+ends are short bars; a payload's `"legend": false` drops the legend and `"judged":
+false` the limit, the point and the units warning; an estimate that names its
+`series` takes that series' colour; a log y writes one notation (`~e`); and every
+chart carries `table` (`chart_table`), which the card shows where Vega does not
+load.
+*Rejected:* keeping it for the record's unbound charts and their locators, as P1.5
+did (the anchors are a spine fact the bake can carry, and the hand-drawn text was
+about 5 px high on a phone).
 
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure

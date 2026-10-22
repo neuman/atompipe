@@ -970,6 +970,58 @@ def _declared_str_list(value: Any) -> list[str]:
     return [str(v) for v in value or []]
 
 
+#: A pack's viewgens, beside ``gates/``.
+VIEWS_DIR = "views"
+
+
+def _view_problems(pack_dir: str, pack: str, manifest: PackManifest,
+                   gate_ids: set[str] | None) -> list[str]:
+    """What is wrong with a pack's ``views/``, loaded through the loader a
+    build uses (`site.load_viewgens`): ``provides_views`` names exactly the
+    view ids it registers; every tool a view draws with (its
+    ``requires_tools``, and each tool a module checks in ``TOOL_CHECKS``) is
+    in the manifest's ``requires_tools``; and a bound viewgen's
+    ``evidence_of`` names a gate of this pack. ``gate_ids`` is None when the
+    gates did not load (that is said once, above).
+
+    What slipped through before (issue #15, P2.2): ``provides_views`` was
+    never read, so a view renamed in code kept its old id in tier 1, and a
+    figure bound to a gate of another pack drew that pack's results from
+    this one."""
+    from . import site as _site                # local import: packs stays free
+    problems: list[str] = []
+    registry = _site.ViewRegistry()
+    try:
+        specs = _site.load_viewgens(os.path.join(pack_dir, VIEWS_DIR), registry,
+                                    pack=pack, root=None)
+    except NopekitError as exc:
+        return [f"{VIEWS_DIR}/ did not load: {exc}"]
+    declared = _declared_str_list(manifest.provides_views)
+    ids = [spec.id for spec in specs]
+    for vid in declared:
+        if vid not in ids:
+            problems.append(f"{MANIFEST_NAME}: provides_views lists {vid!r} but nothing in "
+                            f"{VIEWS_DIR}/ registers it (check the @viewgen id)")
+    for vid in ids:
+        if vid not in declared:
+            problems.append(f"view {vid!r} is registered but {MANIFEST_NAME} provides_views "
+                            f"does not list it: tier 1 must describe what the pack provides")
+    tools = set(manifest.requires_tools or ())
+    for spec in specs:
+        for tool in spec.requires_tools:
+            if tool not in tools:
+                problems.append(f"{MANIFEST_NAME}: requires_tools does not list {tool!r}, "
+                                f"needed by view {spec.id!r}")
+        if spec.evidence_of and gate_ids is not None and spec.evidence_of not in gate_ids:
+            problems.append(f"view {spec.id!r} is bound to {spec.evidence_of!r}, which is not "
+                            f"a gate of this pack: a pack's figure draws its own gate's result")
+    for tool in registry.tool_checks():
+        if tool not in tools:
+            problems.append(f"{MANIFEST_NAME}: requires_tools does not list {tool!r}, which "
+                            f"{VIEWS_DIR}/ checks in {_site.TOOL_CHECKS_NAME}")
+    return problems
+
+
 def _alias_problems(baseline: dict[str, Any]) -> list[str]:
     """Everything wrong with a baseline's ``_aliases`` map.
 
@@ -1377,6 +1429,9 @@ def validate(pack_dir: str, *, tier: int = Tier.BUILD,
                 problems.append(
                     f"{MANIFEST_NAME}: requires_python does not list {mod!r}, needed by gate {spec.id!r}"
                 )
+
+    problems.extend(_view_problems(pack_dir, dirname, manifest,
+                                   registered if (loaded or not gate_files) else None))
 
     # SPEC 38: every bundled evaluator says where its verdict's logic comes
     # from; any other pack's undeclared one shows as undeclared, said here.

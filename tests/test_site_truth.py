@@ -1634,6 +1634,116 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
                 planted["layer"][3]["encoding"]["y"][key] = {"a": 1}
                 self.assertEqual(page.vega_forbidden(planted), [key])
 
+    def test_every_chart_view_is_a_baked_spec(self):
+        """(issue #15, P2.5; the author's rule of 2026-10-21) The technical
+        record draws a chart view from the spec `site build` bakes
+        (`page.view_chart`), through the same `drawChart` as the cards: the
+        hand-drawn `lib/chart.js` is gone, and no template script draws a
+        chart of its own or reads a chart's payload. The spec of an unbound
+        view in each spelling the old chart read holds the view's own limit
+        (on y, and on x as a vertical line), its point with the baked margin
+        words and the verdicts' anchors, and none of
+        `page.VEGA_FORBIDDEN_KEYS`. What slipped through before it: the
+        hand-drawn chart read no `markers` and no axis named in `meta.x`, and
+        its text was about 5 px high on a phone."""
+        import _template
+        self.assertNotIn("lib/chart.js", self.sources)
+        for name, text in self.sources.items():
+            with self.subTest(name):
+                self.assertNotRegex(text, r"""(?m)^import [^;]*from\s+["'][./]*chart\.js["']""")
+        self.assertRegex(self.sources["lib/stage.js"],
+                         r"""(?m)^import \{ drawChart \} from "\./figures\.js";""")
+        body = js_function(self.sources["lib/stage.js"], "renderChart")
+        self.assertIn('drawChart(box, chart, phrase("chart_table"), view.id)', body)
+        self.assertNotRegex(_template.js_code(body), r"\.data\b|svg\(")
+        row = {"id": "curve", "kind": "chart",
+               "meta": {"x": {"label": "depth", "units": "mm"},
+                        "y": {"label": "deflection", "units": "mm"}},
+               "data": {"series": [{"key": "d", "label": "deflection",
+                                    "points": [{"x": 5, "y": 2.5}, [10, 0.31], [20, 0.04]]},
+                                   [0.9, 0.7]],
+                        "limit": [{"value": 0.5, "comparator": "<="},
+                                  {"value": 18, "axis": "x", "label": "longest"}],
+                        "current": {"x": 10, "y": 0.31,
+                                    "margin_text": "0.19 mm inside the limit"}}}
+        anchored = [({"view": "curve", "target": "d"}, {"status": "fail"}),
+                    ({"view": "curve", "position": [12], "label": "here"}, {"status": "fail"}),
+                    ({"view": "curve", "position": [15], "severity": "warning"},
+                     {"status": "pass"})]
+        chart = page.view_chart(row, row["data"], anchored)
+        spec = chart["spec"]
+        self.assertEqual(page.vega_forbidden(spec), [])
+        self.assertEqual(json.loads(json.dumps(spec)), spec, "the spec is plain JSON")
+        self.assertEqual([(r["series"], r["x"], r["y"]) for r in spec["data"]["values"]],
+                         [("d", 5, 2.5), ("d", 10, 0.31), ("d", 20, 0.04),
+                          ("s1", 0, 0.9), ("s1", 1, 0.7)])
+        styles = [l["mark"].get("style") for l in spec["layer"]]
+        for want in ("nk-past", "nk-limit", "nk-limit-label", "nk-located", "nk-loc-fail",
+                     "nk-loc-warn", "nk-loc-label", "nk-current", "nk-current-label"):
+            self.assertIn(want, styles)
+        limits = [l["encoding"] for l in spec["layer"] if l["mark"].get("style") == "nk-limit"]
+        self.assertEqual(limits, [{"y": {"datum": 0.5, "type": "quantitative"}},
+                                  {"x": {"datum": 18, "type": "quantitative"}}])
+        self.assertEqual(chart["limit"][0]["label"], "limit <= 0.5 mm")
+        words = [l["encoding"]["text"].get("value") for l in spec["layer"]
+                 if l["mark"]["type"] == "text"]
+        self.assertIn("0.19 mm inside the limit", words)
+        line = next(l for l in spec["layer"] if l["mark"].get("style") == "nk-series")
+        self.assertEqual(line["encoding"]["x"]["title"], "depth (mm)")
+        heavy = next(l for l in spec["layer"] if l["mark"].get("style") == "nk-located")
+        self.assertEqual({r["series"] for r in heavy["data"]["values"]}, {"d"})
+        # A layer of constants draws from one empty row of its own, never once
+        # per row of the chart (P2.5: at 42 rows the shaded side read solid).
+        for layer in spec["layer"]:
+            if '"field"' not in json.dumps(layer["encoding"]):
+                self.assertEqual(layer.get("data"), {"values": [{}]}, layer)
+        # A bound view's chart file states no limit and no point: one planted
+        # there is never drawn on the record (its limit is the claim's, G6).
+        bound = page.view_chart({"id": "b", "kind": "chart", "binding": {"gate": "g"}},
+                                {"series": {"v": [[1, 2]]}, "limit": {"value": 1},
+                                 "current": {"y": 2}}, ())
+        self.assertFalse([l for l in bound["spec"]["layer"] if str(
+            l["mark"].get("style")).startswith(("nk-limit", "nk-past", "nk-current"))])
+        self.assertEqual(page.view_chart({"id": "e", "kind": "chart"}, {"series": {}}, ()),
+                         {"limit": None, "current": None, "spec": None, "table": None})
+        # The analytic packs mark their current design as `markers`: it is the
+        # point, with the margin words `_chart_margins` bakes against the
+        # view's own limit. What slipped through (review of P2): this
+        # docstring's "read no `markers`" was said fixed and was not, and the
+        # beam's chart "with the current design marked" marked nothing.
+        marked = {"id": "beam", "kind": "chart",
+                  "data": {"series": [{"key": "deflection", "points": [[5, 2.5], [10, 0.31],
+                                                                       [20, 0.04]]}],
+                           "limit": {"value": 0.5, "comparator": "<="},
+                           "markers": [{"x": 10, "y": 0.31, "label": "current design: 38%"}]},
+                  "meta": {"y": {"label": "deflection", "units": "mm"}}}
+        baked = site._chart_margins(marked)
+        chart = page.view_chart(baked, baked["data"], ())
+        self.assertEqual(chart["current"], [{"x": 10, "y": 0.31,
+                                             "margin_text": "0.19 mm inside the limit"}])
+        styles = [l["mark"].get("style") for l in chart["spec"]["layer"]]
+        self.assertIn("nk-current", styles)
+        words = [l["encoding"]["text"].get("value") for l in chart["spec"]["layer"]
+                 if l["mark"]["type"] == "text"]
+        self.assertIn("0.19 mm inside the limit", words)
+        self.assertNotIn("current design: 38%", words)
+        # A table of what the chart draws, for a page where its library does
+        # not load: a long series cut to its ends, numbers as the page writes
+        # them (review of P2: 250 rows of 17 digits, no estimates, no rule).
+        long = {"series": [{"key": "a", "label": "mesh 1",
+                            "points": [[i, 1.0 / (i + 3)] for i in range(40)]}],
+                "estimates": [{"x": 39, "y": 2.731044260323462e-07, "label": "estimate"}],
+                "rule": {"value": 0.1, "label": "tolerance"},
+                "x": {"label": "iteration"}, "y": {"label": "change", "units": "%"}}
+        table = page.chart_table(long)
+        self.assertEqual(table["head"], ["", "iteration", "change (%)"])
+        self.assertEqual(len(table["rows"]), page.CHART_TABLE_ROWS + 1 + 2)
+        self.assertIn(["", "32 more rows are not in this table.", ""], table["rows"])
+        self.assertIn(["tolerance", "", "0.1"], table["rows"])
+        self.assertIn(["estimate", "39", "2.731e-07"], table["rows"])
+        self.assertTrue(all(len(cell) <= 12 for row in table["rows"] if row[0]
+                            for cell in row[1:]))
+
     def test_a_violator_in_a_comment_or_a_string_is_not_code(self):
         source = {"page.js": "// a.verdict.passed ? 1 : 0\nconst t = \"v.age_s >= 1\";\n"
                              "const u = `${x.age_s >= 2}`;\n"}
@@ -1823,7 +1933,8 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         before the prose; the drawer links it in one line; both heroes say
         which result a figure is; and the cards fit a phone."""
         figures = self.js["lib/figures.js"]
-        chips = figures[figures.index("function figureChips"):figures.index("function still")]
+        chips = figures[figures.index("function figureChips"):
+                        figures.index("function figureStill")]
         self.assertIn("fig.claims", chips)
         self.assertRegex(chips, r"tokenChip\(c\.token, c\.word, \{[^}]*marks: c\.marks")
         self.assertEqual(chip_calls_without_marks({"lib/figures.js": figures}), [])
@@ -1843,6 +1954,42 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertIn("repeat(2, minmax(0, 1fr))", wide[:120])
         self.assertTrue(any("width: 100%" in b for b in self._rules(css, ".fig-still img")))
 
+    def test_the_card_headlines_only_a_compared_value(self):
+        """(walkthrough after P2.6) A claim card's large value is the binding
+        one, else the first baked as compared with the claim's acceptance
+        condition, else none: the technical record's rule (`claimRow`), never
+        the first row. What slipped through: a Stale CFD claim, its gates all
+        opaque, headlined its guard cfd.regime's fraction of limit, "Value from
+        cfd.regime", above the pressure drop the claim is about."""
+        card = js_function(self.js["lib/figures.js"], "claimCard")
+        judging = re.search(r"const judging = ([^;]*);", card)
+        self.assertTrue(judging, "claimCard no longer names its headline `judging`")
+        self.assertEqual(
+            judging.group(1).replace(" ", ""),
+            "values.find((v)=>v.binding)||values.find((v)=>v.compared)||null",
+            "the card headlines a value no bake marked binding or compared")
+        self.assertNotIn("values[0]", card)
+        panels = js_function(self.js["lib/panels.js"], "claimRow")
+        self.assertIn("const headline = compared.length ? compared[0] : null;", panels)
+
+    def test_a_hero_still_carries_its_plane_words_and_caption(self):
+        """(review of P2) A figure still as the hero of either page is drawn
+        as on its card (`figureStill`: the plane words over their lines) with
+        its caption, the one text that says what the lines are. What slipped
+        through: both heroes drew the bare picture, with two black lines and
+        nothing that named them."""
+        hero = js_function(self.js["page.js"], "representation")
+        image = hero[hero.index('if (rep.kind === "image")'):]
+        self.assertIn("figureStill(fig, view.src)", image)
+        self.assertIn("fig.caption", image)
+        stage = js_function(self.js["marketing.js"], "stage")
+        image = stage[stage.index('if (rep.kind === "image")'):]
+        self.assertIn("figureStill(fig, view.src)", image)
+        self.assertIn("fig.caption", image)
+        still = js_function(self.js["lib/figures.js"], "figureStill")
+        self.assertIn("fig-marks", still)
+        self.assertIn("fig.marks", still)
+
     def test_a_chart_follows_the_theme_and_says_only_baked_words(self):
         """(issue #15, review of P1) Vega writes the theme's colours into the SVG
         it draws, so a chart is drawn again when the theme moves (the button's
@@ -1855,19 +2002,27 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         style scans never read), and the table's columns take the baked spec's
         axis titles, units included."""
         raw = self.js["lib/figures.js"]
-        self.assertEqual(raw.count("config: chartTheme()"), 1, "a draw that skips embedChart")
-        self.assertIn("config: chartTheme()", js_function(raw, "embedChart"))
+        self.assertEqual(len(re.findall(r"(?<!function )\bchartTheme\(\)", raw)), 1,
+                         "a draw that skips embedChart")
+        self.assertIn("const config = chartTheme();", js_function(raw, "embedChart"))
         watch = js_function(raw, "watchTheme")
         self.assertRegex(watch, r"new MutationObserver\(redraw\)\.observe\(document\."
                                 r"documentElement,\s*\{[^}]*attributeFilter: \[\"data-theme\"\]")
         self.assertIn('matchMedia("(prefers-color-scheme: dark)")', watch)
         self.assertIn('addEventListener("change", redraw)', watch)
         self.assertIn("embedChart(window.vegaEmbed, item)", watch)
-        self.assertIn("watchTheme();", js_function(raw, "chartBox"))
+        # Both the cards and the technical record's chart views (P2.5) draw
+        # through `drawChart`, which watches the theme.
+        self.assertIn("watchTheme();", js_function(raw, "drawChart"))
+        self.assertIn("drawChart(host, chart,", js_function(raw, "chartBox"))
         table = js_function(raw, "chartTable")
         self.assertNotIn("err", table)
-        self.assertIn('axisTitle(spec, "x")', table)
-        self.assertIn('axisTitle(spec, "y")', table)
+        # The table is the spine's (`page.chart_table`): its head and rows as
+        # baked, never the spec's data printed raw (review of P2).
+        self.assertIn("chart.table", table)
+        self.assertIn("table.head", table)
+        import _template
+        self.assertNotRegex(_template.js_code(table), r"String\(|\.values\b")
         self.assertNotIn("err.message", raw)
         self.assertNotIn("did not load", raw)
         self.assertIn(".turn_failed", js_function(raw, "turnButton"))

@@ -37,7 +37,7 @@ import { renderProse } from "./lib/sections.js";
 import { readBuild, watchBuild } from "./lib/live.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
-import { figureTag, scaleLegend } from "./lib/figures.js";
+import { figureTag, scaleLegend, figureStill } from "./lib/figures.js";
 import { leadOf, tallyList } from "./lib/verdict.js";
 import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
@@ -280,9 +280,13 @@ function stage(rep) {
   withData(view).then(() => {
     if (mk.repView !== repKeyOf(rep)) return;       // a rebuild moved on meanwhile
     if (rep.kind === "image") {
-      mount(host, el("figure", { class: rep.figure ? "mk-flat mk-figure" : "mk-flat" },
-        renderImage(view, [], null), caption, rep.figure ? figureTag(rep.figure, words) : null,
-        rep.figure ? scaleLegend(rep.figure.scale) : null));
+      // A figure still is drawn as on its card, with its plane words and
+      // caption (review of P2: two unnamed black lines on the hero).
+      const fig = rep.figure;
+      mount(host, el("figure", { class: fig ? "mk-flat mk-figure" : "mk-flat" },
+        fig ? figureStill(fig, view.src) : renderImage(view, [], null), caption,
+        fig ? figureTag(fig, words) : null, fig ? scaleLegend(fig.scale) : null,
+        fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null));
       return;
     }
     const flat = el("div", { class: "mk-flat-svg" });
