@@ -465,17 +465,38 @@ def pack_gates(pack: str) -> list[Any]:
     return sorted(registry.specs(), key=lambda spec: spec.id)
 
 
+def _stated_acceptance(spec: Any, pack: str) -> dict[str, Any] | None:
+    """The acceptance condition of the first claim ``pack``'s baseline states
+    (``_claims``) that shares a tag with ``spec``, in the legacy form, or None.
+
+    A pack gate that reads its limit through ``ctx.acceptance`` reads it by a tag
+    (cfd.pressure_drop: ``pressure-drop``), and every ``G`` claim carrying that
+    tag must then state one condition, the pack's own, or the gate errors on the
+    wrapped project. *Rejected:* the baseline's claims in place of the ``G``
+    claims (tests name ``G5`` and ``G6`` as the claims a gate's figures sit on)."""
+    for row in pack_baseline(pack).get("_claims") or ():
+        if set(row.get("tags") or ()) & set(spec.claims):
+            acc = row.get("acceptance") or {}
+            return {"comparator": acc.get("comparator", "<="), "limit": acc.get("limit"),
+                    "limit_hi": acc.get("limit_hi"), "quantity": acc.get("quantity", ""),
+                    "units": acc.get("units", "")}
+    return None
+
+
 def _claim(n: int, spec: Any, pack: str) -> dict[str, Any]:
     """Claim ``G<n>``, critical and measurable, covered by ``spec`` through its tags.
 
     ``G``, not ``C``: openmodelica's baseline binds variables to claims C1 and
     C2 and prefers a ledger claim's limit when one of that id exists (packs:H20),
     so a wrapped project whose claims were C-numbered would judge the pack's
-    design against the wrapper's limits instead of the pack's own.
+    design against the wrapper's limits instead of the pack's own. Its
+    condition states no limit, unless the baseline states a claim that shares
+    a tag with ``spec`` (``_stated_acceptance``): then that claim's condition.
     """
     return {
-        "acceptance": {"comparator": "<=", "limit": None, "limit_hi": None,
-                       "quantity": spec.settles or spec.title, "units": ""},
+        "acceptance": _stated_acceptance(spec, pack) or {
+            "comparator": "<=", "limit": None, "limit_hi": None,
+            "quantity": spec.settles or spec.title, "units": ""},
         "critical": True,
         "gates": [],
         "grounded_by": [],
@@ -525,7 +546,9 @@ def wrap_pack_baseline(pack: str, dest: str, *, legacy: bool = True,
       touching the checkout.
     * One critical measurable claim per gate, ``G1…Gn`` in gate-id order, with
       ``tags = spec.claims``, so each claim is covered by its gate (and by any
-      other gate sharing a tag, exactly as a user's claim would be).
+      other gate sharing a tag, exactly as a user's claim would be). A claim
+      that shares a tag with one the baseline states (``_claims``) takes its
+      acceptance condition: the limit a pack gate reads by that tag.
     * The **legacy** layout: ``.nopekit/ledger.json`` and ``.nopekit/.gitignore``
       (``LEGACY_GITIGNORE``), keys sorted, indent 2 — what the 1e09113 spine
       wrote, so that spine reads the project natively, this phase's spine

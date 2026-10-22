@@ -2892,6 +2892,8 @@ SKILLS_DIR = "skills"; SKILL_NAME = "SKILL.md"             # phase 6 (SPEC 37): 
 def skill_files(pack_dir) -> list[tuple[str, str]]         # (name, path) of skills/<name>/SKILL.md
 def validate(pack_dir, *, tier=Tier.BUILD, notes=None) -> list[str]   # problems; empty = ok
 def baseline_context(pack_dir, *, out_dir) -> GateContext  # the ONE sealed baseline context
+BASELINE_CLAIMS = "_claims"                                # issue #15 D2: the claims a baseline states
+def baseline_claims(baseline) -> list[Claim]               # ... read, strictly: the known-good ledger
 def demonstrate(pack_dir, *, tier=Tier.BUILD, out_dir=None) -> Demonstration
 @dataclass
 class Demonstration:                         # what `demonstrate` saw, gate by gate
@@ -2975,8 +2977,11 @@ into the pack — including a wheel's site-packages; a given `out_dir` holds
 `<gate id>/{baseline,control,sealed}`, each emptied before its run. `baseline_context(pack_dir, *,
 out_dir)` is the one sealed baseline context everything builds from: the raw
 `baseline.json` **including `_notes` and `_aliases`**, exactly as the test oracle
-builds it, `root=pack_dir`, an empty `Ledger`, `extra={}`, the given `out_dir`, tier
-`EXTERNAL`. `validate(pack_dir, *, tier=Tier.BUILD, notes=None)` calls `demonstrate`
+builds it, `root=pack_dir`, a `Ledger` of the claims the baseline states under
+`_claims` (`baseline_claims`, which `validate` also runs) and nothing of the
+host's, `extra={}`, the given `out_dir`, tier `EXTERNAL`. A pack gate reads its limit
+from those through `ctx.acceptance` on its controls (issue #15 D2: cfd.pressure_drop,
+whose limit had been a parameter beside the claim's). `validate(pack_dir, *, tier=Tier.BUILD, notes=None)` calls `demonstrate`
 once the gates load; a missing-tool skip, and the gates above `tier` that were not
 run, are appended to `notes` when a list is given and **never** to the returned
 problems, so `validate(dir) == []` on a CI runner

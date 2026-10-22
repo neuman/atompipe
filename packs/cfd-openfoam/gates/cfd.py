@@ -229,6 +229,35 @@ MESH_FILES = ("points", "faces", "owner", "neighbour", "boundary")
 #: case need not).
 WRITE_PRECISION = 12
 
+#: The tag cfd.pressure_drop reads its limit by (``ctx.acceptance``): the claim
+#: tagged ``pressure-drop``, which every gate of this pack covers. A limit lives
+#: in claims/, never in the pack's parameters (issue #15, D2). What slipped
+#: through before it:
+#: the gate judged against ``cfd_dp_max_pa``, a parameter beside the claim's
+#: limit, and a claim at 0.5 Pa with the parameter at 0.6 read "An evaluator
+#: passed. Its value does not meet the acceptance condition." at 0.52 Pa.
+#: Rejected: a parameter naming the claim's id (a second place to state which
+#: claim, and a pack tied to a project's numbering); a tag of this gate alone
+#: (every project would add one more tag to the one claim it already tags).
+#: Two claims tagged so with different limits make the gate error: state one
+#: such claim per case.
+DP_CLAIM_TAG = "pressure-drop"
+
+#: The units cfd.pressure_drop computes in, and the only units of a limit it
+#: judges: rho x OpenFOAM's kinematic pressure is in Pa. A claim in kPa is
+#: refused before any run, never compared. Rejected: converting kPa or bar (a
+#: units table for one gate; the spine compares units as written, so a pass in
+#: Pa against a kPa claim would error anyway); comparing whatever the claim
+#: states (0.52 Pa against "0.5 kPa" fails a design that is 1000 times inside).
+DP_UNITS = "Pa"
+
+#: The comparators cfd.pressure_drop judges: an upper limit. The value judged is
+#: the top of the GCI band, the mesh's share of the error on the side that
+#: fails, and that is the failing side only for an upper limit. Rejected: the
+#: band's bottom for ">=" (no claim of this pack has needed a lower limit, and
+#: a second branch is a second thing to qualify).
+DP_COMPARATORS = ("<=", "<")
+
 
 def _skip(gid: str, reason: str) -> Verdict:
     return Verdict(gate=gid, passed=False, skipped=True, skip_reason=reason)
@@ -1673,8 +1702,8 @@ def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
     velocity along the upstream plane's normal, the one cfd.converged holds to
     cfd_velocity_m_s), ``p_up_pa`` and ``p_down_pa`` (rho x each plane's
     average p), the ``planes`` and the ``fields`` with their sha256. A
-    picture's colour range is a pack factor times one of these, never
-    ``limit_pa``."""
+    picture's colour range is a pack factor times one of these, never a
+    limit: the summary holds none."""
     payload = {"dim": case.dim, "thin_normal": case.thin_normal,
                "formal_order": case.formal_order,
                "levels": [{"k": lv.k, "cells": lv.solve.cells, "counts": lv.counts,
@@ -1787,23 +1816,31 @@ def pressure_drop(ctx: GateContext) -> Verdict:
     """The area-averaged static pressure on the upstream plane minus that on the
     downstream plane, on the finest of the three meshes, times
     ``cfd_density_kg_m3`` (an incompressible solver's p is kinematic, m^2/s^2).
-    The value judged is the top of its GCI band, dp x (1 + GCI), against
-    ``cfd_dp_max_pa``: a pressure drop is a claim about at most, and the mesh's
-    share of the error goes on the side that fails."""
+    The value judged is the top of its GCI band, dp x (1 + GCI), in Pa, against
+    the limit of the claim tagged ``pressure-drop`` (``ctx.acceptance``): a
+    pressure drop is a claim about at most, and the mesh's share of the error
+    goes on the side that fails. The claim's units must be Pa and its comparator
+    ``<=`` or ``<``, or the gate errors before it runs a mesh."""
     gid = "cfd.pressure_drop"
-    vals = {}
-    for key, what in (("cfd_density_kg_m3", "the fluid's density, which turns the solver's "
-                                            "kinematic pressure into pascals"),
-                      ("cfd_dp_max_pa", "the largest pressure drop the claim allows, Pa")):
-        v = _number(ctx, key)
-        if v is None:
-            return _skip(gid, f"no {key}: {what}")
-        if isinstance(v, str):
-            return _error(gid, v)
-        if not v > 0:
-            return _error(gid, f"{key} is {v:g}; it must be positive")
-        vals[key] = v
-    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
+    rho = _number(ctx, "cfd_density_kg_m3")
+    if rho is None:
+        return _skip(gid, "no cfd_density_kg_m3: the fluid's density, which turns the "
+                          "solver's kinematic pressure into pascals")
+    if isinstance(rho, str):
+        return _error(gid, rho)
+    if not rho > 0:
+        return _error(gid, f"cfd_density_kg_m3 is {rho:g}; it must be positive")
+    acc = ctx.acceptance(DP_CLAIM_TAG)
+    comparator = acc.comparator.value
+    if str(acc.units or "").strip() != DP_UNITS:
+        return _error(gid, f"the claim tagged {DP_CLAIM_TAG} states its limit in "
+                           f"{str(acc.units or '')!r}; this gate computes the pressure drop "
+                           f"in {DP_UNITS}: state the limit in {DP_UNITS}")
+    if comparator not in DP_COMPARATORS:
+        return _error(gid, f"the claim tagged {DP_CLAIM_TAG} states {comparator} "
+                           f"{acc.limit:g} {DP_UNITS}; this gate judges only an upper limit "
+                           f"({' or '.join(DP_COMPARATORS)}): the top of the GCI band is "
+                           f"the failing side only there")
     got = _ladder(ctx, gid, rho)
     if isinstance(got, Verdict):
         return got
@@ -1824,15 +1861,18 @@ def pressure_drop(ctx: GateContext) -> Verdict:
                       _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho, planes))
     dp_pa = rho * res.phi[0]
     top = dp_pa * (1.0 + res.gci_fine21)
+    # No limit in the summary: the verdict carries the limit it judged against,
+    # and a picture's scale is never taken from one (until issue #15 D2 it
+    # held ``limit_pa``, the parameter's, which nothing read).
     ev = _ladder_evidence(ctx, gid, case, levels, res, noise,
                           {"density_kg_m3": rho, "dp_pa": dp_pa, "band_top_pa": top,
-                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit}, rho,
-                          planes)
-    passed = top <= limit
-    return Verdict(gate=gid, passed=passed, measured=round(top, 9), limit=limit,
-                   comparator="<=", units="Pa",
+                           "dp_ext_pa": rho * res.phi_ext21}, rho, planes)
+    measured = round(top, 9)
+    passed = acc.holds(measured)
+    return Verdict(gate=gid, passed=passed, measured=measured, limit=acc.limit,
+                   comparator=comparator, units=DP_UNITS,
                    detail=f"pressure drop {dp_pa:.5g} Pa on the finest mesh "
                           f"({levels[-1].solve.cells} cells) + GCI {res.gci_fine21 * 100:.3g}% "
-                          f"= {top:.5g} Pa, {'within' if passed else 'past'} {limit:g} Pa; "
+                          f"= {top:.5g} Pa, {'within' if passed else 'past'} {acc.limit:g} Pa; "
                           f"{rho * res.phi_ext21:.5g} Pa extrapolated",
                    evidence=ev)

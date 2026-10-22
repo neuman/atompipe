@@ -148,9 +148,11 @@ because the verdict cache keys each verdict by exactly what it read. Write for t
   never `acc.units`: a gate that repeats the claim's units back agrees with any claim,
   and the units check never fires. Never key anything on the limit itself: the
   qualification re-runs your known-good design with each limit moved (x0.1, x0.5, x2,
-  x10) and your value must not move. A pack's baseline states no claims, so a pack
-  gate that reads one errors on its own control; a project gate's controls read the
-  claims its `selftest/known_good.py` states (`CLAIMS`), never the live files.
+  x10) and your value must not move. A pack gate's controls read the claims its
+  `selftest/baseline.json` states under `_claims` (each fixture hands the same rows,
+  `Claim.from_dict`, as its ledger); without them it errors on its own
+  control. A project gate's controls read the claims its `selftest/known_good.py`
+  states (`CLAIMS`). Never the live files, and never a limit as a pack parameter.
 - **Say which side of your limit passes: `comparator`.** Every verdict that reports a
   finite `limit` sets `comparator` (`"<="`, `">="`, …, `"between"`) on that branch; a
   branch with no one-sided reading reports no limit. The spine derives the verdict's

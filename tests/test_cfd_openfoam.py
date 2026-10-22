@@ -46,7 +46,7 @@ import _env
 from nopekit import gates as gates_mod
 from nopekit import packs as packs_mod
 from nopekit.modelio import load_path
-from nopekit.models import Ledger, ProjectMeta
+from nopekit.models import Comparator, Ledger, ProjectMeta
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACK = os.path.join(REPO, "packs", "cfd-openfoam")
@@ -75,11 +75,26 @@ def _registry() -> gates_mod.Registry:
     return registry
 
 
-def _run(registry, gid: str, root: str, params: dict, *, tier: int = 2):
+def _claims(limit=None, **acceptance) -> list:
+    """The baseline's own claims (``_claims``), as the pack's controls read
+    them; ``limit`` and ``acceptance`` move the pressure-drop claim's
+    condition."""
+    with open(os.path.join(PACK, "selftest", "baseline.json"), encoding="utf-8") as fh:
+        claims = packs_mod.baseline_claims(json.load(fh))
+    if limit is not None:
+        acceptance["limit"] = limit
+    for claim in claims:
+        for key, value in acceptance.items():
+            setattr(claim.acceptance, key, value)
+    return claims
+
+
+def _run(registry, gid: str, root: str, params: dict, *, tier: int = 2, claims=None):
     spec_fn = registry.get(gid)
     assert spec_fn is not None, f"{gid} is not in the pack"
     ctx = gates_mod.GateContext(
-        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd")), model=None,
+        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd"),
+                                 claims=_claims() if claims is None else claims), model=None,
         params=dict(params), out_dir=os.path.join(root, "out", gid.replace(".", "_")),
         tier=tier, log=lambda _m: None, extra={})
     return gates_mod.run_gate(*spec_fn, ctx)
@@ -729,7 +744,8 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         with open(os.path.join(self.root, "standin.json"), "w") as fh:
             json.dump(mode, fh)
 
-    def gate(self, gid: str, params: dict | None = None, *, runs: bool = True):
+    def gate(self, gid: str, params: dict | None = None, *, runs: bool = True,
+             claims=None):
         calls = os.path.join(self.root, "calls")
         if os.path.exists(calls):
             os.remove(calls)
@@ -737,7 +753,8 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         # sourced etc/bashrc puts the real install's bin on PATH.
         env = {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}
         with mock.patch.dict(os.environ, env):
-            v = _run(self.registry, gid, self.tmp(), dict(self.params, **(params or {})))
+            v = _run(self.registry, gid, self.tmp(), dict(self.params, **(params or {})),
+                     claims=claims)
         # A stand-in that never ran (a noexec temp dir) would skip or error the
         # gate for the wrong reason; the count keeps that from reading as a test.
         if v.outcome in ("pass", "fail") and runs:
@@ -911,12 +928,49 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     def test_the_band_top_is_judged_not_the_value(self):
         """A limit between the pressure drop and its band's top fails."""
         dp_pa = 870.0 * 6.0e-4 / (1 + 2.0 / 40 ** 2)
-        v = self.gate("cfd.pressure_drop", {"cfd_dp_max_pa": dp_pa * 1.0005})
+        v = self.gate("cfd.pressure_drop", claims=_claims(dp_pa * 1.0005))
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertGreater(v.measured, dp_pa * 1.0005)
         v = self.gate("cfd.pressure_drop")
         self.assertEqual(v.outcome, "pass", v.render())
         self.assertEqual(v.units, "Pa")
+
+    def test_the_limit_is_the_claims(self):
+        """Issue #15 D2: the gate judges against the claim tagged pressure-drop, and
+        reports that claim's limit and side. Until then it judged against
+        cfd_dp_max_pa: a claim at 0.5 Pa beside the parameter at 0.6 read a
+        pass at 0.52 Pa that the claim's own condition rejected."""
+        good = self.gate("cfd.pressure_drop")
+        self.assertEqual((good.outcome, good.limit, good.comparator), ("pass", 0.6, "<="))
+        v = self.gate("cfd.pressure_drop", claims=_claims(0.5))
+        self.assertEqual((v.outcome, v.limit, v.measured), ("fail", 0.5, good.measured),
+                         v.render())
+        self.assertIn("past 0.5 Pa", v.detail)
+        v = self.gate("cfd.pressure_drop", claims=_claims(0.6, comparator=Comparator.LT))
+        self.assertEqual((v.outcome, v.comparator), ("pass", "<"), v.render())
+        # A stray parameter of the old name moves nothing.
+        v = self.gate("cfd.pressure_drop", {"cfd_dp_max_pa": 0.1})
+        self.assertEqual((v.outcome, v.limit), ("pass", 0.6), v.render())
+
+    def test_a_limit_the_gate_cannot_judge_errors_before_a_run(self):
+        """Another unit, a lower limit, or no claim tagged pressure-drop: an
+        error, and no OpenFOAM tool runs."""
+        calls = os.path.join(self.root, "calls")
+        cases = (("kPa", _claims(units="kPa"), "states its limit in 'kPa'"),
+                 ("no units", _claims(units=""), "states its limit in ''"),
+                 ("lower limit", _claims(comparator=Comparator.GE), "only an upper limit"),
+                 ("no claim", [], "no claim is named or tagged 'pressure-drop'"))
+        for label, claims, said in cases:
+            with self.subTest(label):
+                v = self.gate("cfd.pressure_drop", claims=claims)
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                self.assertFalse(os.path.exists(calls), "a tool ran")
+
+    def test_the_summary_holds_no_limit(self):
+        v = self.gate("cfd.pressure_drop")
+        summary = self.evidence(v, "summary.json")
+        self.assertFalse([k for k in summary if "limit" in k.lower()], sorted(summary))
 
     def test_a_ladder_past_the_gci_limit_fails_without_openfoam(self):
         """In CI the selftest skips this control: the stand-in holds the

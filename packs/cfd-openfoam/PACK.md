@@ -22,7 +22,7 @@ the right equations or the right geometry. `lenses.md` lists what to attack.
 | `cfd.mesh_quality` | 1 | established | checkMesh says `Mesh OK.` and the worst non-orthogonality, skewness and aspect ratio are each inside the project's limit |
 | `cfd.converged` | 2 | established | simpleFoam printed `SIMPLE solution converged`, every residual is at the pack's target, the pressure drop's estimated remaining change is under 0.1%, and the run carried the stated velocity |
 | `cfd.mesh_independence` | 2 | sourced | the case's mesh and two refinements converge monotonically at an observed order in [0.95, formal + 0.05], with a fine-grid GCI at most `cfd_gci_max_pct`; each plane on a cell face or centre at every level |
-| `cfd.pressure_drop` | 2 | established | the pressure drop on the finest mesh, raised by its GCI, is at most `cfd_dp_max_pa` |
+| `cfd.pressure_drop` | 2 | established | the pressure drop on the finest mesh, raised by its GCI, is at most the limit of the claim tagged `pressure-drop` |
 
 Each gate needs the one before it (`case_readable` → `regime` and `mesh_quality`
 → `converged` → `mesh_independence` → `pressure_drop`). A pressure drop never
@@ -112,6 +112,24 @@ of `cfd.pressure_drop` is not compared with the claim's limit, and the card on
 the page shows no large value. The quantities of the other gates are
 `cfd case readability`, `cfd flow regime`, `cfd mesh quality`, `cfd solver
 convergence` and `cfd mesh independence`.
+
+**The limit is the claim's.** `cfd.pressure_drop` reads its limit from the
+claim tagged `pressure-drop` (`ctx.acceptance`), and from no parameter. It
+compares the top of the GCI band with that limit and reports the limit and the
+comparator of the claim. Edit the limit in `claims/`: the next check runs the
+gate again. The gate gives an error, and runs no mesh, when the claim:
+
+- states its limit in units other than `Pa` (for example, `kPa`);
+- states a comparator other than `<=` or `<` (the top of the band is on the
+  side that fails only for an upper limit);
+- is not there, or two claims tagged `pressure-drop` state different
+  conditions. Tag one pressure-drop claim for each case.
+
+In earlier versions the limit was a parameter, `cfd_dp_max_pa`, beside the
+claim's limit. A claim at 0.5 Pa and the parameter at 0.6 Pa gave a pass at
+0.52 Pa, and the card said that the value does not meet the acceptance
+condition. The gate does not read that parameter now. Remove it from your
+model.
 
 ## Units
 
@@ -210,14 +228,24 @@ not. No status changes, and the build warnings say why.
 "cfd_density_kg_m3": 998,
 "cfd_residual_target": 1e-6,
 "cfd_refinement_ratio": 2,
-"cfd_gci_max_pct": 2,
-"cfd_dp_max_pa": 150
+"cfd_gci_max_pct": 2
+```
+
+and one claim, `claims/C1.json`:
+
+```json
+{"statement": "The static pressure drop along the manifold is at most 150 Pa",
+ "kind": "measurable",
+ "acceptance": {"quantity": "pressure drop from cfd", "comparator": "<=",
+                "limit": 150, "units": "Pa"},
+ "tags": ["pressure-drop"]}
 ```
 
 Required: `cfd_case`, `cfd_dp_planes`, `cfd_velocity_m_s` (the mean velocity
 through the upstream plane), `cfd_length_m` (the hydraulic diameter, 4 x area /
-wetted perimeter), `cfd_sound_speed_m_s`, `cfd_density_kg_m3`, `cfd_gci_max_pct`
-and `cfd_dp_max_pa`; each missing one is a skip that names it. The mesh-quality
+wetted perimeter), `cfd_sound_speed_m_s`, `cfd_density_kg_m3` and
+`cfd_gci_max_pct`; each missing one is a skip that names it. The pressure-drop
+limit is the claim's, never a parameter. The mesh-quality
 limits, the residual target and the refinement ratio have pack defaults, marked
 `[pack default]` in the verdict; `cfd_timeout_s` defaults to 600 s.
 

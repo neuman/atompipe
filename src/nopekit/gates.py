@@ -656,8 +656,9 @@ class GateContext:
         um`` read Checked at "0.6997 um" — 700 um (review of P2.4). On a
         control the condition is the known-good design's own (a project's
         ``selftest/known_good.py`` states ``CLAIMS``), so moving the live claim
-        never changes a control's severity; a pack's baseline states none, so a
-        pack gate that reads one errors on its control, loudly. Raises
+        never changes a control's severity; a pack's are the claims its
+        baseline states under ``_claims`` (``packs.baseline_claims``), and a
+        pack gate whose baseline states none errors on its control, loudly. Raises
         ``NopekitError`` — the gate errors, honestly — when no claim is named or
         tagged so, when the claims a tag names carry different conditions, or
         when the condition has no limit; the read is recorded first.

@@ -43,7 +43,8 @@ import sys
 import tempfile
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, NamedTuple, Sequence
 
-from .models import BASES, BASIS_UNDECLARED, GateSpec, KeyCollision, Ledger, Need, PackManifest, Tier
+from .models import (BASES, BASIS_UNDECLARED, Claim, GateSpec, KeyCollision, Ledger, Need,
+                     PackManifest, Tier)
 from .store import NOPEKIT_DIR, PACKS_NAME, PROPOSER_ID as _PROPOSER_ID, find_root
 from .util import NopekitError, read_json
 
@@ -77,6 +78,8 @@ __all__ = [
     "validate",
     "Demonstration",
     "baseline_context",
+    "BASELINE_CLAIMS",
+    "baseline_claims",
     "demonstrate",
     "SealFinding",
     "seal_findings",
@@ -139,6 +142,24 @@ BASELINE_NOTES = "_notes"
 #: baseline showing it, so they are declared here rather than living only in the
 #: gate source, where nothing can diff them.
 BASELINE_ALIASES = "_aliases"
+
+#: Inside ``selftest/baseline.json``: the claims the baseline was calibrated
+#: against, as a list of claim records (``claims/<id>.json``'s keys, with
+#: ``id``). A pack gate that reads its limit through ``ctx.acceptance`` reads it
+#: from these on its own controls (:func:`baseline_context`; each fixture
+#: hands the same rows as its ledger), never from the host's claims: a pack's good
+#: design is good against the pack's limits (packs:H20). What slipped through
+#: before it: no pack gate could read ``ctx.acceptance`` (its known-good control
+#: had an empty ledger and errored), so cfd.pressure_drop judged against a
+#: parameter of its own, ``cfd_dp_max_pa``, beside the claim's limit. A claim
+#: at 0.5 Pa and the parameter at 0.6 gave a pass at 0.52 Pa that the claim's
+#: condition rejected: two homes for one number (S-35 again, in a pack).
+#: *Rejected:* ``claims`` without the underscore (every other baseline key is a
+#: parameter in ``ctx.params`` and in the key vocabulary two packs are compared
+#: on; ``_`` keys are the baseline's metadata); a ``CLAIMS`` module beside the
+#: fixtures, as a project's ``selftest/known_good.py`` states them (a second
+#: file for the one design the baseline already is).
+BASELINE_CLAIMS = "_claims"
 
 #: ``os.pathsep``-separated directories searched BEFORE everything else.
 #: This is how CI tests a pack that is not installed anywhere, and how a
@@ -1268,6 +1289,10 @@ def validate(pack_dir: str, *, tier: int = Tier.BUILD,
             else:
                 baseline_usable = True
                 problems.extend(_alias_problems(loaded))
+                try:
+                    baseline_claims(loaded)
+                except NopekitError as exc:
+                    problems.append(str(exc))
         except (OSError, ValueError) as exc:
             problems.append(f"{SELFTEST_DIR}/{BASELINE_NAME} does not parse: {exc}")
 
@@ -1560,6 +1585,49 @@ class Demonstration:
     absent here is in ``skipped`` and not here."""
 
 
+def baseline_claims(baseline: Mapping[str, Any]) -> list[Claim]:
+    """The claims ``baseline`` (``selftest/baseline.json`` as it parses) states
+    under ``_claims`` (:data:`BASELINE_CLAIMS`), each a fresh ``Claim``; ``[]``
+    when it states none. :func:`baseline_context` reads the known-good
+    control's ledger with it, and :func:`validate` refuses a baseline it
+    refuses. A fixture builds its known-bad ledger from the same rows
+    (``Claim.from_dict``), so both controls read one ledger through
+    ``ctx.ledger``.
+
+    Raises ``NopekitError`` when ``_claims`` is not a list of objects, a row has
+    no ``id`` or repeats one, or names a key a claim record does not hold: a
+    typo there would leave the gate reading a condition nobody wrote."""
+    where = f"{SELFTEST_DIR}/{BASELINE_NAME}"
+    rows = baseline.get(BASELINE_CLAIMS)
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise NopekitError(f"{where}: {BASELINE_CLAIMS} must be a list of claim records, "
+                           f"not a {type(rows).__name__}")
+    fields = {f.name for f in dataclasses.fields(Claim)} - {"results", "attributions",
+                                                             "standing"}
+    claims: list[Claim] = []
+    for n, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] must be a claim record "
+                               f"(an object), not a {type(row).__name__}")
+        cid = row.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] has no id")
+        if any(c.id == cid for c in claims):
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS} states {cid!r} twice")
+        unknown = sorted(set(row) - fields - {"mechanism"})
+        if unknown:
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] ({cid}) has keys a claim "
+                               f"record does not hold: {', '.join(unknown)}")
+        try:
+            claims.append(Claim.from_dict(json.loads(json.dumps(row))))
+        except (TypeError, ValueError) as exc:
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] ({cid}) is not a claim "
+                               f"record: {exc}") from exc
+    return claims
+
+
 def baseline_context(pack_dir: str, *, out_dir: str) -> "GateContext":
     """The one sealed context a pack's gates are demonstrated against.
 
@@ -1569,11 +1637,13 @@ def baseline_context(pack_dir: str, *, out_dir: str) -> "GateContext":
       the two: stripping keys here would hold the copy to a different input.
     * ``root`` — the pack directory, so a relative asset path in the baseline
       resolves inside the pack.
-    * ``ledger`` — EMPTY. What slipped through otherwise: openmodelica binds its
-      baseline's variables to claims C1 and C2 and prefers the ledger's limit, so
-      inside a project whose own C1 reads "≤ 0.5 mm" the pack judged 342.8 K
-      against 0.5 and failed its own baseline (packs:H20). A pack's good design
-      is good against the pack's limits, not the host's.
+    * ``ledger`` — the claims the baseline states (:func:`baseline_claims`)
+      and nothing else: never the host's. What slipped through otherwise:
+      openmodelica binds its baseline's variables to claims C1 and C2 and
+      prefers the ledger's limit, so inside a project whose own C1 reads
+      "≤ 0.5 mm" the pack judged 342.8 K against 0.5 and failed its own
+      baseline (packs:H20). A pack's good design is good against the pack's
+      limits, not the host's.
     * ``extra`` — empty. ``tier`` — EXTERNAL, the oracle's ``tier=3``: which gates
       run is the caller's ceiling, but a gate that reads ``ctx.tier`` to choose a
       cheaper path must take the path it takes under the oracle.
@@ -1582,7 +1652,8 @@ def baseline_context(pack_dir: str, *, out_dir: str) -> "GateContext":
 
     Read fresh on every call, so a gate that mutates its params cannot hand the
     change to the next gate. Raises ``NopekitError`` when the baseline is
-    missing, does not parse, or is not a JSON object.
+    missing, does not parse, is not a JSON object, or states its claims
+    wrongly (:func:`baseline_claims`).
     """
     from . import gates as _gates          # local import: see _fresh_registry
 
@@ -1603,8 +1674,8 @@ def baseline_context(pack_dir: str, *, out_dir: str) -> "GateContext":
             f"{where} must be a JSON object (a model projection), not a "
             f"{type(params).__name__}")
     return _gates.GateContext(
-        root=pack_dir, ledger=Ledger(), model=None, params=params,
-        out_dir=out_dir, tier=int(Tier.EXTERNAL), extra={})
+        root=pack_dir, ledger=Ledger(claims=baseline_claims(params)), model=None,
+        params=params, out_dir=out_dir, tier=int(Tier.EXTERNAL), extra={})
 
 
 def _run_dir(base: str, gate_id: str, run: str) -> str:

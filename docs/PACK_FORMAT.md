@@ -399,9 +399,15 @@ x10), and the gate's value and units must not move — a value is measured, neve
 chosen by the limit it is judged against (`its known-good value moves when the
 acceptance condition it reads moves`). A gate may still lie at a limit no run visits;
 only an independent evaluator catches that (SPINE_CONTRACT's Limits). A pack's
-`selftest/baseline.json` states no claims, so a pack gate that reads one errors on its
-control: read acceptance conditions in a project's gates, or wait for a baseline's
-`claims` key.
+`selftest/baseline.json` states the claims its design was calibrated against under
+`_claims`, a list of claim records with their `id`; the known-good control's ledger
+is those claims (`packs.baseline_context`), and each known-bad fixture hands the same
+ones (`Claim.from_dict` over the baseline's `_claims`), never the host's. A baseline that states
+none gives an empty ledger, and a pack gate that reads a condition then errors on its
+own control. cfd-openfoam's `cfd.pressure_drop` reads the claim tagged
+`pressure-drop` this way (issue #15 D2): before, it judged against a parameter,
+`cfd_dp_max_pa`, beside the claim's limit, and a claim at 0.5 Pa beside the parameter
+at 0.6 Pa read a pass at 0.52 Pa that the claim rejected.
 
 ### Operating context
 

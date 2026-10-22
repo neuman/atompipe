@@ -316,9 +316,10 @@ class ChartsNeedNoTool(_OnTheStandIn):
                 self.assertEqual([n for n in numbers if n not in held], [])
 
     def test_a_chart_holds_no_limit(self):
-        """No limit key, and not the limit's value: cfd_dp_max_pa (0.6 Pa) is in
-        the summary as limit_pa, and no chart number is it."""
-        limit = self.summary()["limit_pa"]
+        """No limit key, and not the limit's value: the verdict judged against
+        the baseline claim's 0.6 Pa, and no chart number is it."""
+        limit = self.verdict.limit
+        self.assertEqual(limit, 0.6)
         for view_id in (LADDER, SETTLE):
             with self.subTest(view_id):
                 _spec, view, _ctx = self.draw(view_id)
@@ -1245,7 +1246,8 @@ def _run_in_project(root: str, path: str, params: dict | None = None):
     registry = cfd_tests._registry()
     spec_fn = registry.get(GATE)
     ctx = gates_mod.GateContext(
-        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd")), model=None,
+        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd"), claims=cfd_tests._claims()),
+        model=None,
         params={**cfd_tests._baseline(), **(params or {})}, out_dir=store.out_dir(root),
         tier=2,
         log=lambda _m: None, extra={})

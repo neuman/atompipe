@@ -27,7 +27,7 @@ from unittest import mock
 import _env
 from nopekit import gates as gates_mod
 from nopekit import packs as packs_mod
-from nopekit.models import Ledger, ProjectMeta, Tier
+from nopekit.models import Claim, Ledger, ProjectMeta, Tier
 from nopekit.verdicts import GateTrace
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -113,9 +113,17 @@ def _pack_ctx(pack_dir: str, params: dict) -> gates_mod.GateContext:
 
     Its evidence goes to a fresh temp directory (``_scratch_out``), never into
     the pack under test.
+
+    Its ledger holds the claims ``params`` states under ``_claims`` (a pack
+    gate that reads its limit through ``ctx.acceptance`` reads it there),
+    built here with ``Claim.from_dict``, not through ``packs.baseline_claims``:
+    this file's oracle builds its own context.
     """
+    claims = [Claim.from_dict(json.loads(json.dumps(row)))
+              for row in params.get("_claims") or ()]
     return gates_mod.GateContext(
-        root=pack_dir, ledger=Ledger(meta=ProjectMeta(name="selftest")), model=None,
+        root=pack_dir, ledger=Ledger(meta=ProjectMeta(name="selftest"), claims=claims),
+        model=None,
         params=params, out_dir=_scratch_out(), tier=3,
         log=lambda _m: None, extra={})
 
@@ -319,6 +327,30 @@ class PacksValidate(unittest.TestCase):
             with self.subTest(pack=os.path.basename(path)):
                 problems = packs_mod.validate(path)
                 self.assertEqual(problems, [], f"{os.path.basename(path)}: {problems}")
+
+    def test_a_baseline_states_its_claims_strictly(self):
+        """``_claims`` (issue #15 D2): a typo in a stated claim would leave a
+        gate reading a condition nobody wrote, so the reader refuses it, and
+        ``baseline_context`` hands the rest as the known-good ledger."""
+        from nopekit.util import NopekitError
+        row = {"id": "C1", "statement": "s", "kind": "measurable", "tags": ["t"],
+               "acceptance": {"quantity": "q", "comparator": "<=", "limit": 1.0,
+                              "units": "Pa"}}
+        claims = packs_mod.baseline_claims({"_claims": [row]})
+        self.assertEqual([(c.id, c.acceptance.limit) for c in claims], [("C1", 1.0)])
+        self.assertEqual(packs_mod.baseline_claims({}), [])
+        for label, bad, said in (
+                ("not a list", {"C1": row}, "must be a list"),
+                ("no id", [{**row, "id": ""}], "has no id"),
+                ("twice", [row, row], "states 'C1' twice"),
+                ("unknown key", [{**row, "limt": 1}], "limt")):
+            with self.subTest(label):
+                with self.assertRaises(NopekitError) as caught:
+                    packs_mod.baseline_claims({"_claims": bad})
+                self.assertIn(said, str(caught.exception))
+        ctx = packs_mod.baseline_context(os.path.join(REPO, "packs", "cfd-openfoam"),
+                                         out_dir=_scratch_out())
+        self.assertEqual([c.id for c in ctx.ledger.claims], ["C1"])
 
     def test_every_pack_ships_a_tier0_gate(self):
         """A pack of only expensive gates cannot be run in the inner loop, so it
