@@ -126,6 +126,21 @@ RE_LAMINAR_MAX = 2300.0
 #: (a 0.1 mm air passage at Re 2000 runs at about Mach 0.9).
 MACH_MAX = 0.3
 
+#: The units each guard reports its value in: the quantity its own arithmetic
+#: computes, never "fraction of limit" (issue #15, D3). A dimensionless number is
+#: named by its symbol, as fluids-analytic's ``fluid.flow_regime`` names "Re" and
+#: "e/D", so a tile reads "20 Re against a limit of 2300 Re" and a reader sees
+#: which number and which limit. What slipped through before it: cfd.regime and
+#: cfd.mesh_quality reported the worst value divided by its limit, so the page
+#: read "0.008696 fraction of limit" for Re 20, and the number a person checks
+#: against a textbook (Re, degrees) was only in the detail. Rejected: an empty
+#: unit (the tile then reads "20 against a limit of 2300" and does not say of
+#: what); the fraction kept beside the value (two values for one verdict; the
+#: margin is already ``claims.margin``'s, from the value and the limit).
+RE_UNITS, MACH_UNITS = "Re", "Mach"
+NON_ORTHO_UNITS, SKEWNESS_UNITS, ASPECT_RATIO_UNITS = "deg", "skewness", "aspect ratio"
+ITERATIVE_ERROR_UNITS = "%"
+
 #: The loosest residual target cfd.converged will write: OpenFOAM's residuals
 #: are normalised, start near 1, and Celik et al. 2008 (p. 2) ask for "at least
 #: three (preferably four) orders of magnitude decrease"; 1e-4 is the fourth. A
@@ -885,7 +900,9 @@ def case_readable(ctx: GateContext) -> Verdict:
 def regime(ctx: GateContext) -> Verdict:
     """Re = U Dh / nu below 2300 and Ma = U / c below 0.3, with nu read from the
     case and U, Dh and c as the project states them. cfd.converged then holds
-    the stated U to the velocity the run actually carried."""
+    the stated U to the velocity the run actually carried. The value is the
+    Reynolds number against 2300 (units ``Re``), or the Mach number against 0.3
+    (``Mach``) when that is nearer its limit."""
     gid = "cfd.regime"
     path = _case(ctx)
     if path is None:
@@ -917,14 +934,21 @@ def regime(ctx: GateContext) -> Verdict:
     if not ma < MACH_MAX:
         problems.append(f"Mach {ma:.3g} is not below {MACH_MAX:g}: an incompressible solver on "
                         f"a flow whose density changes")
-    # The value is the worse of the two as a fraction of its limit, so a Mach
-    # fail never reports a Reynolds number inside its limit (the first draft did).
-    worst = max(re_ / RE_LAMINAR_MAX, ma / MACH_MAX)
-    return Verdict(gate=gid, passed=not problems, measured=round(worst, 9),
-                   limit=1.0, comparator="<", units="fraction of limit",
-                   detail=("; ".join(problems) if problems else
-                           f"Re {re_:.4g} (U {u:g} m/s, Dh {dh:g} m, nu {case.nu:g} m^2/s) "
-                           f"below {RE_LAMINAR_MAX:g}; Mach {ma:.3g} below {MACH_MAX:g}"))
+    # The value is the number nearer its own limit, in its own units: the
+    # Reynolds number, or the Mach number when that is nearer. So a Mach fail
+    # never reports a Reynolds number inside its limit (the first draft did), and
+    # a pass never shows more margin than the gate has.
+    if ma / MACH_MAX > re_ / RE_LAMINAR_MAX:
+        measured, limit, units = ma, MACH_MAX, MACH_UNITS
+    else:
+        measured, limit, units = re_, RE_LAMINAR_MAX, RE_UNITS
+    said = (f"Re {re_:.4g} = U Dh / nu: mean velocity U {u:g} m/s through the upstream "
+            f"plane, hydraulic diameter Dh {dh:g} m, nu {case.nu:g} m^2/s from the case; "
+            f"limit {RE_LAMINAR_MAX:g}, the onset of transition in a pipe. Mach {ma:.3g} = "
+            f"U / c, c {c:g} m/s; limit {MACH_MAX:g}")
+    return Verdict(gate=gid, passed=not problems, measured=float(f"{measured:.9g}"),
+                   limit=limit, comparator="<", units=units,
+                   detail="; ".join(problems) + f" ({said})" if problems else said)
 
 
 # --------------------------------------------------------------------------- #
@@ -1294,8 +1318,10 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     """blockMesh, then checkMesh, on a staged copy. Passes only on checkMesh's
     ``Mesh OK.`` with the worst non-orthogonality, skewness and aspect ratio each
     inside the project's limit (``cfd_max_non_ortho_deg``, ``cfd_max_skewness``,
-    ``cfd_max_aspect_ratio``). The verdict's value is the worst of the three as a
-    fraction of its limit. checkMesh's exit code is never read: it is 0 on a
+    ``cfd_max_aspect_ratio``). The verdict's value is the one of the three
+    nearest its own limit, in its own units (``deg``, ``skewness``, ``aspect
+    ratio``), against that limit; a failed check with every value inside its
+    limit reports no value. checkMesh's exit code is never read: it is 0 on a
     failed mesh."""
     gid = "cfd.mesh_quality"
     path = _case(ctx)
@@ -1344,16 +1370,23 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     if mc.directions != case.dim:
         return _error(gid, f"checkMesh finds {mc.directions} geometric directions; the case "
                            f"reads as {case.dim}D", logs)
-    ratios = {"non-orthogonality": (mc.non_ortho_deg, limits["cfd_max_non_ortho_deg"], " deg"),
-              "skewness": (mc.skewness, limits["cfd_max_skewness"], ""),
-              "aspect ratio": (mc.aspect_ratio, limits["cfd_max_aspect_ratio"], "")}
-    worst = max(v / lim for v, lim, _u in ratios.values())
+    ratios = {"non-orthogonality": (mc.non_ortho_deg, limits["cfd_max_non_ortho_deg"],
+                                    NON_ORTHO_UNITS),
+              "skewness": (mc.skewness, limits["cfd_max_skewness"], SKEWNESS_UNITS),
+              "aspect ratio": (mc.aspect_ratio, limits["cfd_max_aspect_ratio"],
+                               ASPECT_RATIO_UNITS)}
+    # The value is the one of the three nearest its own limit, in its own
+    # units: on a failing value, the one that fails most. Ties go to the first
+    # (non-orthogonality).
+    binding = max(ratios, key=lambda n: ratios[n][0] / ratios[n][1])
     over = [n for n, (v, lim, _u) in ratios.items() if not v <= lim]
     ev = _evidence(ctx, gid, {"cells": mc.cells, "directions": mc.directions,
                               "mesh_ok": mc.ok, "failed_checks": mc.failed,
                               "values": {n: v for n, (v, _l, _u) in ratios.items()},
                               "limits": limits, "pack_default": marks})
-    said = ", ".join(f"{n} {v:.4g}{u} of {lim:g}" for n, (v, lim, u) in ratios.items())
+    deg = {"non-orthogonality": " deg"}
+    said = ", ".join(f"{n} {v:.4g}{deg.get(n, '')} of {lim:g}{deg.get(n, '')}"
+                     for n, (v, lim, _u) in ratios.items())
     default = f" [pack default: {', '.join(marks)}]" if marks else ""
     if not mc.ok:
         detail = (f"checkMesh failed {len(mc.failed)} check(s): "
@@ -1362,8 +1395,15 @@ def mesh_quality(ctx: GateContext) -> Verdict:
         detail = f"checkMesh said Mesh OK, but {', '.join(over)} past the limit: {said}{default}"
     else:
         detail = f"checkMesh: Mesh OK, {mc.cells} cells; {said}{default}"
-    return Verdict(gate=gid, passed=mc.ok and not over, measured=round(worst, 6), limit=1.0,
-                   comparator="<=", units="fraction of limit", detail=detail,
+    if not mc.ok and not over:
+        # A failed check with every value inside its limit has no one-sided
+        # value: the value nearest its limit would read inside it under a fail,
+        # and the margin would disagree with the verdict (with the fraction of
+        # limit, this read "0.002 fraction of limit" under Failing).
+        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, *logs])
+    v, lim, units = ratios[binding]
+    return Verdict(gate=gid, passed=mc.ok and not over, measured=float(f"{v:.9g}"),
+                   limit=lim, comparator="<=", units=units, detail=detail,
                    evidence=[ev, *logs])
 
 
@@ -1392,8 +1432,9 @@ def converged(ctx: GateContext) -> Verdict:
     p and U were both solved at the last iteration, each initial residual at or
     below the target, and the pressure drop's estimated remaining change
     (``_iter.remaining``, from its whole history) is under 0.1% of it. The value
-    is the iteration it converged at, against the case's own budget (endTime /
-    deltaT).
+    is that estimate in % of the pressure drop, against 0.1 %; the iteration it
+    converged at, against the case's own budget (endTime / deltaT), is in the
+    detail.
 
     A run that dies on SIGFPE (divergence, with trapping on), exits non-zero or
     never prints End is an error. So is a run whose mean velocity through the
@@ -1437,28 +1478,42 @@ def converged(ctx: GateContext) -> Verdict:
     log = solve.log
     at = log.converged_in if log.converged_in is not None else log.last_iteration
     dp = solve.dp()
+    pct = _error_pct(dp)
     ev = _evidence(ctx, gid, {"converged_in": log.converged_in, "last_iteration":
                               log.last_iteration, "budget": case.budget, "target": target,
                               "residuals": log.residuals, "dp_m2_s2": dp[-1] if dp else None,
-                              "iterative_error_pct": _error_pct(dp),
+                              "iterative_error_pct": pct,
                               "convergence_tol_pct": STABLE_TOL * 100.0,
                               "u_upstream": u_run, "cells": solve.cells,
                               "install": inst.root, "build": inst.build})
     hist = _history(ctx, gid, "history.csv", dp)
+    share = "" if pct is None else f" ({pct:.2g}% of it)"
     detail = ("; ".join(why) if why else
               f"converged at iteration {at} of {case.budget} to residual target {target:g}"
               f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, an estimated "
-              f"{I.remaining(dp):.2g} m^2/s^2 still to come; {solve.cells} cells")
+              f"{I.remaining(dp):.2g} m^2/s^2 still to come{share}, tolerance "
+              f"{STABLE_TOL * 100.0:g}%; {solve.cells} cells")
     if why:
         # No one-sided value: a run that stopped short, a residual over target and a
         # number still moving fail on different readings, and none is "iterations
         # past the budget" (with "<", the first draft's pass at 91 < 91 contradicted
         # itself; with "<=", its control's 5 <= 5 read inside the limit and failed).
         return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, hist, *logs])
-    # "<=": a run that converges on the last iteration of its budget converged.
-    return Verdict(gate=gid, passed=True, measured=float(at), limit=float(case.budget),
-                   comparator="<=", units="iterations", detail=detail,
-                   evidence=[ev, hist, *logs])
+    # The value is the judged one: the pressure drop's estimated remaining
+    # change in % of itself, against STABLE_TOL in %, "<=" as `_settled` judges
+    # it. Rounded to 6 significant digits, so a run settled at exactly the
+    # tolerance never reads 0.1000000001 % under a pass. Until D3 it was the
+    # iteration the run converged at against the case's budget: a number the
+    # converged line already implies, so the page read "80 iterations against a
+    # limit of 2000 iterations, 96% inside the limit", a margin on no judgment
+    # the gate made. Rejected: both (one value per verdict); the iterations
+    # (kept in the detail and the evidence). A pass whose last value is 0 has no
+    # percentage and reports no value.
+    if pct is None:
+        return Verdict(gate=gid, passed=True, detail=detail, evidence=[ev, hist, *logs])
+    return Verdict(gate=gid, passed=True, measured=float(f"{pct:.6g}"),
+                   limit=STABLE_TOL * 100.0, comparator="<=", units=ITERATIVE_ERROR_UNITS,
+                   detail=detail, evidence=[ev, hist, *logs])
 
 
 # --------------------------------------------------------------------------- #

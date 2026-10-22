@@ -43,6 +43,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import _env
+from nopekit import claims as claims_mod
 from nopekit import gates as gates_mod
 from nopekit import packs as packs_mod
 from nopekit.modelio import load_path
@@ -675,7 +676,21 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         v = _run(self.registry, "cfd.regime", self.tmp(), params, tier=0)
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("Mach", v.detail)
-        self.assertAlmostEqual(v.measured, 1.15, places=6)
+        # The Mach number in its own units against 0.3 (D3), never a fraction.
+        self.assertEqual((v.units, v.limit, v.comparator), ("Mach", 0.3, "<"))
+        self.assertAlmostEqual(v.measured, 0.3 * 1.15, places=9)
+
+    def test_the_value_is_the_reynolds_number_against_its_limit(self):
+        """(issue #15, D3) The value is Re in units ``Re`` against 2300, and the
+        detail says on which speed and length it was computed. What slipped
+        through before: "0.008696 fraction of limit" for Re 20."""
+        v = _run(self.registry, "cfd.regime", self.tmp(), self.params, tier=0)
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.limit, v.comparator), ("Re", 2300.0, "<"))
+        self.assertAlmostEqual(v.measured, 0.01 * 0.02 / 1e-5, places=6)
+        for said in ("U Dh / nu", "0.01 m/s", "0.02 m", "onset of transition"):
+            self.assertIn(said, v.detail)
+        self.assertGreater(claims_mod.margin(v).fraction, 0.99)
 
     def test_a_plane_with_no_normal_is_an_error(self):
         params = dict(self.params)
@@ -784,8 +799,14 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     def test_a_converged_run_passes(self):
         v = self.gate("cfd.converged")
         self.assertEqual(v.outcome, "pass", v.render())
-        self.assertEqual(v.measured, 60.0)
-        self.assertEqual(v.limit, 2000.0)
+        # The judged value (D3): the estimated remaining change in % of the
+        # pressure drop, against 0.1 %; the iteration is in the detail.
+        self.assertEqual((v.units, v.limit, v.comparator), ("%", 0.1, "<="))
+        summary = next(p for p in v.evidence if p.endswith("summary.json"))
+        with open(summary, encoding="utf-8") as fh:
+            self.assertEqual(v.measured, float(f"{json.load(fh)['iterative_error_pct']:.6g}"))
+        self.assertLessEqual(v.measured, v.limit)
+        self.assertIn("converged at iteration 60 of 2000", v.detail)
 
     def test_out_of_iterations_with_exit_0_and_end_fails(self):
         self.mode({"simpleFoam": {"converge_at": 5000}})
@@ -867,13 +888,16 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("checkMesh failed", v.detail)
+        # Every value inside its limit: no value, so none reads inside under a fail.
+        self.assertEqual((v.measured, v.limit), (None, None))
 
     def test_mesh_ok_past_the_projects_limit_fails(self):
         self.mode({"checkMesh": {"non_ortho": 72.0}})
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("checkMesh said Mesh OK, but non-orthogonality", v.detail)
-        self.assertAlmostEqual(v.measured, 72.0 / 65.0, places=5)
+        # Degrees against degrees (D3), never "fraction of limit".
+        self.assertEqual((v.measured, v.limit, v.units, v.comparator), (72.0, 65.0, "deg", "<="))
 
     def test_a_value_checkmesh_did_not_print_is_an_error(self):
         self.mode({"checkMesh": {"omit": ["non_ortho"]}})
@@ -885,7 +909,21 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         self.mode({"checkMesh": {"aspect": 5000.0, "ok": False}})
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
-        self.assertAlmostEqual(v.measured, 5.0)
+        self.assertEqual((v.measured, v.limit, v.units), (5000.0, 1000.0, "aspect ratio"))
+
+    def test_a_pass_reports_the_value_nearest_its_limit(self):
+        """(D3) A pass reports the one of the three nearest its own limit, in
+        its own units, so it never shows more margin than the gate has: the
+        aspect ratio when that is nearer, the non-orthogonality in degrees when
+        that is."""
+        v = self.gate("cfd.mesh_quality")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.limit), ("aspect ratio", 1000.0))
+        self.mode({"checkMesh": {"non_ortho": 60.0}})
+        v = self.gate("cfd.mesh_quality")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.measured, v.limit, v.units), (60.0, 65.0, "deg"))
+        self.assertAlmostEqual(claims_mod.margin(v).fraction, 5.0 / 65.0)
 
     # -- mesh independence ---------------------------------------------------
     def test_a_poiseuille_ladder_passes(self):

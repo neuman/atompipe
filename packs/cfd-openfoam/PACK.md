@@ -135,10 +135,30 @@ model.
 
 SI. Metres, m/s, kg/m^3, Pa, seconds. OpenFOAM's incompressible `p` is kinematic
 (m^2/s^2): `cfd.pressure_drop` multiplies it by `cfd_density_kg_m3` and reports
-Pa. `cfd.regime` and `cfd.mesh_quality` report the worst of their values as a
-fraction of its limit; `cfd.mesh_independence` reports the GCI in percent;
-`cfd.converged` reports the iteration it converged at, against the case's budget
-(endTime / deltaT), and no value when it fails.
+Pa.
+
+Each guard gives its value in the units of its own calculation, against its own
+limit. The site then shows, for example, "20 Re against a limit of 2300 Re, 99%
+inside the limit".
+
+| Gate | Value | Limit |
+|---|---|---|
+| `cfd.regime` | Re = U Dh / nu, in `Re`: U is `cfd_velocity_m_s`, Dh is `cfd_length_m`, nu is from the case | below 2300, the onset of transition in a pipe |
+| `cfd.regime` | Mach = U / c, in `Mach`, when it is nearer its limit than Re | below 0.3 |
+| `cfd.mesh_quality` | the worst non-orthogonality in `deg`, skewness in `skewness` or aspect ratio in `aspect ratio`: the one nearest its limit | `cfd_max_non_ortho_deg`, `cfd_max_skewness`, `cfd_max_aspect_ratio` |
+| `cfd.converged` | the estimated change still to come in the pressure drop, in `%` of it | at most 0.1 % |
+| `cfd.mesh_independence` | the fine-grid GCI, in `%` of the pressure drop | `cfd_gci_max_pct` |
+
+A gate that judges more than one value gives the value nearest its limit. Thus a
+pass never shows more margin than the gate has, and a fail gives the value that
+failed. A gate gives no value when it fails for a reason that is not a value:
+`cfd.converged` when the run stops short, and `cfd.mesh_quality` when checkMesh
+fails a check but each value is in its limit. The detail of `cfd.converged`
+gives the iteration that the run converged at.
+
+In earlier versions, `cfd.regime` and `cfd.mesh_quality` gave the worst value
+divided by its limit. The page then showed "0.008696 fraction of limit" for Re
+20.
 
 Each gate that runs simpleFoam writes the pressure drop's history as a CSV file
 beside its `summary.json`, one for each mesh, and the summary holds the
