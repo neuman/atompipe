@@ -335,24 +335,43 @@ class ChartsNeedNoTool(_OnTheStandIn):
                          [f"{lv['cells']} cells" for lv in s["levels"]])
         self.assertEqual(series["richardson"],
                          {"key": "richardson", "label": "zero cell size",
-                          "points": [[0.0, s["dp_ext_pa"]]], "hollow": True})
-        self.assertEqual(series["band_top"]["points"], [[1.0, s["band_top_pa"]]])
+                          "points": [[0.0, s["dp_ext_pa"]]], "labels": ["zero cell size"],
+                          "labels_below": True, "hollow": True})
+        # No series for the band's top: its swatch had no mark (review of P2).
+        self.assertEqual(sorted(series), ["meshes", "richardson"])
+        self.assertIs(view.data["legend"], False)
         self.assertEqual(view.data["band"], [{"x": 1.0, "lo": s["dp_pa"],
                                               "hi": s["band_top_pa"], "label": "GCI band"}])
         self.assertEqual(view.data["y"], {"label": "pressure drop", "units": "Pa",
                                           "zero": False})
-        # The judged value (the band's top) is a series point, so the spine puts
-        # the judged point at the finest mesh, not as a line across the chart.
+        # The judged value is the band's top, so the spine puts the judged
+        # point at the finest mesh, not as a line across the chart.
         self.assertEqual(page._series_x(view.data, round(s["band_top_pa"], 9)), 1.0)
         current = {"x": 1.0, "y": round(s["band_top_pa"], 9), "margin_text": "13% inside"}
         spec = page.chart_spec(view.data, None, current)
         [line] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-series"]
-        self.assertEqual(line["encoding"]["y"]["scale"], {"zero": False})
-        # The judged point's words sit above the finest mesh's "8000 cells", not
-        # over it (they were drawn over each other until P2.1).
+        self.assertEqual(line["encoding"]["y"]["scale"], {"zero": False,
+                                                          "padding": page.CHART_PAD})
+        self.assertIsNone(line["encoding"]["color"]["legend"])
+        # The judged point's words sit under the point, the finest mesh's "8000
+        # cells" above it: drawn over each other until P2.1, then lifted above
+        # into the next mesh's words on a phone (review of P2).
         [words] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-current-label"]
-        [cells] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-point-label"]
-        self.assertLess(words["mark"]["dy"], cells["mark"]["dy"])
+        cells, under = [l for l in spec["layer"] if l["mark"].get("style") == "nk-point-label"]
+        self.assertGreater(words["mark"]["dy"], 0)
+        self.assertLess(cells["mark"]["dy"], 0)
+        # "zero cell size" under its point, apart from "8000 cells" above the
+        # next (review of P2: the two ran into each other on a phone).
+        self.assertEqual([r["text"] for r in under["data"]["values"]], ["zero cell size"])
+        self.assertGreater(under["mark"]["dy"], 0)
+        # The band and its two end bars are drawn over the points, and the
+        # judged point is a ring: the filled dot hid the band (review of P2).
+        styles = [l["mark"].get("style") for l in spec["layer"]]
+        self.assertGreater(styles.index("nk-band"), styles.index("nk-point"))
+        self.assertEqual(styles.count("nk-band-end"), 2)
+        [ring] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-current"]
+        self.assertIs(ring["mark"]["filled"], False)
+        self.assertGreater(styles.index("nk-current"), styles.index("nk-band"))
 
     def test_the_settling_chart_draws_each_mesh_its_tolerance_and_estimates(self):
         s = self.summary()
@@ -376,6 +395,26 @@ class ChartsNeedNoTool(_OnTheStandIn):
         estimates = [(e["x"], e["y"]) for e in view.data["estimates"]]
         self.assertEqual(estimates, [(lv["converged_in"], lv["iterative_error_pct"])
                                      for lv in s["levels"] if lv["iterative_error_pct"]])
+        # Each diamond in its mesh's colour, under its mesh's name (review of
+        # P2: three dark diamonds that no reader could tell apart).
+        self.assertEqual([e["series"] for e in view.data["estimates"]],
+                         [f"level{lv['k']}" for lv in s["levels"] if lv["iterative_error_pct"]])
+        spec = page.chart_spec(view.data, None, None)
+        [diamonds] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-estimate"]
+        self.assertEqual(diamonds["encoding"]["color"]["field"], "label")
+        names = {item["key"]: item["label"] for item in view.data["series"]}
+        self.assertEqual([r["label"] for r in diamonds["data"]["values"]],
+                         [names[e["series"]] for e in view.data["estimates"]])
+        line = next(l for l in spec["layer"] if l["mark"].get("style") == "nk-series")
+        self.assertEqual(line["encoding"]["y"]["axis"], {"format": "~e"})
+        # Of the change in %, never the judged quantity: the spine draws no
+        # limit and no point on it, and says nothing about its units (P2.1 to
+        # review of P2: six warnings on every build).
+        self.assertIs(view.data["judged"], False)
+        chart, warning = page.chart_block(None, {"measured": 0.52, "units": "Pa", "limit": 0.6,
+                                                 "comparator": "<=", "margin_text": "x"},
+                                          view.data)
+        self.assertEqual((chart["limit"], chart["current"], warning), (None, None, ""))
 
     def test_another_runs_evidence_draws_no_chart(self):
         """A file the entry's manifest does not vouch for is not in ``files``:
@@ -845,6 +884,71 @@ class ToolIdentityIsTheBuild(_OnTheStandInPvbatch):
         self.assertIn("is not the file the paraview-6.2.0-py312ha24fc4a_1 package installed",
                       str(caught.exception))
 
+    def locked(self) -> dict:
+        with open(self.pv.LOCK, encoding="utf-8") as fh:
+            return json.load(fh)["accepted"][0]["packages"]
+
+    def test_each_locked_package_is_held_and_named(self):
+        """(review of P2) Mesa draws the pixels and Pillow reads them: a build
+        with the checked paraview and one other package changed is refused,
+        and the refusal names that package. Before, a check of the paraview
+        hash alone passed every test, and the refusal named only paraview's
+        hash, the checked build's own."""
+        for name in self.pv.LOCKED_PACKAGES:
+            if name == "paraview":
+                continue
+            with self.subTest(name):
+                self.pv._identity.cache_clear()
+                other = pv_standin.install(os.path.join(self.dir, name),
+                                           packages={**self.locked(), name: "0" * 64})
+                self.environ(PATH=other["bin"] + os.pathsep + "/usr/bin:/bin",
+                             **{self.pv.EXTRA_LOCK_ENV: None})
+                with self.assertRaises(self.pv.Unavailable) as caught:
+                    self.pv.locate()
+                said = str(caught.exception)
+                self.assertIn("which this pack did not check", said)
+                self.assertIn(f"(its {name} package is not the checked build's)", said)
+
+    def test_the_build_string_is_held(self):
+        """The lock's build string too, not the version alone."""
+        lock = {"paraview": "6.2.0", "build": "py312other_0", "packages": self.locked()}
+        self.pv._identity.cache_clear()
+        other = pv_standin.install(os.path.join(self.dir, "build"), packages=self.locked())
+        self.environ(PATH=other["bin"] + os.pathsep + "/usr/bin:/bin",
+                     **{self.pv.EXTRA_LOCK_ENV: None})
+        with mock.patch.object(self.pv, "_accepted", return_value=[(lock, "lock")]):
+            with self.assertRaises(self.pv.Unavailable) as caught:
+                self.pv.locate()
+        self.assertIn("which this pack did not check", str(caught.exception))
+        with mock.patch.object(self.pv, "_accepted",
+                               return_value=[(dict(lock, build="py312ha24fc4a_1"), "lock")]):
+            self.pv._identity.cache_clear()
+            self.assertEqual(self.pv.locate().accepted_by, "lock")
+
+    def test_the_conda_records_must_be_whole_and_one_each(self):
+        """No paraview record, two records of one package, and a launcher
+        that names a pvbatch that is not there are each unavailable."""
+        self.environ()
+        meta = os.path.join(self.prefix, "conda-meta")
+        mesa = next(n for n in os.listdir(meta) if n.startswith("mesalib-"))
+        shutil.copy(os.path.join(meta, mesa), os.path.join(meta, "mesalib-9-copy.json"))
+        with self.assertRaises(self.pv.Unavailable) as caught:
+            self.pv.locate()
+        self.assertIn("conda-meta holds two mesalib records", str(caught.exception))
+        os.remove(os.path.join(meta, "mesalib-9-copy.json"))
+        self.pv._identity.cache_clear()
+        record = next(n for n in os.listdir(meta) if n.startswith("paraview-"))
+        os.rename(os.path.join(meta, record), os.path.join(self.dir, record))
+        with self.assertRaises(self.pv.Unavailable) as caught:
+            self.pv.locate()
+        self.assertIn("has no conda record of paraview", str(caught.exception))
+        os.rename(os.path.join(self.dir, record), os.path.join(meta, record))
+        self.pv._identity.cache_clear()
+        os.rename(os.path.join(self.prefix, "bin", "pvbatch"), os.path.join(self.dir, "gone"))
+        with self.assertRaises(self.pv.Unavailable) as caught:
+            self.pv.locate()
+        self.assertIn("/bin/pvbatch, which is not there", str(caught.exception))
+
     def test_the_banner_must_say_the_locked_version(self):
         self.mode("ok", banner="paraview version 6.1.0")
         self.environ()
@@ -882,6 +986,19 @@ class ToolIdentityIsTheBuild(_OnTheStandInPvbatch):
         with open(bare, "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\n# PATH=/opt/pv/bin:/usr/bin\nexec pvbatch \"$@\"\n")
         self.assertIsNone(self.pv.prefix_from_wrapper(bare))
+        # The launcher in two lines (the form `prefix_from_wrapper`'s own
+        # docstring shows), and a quoted prefix with a space: read as the
+        # shell reads them (review of P2: a pattern of our own read neither).
+        for text, want in (
+                ('#!/bin/sh\nexec env -i HOME="$HOME" PATH=/opt/pv/bin:/usr/bin:/bin \\\n'
+                 '    /opt/pv/bin/pvbatch --force-offscreen-rendering "$@"\n', "/opt/pv"),
+                ('#!/bin/sh\nexec env -i PATH=/usr/bin:/bin "/opt/Para View/bin/pvbatch" '
+                 '--force-offscreen-rendering "$@"\n', "/opt/Para View"),
+                ('#!/bin/sh\necho /opt/pv/bin/pvbatch\n', None)):
+            with self.subTest(want):
+                with open(bare, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                self.assertEqual(self.pv.prefix_from_wrapper(bare), want)
 
     def test_nothing_on_path_is_unavailable_and_says_no_status_moves(self):
         self.environ(PATH="/usr/bin:/bin")
@@ -972,6 +1089,12 @@ class TheRendererControlRuns(_OnTheStandInPvbatch):
         no_known = [c for c in good if c["value"] != 0.5]
         self.assertIn("the control reported no cell at t = 0.5",
                       self.pv.judge_control({"cells": no_known}))
+        # One in-range cell left out, every other check still met: only the
+        # count catches it (review of P2: removing the count left every
+        # test green).
+        one_short = good[:3] + good[4:]
+        self.assertEqual(self.pv.judge_control({"cells": one_short}),
+                         ["the control reported 14 cells of the strip's 15"])
         other_map = [dict(c, want=[c["pixel"][2], c["pixel"][1], c["pixel"][0]],
                           pixel=[c["pixel"][2], c["pixel"][1], c["pixel"][0]])
                      if c["where"] == "in" else c for c in good]
@@ -1110,17 +1233,19 @@ class TheRealRendererControl(_env.EnvCase):
 # --------------------------------------------------------------------------- #
 # P2.3: the stills (views/_scene.py, views/_scales.py, flow.py)
 # --------------------------------------------------------------------------- #
-def _run_in_project(root: str, path: str):
-    """cfd.pressure_drop on the baseline with ``root``'s ``.nopekit/out`` as
-    its out directory, as ``check`` runs it: the summary's ``<out>/...`` stage
-    is then where ``BoundContext.bind`` looks."""
+def _run_in_project(root: str, path: str, params: dict | None = None):
+    """cfd.pressure_drop on the baseline (with ``params`` over it) with
+    ``root``'s ``.nopekit/out`` as its out directory, as ``check`` runs it:
+    the summary's ``<out>/...`` stage is then where ``BoundContext.bind``
+    looks."""
     from nopekit import gates as gates_mod
     from nopekit.models import Ledger, ProjectMeta
     registry = cfd_tests._registry()
     spec_fn = registry.get(GATE)
     ctx = gates_mod.GateContext(
         root=root, ledger=Ledger(meta=ProjectMeta(name="cfd")), model=None,
-        params=dict(cfd_tests._baseline()), out_dir=store.out_dir(root), tier=2,
+        params={**cfd_tests._baseline(), **(params or {})}, out_dir=store.out_dir(root),
+        tier=2,
         log=lambda _m: None, extra={})
     with mock.patch.dict(os.environ, {"PATH": path}):
         return gates_mod.run_gate(*spec_fn, ctx)
@@ -1256,7 +1381,12 @@ class TheStillsOnTheStandIn(_env.EnvCase):
         self.assertEqual(job["range"], [view.meta["scale"]["lo"], view.meta["scale"]["hi"]])
         self.assertEqual((job["preset"], job["over"], job["under"]),
                          ("Viridis", [255, 0, 255], [128, 128, 128]))
-        self.assertEqual((job["width"], job["line_px"]), (scales.WIDTH_PX, scales.LINE_PX))
+        self.assertEqual((job["width"], job["line_px"], job["max_height"]),
+                         (scales.WIDTH_PX, scales.LINE_PX, scales.MAX_HEIGHT_PX))
+        # The baseline is thin along z with its flow along x: the camera the
+        # stills always had (the same bytes).
+        self.assertEqual((job["look"], job["right"], job["up"]),
+                         ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]))
         self.assertEqual(job["planes"], [{"point": p["point"], "normal": p["normal"]}
                                          for p in summary["planes"]])
         # The scene's ticks, placed on the gradient from 0 to 1.
@@ -1283,7 +1413,10 @@ class TheStillsOnTheStandIn(_env.EnvCase):
         field = os.path.join(stage, summary["fields"]["time"], "mag(U)")
         with open(field, "rb") as fh:
             kept = fh.read()
-        self.addCleanup(lambda: open(field, "wb").write(kept))
+        def put_back():
+            with open(field, "wb") as fh:
+                fh.write(kept)
+        self.addCleanup(put_back)
         with open(field, "ab") as fh:
             fh.write(b"// another run\n")
         _spec, view, _note, ctx = self.draw(SPEED)
@@ -1317,6 +1450,67 @@ class TheStillsOnTheStandIn(_env.EnvCase):
         self.assertTrue(any("renderer control failed" in n and "clips" in n
                             for n in ctx.notes), ctx.notes)
         self.assertEqual(self.scenes(), [])
+
+    def test_a_png_that_is_not_the_runs_is_an_error(self):
+        """The control of the PNG's digest check (review of P2: removing it
+        left every test green)."""
+        pv_standin.set_mode(self.stand["prefix"], "other-png")
+        _spec, view, note, ctx = self.draw(SPEED)
+        self.assertIsNone(view)
+        self.assertTrue(note.startswith("error:"), note)
+        self.assertIn("the PNG on disk is not the one pvbatch's result names", note)
+        self.assertEqual(ctx.outputs, {})
+
+    def test_the_plane_lines_are_one_a_plane_upstream_to_downstream(self):
+        """One line for two planes, and two lines at one place (what a flow
+        along y drew before the review of P2), are each an error."""
+        for mode, said in (("one-mark", "pvbatch placed 1 plane lines in the picture for 2"),
+                           ("same-mark", "not upstream to downstream along the flow")):
+            with self.subTest(mode):
+                pv_standin.set_mode(self.stand["prefix"], mode)
+                _spec, view, note, ctx = self.draw(SPEED)
+                self.assertIsNone(view)
+                self.assertTrue(note.startswith("error:"), note)
+                self.assertIn(said, note)
+                self.assertEqual(ctx.outputs, {})
+
+    def test_a_cut_that_is_not_the_whole_finest_mesh_is_an_error(self):
+        """A cut of fewer cells than the finest mesh is not the field the
+        caption names (review of P2: a case thin along y, cut across z, drew
+        200 of its 8000 cells)."""
+        pv_standin.set_mode(self.stand["prefix"], "half-cut")
+        _spec, view, note, ctx = self.draw(PRESSURE)
+        self.assertIsNone(view)
+        self.assertTrue(note.startswith("error:"), note)
+        self.assertIn("the picture is not the whole field", note)
+        self.assertEqual(ctx.outputs, {})
+
+    def test_the_camera_follows_the_thin_axis_and_the_flow(self):
+        """(review of P2) The still looks along the case's thin axis, from
+        one side whatever the sign the gate found, with the flow from
+        upstream to downstream to the right; a 3D case, a summary with no
+        thin axis, and planes along the thin axis draw no still."""
+        orient = _views().get(SPEED)[1].__globals__["_orientation"]
+
+        def planes(a, b, n):
+            return [{"point": a, "normal": n}, {"point": b, "normal": n}]
+        along_y = planes([0, 0.025, 0], [0, 0.075, 0], [0, 1, 0])
+        self.assertEqual(orient({"dim": 2, "thin_normal": [0, 0, -1]}, along_y),
+                         ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]))
+        thin_y = planes([0.025, 0, 0], [0.075, 0, 0], [1, 0, 0])
+        self.assertEqual(orient({"dim": 2, "thin_normal": [0, -1, 0]}, thin_y),
+                         ([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]))
+        backward = planes([0.075, 0, 0], [0.025, 0, 0], [1, 0, 0])
+        self.assertEqual(orient({"dim": 2, "thin_normal": [0, 0, 1]}, backward)[1],
+                         [-1.0, 0.0, 0.0])
+        for summary, plane_set, said in (
+                ({"dim": 3, "thin_normal": None}, thin_y, "this case is 3D"),
+                ({"dim": 2}, thin_y, "names no thin direction"),
+                ({"dim": 2, "thin_normal": [1, 0, 0]}, thin_y, "not across the flow"),
+                ({"dim": 2, "thin_normal": [0, 0, 1]}, planes([0.025, 0, 0], [0.025, 0, 0],
+                                                            [1, 0, 0]), "one plane")):
+            with self.subTest(said):
+                self.assertIn(said, orient(summary, plane_set))
 
     def test_no_paraview_on_path_is_unavailable_before_the_viewgen_runs(self):
         self.environ(PATH=self.foam_path)
@@ -1458,6 +1652,15 @@ class TheFieldFiles(_env.EnvCase):
         doc["buffers"][0]["uri"] = "field.bin"
         self.assertIn("names a file outside it ('field.bin')", site_mod._solid_problem(
             "pressure.gltf", json.dumps(doc).encode()))
+        # An image too (review of P2: only a buffer was planted, so the rule's
+        # images half could go with every test green, and the page would
+        # fetch a texture the spine never hashed).
+        doc = json.loads(bands)
+        doc["images"] = [{"uri": "tex.png"}]
+        self.assertIn("names a file outside it ('tex.png')", site_mod._solid_problem(
+            "pressure.gltf", json.dumps(doc).encode()))
+        doc["images"] = [{"uri": "data:image/png;base64,iVBORw0KGgo="}]
+        self.assertEqual(site_mod._solid_problem("pressure.gltf", json.dumps(doc).encode()), "")
         doc = json.loads(bands)
         doc["asset"]["version"] = "1.0"
         self.assertEqual(site_mod._solid_problem("pressure.gltf", json.dumps(doc).encode()),
@@ -1530,8 +1733,25 @@ def _points_bounds(path: str) -> list[float]:
     return [f(p[k] for p in pts) for k in range(3) for f in (min, max)]
 
 
-@unittest.skipIf(cfd_tests._real_install() is None or _real_pvbatch() is None,
-                 "not walked: needs ESI OpenFOAM v2606 and the checked pvbatch62")
+def _pil_missing() -> str:
+    """Why the pixels of a still cannot be read in this process, or ``""``.
+    Pillow inside pvbatch is another interpreter: the checked pvbatch62 says
+    nothing about this one (review of P2: these classes raised
+    ModuleNotFoundError where Pillow was absent, and did not skip)."""
+    try:
+        import PIL.Image  # noqa: F401
+    except ImportError:
+        return "Pillow is not installed in this python"
+    return ""
+
+
+def _real_stills_missing() -> str:
+    if cfd_tests._real_install() is None or _real_pvbatch() is None:
+        return "needs ESI OpenFOAM v2606 and the checked pvbatch62"
+    return _pil_missing()
+
+
+@unittest.skipIf(_real_stills_missing(), f"not walked: {_real_stills_missing()}")
 class TheRealStills(_env.EnvCase):
     """W10 on the real tools: cfd.pressure_drop on the baseline (v2606), then
     each still drawn by the real ParaView 6.2.0 through its viewgen. Every
@@ -1773,6 +1993,105 @@ class TheRealStills(_env.EnvCase):
                 open(os.path.join(PACK, "views", "viridis.json"), "rb") as committed:
             self.assertEqual(fh.read(), committed.read())
 
+
+
+def _dark_runs(image) -> list[list[int]]:
+    """The runs of near-black columns along the middle row of a still: the
+    planes' lines ParaView drew."""
+    w, h = image.size
+    runs: list[list[int]] = []
+    for x in (x for x in range(w) if max(image.getpixel((x, h // 2))) < 40):
+        if runs and x == runs[-1][-1] + 1:
+            runs[-1].append(x)
+        else:
+            runs.append([x])
+    return runs
+
+
+#: The baseline channel turned, as each review case turned it: ``(name, the
+#: blockMeshDict's eight vertices, the inlet velocity, the two planes)``.
+#: About z, its flow runs along y; about x, it is thin along y.
+TURNED = (
+    ("flow along y",
+     "(0 0 0) (0 0.1 0) (-0.01 0 0) (-0.01 0.1 0) (0 0 0.001) (0 0.1 0.001) "
+     "(-0.01 0 0.001) (-0.01 0.1 0.001)", "(0 0.01 0)",
+     [{"point": [-0.005, 0.025, 0.0005], "normal": [0, 1, 0]},
+      {"point": [-0.005, 0.075, 0.0005], "normal": [0, 1, 0]}]),
+    ("thin along y",
+     "(0 0 0) (0.1 0 0) (0 0 0.01) (0.1 0 0.01) (0 -0.001 0) (0.1 -0.001 0) "
+     "(0 -0.001 0.01) (0.1 -0.001 0.01)", "(0.01 0 0)",
+     [{"point": [0.025, -0.0005, 0.005], "normal": [1, 0, 0]},
+      {"point": [0.075, -0.0005, 0.005], "normal": [1, 0, 0]}]),
+)
+
+
+@unittest.skipIf(_real_stills_missing(), f"not walked: {_real_stills_missing()}")
+class TheRealTurnedCases(_env.EnvCase):
+    """(review of P2) The baseline channel turned so that its flow runs along
+    y, and so that it is thin along y, each solved by the real v2606 and drawn
+    by the real ParaView 6.2.0: the still is the whole 8000-cell cut across
+    the thin axis, 1600 x 160 with the flow from left to right, and each
+    plane's mark is over its line, where it is on the baseline. What slipped
+    through before: the scene always cut across z and looked down z, so the
+    first case put both marks at the middle, one over the other, and the
+    second drew one row of 200 cells (1600 x 64) as "the field"."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import re
+        import tempfile
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        cls.drawn = {}
+        for name, vertices, inlet, planes in TURNED:
+            root = os.path.join(cls.dir, name.replace(" ", "-"))
+            case = os.path.join(root, "case")
+            shutil.copytree(os.path.join(PACK, "selftest", "assets", "channel"), case)
+            path = os.path.join(case, "system", "blockMeshDict")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            text = re.sub(r"vertices\s*\((?:[^()]*\([^()]*\))*[^()]*\);",
+                          f"vertices\n(\n    {vertices}\n);", text, count=1)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            path = os.path.join(case, "0", "U")
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read().replace("uniform (0.01 0 0)", f"uniform {inlet}")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            verdict = _run_in_project(root, os.environ.get("PATH", ""),
+                                      {"cfd_case": "case", "cfd_dp_planes": planes})
+            spec, fn = _views().get(SPEED)
+            ctx = _bound_context(root, verdict, SPEED, os.path.join(cls.dir, "scratch", name))
+            view, note = site_mod.run_viewgen(spec, fn, ctx)
+            png = None
+            if view is not None:
+                with open(ctx.outputs[view.src][0], "rb") as fh:
+                    png = fh.read()
+            cls.drawn[name] = (verdict, view, note + " ".join(ctx.notes), png)
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+
+    def test_each_turned_case_is_drawn_as_the_baseline_is(self):
+        from PIL import Image
+        import io
+        for name, *_rest in TURNED:
+            with self.subTest(name):
+                verdict, view, note, png = self.drawn[name]
+                self.assertEqual(verdict.outcome, "pass", verdict.render())
+                self.assertEqual(_summary_of(verdict)["levels"][-1]["cells"], 8000)
+                self.assertIsNotNone(view, note)
+                image = Image.open(io.BytesIO(png)).convert("RGB")
+                self.assertEqual(image.size, (1600, 160))
+                marks = [m["at"] for m in view.meta["marks"]]
+                for got, want in zip(marks, pv_standin.STILL_MARKS):
+                    self.assertAlmostEqual(got, want, delta=1 / 1600)
+                runs = _dark_runs(image)
+                self.assertEqual(len(runs), 2, runs)
+                for run, at in zip(runs, marks):
+                    self.assertAlmostEqual((run[0] + run[-1] + 1) / 2, at * 1600, delta=1.0)
 
 
 def _site_files(root: str, top: str) -> dict[str, bytes]:

@@ -299,7 +299,9 @@ BOUND_KINDS = (ViewKind.IMAGE, ViewKind.CHART, ViewKind.MODEL3D, ViewKind.FIELD)
 #: margin from the view's own limit, so a pack limit beside the claim's was a
 #: second limit on the page. *Rejected:* stripping such a key silently (a pack
 #: bug would read as a working chart).
-CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now"})
+#: ``markers`` too, since an unbound view's ``markers`` became its point
+#: (review of P2, `page.CHART_CURRENT_KEYS`).
+CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now", "markers"})
 
 #: The parts of a bound chart whose every number must be one a verified
 #: evidence file of the entry holds (a JSON leaf or a CSV cell): a chart draws
@@ -4171,7 +4173,7 @@ def _chart_margins(row: dict) -> dict:
         if axis != "x" and _finite(value):
             limit = (float(value), comparator)
             break
-    key = next((k for k in ("current", "marker", "now") if k in data), None)
+    key = next((k for k in page_logic.CHART_CURRENT_KEYS if k in data), None)
     if limit is None or key is None:
         return row
     # The y axis as the chart reads it (`page._view_axis`): the payload's, else

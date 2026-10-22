@@ -1216,6 +1216,29 @@ class AFigureSaysWhichResultItIs(_env.EnvCase):
         self.assertIn(f"its result {a}. This page shows another result of {GATE}.", text)
         self.assertEqual(site_status(self, root)["edited"], [])
 
+    def test_an_older_chart_draws_its_own_run_alone(self):
+        """(review of P2) A chart of another result draws that run's series
+        with no limit and no judged point: the result now served is not among
+        its points. What slipped through: the served row went to the older
+        chart too, and its value was drawn as a line across the other run's
+        series, with the served row's margin words, beside "That other result:
+        pass, ...". Made as a clone sees it: B's verdict, and not B's evidence."""
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        build_in(self, root, no_tool_env())
+        b = check_at(self, root, 2.0)
+        self.assertNotEqual(a, b)
+        for rel in ((".nopekit", "out"), (".nopekit", "cache", "evidence")):
+            shutil.rmtree(os.path.join(root, *rel), ignore_errors=True)
+        build_in(self, root, no_tool_env())
+        chart = page_figure(root, CHART)
+        self.assertEqual((chart["entry"], chart["currency"]), (a, "older"))
+        self.assertEqual((chart["chart"]["limit"], chart["chart"]["current"]), (None, None))
+        styles = {layer["mark"].get("style") for layer in chart["chart"]["spec"]["layer"]}
+        self.assertFalse(styles & {"nk-current", "nk-current-rule", "nk-current-label",
+                                   "nk-limit", "nk-past"}, styles)
+        self.assertEqual(site_status(self, root)["edited"], [])
+
     def test_a_design_edit_reads_stale(self):
         """The design moved and nothing checked it again: the served entry is
         not current, and its figures say so, beside the evaluator's outcome."""

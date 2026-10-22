@@ -1045,9 +1045,11 @@ bound chart's spellings (below), and a point can also be an `{x, y}` object or a
 number (its x is then its index). Put its axes in `data.x` and `data.y`, or in
 `meta.x` and `meta.y`. Its `limit` is `{value, comparator, label, axis}` (or a list);
 the spine draws the first limit on each axis. Its `current` is `{x, y}` (or a list),
-and the build writes the distance to the y limit beside it. The spine bakes the
-Vega-Lite spec of this chart too (`page.view_chart`). It does not draw `markers` or
-a series' `style`. A verdict's locator on the chart draws its `target` series heavier,
+and the build writes the distance to the y limit beside it. `marker`, `now` and
+`markers` (`[{x, y, label}]`, as the analytic packs write their current design) are
+read as `current`, the first of them present; a marker's own `label` is not drawn,
+as the build writes the distance beside the point. The spine bakes the Vega-Lite spec
+of this chart too (`page.view_chart`). It does not draw a series' `style`. A verdict's locator on the chart draws its `target` series heavier,
 or a line at its `position[0]`.
 
 Rules:
@@ -1116,7 +1118,7 @@ from nopekit.models import View, ViewKind
 def speed(ctx: BoundContext) -> View | None:
     path = ctx.entry.path("summary.json")     # a verified evidence file, or None
     if path is None:
-        ctx.note("the solved fields on this computer are from another run: "
+        ctx.note("summary.json: the file on this computer is from another run: "
                  "`nopekit check --force --only flow.pressure_drop` solves it again")
         return None
     with open(path, encoding="utf-8") as fh:
@@ -1220,13 +1222,21 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
               // "zero": false: a linear y that does not start at zero
     "band": [ { "x": 3, "lo": 0.52, "hi": 0.525, "label": "GCI band" } ],
     "rule": { "value": 0.1, "label": "tolerance" },               // never called a limit
-    "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated" } ] }
+    "estimates": [ { "x": 4, "y": 0.5219, "label": "extrapolated",
+                     "series": "dp" } ],   // series: drawn in that series' colour
+    "legend": false,      // optional: each point is named on the chart, so no legend
+    "judged": false }     // optional: not of the judged quantity (a change in %)
   ```
+
+  The judged point is a ring at the series point or the band end (`hi` or `lo`)
+  whose y is the floor's value. A payload that says `"judged": false` gets no limit
+  line and no ring, and the build says nothing of its units: say it for a chart of
+  another quantity than the claim's, such as a settling history.
 
   Every number under `series`, `band`, `estimates` and `rule` must be a JSON leaf or a
   CSV cell of a verified evidence file of the entry: write the numbers you want to
   plot into the gate's evidence. A payload that holds `limit`, `limits`, `current`,
-  `marker` or `now` is refused: the limit line and the judged point are the claim's,
+  `marker`, `now` or `markers` is refused: the limit line and the judged point are the claim's,
   which the spine takes from the floor. State `y.units` as the claim's units, or the
   page draws no limit line and the build says why. The spine bakes the whole Vega-Lite
   spec from this payload (`page.chart_spec`); the pack ships no chart code.

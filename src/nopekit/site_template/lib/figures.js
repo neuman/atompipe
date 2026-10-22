@@ -114,11 +114,13 @@ function chartTheme() {
       "nk-rule": { color: amber, strokeDash: [2, 3], strokeWidth: 1.5 },
       "nk-rule-label": { color: amber },
       "nk-band": { color: ink2, strokeWidth: 2 },
+      "nk-band-end": { color: ink2, thickness: 2, size: 16, opacity: 1 },
       "nk-hollow": { strokeWidth: 2, opacity: 1 },
       "nk-point": { opacity: 1 },
       "nk-point-label": { color: ink2 },
       "nk-estimate": { color: ink2, size: 90, opacity: 1 },
-      "nk-current": { color: ink, size: 150, opacity: 1 },
+      // A ring: the band and the point under it stay in view (review of P2).
+      "nk-current": { color: ink, size: 300, strokeWidth: 2.5, opacity: 1 },
       "nk-current-rule": { color: ink, strokeDash: [1, 3], strokeWidth: 1.5 },
       "nk-current-label": { color: ink, fontWeight: 600 },
       // The verdicts' anchors on a chart view of the technical record
@@ -224,33 +226,27 @@ export function drawChart(host, chart, notice, name) {
   return host;
 }
 
-/** The axis titles the baked spec gives ``x`` and ``y`` (with their units),
- *  read from its layers as they are; "" where it has none. */
-function axisTitle(spec, channel) {
-  for (const layer of [spec, ...((spec && spec.layer) || [])]) {
-    const enc = (layer && layer.encoding && layer.encoding[channel]) || null;
-    if (enc && enc.field === channel && enc.title) return String(enc.title);
-  }
-  return "";
-}
-
 /** The labels of the baked limit (one, or a list), as they are. */
 const limitLabels = (limit) => [].concat(limit || []).map((l) => (l && l.label) || "").filter(Boolean);
 /** The baked margin words of the judged point (one, or a list), as they are. */
 const marginTexts = (current) => [].concat(current || []).map((c) => (c && c.margin_text) || "").filter(Boolean);
 
+/** The chart's numbers as the table the spine baked (`page.chart_table`):
+ *  its head and rows as text, a long series cut to its ends with a row that
+ *  counts the rest, its bands, rules and estimates, and the limit and the
+ *  judged point's words under it. What slipped through (review of P2): this
+ *  printed every row of the spec's data, 250 rows of 17 digits for the CFD
+ *  settling chart, wider than its card, and left out the tolerance and the
+ *  estimates, which are not in that data. */
 function chartTable(chart, notice) {
-  const spec = chart.spec || {};
-  const rows = ((spec.data || {}).values) || [];
+  const table = chart.table || { head: [], rows: [] };
   return el("div", { class: "fig-table" },
     el("p", { class: "nk-notice", role: "note", text: notice || "" }),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", { text: "" }),
-        el("th", { text: axisTitle(spec, "x") || "x" }),
-        el("th", { text: axisTitle(spec, "y") || "y" }))),
-      el("tbody", {}, ...rows.map((r) => el("tr", {},
-        el("td", { text: r.label || r.series || "" }), el("td", { text: String(r.x) }),
-        el("td", { text: String(r.y) }))))),
+    el("div", { class: "fig-table-scroll" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, ...(table.head || []).map((h) => el("th", { text: h || "" })))),
+        el("tbody", {}, ...(table.rows || []).map((r) => el("tr", {},
+          ...r.map((cell) => el("td", { text: cell || "" }))))))),
     ...limitLabels(chart.limit).map((text) => el("p", { class: "small", text })),
     ...marginTexts(chart.current).map((text) => el("p", { class: "small", text })));
 }
@@ -272,8 +268,9 @@ export function scaleLegend(scale) {
     el("div", { class: "fig-legend-bar" },
       scale.under ? el("span", { class: "fig-swatch", style: { background: scale.under }, "aria-hidden": "true" }) : null,
       el("div", { class: "fig-ramp", style: { background: `linear-gradient(to right, ${stops})` } },
-        ...(scale.ticks || []).map((t) => el("span", { class: "fig-tick",
-          style: { left: `${(Number(t.at) * 100).toFixed(2)}%` }, text: t.text || "" }))),
+        ...(scale.ticks || []).map((t) => el("span", { class: `fig-tick${tickEnd(t.at)}`,
+          style: { left: `${(Number(t.at) * 100).toFixed(2)}%` } },
+          el("span", { class: "fig-tick-text", text: t.text || "" })))),
       scale.over ? el("span", { class: "fig-swatch", style: { background: scale.over }, "aria-hidden": "true" }) : null),
     scale.under_word || scale.over_word
       ? el("p", { class: "fig-legend-words small" },
@@ -283,6 +280,18 @@ export function scaleLegend(scale) {
           scale.over_word ? ` ${scale.over_word}` : "")
       : null,
     scale.source_text ? el("p", { class: "small muted", text: scale.source_text }) : null);
+}
+
+/** Where a tick's words sit on its mark: centred, or from the mark inward
+ *  near an end of the ramp, so they stay inside the legend. Layout alone: the
+ *  mark itself is always at the baked position (``.fig-tick::before`` at the
+ *  tick's own left). What slipped through (review of P2): the first and last
+ *  ticks' words were moved by `:first-child` and `:last-child` rules and the
+ *  mark moved with them, up to 17 px off its value on the speed legend, and an
+ *  interior first tick (the pressure's 0.0, at 0.165) too. */
+function tickEnd(at) {
+  const where = Number(at);
+  return where < 0.1 ? " fig-tick--start" : where > 0.9 ? " fig-tick--end" : "";
 }
 
 /** The chips of every claim the figure's gate covers, as baked. */
@@ -295,15 +304,25 @@ function figureChips(fig, words) {
       notices: words.notices, trace: words.trace }))));
 }
 
-/** A still: the picture linked to its full file, its marks as HTML labels at
- *  the baked positions, its legend and its caption. */
-function still(fig) {
+/** A still: its marks' words in a row above the picture, each over its baked
+ *  position with a short line down to the picture's edge, and the picture
+ *  linked to its full file. Nothing is drawn over the picture: the lines in it
+ *  are the tool's own. What slipped through (review of P2): the words sat on
+ *  the picture, and on a phone a 10 to 1 strip 29 px high was mostly hidden
+ *  by them; a white line drawn over each plane hid the black line ParaView
+ *  drew there. Exported for the hero of both pages, with ``src`` the hero's
+ *  own file. */
+export function figureStill(fig, src) {
+  const marks = fig.marks || [];
   return el("div", { class: "fig-still-box" },
-    el("a", { class: "fig-still", href: fig.src, target: "_blank", rel: "noopener" },
-      el("img", { src: fig.src, alt: fig.alt || fig.title || "", loading: "lazy" }),
-      ...(fig.marks || []).map((m) => el("span", { class: "fig-mark",
-        style: { left: `${(Number(m.at) * 100).toFixed(2)}%` } },
-        el("span", { class: "fig-mark-text", text: m.text || "" })))));
+    marks.length
+      ? el("div", { class: "fig-marks", "aria-hidden": "true" },
+          ...marks.map((m) => el("span", { class: `fig-mark${tickEnd(m.at)}`,
+            style: { left: `${(Number(m.at) * 100).toFixed(2)}%` } },
+            el("span", { class: "fig-mark-text", text: m.text || "" }))))
+      : null,
+    el("a", { class: "fig-still", href: src || fig.src, target: "_blank", rel: "noopener" },
+      el("img", { src: src || fig.src, alt: fig.alt || fig.title || "", loading: "lazy" })));
 }
 
 const viewers = new Set();
@@ -351,7 +370,7 @@ function figureBlock(fig, words, build) {
   const look = currencyLook(fig.currency);
   const drawn = fig.src || fig.data_src || fig.field_src;
   const body = fig.kind === "chart" && fig.data_src ? chartBox(fig, words)
-    : fig.kind === "image" && fig.src ? still(fig) : null;
+    : fig.kind === "image" && fig.src ? figureStill(fig) : null;
   return el("figure", { class: `fig fig-${fig.kind} currency-${fig.currency}`, id: `figure-${fig.id}` },
     el("figcaption", { class: "fig-head" },
       el("span", { class: "fig-title", text: fig.title || fig.view }),
@@ -359,9 +378,12 @@ function figureBlock(fig, words, build) {
     drawn ? null : el("p", { class: `fig-none tone-${look.tone}` },
       el("span", { class: "nk-glyph", "aria-hidden": "true", text: look.glyph }), ` ${fig.currency_word || ""}`),
     body,
-    turnButton(fig, build, words),
+    // The legend and the caption under the picture they explain, then the 3D
+    // view, which the same legend explains (review of P2: the button sat
+    // between the still and its legend).
     fig.kind === "image" ? scaleLegend(fig.scale) : null,
     fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null,
+    turnButton(fig, build, words),
     fig.tool_word ? el("p", { class: "nk-notice", role: "note", text: fig.tool_word }) : null);
 }
 
@@ -421,6 +443,12 @@ function claimCard(row, words, build) {
           judging.gate && said.judged
             ? el("p", { class: "small muted", text: said.judged.replace("{gate}", judging.gate) }) : null)
       : null,
+    // Why the claim reads what it reads, in the bake's sentence (review of
+    // P2: a failing card said its value and margin and never why it failed).
+    // Not beside Checked (the value says it) or Stale (the card's currency
+    // sentence says it).
+    row.cause_text && !["checked", "stale"].includes(row.token)
+      ? el("p", { class: "fig-cause", text: row.cause_text }) : null,
     others.length
       ? el("div", { class: "fig-tiles", "aria-label": said.others || "" },
           ...others.map((v) => el("div", { class: "fig-tile" },

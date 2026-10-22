@@ -3800,9 +3800,13 @@ def entry_outcome(verdict) -> str            # error | pass | fail | unrun
 def drawn_text(verdict) -> str               # an older figure's line about its result
 def binding_text(figures) -> str             # which result each gate's figures are of
 def margin_text(margin) -> str               # the margin's words alone
-def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec}, warning): the floor's
+def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec, table}, warning): the floor's
 def chart_spec(payload, limit, current, *, locators=()) -> dict   # P1.5: a chart's whole Vega-Lite spec
-def view_chart(row, payload, anchored=()) -> dict   # P2.5: {limit, current, spec} of a chart view on the record
+def chart_table(payload) -> dict | None      # review of P2: {head, rows}, the chart's numbers as text
+def view_chart(row, payload, anchored=()) -> dict   # P2.5: {limit, current, spec, table} of a chart view on the record
+CHART_CURRENT_KEYS = ("current", "marker", "now", "markers")   # an unbound view's point, first present
+CHART_PAD = 14                               # px a continuous axis keeps inside each end
+CHART_TABLE_ROWS = 8                         # rows of one series in a chart's table
 VEGA_FORBIDDEN_KEYS: frozenset               # keys a baked spec never holds (Vega computes)
 def vega_forbidden(spec) -> list             # the forbidden keys a spec holds, sorted
 CHART_HEIGHT = 260                           # the chart's CSS height; its width is the card's
@@ -3929,6 +3933,14 @@ anchors as `locators`. `site.build` puts it in each chart row as `chart`, split 
 constants draws from one empty row of its own. *What slipped through:* such a layer
 inherited the chart's rows and was drawn once per row, so at 42 rows the shaded side
 of a limit read solid and each label was 42 copies. `lib/chart.js` is deleted.
+In the review of P2: an `older` figure's chart gets no floor row (`figure_row`, and
+G6 the same), so it draws its own run's series alone; the judged point is a ring,
+found at a series point or a band's end (`_series_x`), drawn over the band, whose two
+ends are short bars; a payload's `"legend": false` drops the legend and `"judged":
+false` the limit, the point and the units warning; an estimate that names its
+`series` takes that series' colour; a log y writes one notation (`~e`); and every
+chart carries `table` (`chart_table`), which the card shows where Vega does not
+load.
 *Rejected:* keeping it for the record's unbound charts and their locators, as P1.5
 did (the anchors are a spine fact the bake can carry, and the hand-drawn text was
 about 5 px high on a phone).

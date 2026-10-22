@@ -160,7 +160,10 @@ WORD_KEYS = frozenset({
     # blocks are the prose's own).
     "currency_word", "drawn_text", "caption", "alt", "provenance", "tool_word",
     "over_word", "under_word", "source_text", "binding_text", "live_word", "margin_text",
-    "quantity"})
+    "quantity",
+    # review of P2: a chart's baked table (`chart_table`), its cells and the
+    # sentence that counts the rows left out
+    "rows"})
 RECORD_KEYS = frozenset({
     "schema", "name", "summary", "revision", "records_digest", "resolution_digest",
     "content_digest", "trace", "view", "kind", "title", "token", "id", "key", "lane",
@@ -190,7 +193,9 @@ RECORD_KEYS = frozenset({
     # mark's ``align`` and ``baseline``) and a data row's ``series`` key; its words are the floor's and the pack's
     # labels, under ``label`` and ``text`` (words), and the axis ``title``, a
     # record as a view's title is.
-    "spec", "style", "field", "shape", "width", "series", "align", "baseline"})
+    "spec", "style", "field", "shape", "width", "series", "align", "baseline",
+    # review of P2: a log axis's number ``format`` and a band end's ``orient``
+    "format", "orient"})
 
 
 class Board(NamedTuple):
@@ -1394,6 +1399,17 @@ def _series_x(payload: Any, y: float) -> float | None:
     for row in _chart_series(payload):
         if math.isclose(float(row["y"]), float(y), rel_tol=1e-9, abs_tol=0.0):
             return row["x"]
+    # And the top or bottom of a band: the value a GCI band's top judges is
+    # drawn as the band's end, never as a series point of its own. What
+    # slipped through (review of P2): cfd-openfoam's ladder added a series
+    # "top of the GCI band" only so that this function found the point, and
+    # its purple swatch sat in the legend with no mark a reader could see.
+    for band in (payload.get("band") if isinstance(payload, Mapping) else None) or ():
+        if isinstance(band, Mapping) and _finite_number(band.get("x")) and any(
+                _finite_number(band.get(k)) and math.isclose(float(band[k]), float(y),
+                                                              rel_tol=1e-9, abs_tol=0.0)
+                for k in ("hi", "lo")):
+            return band["x"]
     return None
 
 
@@ -1410,8 +1426,13 @@ def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tupl
     limit beside the claim's was a second limit on the page. The spec is in
     the block, so G6 holds what the browser draws, not only the numbers beside
     it."""
-    if row is None:
-        return {"limit": None, "current": None, "spec": chart_spec(payload, None, None)}, ""
+    # A chart that says it is not of the judged quantity (``"judged":
+    # false``, a settling history in %) gets no limit and no point, and no
+    # warning that its units differ. What slipped through (P2.1 to review of
+    # P2): the cfd settling chart warned on every build, once per claim.
+    if row is None or (isinstance(payload, Mapping) and payload.get("judged") is False):
+        return {"limit": None, "current": None, "spec": chart_spec(payload, None, None),
+                "table": chart_table(payload)}, ""
     said = _site_words()["figure"]
     y_units = _chart_y_units(payload)
     units = str(row.get("units") or "")
@@ -1443,7 +1464,7 @@ def chart_block(claim: Any, row: Mapping[str, Any] | None, payload: Any) -> tupl
                               f"{units or 'no units'}, so the result is not marked")
         current = None
     return {"limit": limit, "current": current,
-            "spec": chart_spec(payload, limit, current)}, warning
+            "spec": chart_spec(payload, limit, current), "table": chart_table(payload)}, warning
 
 
 def _view_points(raw: Any) -> list[list]:
@@ -1502,10 +1523,18 @@ def view_chart(row: Mapping[str, Any], payload: Any,
     ``info``, ``severityOf``'s rule in ``lib/panels.js``). ``spec`` is None
     for a view with nothing to draw.
 
+    The three analytic packs mark their current design as ``markers``; it is
+    read as the point, as ``current`` is. What slipped through (review of P2):
+    this docstring said the move to Vega-Lite fixed "read no ``markers``",
+    while the code still read only ``current``, ``marker`` and ``now``, so the
+    beam's deflection chart, "with the current design marked", marked nothing.
+
     *Rejected:* keeping ``lib/chart.js`` for these views (the author's rule;
     and it drew text about 5 px high on a phone, read no ``markers`` and no
     axis named in ``meta.x``); composing the locators' layers in the browser
-    (the page would decide what a chart shows)."""
+    (the page would decide what a chart shows); the marker's own ``label``
+    beside the point (its words hold the pack's own margin, a second margin
+    beside the spine's ``margin_text``)."""
     data = payload if isinstance(payload, Mapping) else {}
     meta = row.get("meta") if isinstance(row.get("meta"), Mapping) else {}
     bound = bool(row.get("binding"))
@@ -1550,7 +1579,7 @@ def view_chart(row: Mapping[str, Any], payload: Any,
                 p for p in ("limit", comparator, _num(value), units) if p))
             limits.append({"value": value, "comparator": comparator, "units": units,
                            "label": label, "axis": axis})
-        key = next((k for k in ("current", "marker", "now") if k in data), None)
+        key = next((k for k in CHART_CURRENT_KEYS if k in data), None)
         for item in _listed(data.get(key)) if key else ():
             y = item.get("y", item.get("value"))
             if _finite_number(y):
@@ -1571,9 +1600,10 @@ def view_chart(row: Mapping[str, Any], payload: Any,
         marks.append({"x": position[0], "label": str(locator.get("label") or ""),
                       "severity": severity})
     if not _chart_series(drawn) and not currents:
-        return {"limit": None, "current": None, "spec": None}
+        return {"limit": None, "current": None, "spec": None, "table": None}
     return {"limit": limits or None, "current": currents or None,
-            "spec": chart_spec(drawn, limits, currents, locators=marks)}
+            "spec": chart_spec(drawn, limits, currents, locators=marks),
+            "table": chart_table(drawn)}
 
 
 # --------------------------------------------------------------------------- #
@@ -1595,6 +1625,28 @@ VEGA_FORBIDDEN_KEYS = frozenset({
     "transform", "calculate", "filter", "aggregate", "params", "expr", "signal", "bin",
     "timeUnit", "impute", "regression", "loess", "density", "fold", "stack", "test"})
 
+#: The keys an unbound chart view may give its current point under, in the
+#: order they are read: the first present is the one drawn (`view_chart`), and
+#: `site._chart_margins` bakes the margin words of the same one.
+CHART_CURRENT_KEYS = ("current", "marker", "now", "markers")
+
+#: The room, in CSS pixels, a chart keeps inside each end of a continuous axis
+#: (Vega-Lite's scale ``padding``): a point at the end of the data is drawn
+#: whole and away from the axis line. What slipped through (review of P2): the
+#: ladder's Richardson point at zero cell size sat on the left edge, half cut.
+#: *Rejected:* a domain widened by the spine (a number of the axis no evidence
+#: holds); padding on a log axis (Vega-Lite pads it in a power of ten).
+CHART_PAD = 14
+
+#: At most this many rows of one series in a chart's table, the first half and
+#: the last half, with a row that counts the rows between (`chart_table`).
+#: What slipped through (review of P2): with no chart library, the CFD settling
+#: chart's table printed all 250 rows of 17 digits, about 28 000 px tall on a
+#: phone and wider than its card. *Rejected:* a table that scrolls with every
+#: row (the page holds each number twice, and no reader reads row 140 of a
+#: settling history).
+CHART_TABLE_ROWS = 8
+
 #: The chart's height in CSS pixels; its width is the card's (``"container"``).
 #: 260 px holds a ladder of three points, its limit and their labels at 390 px
 #: wide with the axis text at 12 px (the figure project's page, P1.5).
@@ -1613,12 +1665,13 @@ def _chart_series(payload: Any) -> list[dict]:
     ``text`` for a labelled point and ``hollow`` true for a hollow one), in the
     payload's order. A series is ``{key: [[x, y], ...]}``, or a list of
     ``{key | name, label?, points: [[x, y], ...] | x: [...] and y: [...],
-    labels?: [str], hollow?: bool | [bool]}``. A point that is not two finite
+    labels?: [str], hollow?: bool | [bool], labels_below?: bool}`` (``below``
+    true on a labelled row whose words go under its point). A point that is not two finite
     numbers is left out, never guessed."""
     raw = payload.get("series") if isinstance(payload, Mapping) else None
     entries: list[tuple] = []
     if isinstance(raw, Mapping):
-        entries = [(str(k), str(k), v, None, None) for k, v in raw.items()]
+        entries = [(str(k), str(k), v, None, None, False) for k, v in raw.items()]
     elif isinstance(raw, list):
         for i, item in enumerate(raw):
             if not isinstance(item, Mapping):
@@ -1630,9 +1683,9 @@ def _chart_series(payload: Any) -> list[dict]:
                     range(len(item["y"])))
                 points = [[x, y] for x, y in zip(xs, item["y"])]
             entries.append((key, str(item.get("label") or key), points, item.get("labels"),
-                            item.get("hollow")))
+                            item.get("hollow"), item.get("labels_below") is True))
     rows: list[dict] = []
-    for key, label, points, labels, hollow in entries:
+    for key, label, points, labels, hollow, *below in entries:
         for i, point in enumerate(points if isinstance(points, list) else ()):
             if not (isinstance(point, list) and len(point) >= 2
                     and _finite_number(point[0]) and _finite_number(point[1])):
@@ -1641,6 +1694,8 @@ def _chart_series(payload: Any) -> list[dict]:
             text = labels[i] if isinstance(labels, list) and i < len(labels) else None
             if isinstance(text, str) and text:
                 row["text"] = text
+                if below and below[0]:
+                    row["below"] = True
             flag = hollow[i] if isinstance(hollow, list) and i < len(hollow) else hollow
             if flag is True:
                 row["hollow"] = True
@@ -1703,18 +1758,29 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
     x_axis = payload.get("x") if isinstance(payload.get("x"), Mapping) else {}
     y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
     x_title, y_title = _axis_title(x_axis), _axis_title(y_axis)
-    x_enc = {"field": "x", "type": "quantitative", "title": x_title, "scale": {"zero": False}}
+    x_enc = {"field": "x", "type": "quantitative", "title": x_title,
+             "scale": {"zero": False, "padding": CHART_PAD}}
     # A y axis starts at zero unless the payload says ``"zero": false``. What
     # slipped through (GitHub #15, P2.1): a mesh ladder's three levels differ by
     # 0.4% of the drop, and from zero they drew as one point. Zero stays the
     # default, so no chart is drawn from a cut-off axis unless its pack asks.
     # *Rejected:* a log y for the ladder (its domain rounds to powers of ten).
+    log = y_axis.get("scale") == "log"
     y_enc = {"field": "y", "type": "quantitative", "title": y_title,
-             "scale": {"type": "log"} if y_axis.get("scale") == "log" else
-             {"zero": y_axis.get("zero") is not False}}
+             "scale": {"type": "log"} if log else
+             {"zero": True} if y_axis.get("zero") is not False else
+             {"zero": False, "padding": CHART_PAD}}
+    if log:
+        # One notation down a log axis: "1e-4" to "1e-9". What slipped through
+        # (review of P2): Vega's default wrote 0.0001, 0.00001, 0.000001 and
+        # then 1e-7, two notations on one axis.
+        y_enc["axis"] = {"format": "~e"}
     several = len({r["series"] for r in rows}) > 1
+    # A payload that names each point on the chart (``"legend": false``) has
+    # no legend: the cfd ladder's legend showed a filled swatch for a hollow
+    # point and a swatch for a mark that was not drawn (review of P2).
     colour = {"field": "label", "type": "nominal", "title": "",
-              "legend": {} if several else None}
+              "legend": {} if several and payload.get("legend") is not False else None}
     tooltip = [{"field": "label", "type": "nominal", "title": ""},
                {"field": "x", "type": "quantitative", "title": x_title or "x"},
                {"field": "y", "type": "quantitative", "title": y_title or "y"}]
@@ -1763,17 +1829,16 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
         if isinstance(item, Mapping) and _finite_number(item.get("value")):
             layers.append({"mark": {"type": "rule", "style": "nk-rule"},
                            "encoding": {"y": _datum(item["value"])}})
+            # Its words at the right end: at the left, the first iterations
+            # of each mesh drew over "tolerance" (review of P2).
             if item.get("label"):
-                layers.append({"mark": _text_mark("nk-rule-label", "left", 6, -4),
-                               "encoding": {"x": {"value": 0}, "y": _datum(item["value"]),
+                layers.append({"mark": _text_mark("nk-rule-label", "right", -6, -4),
+                               "encoding": {"x": {"value": "width"},
+                                            "y": _datum(item["value"]),
                                             "text": {"value": str(item["label"])}}})
     band = [{"label": str(b.get("label") or ""), "x": b["x"], "lo": b["lo"], "hi": b["hi"]}
             for b in payload.get("band") or () if isinstance(b, Mapping)
             and all(_finite_number(b.get(k)) for k in ("x", "lo", "hi"))]
-    if band:
-        layers.append({"data": {"values": band}, "mark": {"type": "rule", "style": "nk-band"},
-                       "encoding": {"x": at_x, "y": {"field": "lo", "type": "quantitative"},
-                                    "y2": {"field": "hi"}}})
     located = {str(loc["series"]) for loc in _listed(list(locators)) if loc.get("series")}
     if rows:
         layers.append({"mark": {"type": "line", "style": "nk-series"},
@@ -1793,19 +1858,46 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
                                         "style": "nk-hollow" if hollow else "nk-point"},
                                "encoding": {"x": at_x, "y": at_y, "color": colour,
                                             "tooltip": tooltip}})
-        labelled = [r for r in rows if r.get("text")]
-        if labelled:
-            layers.append({"data": {"values": labelled},
-                           "mark": _text_mark("nk-point-label", "center", 0, -8),
-                           "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
-    estimates = [{"label": str(e.get("label") or ""), "x": e["x"], "y": e["y"]}
+        # A series may ask for its words under its points (``"labels_below":
+        # true``): on a phone the ladder's "zero cell size" and "8000 cells"
+        # ran into each other above two points 60 px apart (review of P2).
+        for below, dy in ((False, -12), (True, 26)):
+            labelled = [r for r in rows if r.get("text") and bool(r.get("below")) is below]
+            if labelled:
+                layers.append({"data": {"values": labelled},
+                               "mark": _text_mark("nk-point-label", "center", 0, dy),
+                               "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
+    # The band over the points, its ends drawn as short bars: a GCI band of
+    # 0.16% is about 2 px tall on a card, and drawn as a line under the
+    # points and the judged point it was never seen, while the caption
+    # described "the bar" (review of P2).
+    if band:
+        layers.append({"data": {"values": band}, "mark": {"type": "rule", "style": "nk-band"},
+                       "encoding": {"x": at_x, "y": {"field": "lo", "type": "quantitative"},
+                                    "y2": {"field": "hi"}}})
+        for end in ("lo", "hi"):
+            layers.append({"data": {"values": band},
+                           "mark": {"type": "tick", "orient": "horizontal",
+                                    "style": "nk-band-end"},
+                           "encoding": {"x": at_x,
+                                        "y": {"field": end, "type": "quantitative"}}})
+    # Each estimate in its series' colour, under that series' name: one dark
+    # diamond per mesh could not be told apart (review of P2).
+    labels = {r["series"]: r["label"] for r in rows}
+    estimates = [{"label": labels.get(str(e.get("series")), str(e.get("label") or "")),
+                  "estimate": str(e.get("label") or ""), "x": e["x"], "y": e["y"]}
                  for e in payload.get("estimates") or () if isinstance(e, Mapping)
                  and _finite_number(e.get("x")) and _finite_number(e.get("y"))]
     if estimates:
+        coloured = all(str(e.get("series")) in labels
+                       for e in payload.get("estimates") or () if isinstance(e, Mapping))
         layers.append({"data": {"values": estimates},
                        "mark": {"type": "point", "shape": "diamond", "filled": True,
                                 "style": "nk-estimate"},
-                       "encoding": {"x": at_x, "y": at_y, "tooltip": tooltip}})
+                       "encoding": {"x": at_x, "y": at_y,
+                                    **({"color": colour} if coloured else {}),
+                                    "tooltip": [{"field": "estimate", "type": "nominal",
+                                                 "title": ""}, *tooltip[1:]]}})
     for loc in _listed(list(locators)):
         if loc.get("series") or not _finite_number(loc.get("x")):
             continue
@@ -1827,17 +1919,22 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
         # chart's right edge from a point at the right end.
         last = not any(r["x"] > current.get("x") for r in rows) if _finite_number(
             current.get("x")) else False
-        # And above a series point's own words at the same x. What slipped
-        # through (cfd-openfoam.ladder, P2.1): "8000 cells" and "13% inside the
-        # limit" were drawn over each other at the finest mesh.
+        # And under the point when a series point's own words are above it at
+        # the same x. What slipped through (cfd-openfoam.ladder, P2.1): "8000
+        # cells" and "13% inside the limit" were drawn over each other at the
+        # finest mesh; lifted above them (P2.1), they ran into the next
+        # mesh's words on a phone (review of P2).
         crowded = _finite_number(current.get("x")) and any(
             r.get("text") and r["x"] == current["x"] for r in rows)
-        dy = -24 if crowded else -8
+        dy = 26 if crowded else -12
         label_mark = (_text_mark("nk-current-label", "right", -10, dy) if last
                       else _text_mark("nk-current-label", "left", 10, dy))
         if _finite_number(current.get("x")):
             at = {"x": _datum(current["x"]), "y": _datum(current["y"])}
-            layers.append({"mark": {"type": "point", "filled": True, "style": "nk-current"},
+            # A ring, never a filled dot: the filled dot of 14 px hid the
+            # finest mesh's point and the whole GCI band under it, and was in
+            # no legend (review of P2). The caption names the ring.
+            layers.append({"mark": {"type": "point", "filled": False, "style": "nk-current"},
                            "encoding": dict(at)})
         else:
             at = {"x": {"value": 0}, "y": _datum(current["y"])}
@@ -1856,6 +1953,54 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
             layer["data"] = {"values": [{}]}
     return {"width": "container", "height": CHART_HEIGHT, "data": {"values": rows},
             "layer": layers}
+
+
+def chart_table(payload: Any) -> dict | None:
+    """``{head, rows}``: what a chart shows, as the text of a table, for a
+    page where the chart library does not load (``lib/figures.js``). A row
+    per series point (``CHART_TABLE_ROWS`` of a long series, with a row that
+    counts the ones left out), per band, rule and estimate; every number
+    written as the page writes numbers (`_num`). The limit and the judged
+    point are under the table in their own words. None for a chart with no
+    rows."""
+    payload = payload if isinstance(payload, Mapping) else {}
+    rows = _chart_series(payload)
+    said = _site_words()["figure"]
+    x_axis = payload.get("x") if isinstance(payload.get("x"), Mapping) else {}
+    y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
+    out: list[list[str]] = []
+    by_series: dict[str, list[dict]] = {}
+    for row in rows:
+        by_series.setdefault(row["series"], []).append(row)
+    half = CHART_TABLE_ROWS // 2
+    for points in by_series.values():
+        shown = points if len(points) <= CHART_TABLE_ROWS else points[:half] + [None] + \
+            points[-half:]
+        for row in shown:
+            if row is None:
+                out.append(["", said["table_more"].format(n=len(points) - 2 * half), ""])
+                continue
+            name = row["label"] + (f" ({row['text']})" if row.get("text")
+                                   and row["text"] != row["label"] else "")
+            out.append([name, _num(row["x"]), _num(row["y"])])
+    for band in payload.get("band") or ():
+        if isinstance(band, Mapping) and all(_finite_number(band.get(k))
+                                             for k in ("x", "lo", "hi")):
+            out.append([str(band.get("label") or ""), _num(band["x"]),
+                        said["table_band"].format(lo=_num(band["lo"]), hi=_num(band["hi"]))])
+    rule = payload.get("rule")
+    for item in rule if isinstance(rule, list) else [rule] if rule else []:
+        if isinstance(item, Mapping) and _finite_number(item.get("value")):
+            out.append([str(item.get("label") or ""), "", _num(item["value"])])
+    labels = {r["series"]: r["label"] for r in rows}
+    for est in payload.get("estimates") or ():
+        if isinstance(est, Mapping) and _finite_number(est.get("x")) and _finite_number(
+                est.get("y")):
+            out.append([str(est.get("label") or labels.get(str(est.get("series")), "")),
+                        _num(est["x"]), _num(est["y"])])
+    if not out:
+        return None
+    return {"head": ["", _axis_title(x_axis) or "x", _axis_title(y_axis) or "y"], "rows": out}
 
 
 def vega_forbidden(spec: Any) -> list[str]:
@@ -1941,7 +2086,14 @@ def figure_row(root: str, bound: BoundFigure, *, claim: Any, floor_row: Mapping 
                           bound.kind)
     chart: dict = {}
     if bound.kind == "chart" and files["data_src"]:
-        chart, warning = chart_block(claim, floor_row, _chart_payload(root, files["data_src"]))
+        # An older figure is another entry's series: it draws them with no
+        # judged point and no limit of the result now served. What slipped
+        # through (review of P2): the served row went to chart_block for an
+        # older ladder too, its value was not among that run's points, and the
+        # chart drew run B's value as a line across run A's meshes, with run
+        # B's margin words, beside "That other result: pass, 0.5222 Pa."
+        chart, warning = chart_block(claim, floor_row if fig.currency != "older" else None,
+                                     _chart_payload(root, files["data_src"]))
         if warning and warnings is not None:
             warnings.append(f"view {bound.view}: {warning}")
     field = (sidecar.get("files") or {}).get("field")
@@ -3766,8 +3918,11 @@ def _figure_problems(page_doc: Mapping[str, Any], facts: FigureFacts, toks: Any,
         # G6: a chart's limit and point are the floor's.
         chart = fig.get("chart")
         if kind == "chart" and paths[2]:
+            # An older figure's chart is its own run's series alone: the
+            # served result's point and limit are never drawn on it.
             expected_chart, _warning = chart_block(
-                facts.claims.get(cid), facts.floor.get((cid, gate)),
+                facts.claims.get(cid),
+                None if fig.get("currency") == "older" else facts.floor.get((cid, gate)),
                 _chart_payload(facts.root, paths[2]))
             planted = vega_forbidden((chart or {}).get("spec")) if isinstance(
                 chart, Mapping) else []

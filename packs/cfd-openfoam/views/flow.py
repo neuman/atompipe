@@ -100,7 +100,7 @@ TOOL_CHECKS = {_pv.WRAPPER: _pv.doctor_check}
 
 #: What the page says each chart is drawn from (the ViewSpec description, the
 #: figure's provenance line).
-PROVENANCE = "OpenFOAM solved each mesh. The chart shows the numbers of that run."
+PROVENANCE = "OpenFOAM solved each mesh. Each chart shows the numbers of that run."
 
 #: What the page says each still is drawn from.
 PICTURE_PROVENANCE = "OpenFOAM calculated the fields. ParaView drew them."
@@ -129,22 +129,39 @@ MESH = tuple(f"constant/polyMesh/{name}"
 CONTROL_DICT = ("FoamFile\n{\n    version 2.0;\n    format ascii;\n    class dictionary;\n"
                 "    object controlDict;\n}\n")
 
-LADDER_CAPTION = ("The pressure drop on each of the three meshes. The circle with no fill is "
-                  "the value at zero cell size (Richardson extrapolation). The bar is the mesh "
-                  "error band (GCI). The top of the bar is the value that is compared with the "
-                  "limit.")
+#: The ladder's caption. It names only marks a reader can find on every
+#: card: the band's two end bars (they touch when the band is small, and the
+#: words say so) and the ring the spine draws at the judged value on a
+#: claim's card. What slipped through (review of P2): "The bar is the mesh
+#: error band" over a band of 0.16%, 2 px tall under a filled dot, and a
+#: legend swatch for "top of the GCI band" that no mark matched.
+LADDER_CAPTION = ("The pressure drop on each of the three meshes, against the cell size "
+                  "relative to the finest mesh. The circle with no fill is the value at zero "
+                  "cell size (Richardson extrapolation). At the finest mesh, a short bar at "
+                  "each end of a vertical line shows the mesh error band (GCI). When the band "
+                  "is small, the two bars touch. On a claim's card, a ring shows the top of "
+                  "the band. That value is compared with the limit.")
 
+#: The settling chart's caption: each diamond is in the colour of its mesh,
+#: and the words say how to read a diamond against the tolerance line.
 SETTLE_CAPTION = ("How much the pressure drop changed after each iteration, as a percentage "
                   "of the last value, on each mesh. The dotted line is the tolerance. Each "
-                  "diamond is the estimate of the change that is still to come.")
+                  "diamond, in the colour of its mesh, is the estimate of the change that is "
+                  "still to come. A diamond below the dotted line shows a mesh whose remaining "
+                  "change is less than the tolerance.")
 
 
 def _summary(ctx):
     """The verified summary of the entry, or None, said in the warnings."""
     path = ctx.entry.path("summary.json")
     if path is None:
-        ctx.note(f"the evidence on this computer is from another run: `nopekit check --force "
-                 f"--only {GATE}` solves it again")
+        # The spine's own sentence for a file of another run, word for word
+        # (`page._ANOTHER_RUN`): one fault, one sentence to search a build's
+        # warnings for. What slipped through (review of P2): the pack said
+        # "the evidence on this computer", PACK.md quoted "the file on this
+        # computer", and PACK_FORMAT's example a third spelling.
+        ctx.note(f"summary.json: the file on this computer is from another run: `nopekit "
+                 f"check --force --only {GATE}` solves it again")
         return None
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
@@ -160,9 +177,9 @@ def _number(value) -> bool:
 def ladder(ctx):
     """``levels[].dp_pa`` against ``levels[].h_rel``, each point named by its
     cell count; ``dp_ext_pa`` at ``h_rel_ext`` with no fill; the GCI band at the
-    finest level from ``dp_pa`` to ``band_top_pa``, and its top as a point, so the
-    spine puts the judged point there (``page._series_x`` finds the judged value
-    among the series). A run that gave no band (an error of the gate) draws its
+    finest level from ``dp_pa`` to ``band_top_pa``, whose top is where the spine
+    puts the judged point (``page._series_x`` finds the judged value at a
+    band's end). A run that gave no band (an error of the gate) draws its
     meshes alone.
 
     The y axis does not start at zero: the three meshes differ by about 0.4% of
@@ -179,23 +196,26 @@ def ladder(ctx):
                  f"`nopekit check --force --only {GATE}` runs it again")
         return None
     levels.sort(key=lambda lv: -lv["h_rel"])
-    # Legend words short enough for Vega's legend (it cut "pressure drop on each
-    # mesh" at 160 px), and in the order Vega sorts them, by text.
+    # Each point named on the chart, and no legend (``"legend": false``): the
+    # legend drew a filled swatch for the hollow point, and a swatch for the
+    # band's top, which had no mark of its own (review of P2).
     series = [{"key": "meshes", "label": "each mesh",
                "points": [[lv["h_rel"], lv["dp_pa"]] for lv in levels],
                "labels": [f"{lv['cells']} cells" for lv in levels]}]
-    data = {"series": series,
-            "x": {"label": "cell size, relative to the finest mesh"},
+    # "relative cell size": the longer "cell size, relative to the finest
+    # mesh" was cut on a phone (review of P2); the caption says it whole.
+    data = {"series": series, "legend": False,
+            "x": {"label": "relative cell size"},
             "y": {"label": "pressure drop", "units": "Pa", "zero": False}}
     finest = levels[-1]
     if _number(summary.get("dp_ext_pa")) and _number(summary.get("h_rel_ext")):
         series.append({"key": "richardson", "label": "zero cell size",
                        "points": [[summary["h_rel_ext"], summary["dp_ext_pa"]]],
-                       "hollow": True})
+                       "labels": ["zero cell size"], "labels_below": True, "hollow": True})
+    # The band's top is its ``hi``: the spine finds the judged value there
+    # (`page._series_x` reads a band's ends), so no series is added for it.
     top = summary.get("band_top_pa")
     if _number(top) and _number(summary.get("dp_pa")):
-        series.append({"key": "band_top", "label": "top of the GCI band",
-                       "points": [[finest["h_rel"], top]]})
         data["band"] = [{"x": finest["h_rel"], "lo": summary["dp_pa"], "hi": top,
                          "label": "GCI band"}]
     return View(id="cfd-openfoam.ladder", kind=ViewKind.CHART, data=data,
@@ -254,11 +274,16 @@ def settle(ctx):
         series.append({"key": f"level{lv.get('k')}", "label": label, "points": points})
         est = lv.get("iterative_error_pct")
         if last is not None and _number(est) and est > 0:
-            estimates.append({"x": last, "y": est, "label": f"estimate, {label}"})
+            estimates.append({"x": last, "y": est, "label": f"estimate, {label}",
+                              "series": f"level{lv.get('k')}"})
     if not series:
         ctx.note("the summary of this result holds no mesh levels")
         return None
-    data = {"series": series, "estimates": estimates,
+    # ``"judged": false``: this chart is of the change in %, never the claim's
+    # pressure drop, so the spine draws no limit and no judged point on it and
+    # says nothing. What slipped through (P2.1 to review of P2): each build
+    # warned six times "its y axis is in % and the limit in Pa".
+    data = {"series": series, "estimates": estimates, "judged": False,
             "x": {"label": "iteration"},
             "y": {"label": "change of the pressure drop", "units": "%", "scale": "log"}}
     tol = summary.get("convergence_tol_pct")
@@ -306,6 +331,58 @@ def _case(ctx, summary: dict, field: str, work: str) -> tuple[str, str] | None:
     return case, time
 
 
+def _vector(value) -> list[float] | None:
+    if isinstance(value, (list, tuple)) and len(value) == 3 and all(_number(v) for v in value):
+        return [float(v) for v in value]
+    return None
+
+
+def _orientation(summary: dict, planes: list[dict]):
+    """``(look, right, up)`` of a still, or a str that says why there is none.
+
+    ``look`` is the 2D case's thin axis (the summary's ``thin_normal``, the
+    gate's normal of the empty patches), its largest part made positive, so
+    one case is always seen from one side; ``right`` is the planes' normal,
+    upstream to downstream; ``up`` is ``look x right``. The scene cuts
+    across ``look`` and puts ``right`` to the right of the picture, so a
+    plane's line is vertical and its mark is its place along the flow. On
+    the baseline (thin along z, flow along x) this is the camera the stills
+    always had: the same bytes.
+
+    What slipped through (review of P2): the scene always cut across z and
+    looked down z with y up. A flow along y put both marks at the middle,
+    one over the other; a case thin along y was cut through its height and
+    drawn as one row of 200 cells under "at the middle of its thickness".
+    *Rejected:* finding the thin axis in the scene from the mesh's bounds
+    (the thinnest side is not always the empty one); a cut of a 3D case
+    (no one middle stands for a duct; the caption would not be true)."""
+    if summary.get("dim") != 2:
+        return ("the stills show a planar 2D case only, at the middle of its thickness, and "
+                "this case is 3D")
+    look = _vector(summary.get("thin_normal"))
+    if look is None:
+        return (f"the summary of this result names no thin direction (thin_normal): "
+                f"`nopekit check --force --only {GATE}` runs it again")
+    if len(planes) != 2:
+        return "the summary of this result does not name two measuring planes"
+    p0, p1 = _vector(planes[0].get("point")), _vector(planes[1].get("point"))
+    normal = _vector(planes[0].get("normal"))
+    if p0 is None or p1 is None or normal is None:
+        return "the summary of this result names a measuring plane with no point or normal"
+    biggest = max(range(3), key=lambda i: abs(look[i]))
+    if look[biggest] < 0:
+        look = [-v for v in look]
+    ahead = sum((b - a) * n for a, b, n in zip(p0, p1, normal))
+    if ahead == 0:
+        return "the two measuring planes are one plane"
+    right = [n if ahead > 0 else -n for n in normal]
+    if abs(sum(a * b for a, b in zip(look, right))) > 1e-6:
+        return "the measuring planes are not across the flow in the plane of the case"
+    up = [look[1] * right[2] - look[2] * right[1], look[2] * right[0] - look[0] * right[2],
+          look[0] * right[1] - look[1] * right[0]]
+    return look, right, up
+
+
 def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str,
            gltf: str = ""):
     """One still: the summary, its scale, the bound case, a checked ParaView,
@@ -328,6 +405,11 @@ def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str,
     planes = [p for p in summary.get("planes") or () if isinstance(p, dict)]
     levels = [lv for lv in summary.get("levels") or () if isinstance(lv, dict)]
     cells = levels[-1].get("cells") if levels else None
+    oriented = _orientation(summary, planes)
+    if isinstance(oriented, str):
+        ctx.note(oriented)
+        return None
+    look, right, up = oriented
     with tempfile.TemporaryDirectory(prefix="nopekit-cfd-still-") as work:
         found = _case(ctx, summary, kind["field"], work)
         if found is None:
@@ -343,7 +425,9 @@ def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str,
                "range": [scale["lo"], scale["hi"]], "preset": _scales.PRESET,
                "over": list(_scales.OVER), "under": list(_scales.UNDER),
                "planes": [{"point": p.get("point"), "normal": p.get("normal")} for p in planes],
+               "look": look, "right": right, "up": up,
                "width": _scales.WIDTH_PX, "min_height": _scales.MIN_HEIGHT_PX,
+               "max_height": _scales.MAX_HEIGHT_PX,
                "line_px": _scales.LINE_PX, "ticks": _scales.TICK_BINS, "png": png}
         if gltf:
             job["gltf"] = "field.gltf"
@@ -360,11 +444,24 @@ def _still(ctx, view_id: str, kind: dict, scale_of, caption: str, alt: str,
             data = fh.read()
         if hashlib.sha256(data).hexdigest() != result.get("png_sha256"):
             raise _pv.RunError("the PNG on disk is not the one pvbatch's result names")
+        # The cut is the whole finest mesh: a 2D case cut across its thin
+        # axis crosses every cell once. A cut of fewer cells is not the
+        # field the caption names (review of P2: a case thin along y, cut
+        # across z, drew 200 of its 8000 cells).
+        if result.get("cut_cells") != cells:
+            raise _pv.RunError(f"pvbatch's cut holds {result.get('cut_cells')} cells, and the "
+                               f"finest mesh {cells}: the picture is not the whole field")
         marks = [m for m in result.get("marks") or () if isinstance(m, dict)]
         if len(marks) != len(planes) or not all(
                 _number(m.get("at")) and 0 < m["at"] < 1 for m in marks):
             raise _pv.RunError(f"pvbatch placed {len(marks)} plane lines in the picture for "
                                f"{len(planes)} planes")
+        # Upstream left of downstream, apart: each mark is its plane's place
+        # along the flow (review of P2: two marks at 0.5, one over the other).
+        if any(b["at"] <= a["at"] for a, b in zip(marks, marks[1:])):
+            where = ", ".join(f"{m['at']:.3f}" for m in marks)
+            raise _pv.RunError(f"pvbatch placed the plane lines at {where} of the width: not "
+                               f"upstream to downstream along the flow")
         solid = None
         if gltf:
             with open(os.path.join(work, "run", job["gltf"]), "rb") as fh:

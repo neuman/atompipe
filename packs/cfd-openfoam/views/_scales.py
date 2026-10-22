@@ -91,6 +91,15 @@ PRESSURE_LO, PRESSURE_HI = -1.0, 2.0
 #: (a long channel would be a line, and a square case a band).
 WIDTH_PX = 1600
 MIN_HEIGHT_PX = 64
+#: And not more than MAX_HEIGHT_PX: past it, the cut is drawn smaller in the
+#: frame, with white beside it. The flow runs across the picture (the scene's
+#: ``right``), so only a case shorter along its flow than across it reaches
+#: this. What slipped through (review of P2): with no top, a domain ten times
+#: taller than wide was drawn 1600 x 16000 px (10 s, 1.8 GB). *Rejected:*
+#: 3200 (a card shows a picture twice as tall as wide, and the reader scrolls
+#: past the field to find its legend); refusing the still (the field is still
+#: true, only smaller).
+MAX_HEIGHT_PX = 1600
 #: Each measuring plane's line, in px (B.3.3: at least 6 px at 1600 px wide).
 #: Measured: 6 drew 6 px wide.
 LINE_PX = 6

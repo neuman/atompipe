@@ -36,8 +36,14 @@ llvmpipe); ``crash`` (a traceback, exit 1); ``no-result`` (exit 0, nothing
 written); ``dirty-home`` (writes into its HOME, then a good result);
 ``other-preset`` (a scene job reports another preset than viridis);
 ``huge-field`` (the glTF padded with spaces past the 2 MiB cap: still JSON);
-``other-field`` (the result names another glTF's sha256). Its ``--version``
-banner is ``standin.json``'s ``banner``.
+``other-field`` (the result names another glTF's sha256); ``other-png`` (the
+result names another PNG's sha256); ``one-mark`` (one plane line for two
+planes); ``same-mark`` (both lines at one place, as a flow along y drew them
+before the review of P2); ``half-cut`` (a cut of half the case's cells). A
+scene job's ``cut_cells`` is the cell count the case's ``owner`` file states
+(OpenFOAM's ``nCells:`` note, or the OpenFOAM stand-in's ``N cells``): the
+count a cut across a 2D case's thin axis holds. Its ``--version`` banner is
+``standin.json``'s ``banner``.
 """
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -355,11 +362,15 @@ def _still(job: dict, raw: bytes, out_dir: str, kind: str) -> int:
             solid += b" " * HUGE
         with open(os.path.join(out_dir, job["gltf"]), "wb") as fh:
             fh.write(solid)
+    marks = {"one-mark": STILL_MARKS[:1], "same-mark": [0.5, 0.5]}.get(kind, STILL_MARKS)
+    cells = _case_cells(job["case"])
     result = {"done": hashlib.sha256(raw if kind != "no-done" else raw + b" ").hexdigest(),
               "gl_renderer": "D3D12 (NVIDIA GeForce RTX 4070)" if kind == "gpu" else GL,
-              "paraview": "paraview version 6.2.0", "png_sha256": hashlib.sha256(png).hexdigest(),
+              "paraview": "paraview version 6.2.0",
+              "png_sha256": hashlib.sha256(png if kind != "other-png" else png + b" ").hexdigest(),
               "size": STILL_SIZE, "preset_sha256": preset,
-              "marks": [{"at": at, "px": at * STILL_SIZE[0]} for at in STILL_MARKS],
+              "cut_cells": cells // 2 if kind == "half-cut" and cells else cells,
+              "marks": [{"at": at, "px": at * STILL_SIZE[0]} for at in marks],
               "ticks": [lo, hi], "tick_texts": [f"{lo:g}", f"{hi:g}"]}
     if solid is not None:
         result["gltf_sha256"] = hashlib.sha256(
@@ -367,6 +378,18 @@ def _still(job: dict, raw: bytes, out_dir: str, kind: str) -> int:
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=1, sort_keys=True)
     return 0
+
+
+def _case_cells(case: str) -> int | None:
+    """The cells the case's ``constant/polyMesh/owner`` says it holds, or None."""
+    try:
+        with open(os.path.join(case, "constant", "polyMesh", "owner"), encoding="utf-8",
+                  errors="replace") as fh:
+            head = fh.read(4096)
+    except OSError:
+        return None
+    found = re.search(r"nCells:\s*(\d+)", head) or re.search(r"(\d+) cells", head)
+    return int(found.group(1)) if found else None
 
 
 # --------------------------------------------------------------------------- #

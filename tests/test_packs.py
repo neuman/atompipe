@@ -461,6 +461,33 @@ class ProvidesViewsIsWhatRegisters(unittest.TestCase):
         self.assertIn("is bound to 'other.pressure_drop', which is not a gate of this pack",
                       found[0])
 
+    def test_validate_reads_the_views(self):
+        """Through `packs.validate`, the command's own path: a copy of
+        cfd-openfoam whose pack.json leaves out a view it registers and the
+        tool its stills draw with is not publishable, and each is named. What
+        slipped through (review of P2): every test called `_view_problems`
+        directly, so `validate` could stop calling it with every test green,
+        and the copy below read "publishable"."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="nopekit-views-validate-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        copy = os.path.join(root, "cfd-openfoam")
+        shutil.copytree(os.path.join(REPO, "packs", "cfd-openfoam"), copy,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        clean = packs_mod.validate(copy, tier=Tier.INSTANT)
+        self.assertFalse([p for p in clean if "provides_views" in p or "pvbatch62" in p], clean)
+        path = os.path.join(copy, "pack.json")
+        with open(path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        manifest["provides_views"].remove("cfd-openfoam.settle")
+        manifest["requires_tools"].remove("pvbatch62")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+        found = packs_mod.validate(copy, tier=Tier.INSTANT)
+        self.assertTrue(any("view 'cfd-openfoam.settle' is registered but pack.json "
+                            "provides_views does not list it" in p for p in found), found)
+        self.assertTrue(any("requires_tools does not list 'pvbatch62'" in p for p in found),
+                        found)
+
     def test_a_tool_check_that_is_not_a_function_is_refused(self):
         found = self.problems(checks="{'nopekit-draw': 'yes'}", manifest_tools=["nopekit-draw"])
         self.assertEqual(len(found), 1, found)

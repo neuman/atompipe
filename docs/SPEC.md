@@ -2136,7 +2136,23 @@ and while building it:
   *Rejected:* a screenshot of the page (its chips are one build's statuses, and
   go out of date in the README); a new run of the scene for the README (a second
   drawing of the field, which can differ from the published one).
-- **Phase 2, decided here and not yet built:** a solver history is CSV evidence,
+- **Phase 2, review (built):** the stills look along the case's thin axis
+  (the gate's `thin_normal`, the normal of its `empty` patches) with the flow
+  from left to right, refuse a cut that is not the whole finest mesh and plane
+  lines out of order, and are at most as tall as wide; a 3D case gets the
+  charts and no still. An older chart draws its own run alone. The ladder's
+  judged point is a ring over a band with end bars, named on the chart and in
+  its caption; the settling chart's diamonds take their mesh's colour, its log
+  axis one notation, and it says `"judged": false`, so the build no longer
+  warns six times about its units. Every chart carries a baked table for a page
+  where Vega does not load. On the page, a still's plane words sit above the
+  picture, a legend's tick marks sit on their values, a hero still shows its
+  words and caption, the card says its claim's cause sentence, and the 3D view
+  looks down on the cut. The analytic packs' `markers` are drawn as their point.
+  *Rejected:* a cut of a 3D case (no one middle stands for a duct); the thin
+  axis found in the scene from the mesh's bounds (the thinnest side is not
+  always the empty one).
+- **Phase 2, built in P0.2 and P2.1:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 
 ## 9. Retired

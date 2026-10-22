@@ -117,7 +117,10 @@ def make(stage: str) -> dict[str, bytes]:
             job = {"case": case, "time": TIME, "field": "static(p)", "range": [LO, HI],
                    "preset": scales.PRESET, "over": list(scales.OVER),
                    "under": list(scales.UNDER), "planes": [], "width": scales.WIDTH_PX,
-                   "min_height": scales.MIN_HEIGHT_PX, "line_px": scales.LINE_PX,
+                   "min_height": scales.MIN_HEIGHT_PX, "max_height": scales.MAX_HEIGHT_PX,
+                   # The baseline: thin along z, its flow along x.
+                   "look": [0.0, 0.0, 1.0], "right": [1.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0],
+                   "line_px": scales.LINE_PX,
                    "ticks": scales.TICK_BINS, "png": "still.png", "gltf": name}
             run = os.path.join(work, name + ".run")
             pv.run(inst, script, job, run)

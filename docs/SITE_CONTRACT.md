@@ -1383,7 +1383,9 @@ value; a decision's `values` and the top-level `losers`):
   `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
   claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
   drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
-  not load; its columns take the baked spec's axis titles), `chart_empty` (a chart
+  not load, above the chart's baked `table`), `table_more` and `table_band` (the words
+  `page.chart_table` bakes into that table: the rows of a long series left out, and a
+  band's two ends; review of P2), `chart_empty` (a chart
   view with no series, on the technical record, from P2.5) and `turn_failed` (where
   the 3D view did not load). The card prints no error text of its own.
 
@@ -1599,7 +1601,10 @@ that result.
 4. A colour range is a pack constant times a named evidence value, never a claim's
    limit. One `scale` object gives the pixels and the HTML legend.
 5. A chart draws only numbers its entry's verified evidence holds. Its limit and its
-   judged point are the floor row's, set by the spine.
+   judged point are the floor row's, set by the spine, and only on a chart of the
+   served entry: an `older` chart draws its own run's series with no limit and no
+   judged point (review of P2: the served value was drawn as a line across the other
+   run's series, with the served margin words).
 6. No figure file is over 2 MiB (`page.EVIDENCE_MAX_BYTES`).
 
 **The viewgen** declares the gate whose served entry it draws, `evidence_of`, and the
@@ -1637,7 +1642,7 @@ it.
 | a still starts with the PNG signature and its IHDR parses; a `.glb` starts with `glTF`; a `.gltf` is JSON with `asset.version` `2.0` and every buffer and image a `data:` URI (`site._solid_problem`) | not a PNG, not a GLB, not a glTF 2.0, names a file outside it |
 | one PNG and one 3D file at most, nothing else; a still is never written with `write_live` | a bound figure writes at most one PNG and one 3D file |
 | a picture carries no payload, and its `src` names a file it wrote | its numbers are its evidence's; its src names no file it wrote |
-| a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`) | a chart's limit and its point are the claim's |
+| a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`, `markers`) | a chart's limit and its point are the claim's |
 | every number under `series`, `band`, `estimates` and `rule` is a JSON leaf or a CSV cell of a verified evidence file | the chart holds a number no evidence file holds |
 | every bound input and verified evidence file hashes the same after the call | the inputs moved while the picture was drawn |
 | `scale.lo` and `scale.hi` equal no `limit` or `limit_hi` of a claim the gate covers, nor the entry's verdict limit (relative 1e-9); no `scale.source[].key` holds `limit` | a colour range taken from a limit |
@@ -1720,8 +1725,17 @@ else B's as `older`, else `none`.
 `representation.figure` and `controls` for a figure hero ("`page.json`"); `state.json`'s
 bound row `binding`, `data_url` and `field_src` (`state.json`, "views"); `build.json`'s
 `live_figures` (below); the claim card in `lib/figures.js` ("The renderer"). The chart is
-a Vega-Lite spec the spine bakes whole (`page.chart_spec`), and a field is drawn as
-the file holds its colours (`lib/viewer3d.js` field mode). `page.status_problems` holds
+a Vega-Lite spec the spine bakes whole (`page.chart_spec`), with a table of its numbers
+(`page.chart_table`: a long series cut to its first and last rows, numbers as the page
+writes them) that the card shows where the chart library does not load; and a field is
+drawn as the file holds its colours (`lib/viewer3d.js` field mode, its first view
+looking down on the cut). A still's marks are its plane words in a row above the
+picture, each over its baked position with a short line down to the picture's edge:
+nothing is drawn over the picture (review of P2: on a phone the words hid most of a
+10 to 1 strip, and a white line hid the tool's own black line). A figure still as the
+hero of either page is drawn the same way, with its caption. A legend's tick mark is
+always at its baked position; its words run inward near an end of the ramp. The card
+says the claim's cause sentence (`cause_text`) under its value. `page.status_problems` holds
 every figure (G1-G8, listed under `page.json`).
 
 ## `build.json`, live and published

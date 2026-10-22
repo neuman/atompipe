@@ -5,17 +5,21 @@ by nopekit).
 ``pvbatch --force-offscreen-rendering _scene.py <job.json>`` reads the case
 the job names (a copy that ``flow.py`` made of the bound files: the mesh,
 the field at its time and a controlDict of its own), cuts it at the middle of
-its thickness, colours each cell of the cut by the field with ParaView's own
-preset on the job's range, draws the trace of each measuring plane as a black
-line, and writes the PNG, the glTF of the cut when the job names one
-(``gltf``), and ``result.json`` beside the job::
+its thickness (normal to the job's ``look``, the 2D case's thin axis),
+colours each cell of the cut by the field with ParaView's own preset on the
+job's range, draws the trace of each measuring plane as a black line, and
+writes the PNG, the glTF of the cut when the job names one (``gltf``), and
+``result.json`` beside the job::
 
     {"done": <sha256 of job.json>, "gl_renderer": <the GL renderer string>,
      "paraview": <version>, "png_sha256": <sha256 of the PNG>, "size": [w, h],
      "preset_sha256": <sha256 of the preset as ParaView exports it>,
+     "cut_cells": <the cells of the cut>,
      "marks": [{"at": <x of the plane's line / image width>, "px": <x in px>}],
      "ticks": [<tick value>, ...], "tick_texts": [<its text>, ...],
-     "window": [x0, x1, y0, y1], "gltf_sha256": <sha256 of the glTF, when asked>}
+     "window": [the picture's half width and half height about the cut's centre,
+                as -w, w, -h, h, in metres along right and up],
+     "gltf_sha256": <sha256 of the glTF, when asked>}
 
 What each step is, and what was measured on ParaView 6.2.0 while it was
 written:
@@ -42,8 +46,16 @@ written:
   moved. 6 px drew 6 px wide.
 - **The frame.** A parallel camera on the whole cut plus 5% on each side, so
   a corner cell is always in the picture; the width is the job's, the height
-  the cut's aspect. The first Render resets the camera to the bounding
-  sphere, so the camera is set after it (as in the control).
+  the cut's aspect, at most the job's ``max_height``. The camera looks along
+  the job's ``look`` with the job's ``right`` (the flow, upstream to
+  downstream) to the right of the picture, so each plane's line is vertical
+  and its mark's ``at`` is its place along the flow. The first Render resets
+  the camera to the bounding sphere, so the camera is set after it (as in
+  the control). What slipped through (review of P2): the camera always
+  looked down z with y up, so a flow along y put both planes' marks at the
+  middle of the picture, one over the other, and a case thin along y was cut
+  through its height, one row of cells drawn as the field; and a domain
+  taller than wide was drawn 1600 x 16000 px.
 - **The bytes.** ParaView's PNG carries a text chunk (``Application
   ParaView``); Pillow reads the pixels and writes them again with no chunk
   but the image's, so two runs on the locked build write the same bytes.
@@ -126,18 +138,30 @@ def main(job_path):
     reader.UpdatePipeline(time)
     b = reader.GetDataInformation().GetBounds()
     cx, cy, cz = (b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2
-    dx, dy, dz = b[1] - b[0], b[3] - b[2], b[5] - b[4]
+    look = [float(v) for v in job["look"]]
+    right = [float(v) for v in job["right"]]
+    up = [float(v) for v in job["up"]]
+    corners = [(x, y, z) for x in b[0:2] for y in b[2:4] for z in b[4:6]]
+
+    def extent(axis):
+        along = [c[0] * axis[0] + c[1] * axis[1] + c[2] * axis[2] for c in corners]
+        return max(along) - min(along)
+
+    # dx along the flow (the picture's width), dy across it (its height).
+    dx, dy = extent(right), extent(up)
+    size = max(b[1] - b[0], b[3] - b[2], b[5] - b[4], 1e-9)
 
     cut = pv.Slice(Input=reader)
     cut.SliceType = "Plane"
     cut.SliceType.Origin = [cx, cy, cz]
-    cut.SliceType.Normal = [0.0, 0.0, 1.0]
+    cut.SliceType.Normal = look
     cut.Triangulatetheslice = 0
     surface = pv.ExtractSurface(Input=cut)
     shrunk = pv.Shrink(Input=surface, ShrinkFactor=1.0)
     points = pv.CellDatatoPointData(Input=shrunk)
 
-    height = max(int(job.get("min_height", 1)), int(round(width * dy / dx)))
+    height = max(int(job.get("min_height", 1)),
+                 min(int(job.get("max_height", width)), int(round(width * dy / dx))))
     view = pv.CreateRenderView()
     view.ViewSize = [width, height]
     view.OrientationAxesVisibility = 0
@@ -185,8 +209,9 @@ def main(job_path):
     pv.Render(view)
     view.CameraParallelProjection = 1
     view.CameraFocalPoint = [cx, cy, cz]
-    view.CameraPosition = [cx, cy, cz + 10.0 * max(dx, dy, dz, 1e-9)]
-    view.CameraViewUp = [0.0, 1.0, 0.0]
+    view.CameraPosition = [cx + look[0] * 10.0 * size, cy + look[1] * 10.0 * size,
+                           cz + look[2] * 10.0 * size]
+    view.CameraViewUp = up
     view.CameraParallelScale = max(dx * height / width, dy) * 1.05 / 2
     pv.Render(view)
     shot = os.path.join(out_dir, "paraview.png")
@@ -196,6 +221,7 @@ def main(job_path):
     with open(png, "rb") as fh:
         png_sha = _sha256(fh.read())
 
+    cut_cells = int(cut.GetDataInformation().GetNumberOfCells())
     renderer = view.GetRenderer()
     marks = []
     for trace in lines:
@@ -227,10 +253,10 @@ def main(job_path):
     ticks, texts = _ticks(lo, hi, int(job["ticks"]))
     result = {"done": _sha256(raw), "gl_renderer": gl,
               "paraview": pv.GetParaViewSourceVersion(), "png_sha256": png_sha,
-              "size": [width, height],
+              "size": [width, height], "cut_cells": cut_cells,
               "preset_sha256": _sha256(_preset_text(job["preset"]).encode("utf-8")),
               "marks": marks, "ticks": ticks, "tick_texts": texts,
-              "window": [cx - half_w, cx + half_w, cy - half_h, cy + half_h]}
+              "window": [-half_w, half_w, -half_h, half_h]}
     if gltf_sha is not None:
         result["gltf_sha256"] = gltf_sha
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:

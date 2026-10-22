@@ -1168,6 +1168,10 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.AFigureSaysWhichResultItIs.test_site_status_reads_behind_after_a_check_that_moved_only_the_entry",
     "test_figures.AFigureSaysWhichResultItIs.test_two_older_renders_after_a_merge_show_none",
     "test_figures.AFigureSaysWhichResultItIs.test_the_technical_page_says_the_same_word",
+    # The review of P2: an older chart draws its own run alone, never the
+    # served row's point and limit (two checks and two builds, ~1.4 s; the
+    # FAST row above runs the same bake of an older figure).
+    "test_figures.AFigureSaysWhichResultItIs.test_an_older_chart_draws_its_own_run_alone",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_planted_chip_is_refused",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_missing_or_extra_claim_is_refused",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_a_chart_limit_and_margin_are_the_floors",

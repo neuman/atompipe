@@ -674,7 +674,8 @@ class Case:
             isinstance(v, F.FoamList) and len(v) > 0 for v in edges.value)
         self.blocks = _blocks(bmd, len(verts))
         self.patches = _patches(bmd)
-        self.dim, self.thin = _thin_directions(verts, self.blocks, self.patches)
+        self.dim, self.thin, self.thin_normal = _thin_directions(verts, self.blocks,
+                                                                self.patches)
 
     def cells(self) -> int:
         return sum(a * b * c for _l, (a, b, c), _ids, _g in self.blocks)
@@ -712,7 +713,12 @@ def _formal_order(schemes) -> int:
 
 
 def _thin_directions(verts, blocks, patches):
-    """``(mesh dimension, [the one-cell direction of each block, or None])``.
+    """``(mesh dimension, [the one-cell direction of each block, or None], the
+    unit normal of the empty patches or None)``. The normal goes into
+    cfd.pressure_drop's summary as ``thin_normal``: the stills cut the case
+    across it. What slipped through (review of P2): the stills always cut
+    across z, so a 2D case thin along y was drawn as one row of cells, under a
+    caption that said "at the middle of its thickness".
 
     2D only when the empty patches have faces, all parallel, and every block is
     one cell thick across them: the direction is found from the geometry, never
@@ -736,7 +742,7 @@ def _thin_directions(verts, blocks, patches):
                 raise CaseProblem("system/blockMeshDict: an empty face of no area")
             normals.append(n)
     if not normals:
-        return 3, [None] * len(blocks)
+        return 3, [None] * len(blocks), None
     axis = normals[0]
     if any(abs(_dot(n, axis)) < 0.999 for n in normals):
         raise CaseProblem("the empty patches are not parallel: not a planar 2D case")
@@ -752,7 +758,7 @@ def _thin_directions(verts, blocks, patches):
             raise CaseProblem("a 2D case whose blocks are not one cell thick across the empty "
                               "patches")
         thin.append(k)
-    return 2, thin
+    return 2, thin, list(axis)
 
 
 def _planes(ctx: GateContext):
@@ -1658,7 +1664,9 @@ def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
 
     With ``rho`` (cfd.pressure_drop) the summary also holds what the site's
     pictures draw (GitHub #15, Phase 2), each number the gate's or OpenFOAM's,
-    so a picture computes none: per level ``h_rel`` (its cell size relative to
+    so a picture computes none: ``thin_normal`` (the unit normal of a 2D case's
+    empty patches, the axis a still looks along; None in 3D); per level
+    ``h_rel`` (its cell size relative to
     the finest, (cells_fine / cells)^(1/dim), Celik's h) and ``dp_pa``;
     ``h_rel_ext``, zero, where the Richardson value sits on that axis; and, on
     the finest level at its last iteration, ``u_upstream_m_s`` (the mean
@@ -1667,7 +1675,8 @@ def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
     average p), the ``planes`` and the ``fields`` with their sha256. A
     picture's colour range is a pack factor times one of these, never
     ``limit_pa``."""
-    payload = {"dim": case.dim, "formal_order": case.formal_order,
+    payload = {"dim": case.dim, "thin_normal": case.thin_normal,
+               "formal_order": case.formal_order,
                "levels": [{"k": lv.k, "cells": lv.solve.cells, "counts": lv.counts,
                            "converged_in": lv.solve.log.converged_in,
                            "dp_m2_s2": lv.solve.dp()[-1],

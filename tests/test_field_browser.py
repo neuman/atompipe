@@ -34,6 +34,7 @@ that CI does not have, and an invariant class never skips.
 from __future__ import annotations
 
 import http.server
+import json
 import os
 import pwd
 import shutil
@@ -371,6 +372,155 @@ class TheBrowserDrawsAParaViewField(_ViewerPage):
         counts = drawn_counts(self.shot("lit", "bands.gltf"), self.colours())
         self.assertTrue(any(n < MIN_PIXELS for n in counts),
                         f"the lit drawing kept every band's colour: {counts}")
+
+
+#: A page that mounts `scaleLegend` and `figureStill` from ``lib/figures.js``
+#: with ``page.css``, in a box of each width, and writes what it measured
+#: into ``#out`` as JSON: each tick's mark against its value's place on the
+#: ramp, and each plane mark against its place on the picture, with the
+#: picture's and the words' boxes.
+LAYOUT = """<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="page.css">
+<style>body { margin: 0; padding: 20px; } .box { margin-bottom: 40px; }</style>
+</head><body><pre id="out">pending</pre>
+<script type="module">
+import { scaleLegend, figureStill } from "./lib/figures.js";
+const FIGS = __FIGS__;
+const pic = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="160">' +
+  '<rect width="1600" height="160" fill="#3a6"/></svg>');
+const out = [];
+for (const width of [1000, 300]) {
+  for (const fig of FIGS) {
+    const box = document.createElement("div");
+    box.className = "box";
+    box.style.width = width + "px";
+    document.body.appendChild(box);
+    const still = figureStill(fig, pic);
+    box.appendChild(still);
+    box.appendChild(scaleLegend(fig.scale));
+    const img = still.querySelector("img");
+    await img.decode();
+    const r = img.getBoundingClientRect();
+    const ramp = box.querySelector(".fig-ramp").getBoundingClientRect();
+    const ticks = [...box.querySelectorAll(".fig-tick")].map((t, i) => {
+      const at = fig.scale.ticks[i].at;
+      const mark = t.getBoundingClientRect().left
+        + parseFloat(getComputedStyle(t, "::before").left)
+        + parseFloat(getComputedStyle(t, "::before").borderLeftWidth) / 2;
+      const words = t.querySelector(".fig-tick-text").getBoundingClientRect();
+      return { at, mark, want: ramp.left + at * ramp.width, left: words.left,
+               right: words.right };
+    });
+    const marks = [...still.querySelectorAll(".fig-mark")].map((m, i) => {
+      const at = fig.marks[i].at;
+      const line = m.getBoundingClientRect().left
+        + parseFloat(getComputedStyle(m, "::after").left)
+        + parseFloat(getComputedStyle(m, "::after").borderLeftWidth) / 2;
+      const words = m.querySelector(".fig-mark-text").getBoundingClientRect();
+      return { at, line, want: r.left + at * r.width, top: words.top, bottom: words.bottom,
+               left: words.left, right: words.right };
+    });
+    out.push({ width, img: { left: r.left, right: r.right, top: r.top },
+               ramp: { left: ramp.left, right: ramp.right }, ticks, marks });
+  }
+}
+document.getElementById("out").textContent = JSON.stringify(out);
+</script></body></html>
+"""
+
+#: The two baseline stills' marks and scales, as page.json bakes them: the
+#: speed's ticks at both ends of the ramp, the pressure's inside it.
+LAYOUT_FIGS = [
+    {"marks": [{"at": 0.2619, "text": "upstream plane"},
+               {"at": 0.7381, "text": "downstream plane"}],
+     "scale": {"quantity": "speed", "units": "m/s", "stops": [{"at": 0, "colour": "#440154"},
+                                                              {"at": 1, "colour": "#fde725"}],
+               "over": "#ff00ff", "ticks": [{"at": a, "text": t} for a, t in (
+                   (0.0, "0.000"), (0.25, "0.005"), (0.5, "0.010"), (0.75, "0.015"),
+                   (1.0, "0.020"))]}},
+    {"marks": [{"at": 0.2619, "text": "upstream plane"},
+               {"at": 0.7381, "text": "downstream plane"}],
+     "scale": {"quantity": "static pressure", "units": "Pa",
+               "stops": [{"at": 0, "colour": "#440154"}, {"at": 1, "colour": "#fde725"}],
+               "over": "#ff00ff", "under": "#808080",
+               "ticks": [{"at": 0.165, "text": "0.0"}, {"at": 0.4845, "text": "0.5"},
+                         {"at": 0.804, "text": "1.0"}]}},
+]
+
+
+@unittest.skipIf(_browser() is None, "not walked: no headless Chromium under "
+                                     "~/.cache/ms-playwright/ (build 1228)")
+class TheLegendAndTheMarksSitOnTheirValues(_env.EnvCase):
+    """(review of P2) In a real browser, with the real ``page.css``: each
+    tick's mark on a still's legend is at its value's place on the ramp
+    within 1 px, at an end of the ramp and inside it, in a box 1000 px and
+    300 px wide; each plane's words sit above the picture, never on it, with
+    their line at the plane's place within 1 px, and inside the box. What
+    slipped through: the first and last ticks' marks moved with their words,
+    17 px off on the speed legend and 9.5 px on the pressure's; and the plane
+    words sat on a strip 29 px high on a phone, hiding most of it."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        site = tempfile.mkdtemp(prefix="nopekit-layout-")
+        cls.addClassCleanup(shutil.rmtree, site, True)
+        os.makedirs(os.path.join(site, "lib"))
+        for rel, text in _template.template_files(".js").items():
+            if rel.startswith("lib/"):
+                with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        with open(os.path.join(site, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write(_template.template_files(".css")["page.css"])
+        with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write(LAYOUT.replace("__FIGS__", json.dumps(LAYOUT_FIGS)))
+        handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+        server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.server_close)
+        cls.addClassCleanup(server.shutdown)
+        browser = _browser()
+        profile = tempfile.mkdtemp(prefix="nopekit-layout-profile-")
+        cls.addClassCleanup(shutil.rmtree, profile, True)
+        shell = browser.endswith("chrome-headless-shell")
+        done = _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+                         "--force-device-scale-factor=1", "--window-size=1200,1600",
+                         "--virtual-time-budget=5000", f"--user-data-dir={profile}",
+                         "--dump-dom",
+                         f"http://127.0.0.1:{server.server_address[1]}/index.html"],
+                        cwd=profile, timeout=120)
+        import html
+        import re
+        found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
+        cls.measured = json.loads(html.unescape(found.group(1))) if found else None
+        cls.dom = done.stdout[-2000:]
+
+    def setUp(self):
+        super().setUp()
+        self.assertIsInstance(self.measured, list, self.dom)
+        self.assertEqual(len(self.measured), 4)
+
+    def test_each_tick_mark_is_at_its_value(self):
+        for box in self.measured:
+            for tick in box["ticks"]:
+                with self.subTest(width=box["width"], at=tick["at"]):
+                    self.assertAlmostEqual(tick["mark"], tick["want"], delta=1.0)
+                    # Its words stay inside the legend's ramp.
+                    self.assertGreaterEqual(tick["left"], box["ramp"]["left"] - 1)
+                    self.assertLessEqual(tick["right"], box["ramp"]["right"] + 1)
+
+    def test_each_plane_word_is_above_the_picture_over_its_line(self):
+        for box in self.measured:
+            for mark in box["marks"]:
+                with self.subTest(width=box["width"], at=mark["at"]):
+                    self.assertAlmostEqual(mark["line"], mark["want"], delta=1.0)
+                    self.assertLessEqual(mark["bottom"], box["img"]["top"] + 0.5)
+                    self.assertGreaterEqual(mark["left"], box["img"]["left"] - 1)
+                    self.assertLessEqual(mark["right"], box["img"]["right"] + 1)
+            words = sorted(box["marks"], key=lambda m: m["left"])
+            for a, b in zip(words, words[1:]):
+                self.assertLessEqual(a["right"], b["left"], "two plane words overlap")
 
 
 if __name__ == "__main__":

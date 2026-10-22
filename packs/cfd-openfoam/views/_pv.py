@@ -43,6 +43,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -160,17 +161,29 @@ def prefix_from_wrapper(path: str) -> str | None:
         exec env -i HOME="$HOME" PATH=<prefix>/bin:/usr/bin:/bin ... \\
             <prefix>/bin/pvbatch --force-offscreen-rendering "$@"
 
-    The prefix is the one before ``/bin/pvbatch``; a ``PATH=`` entry ends in
-    ``/bin:`` and never matches."""
+    The shell's own rules split it: the lines a ``\\`` continues are one
+    line, and the standard library's ``shlex`` splits that line as a POSIX
+    shell does, quotes and all. The prefix is the one before ``/bin/pvbatch``
+    in the last word that ends so; a ``PATH=`` word ends in ``/bin:/usr/bin:/bin``
+    and never does. What slipped through (review of P2): a pattern of our own
+    read only the line ``exec`` begins, so the two-line form above (this
+    docstring's own) and a quoted prefix with a space read as no launcher.
+    *Rejected:* growing the pattern (a second shell grammar, kept by hand)."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             text = fh.read(8192)
     except OSError:
         return None
-    for line in text.splitlines():
-        if not re.match(r"\s*exec\b", line):
+    for line in re.sub(r"\\\n", " ", text).splitlines():
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
             continue
-        found = re.findall(r"""(/[^\s"'=:]+?)/bin/pvbatch(?=["'\s]|$)""", line)
+        if not words or words[0] != "exec":
+            continue
+        found = [w[:-len("/bin/pvbatch")] for w in words
+                 if w.endswith("/bin/pvbatch") and w.startswith("/")
+                 and len(w) > len("/bin/pvbatch")]
         if found:
             return found[-1]
     return None
@@ -309,9 +322,20 @@ def _identity(prefix: str, via: str, mtime: int, size: int, stamps: tuple,
     if not accepted_by:
         sha12 = dict(packages).get("paraview", "")[:12] or "no sha256"
         missing = [n for n, sha in packages if not sha]
+        # The packages that differ from a checked build of this version: the
+        # paraview hash alone can be the checked build's own, with its Mesa
+        # another. What slipped through (review of P2): the refusal named only
+        # paraview's sha256, so a build whose Mesa differed read as "the
+        # checked build is not checked", and nothing named the package.
+        same = [entry for entry, _by in _accepted()
+                if entry.get("paraview") == version and entry.get("build") == build]
+        differ = [n for n, sha in packages if sha and same
+                  and (same[0].get("packages") or {}).get(n) != sha]
         raise Unavailable(
             f"{WRAPPER} is ParaView build {name}:{sha12}, which this pack did not check"
             + (f" (no conda record of {', '.join(missing)})" if missing else "")
+            + (f" (its {', '.join(differ)} {'package is' if len(differ) == 1 else 'packages are'}"
+               f" not the checked build's)" if differ else "")
             + f": {os.path.basename(LOCK)} names the builds it checked")
     # The banner too, never alone: the lock says which build, the banner that
     # the program at that path runs as that build.

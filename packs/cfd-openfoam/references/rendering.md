@@ -41,7 +41,9 @@ nopekit doctor                 # pvbatch62: found, paraview-6.2.0-py312ha24fc4a_
 ```
 
 The pack reads the install's path from the launcher's `exec` line: the path
-before `/bin/pvbatch`. It does not run the launcher. It runs that `pvbatch`
+before `/bin/pvbatch`. The line is split as a POSIX shell splits it (Python's
+`shlex`), so a line that a `\` continues and a quoted path with a space are
+read correctly. It does not run the launcher. It runs that `pvbatch`
 itself, in an environment of its own (see "How a run is made"). You can use
 the launcher from a shell to try a script by hand.
 
@@ -60,8 +62,11 @@ the build warnings and `nopekit doctor` say which check failed.
 
 The banner alone is not a check: another 6.2.0 build prints the same banner
 and can link another Mesa. A build that fails check 2 reads, for example:
-`pvbatch62 is ParaView build paraview-6.2.0-py312ha24fc4a_1:24e7bc58bea0,
-which this pack did not check`.
+`pvbatch62 is ParaView build paraview-6.2.0-py312ha24fc4a_1:<sha12>, which
+this pack did not check`, where `<sha12>` is the start of its paraview
+package's sha256. When the paraview package is the checked one and another
+locked package is not, the refusal also names that package, for example
+`(its mesa-llvmpipe package is not the checked build's)`.
 
 To try another build, set `NOPEKIT_PVBATCH_EXTRA_LOCK` to a JSON entry in the
 form of the lock's `accepted` entries. A build accepted this way says so: its
@@ -107,12 +112,16 @@ examines the pixels:
   colour of the lookup table for its value;
 - each cell above the scale is exactly magenta (255, 0, 255), and each cell
   below it is exactly grey (128, 128, 128);
-- the cell at 0.5 is within 1 of viridis's (33, 145, 140), so the preset is
-  viridis.
+- the lookup table's colour for 0.5 is within 1 of viridis's (33, 145, 140),
+  so the preset is viridis. The pixel of that cell is held to the lookup
+  table's colour within 1, as every cell is, so it can be up to 2 from
+  (33, 145, 140);
+- the report holds all 15 cells.
 
 The result is kept in `.nopekit/cache/pvbatch/`, keyed by the build, the
-control script, the fixture and the values above. The control does not run
-again until one of them changes. If the control fails, the warnings name each
+control script, the fixture, the values above and `views/_pv.py` (the code
+that examines the pixels). The control does not run again until one of them
+changes. If the control fails, the warnings name each
 cell that failed, and no picture is drawn on that build. `nopekit doctor`
 reads the kept result and does not run the control.
 

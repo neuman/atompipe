@@ -101,6 +101,15 @@ is an error; a timeout is a skip.
 | `convergence` | `cfd.converged` |
 | `mesh-independence` | `cfd.mesh_independence` |
 
+**The claim's quantity.** nopekit compares a value with a claim's limit only
+when the claim's `acceptance.quantity` is the quantity the gate settles, word
+for word. For the pressure drop, write `"quantity": "pressure drop from cfd"`
+and `"units": "Pa"`. With another word, such as `"pressure drop"`, the value
+of `cfd.pressure_drop` is not compared with the claim's limit, and the card on
+the page shows no large value. The quantities of the other gates are
+`cfd case readability`, `cfd flow regime`, `cfd mesh quality`, `cfd solver
+convergence` and `cfd mesh independence`.
+
 ## Units
 
 SI. Metres, m/s, kg/m^3, Pa, seconds. OpenFOAM's incompressible `p` is kinematic
@@ -128,10 +137,23 @@ shows beside the claim. A picture changes no status.
 | `cfd-openfoam.speed` | OpenFOAM's `mag(U)` on the finest mesh, cut at the middle of its thickness | `pvbatch62` |
 | `cfd-openfoam.pressure` | OpenFOAM's `static(p)` in Pa on the same cut; "Turn it in 3D" shows the cut in 3D | `pvbatch62` |
 
-A chart draws the numbers of the result and no other number. The site adds
-the claim's limit and the judged value. In a still, each cell shows its own
-value, and the two lines are the measuring planes. OpenFOAM computed each
-field, and ParaView only gives it colours.
+A chart draws the numbers of the result and no other number. On the ladder,
+the site adds the claim's limit and a ring at the judged value, the top of the
+GCI band. The band is a vertical line with a short bar at each end; when the
+band is small, the two bars touch. The settling chart is of a change in
+percent, so it has no limit and no ring. In a still, each cell shows its own
+value, and the two lines are the measuring planes. Their names are above the
+picture. OpenFOAM computed each field, and ParaView only gives it colours.
+
+**Which cut.** The stills show a planar 2D case only. The gate writes the
+normal of the case's `empty` patches into the summary (`thin_normal`), and
+ParaView cuts the case across it, at the middle of its thickness, so the cut
+holds every cell of the finest mesh. The flow, from the upstream plane to the
+downstream plane, goes from left to right in the picture, whatever the axis
+of the case. The pack refuses a still whose cut does not hold every cell of
+the finest mesh, and one whose plane lines are not in that order. A 3D case
+gets the two charts and no still: no one cut shows a 3D duct, and the caption
+would not be true. A picture is at most as tall as it is wide.
 
 **The scales.** Each colour scale is a constant of the pack times a value of
 the result. It is never the claim's limit: a colour set by the limit would be
@@ -157,9 +179,10 @@ runs the result again. The next build then commits it.
 **"From another run".** A still is drawn only from the field files whose
 sha256 the result's `summary.json` names. The files on this computer can be
 from another run: for example, a check of another design wrote over them
-after the result on the page. Then the build draws no new still, and its
+after the result on the page. Then the build draws no new picture, and its
 warning says "the file on this computer is from another run: `nopekit check
---force --only cfd.pressure_drop` solves it again". The page keeps a still of
+--force --only cfd.pressure_drop` solves it again", after the name of the
+file. The charts say the same when `summary.json` is from another run. The page keeps a still of
 another result, and says so, or shows no still. Run that command, then
 `nopekit site build`.
 

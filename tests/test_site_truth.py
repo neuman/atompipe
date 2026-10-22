@@ -1705,7 +1705,44 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
         self.assertFalse([l for l in bound["spec"]["layer"] if str(
             l["mark"].get("style")).startswith(("nk-limit", "nk-past", "nk-current"))])
         self.assertEqual(page.view_chart({"id": "e", "kind": "chart"}, {"series": {}}, ()),
-                         {"limit": None, "current": None, "spec": None})
+                         {"limit": None, "current": None, "spec": None, "table": None})
+        # The analytic packs mark their current design as `markers`: it is the
+        # point, with the margin words `_chart_margins` bakes against the
+        # view's own limit. What slipped through (review of P2): this
+        # docstring's "read no `markers`" was said fixed and was not, and the
+        # beam's chart "with the current design marked" marked nothing.
+        marked = {"id": "beam", "kind": "chart",
+                  "data": {"series": [{"key": "deflection", "points": [[5, 2.5], [10, 0.31],
+                                                                       [20, 0.04]]}],
+                           "limit": {"value": 0.5, "comparator": "<="},
+                           "markers": [{"x": 10, "y": 0.31, "label": "current design: 38%"}]},
+                  "meta": {"y": {"label": "deflection", "units": "mm"}}}
+        baked = site._chart_margins(marked)
+        chart = page.view_chart(baked, baked["data"], ())
+        self.assertEqual(chart["current"], [{"x": 10, "y": 0.31,
+                                             "margin_text": "0.19 mm inside the limit"}])
+        styles = [l["mark"].get("style") for l in chart["spec"]["layer"]]
+        self.assertIn("nk-current", styles)
+        words = [l["encoding"]["text"].get("value") for l in chart["spec"]["layer"]
+                 if l["mark"]["type"] == "text"]
+        self.assertIn("0.19 mm inside the limit", words)
+        self.assertNotIn("current design: 38%", words)
+        # A table of what the chart draws, for a page where its library does
+        # not load: a long series cut to its ends, numbers as the page writes
+        # them (review of P2: 250 rows of 17 digits, no estimates, no rule).
+        long = {"series": [{"key": "a", "label": "mesh 1",
+                            "points": [[i, 1.0 / (i + 3)] for i in range(40)]}],
+                "estimates": [{"x": 39, "y": 2.731044260323462e-07, "label": "estimate"}],
+                "rule": {"value": 0.1, "label": "tolerance"},
+                "x": {"label": "iteration"}, "y": {"label": "change", "units": "%"}}
+        table = page.chart_table(long)
+        self.assertEqual(table["head"], ["", "iteration", "change (%)"])
+        self.assertEqual(len(table["rows"]), page.CHART_TABLE_ROWS + 1 + 2)
+        self.assertIn(["", "32 more rows are not in this table.", ""], table["rows"])
+        self.assertIn(["tolerance", "", "0.1"], table["rows"])
+        self.assertIn(["estimate", "39", "2.731e-07"], table["rows"])
+        self.assertTrue(all(len(cell) <= 12 for row in table["rows"] if row[0]
+                            for cell in row[1:]))
 
     def test_a_violator_in_a_comment_or_a_string_is_not_code(self):
         source = {"page.js": "// a.verdict.passed ? 1 : 0\nconst t = \"v.age_s >= 1\";\n"
@@ -1896,7 +1933,8 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         before the prose; the drawer links it in one line; both heroes say
         which result a figure is; and the cards fit a phone."""
         figures = self.js["lib/figures.js"]
-        chips = figures[figures.index("function figureChips"):figures.index("function still")]
+        chips = figures[figures.index("function figureChips"):
+                        figures.index("function figureStill")]
         self.assertIn("fig.claims", chips)
         self.assertRegex(chips, r"tokenChip\(c\.token, c\.word, \{[^}]*marks: c\.marks")
         self.assertEqual(chip_calls_without_marks({"lib/figures.js": figures}), [])
@@ -1934,6 +1972,24 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         panels = js_function(self.js["lib/panels.js"], "claimRow")
         self.assertIn("const headline = compared.length ? compared[0] : null;", panels)
 
+    def test_a_hero_still_carries_its_plane_words_and_caption(self):
+        """(review of P2) A figure still as the hero of either page is drawn
+        as on its card (`figureStill`: the plane words over their lines) with
+        its caption, the one text that says what the lines are. What slipped
+        through: both heroes drew the bare picture, with two black lines and
+        nothing that named them."""
+        hero = js_function(self.js["page.js"], "representation")
+        image = hero[hero.index('if (rep.kind === "image")'):]
+        self.assertIn("figureStill(fig, view.src)", image)
+        self.assertIn("fig.caption", image)
+        stage = js_function(self.js["marketing.js"], "stage")
+        image = stage[stage.index('if (rep.kind === "image")'):]
+        self.assertIn("figureStill(fig, view.src)", image)
+        self.assertIn("fig.caption", image)
+        still = js_function(self.js["lib/figures.js"], "figureStill")
+        self.assertIn("fig-marks", still)
+        self.assertIn("fig.marks", still)
+
     def test_a_chart_follows_the_theme_and_says_only_baked_words(self):
         """(issue #15, review of P1) Vega writes the theme's colours into the SVG
         it draws, so a chart is drawn again when the theme moves (the button's
@@ -1961,8 +2017,12 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertIn("drawChart(host, chart,", js_function(raw, "chartBox"))
         table = js_function(raw, "chartTable")
         self.assertNotIn("err", table)
-        self.assertIn('axisTitle(spec, "x")', table)
-        self.assertIn('axisTitle(spec, "y")', table)
+        # The table is the spine's (`page.chart_table`): its head and rows as
+        # baked, never the spec's data printed raw (review of P2).
+        self.assertIn("chart.table", table)
+        self.assertIn("table.head", table)
+        import _template
+        self.assertNotRegex(_template.js_code(table), r"String\(|\.values\b")
         self.assertNotIn("err.message", raw)
         self.assertNotIn("did not load", raw)
         self.assertIn(".turn_failed", js_function(raw, "turnButton"))
