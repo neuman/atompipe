@@ -1,0 +1,17 @@
+{
+  "statement": "The base mesh is the one asked for: no face past the pack's quality limits, and no cell cap reached",
+  "kind": "measurable",
+  "tags": [
+    "mesh-quality"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.mesh_quality meshes the case with snappyHexMesh under the pack's quality limits (OpenFOAM's own caseDicts/meshQualityDict) and reads checkMesh -meshQuality's faces in error, snappy's last check and its cell cap",
+    "evaluators": [
+      "aero.mesh_quality"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

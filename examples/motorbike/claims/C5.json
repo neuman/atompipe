@@ -1,0 +1,17 @@
+{
+  "statement": "The drag area settles on the base mesh: its iterative uncertainty over the last 100 iterations is at most 1% of its mean",
+  "kind": "measurable",
+  "tags": [
+    "convergence"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.converged solves the base mesh with simpleFoam and reads the drag area's history from forceCoeffs: U_I = (max - min) / 2 over the last window (ITTC 7.5-03-01-01). The same run writes the fields the pictures draw",
+    "evaluators": [
+      "aero.converged"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

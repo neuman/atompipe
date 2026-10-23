@@ -1,0 +1,10 @@
+{
+  "kind": "zone",
+  "title": "The body and the case",
+  "members": [
+    "aero_case",
+    "aero_geometry",
+    "aero_geometry_sha256",
+    "aero_body_group"
+  ]
+}

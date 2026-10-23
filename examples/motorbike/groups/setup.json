@@ -1,0 +1,10 @@
+{
+  "kind": "board",
+  "title": "Is the flow set up right",
+  "line": "The run is the flow the person asked for, in a box large enough for it.",
+  "members": [
+    "C2",
+    "C3"
+  ],
+  "order": 2
+}

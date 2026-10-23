@@ -1,0 +1,17 @@
+{
+  "statement": "The wall model applies on the body: y+ is at most 300 on at least 90% of its area",
+  "kind": "measurable",
+  "tags": [
+    "wall-treatment"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.wall_treatment, with the mesh ladder: OpenFOAM's yPlus on each face of the body, area-weighted. Until it is in the pack, no evaluator covers this claim",
+    "evaluators": [
+      "aero.wall_treatment"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

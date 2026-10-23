@@ -1,0 +1,14 @@
+{
+  "description": "Book a wind tunnel for a scale model of the bike and rider",
+  "requires": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "A1",
+    "A2"
+  ]
+}

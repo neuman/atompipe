@@ -1,0 +1,12 @@
+{
+  "statement": "The wheels do not turn in the model, and the drag of turning wheels is not part of the drag area",
+  "kind": "assumption",
+  "owner": "Eric Neuman",
+  "rationale": "the tutorial's case has no rotating wall on the wheels and no moving ground under them; a turning wheel changes the flow under the bike and the drag",
+  "mechanism": {
+    "how": "A run with a rotating-wall condition on each wheel and the ground moving at 20 m/s, compared with this one; or a coast-down test of the real bike"
+  },
+  "requirements": [
+    "R1"
+  ]
+}

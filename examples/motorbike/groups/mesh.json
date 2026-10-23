@@ -1,0 +1,11 @@
+{
+  "kind": "board",
+  "title": "Is the mesh fine enough",
+  "line": "The mesh is good, the wall model applies, and a finer mesh gives the same drag area.",
+  "members": [
+    "C4",
+    "C6",
+    "C7"
+  ],
+  "order": 4
+}

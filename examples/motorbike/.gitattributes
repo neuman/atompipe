@@ -1,0 +1,9 @@
+# nopekit:begin
+# Written by nopekit: digests are over bytes, so line endings must not move.
+* text=auto eol=lf
+*.stl -text
+*.step -text
+*.glb -text
+*.png -text
+*.jpg -text
+# nopekit:end

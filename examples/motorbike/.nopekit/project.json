@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "name": "motorbike",
+  "summary": "The OpenFOAM motorBike in still air at 72 km/h: its drag area, and the flow around it",
+  "created": "2026-10-23T18:40:22Z",
+  "revision": "v0.1",
+  "model_entry": "model/bike.py",
+  "packs": [
+    "aero-openfoam"
+  ],
+  "spine_version": "0.1.0",
+  "people": []
+}

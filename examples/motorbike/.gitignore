@@ -1,0 +1,15 @@
+# nopekit:begin
+# Written by nopekit: bytecode from importing model/, gates/ and selftest/,
+# the readiness report `nopekit report --write` renders, the packages
+# `nopekit export` writes, and the editor launch entry `nopekit init` writes
+# with this machine's paths. Outputs, never sources.
+__pycache__/
+*.py[cod]
+/REPORT.md
+/out/
+/.vscode/launch.json
+# nopekit:end
+
+# The page is built on demand: nopekit site init, then nopekit site build. Only its text is tracked.
+/site/*
+!/site/content/
