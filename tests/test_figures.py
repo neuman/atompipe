@@ -1694,11 +1694,29 @@ SCALE = {"quantity": "value", "units": "Pa", "lo": 0.0, "hi": 3.75,
          "source_text": "The scale is 3.75 times the reference value of the run."}
 
 
+#: Two scales on one figure (design P2), as the aero pack's hero states them:
+#: the pressure on the surface, the speed on the lines, each a pack constant
+#: times the run's ``u_ref``.
+SCALES = [
+    {**SCALE, "on": "surface"},
+    {**SCALE, "on": "lines", "quantity": "speed", "units": "m/s", "hi": 2.5,
+     "ticks": [{"at": 0.4, "value": 1.0, "text": "1 m/s"}],
+     "source": [{"key": "u_ref", "factor": 2.5}],
+     "source_text": "The scale is 2.5 times the reference value of the run."},
+]
+
+
+def without_words(scales: list) -> list:
+    """A page row's ``scales`` without the words the bake adds (``on_word``)."""
+    return [{k: v for k, v in s.items() if k != "on_word"} for s in scales]
+
+
 class TheScaleIsAPackConstant(_env.EnvCase):
     """(Invariant 14) A figure's colour range is a pack constant times a value
     of its evidence, never a claim's limit: a limit edit moves no scale, and a
     range keyed to a limit or ending at one is refused; every number a chart
-    draws is one its evidence holds."""
+    draws is one its evidence holds. Each scale of a figure's ``scales``
+    (design P2) is held to the same rule as its one ``scale``."""
 
     def test_the_scale_never_moves_with_the_limit(self):
         """D1's limit doubled and the still drawn again (its scene edited): the
@@ -1732,6 +1750,43 @@ class TheScaleIsAPackConstant(_env.EnvCase):
                                     for w in summary["warnings"]), summary["warnings"])
                 self.assertEqual(page_figure(root, PIC)["currency"], "none")
 
+    def test_no_scale_of_several_moves_with_the_limit(self):
+        """The same with two scales on the still: after D1's limit doubled
+        and the still drawn again, the sidecar's scales and the page's are the
+        same, while the chart's limit moved with the claim."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, scales=SCALES)
+        build_in(self, root, draw.env)
+        scales = json.dumps(sidecar_of(root, a, PIC)["scales"], sort_keys=True)
+        self.assertEqual(json.loads(scales), SCALES)
+        set_limit(root, 20.0)
+        edit_scene(root, "scene 2")
+        build_in(self, root, draw.env)
+        self.assertEqual(len(draw.calls()), 2, "the still was not drawn again")
+        self.assertEqual(json.dumps(sidecar_of(root, a, PIC)["scales"], sort_keys=True), scales)
+        self.assertEqual(json.dumps(without_words(page_figure(root, PIC)["scales"]),
+                                    sort_keys=True), scales)
+        self.assertEqual(page_figure(root, CHART)["chart"]["limit"]["value"], 20.0)
+
+    def test_a_scale_of_several_keyed_to_a_limit_is_refused(self):
+        """Two scales, one of them keyed to D1's limit (its source, its top or
+        its bottom): the figure is refused whole, whichever of the two it is."""
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        keyed = [{"key": "limit_pa", "factor": 1.0}]
+        for label, scales in (("source", [SCALES[0], {**SCALES[1], "source": keyed}]),
+                              ("end", [SCALES[0], {**SCALES[1], "hi": 10.0}]),
+                              ("first", [{**SCALES[0], "lo": 10.0}, SCALES[1]])):
+            with self.subTest(label):
+                draw_settings(root, scales=scales)
+                summary = build_in(self, root, draw.env)
+                self.assertTrue(any(PIC in w and "a colour range taken from a limit" in w
+                                    for w in summary["warnings"]), summary["warnings"])
+                self.assertEqual(page_figure(root, PIC)["currency"], "none")
+
     def test_a_bound_viewgen_reads_no_limit(self):
         """A bound viewgen's context holds every claim with no acceptance: the
         chart, asked to note each claim's limit it is handed, notes none. Red
@@ -1755,6 +1810,96 @@ class TheScaleIsAPackConstant(_env.EnvCase):
                             for w in summary["warnings"]), summary["warnings"])
         self.assertEqual(page_figure(root, CHART)["currency"], "none")
 
+
+
+class SeveralScalesAndALight(_env.EnvCase):
+    """(design P2) A figure states several colour scales (``scales``, each
+    ``on`` a surface or lines) and its ``light``; the sidecar holds them at
+    schema 2 and the page bakes them with their words. A figure that states
+    neither is written and baked as before, at schema 1. A scales list of the
+    wrong shape is refused at the build and at the reader."""
+
+    def test_a_one_scale_figure_is_written_as_before(self):
+        from nopekit import page
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, scale=SCALE, glb="live")
+        build_in(self, root, draw.env)
+        sidecar = sidecar_of(root, a, PIC)
+        self.assertEqual(sidecar["schema"], 1)
+        self.assertEqual(set(sidecar), set(page.SIDECAR_KEYS_BY_SCHEMA[1]))
+        row = page_figure(root, PIC)
+        self.assertEqual(row["scale"], SCALE)
+        self.assertNotIn("scales", row)
+        self.assertNotIn("light", row)
+        self.assertNotIn("flat_word", row["turn"])
+
+    def test_two_scales_and_a_light_are_baked(self):
+        from nopekit import page, report
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, scales=SCALES, light="scene", glb="live", shape="lit")
+        build_in(self, root, draw.env)
+        sidecar = sidecar_of(root, a, PIC)
+        self.assertEqual(sidecar["schema"], 2)
+        self.assertEqual(set(sidecar), set(page.SIDECAR_KEYS_BY_SCHEMA[2]))
+        self.assertEqual((sidecar["scale"], sidecar["scales"], sidecar["light"]),
+                         ({}, SCALES, "scene"))
+        row = page_figure(root, PIC)
+        said = report.HUMAN["site"]["light"]
+        self.assertEqual(without_words(row["scales"]), SCALES)
+        self.assertEqual([s["on_word"] for s in row["scales"]],
+                         [said["surface"], said["lines"]])
+        self.assertEqual(row["light"], "scene")
+        self.assertEqual(row["turn"]["flat_word"], said["flat"])
+        self.assertEqual(row["currency"], "current")
+
+    def test_each_shape_fault_is_refused(self):
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        check_at(self, root, 1.0)
+        for label, cfg, said in (
+                ("both", {"scales": SCALES, "keep_scale": True},
+                 "a colour scale and a list of scales"),
+                ("on", {"scales": [{**SCALES[0], "on": "volume"}]}, "is on 'volume'"),
+                ("twice", {"scales": [SCALES[0], {**SCALES[1], "on": "surface"}]},
+                 "two colour scales in its list are on 'surface'"),
+                ("not a list", {"scales": {"on": "surface"}}, "are not a list"),
+                ("light", {"scales": SCALES, "light": "bright"}, "its light 'bright'")):
+            with self.subTest(label):
+                draw_settings(root, **cfg)
+                summary = build_in(self, root, draw.env)
+                self.assertTrue(any(PIC in w and said in w for w in summary["warnings"]),
+                                summary["warnings"])
+                self.assertEqual(page_figure(root, PIC)["currency"], "none")
+
+    def test_a_hand_edited_sidecar_is_not_read(self):
+        """A schema-2 sidecar whose second scale is moved onto the first's
+        surface, and a schema-1 sidecar given a ``scales`` key, are refused by
+        the reader, each saying why."""
+        from nopekit import page
+        draw = Draw(self)
+        root = _projects.figure_project(os.path.join(self.tmp(), "fig"))
+        a = check_at(self, root, 1.0)
+        draw_settings(root, scales=SCALES, light="scene")
+        build_in(self, root, draw.env)
+        path = os.path.join(root, "site", "assets", "figures", GATE, a, PIC + ".view.json")
+        with open(path, encoding="utf-8") as fh:
+            good = json.load(fh)
+        self.assertIsNotNone(page.read_sidecar(root, GATE, a, PIC)[0])
+        for label, doc, said in (
+                ("twice", {**good, "scales": [SCALES[0], {**SCALES[1], "on": "surface"}]},
+                 "two colour scales"),
+                ("schema 1 with scales", {**good, "schema": 1}, "is not a sidecar of schema"),
+                ("light", {**good, "light": "bright"}, "its light 'bright'")):
+            with self.subTest(label):
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(doc, fh)
+                found, why = page.read_sidecar(root, GATE, a, PIC)
+                self.assertIsNone(found)
+                self.assertIn(said, why)
 
 
 # --------------------------------------------------------------------------- #

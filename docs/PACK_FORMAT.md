@@ -1190,8 +1190,8 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
 
 - **What it returns.** A still or a 3D view: `src` is the name `write_asset` returned,
   and `data` is empty. A chart: no `src`, and its payload in `data`. `meta` may hold
-  `caption` (ASD-STE100 site text, scanned as such), `alt`, `scale`, `marks` and
-  `tool` (written into the sidecar as given). Write at most one PNG and one 3D file
+  `caption` (ASD-STE100 site text, scanned as such), `alt`, `scale` (or `scales`),
+  `marks`, `light` and `tool` (written into the sidecar as given). Write at most one PNG and one 3D file
   (`.glb`, or a `.gltf` whose every buffer and image is a `data:` URI: one that names
   a file beside it is refused, because the page would fetch bytes nothing checked). A
   still may carry its 3D file beside it: write both with `write_asset`, and the spine
@@ -1218,6 +1218,31 @@ class BoundContext(ViewContext):             # root; ledger, its claims' accepta
   refuses an end equal to a limit of a claim the gate covers or to the entry's verdict
   limit, and a `source` key that holds `limit`. A doubled limit leaves the scale
   byte-identical.
+- **Several scales on one picture.** A picture with two ramps (a body coloured by
+  its surface pressure, its stream tubes by the speed of the air) states `scales`
+  in place of `scale`: a list of scale objects as above, each with `on` set to
+  `"surface"` or `"lines"`, at most one on each. The page draws one legend for each,
+  its title led by a glyph (a filled swatch for a surface, a line for lines) and the
+  words "On the surface" or "On the lines", side by side where there is room and
+  stacked on a phone. Every rule of the one scale holds for each entry: an end equal
+  to a limit, or a `source` key that holds `limit`, refuses the figure whole. A
+  figure that states `scale` and `scales` both, an `on` of another word, or two
+  scales on the same `on`, is refused.
+
+  ```jsonc
+  "scales": [ { "on": "surface", "quantity": "pressure, Cp", "lo": -1, "hi": 1, ... },
+              { "on": "lines", "quantity": "air speed / bike speed", "lo": 0, "hi": 2, ... } ]
+  ```
+- **A lit picture.** `light: "scene"` says that the picture is drawn with lights and
+  shade, so a pixel is darker or lighter than the key's colour; `"none"` says each
+  pixel is a colour of the key. Say it in the caption too ("Light and shade make some
+  colours darker than the colours in the key"). The page gives a lit still a border,
+  and turns its 3D file lit, with a "Flat colours" toggle that draws each colour as
+  the file holds it, the key's (`docs/SITE_CONTRACT.md`, "Lit field mode"). nopekit
+  judges no pixel: hold your lit pictures to the key in your own tests, with an unlit
+  twin at the same camera whose every pixel is a key colour within 2, and controls
+  that fail (a lit twin, a tone-mapped twin). A figure that states neither `scales`
+  nor `light` writes the sidecar it wrote before (schema 1).
 - **A chart's payload** is the run's numbers, never yours:
 
   ```jsonc

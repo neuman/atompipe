@@ -285,6 +285,13 @@ export function createStage(state, app) {
             ev.currentTarget.setAttribute("aria-pressed", String(on)); viewer && viewer.setWireframe(on); },
           "aria-pressed": "false" }),
         el("span", { class: "key-hint", text: "W" }),
+        // A lit field (design P2) shows its flat colours, the key's, on demand.
+        !disabled && viewer.lit
+          ? el("button", { class: "btn", type: "button", text: "Flat colours",
+            "aria-pressed": String(viewer.flat),
+            onclick: (ev) => { const on = ev.currentTarget.getAttribute("aria-pressed") !== "true";
+              ev.currentTarget.setAttribute("aria-pressed", String(on)); viewer && viewer.setFlat(on); } })
+          : null,
         el("button", { class: "btn", type: "button", disabled, text: "Frame",
           onclick: () => viewer && viewer.frameAll() }),
         el("span", { class: "key-hint", text: "F" }),

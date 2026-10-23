@@ -1206,6 +1206,14 @@ LEFT_FOR_THE_GATE: list[str] = [
     "test_figures.AFigureSaysWhichResultItIs.test_a_bound_solid_is_never_the_hero_as_a_plain_view",
     "test_figures.TheScaleIsAPackConstant.test_a_bound_viewgen_reads_no_limit",
     "test_figures.AMissingRendererMovesNoStatus.test_a_kept_row_is_kept_only_at_the_bytes_the_build_wrote",
+    # Design P2: the same two rules over each scale of a figure's `scales`
+    # (two builds after one check, ~2 s; three refused builds, ~3 s). The FAST
+    # row above runs the one-scale twin of the first through the same
+    # `_figure_refusal` loop and sidecar write. An iteration touching
+    # `page.scales_problem`, `sidecar_schema`, `figure_row`'s scales or
+    # `site._figure_refusal` runs test_figures whole.
+    "test_figures.TheScaleIsAPackConstant.test_no_scale_of_several_moves_with_the_limit",
+    "test_figures.TheScaleIsAPackConstant.test_a_scale_of_several_keyed_to_a_limit_is_refused",
     # The review of phase 6: the rest of the identity rows (a listed person
     # commits, an email in another case, no identity, no people, a detached
     # HEAD, a merge, a newer record, no repository, and the CLI's words for git

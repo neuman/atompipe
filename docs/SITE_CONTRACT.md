@@ -651,8 +651,10 @@ an agent can read the site's state without a browser.
   (`stage.js`); it draws a bound chart's series alone, from the row's `chart.spec`,
   with no limit (the chart file holds none, and the limit is the claim's, on the
   engineering page).
-  Its `meta` holds the pack's `caption`, `alt`, colour `scale` and `marks`, none of
-  which vouches for a number in prose.
+  Its `meta` holds the pack's `caption`, `alt`, colour `scale` (or `scales`, design
+  P2), `marks` and `light`, each only where the sidecar states it, none of which
+  vouches for a number in prose; a field whose `light` is `scene` is turned lit, with
+  a "Flat colours" button.
 - `params` is the parameter view (`modelio.param_view`, `ParamView.to_dict`), never
   the param records: every parameter the model holds, in its field order, then any
   record the model no longer defines. `value`, `units`, `rationale` and
@@ -889,9 +891,15 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   trace's words), the PNG linked to itself, each mark as an HTML label at its baked
   `at`, the legend (a CSS gradient of the scale's `stops`, ticks at their baked `at`
   with their `text`, the `under` and `over` swatches with their words, `source_text`)
-  and the caption; "Turn it in 3D" (`turn.word`) only where a 3D file is there to turn
+  and the caption; a figure with `scales` (design P2) has one legend for each, in a
+  grid (`.fig-legends`) that sets them side by side where each has 300 px and stacks
+  them where it does not, each title led by its glyph (a filled swatch for `on:
+  "surface"`, a line for `on: "lines"`) and its baked `on_word`; a still with `light:
+  "scene"` has a border (`--fig-border`, `--fig-radius`); "Turn it in 3D" (`turn.word`)
+  only where a 3D file is there to turn
   (`field_src`, or `build.json`'s `live_figures[<figure id>]` with `turn.live_word`),
-  which mounts the viewer in field mode when pressed; then `binding_text` and each
+  which mounts the viewer in field mode when pressed, lit with a "Flat colours" toggle
+  (`turn.flat_word`) when the figure's `light` is `scene`; then `binding_text` and each
   figure's `provenance`. A figure with no file shows its sentence alone. Vega, Vega-Lite
   and vega-embed load on demand from `vendor/vega/` when it is there, else from the
   CDN, at the versions `site.VEGA_VERSIONS` pins (`site vendor` copies them too). The
@@ -930,6 +938,31 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   writes it, reads back as those bytes within 2 (`tests/test_field_browser.py`, in a
   headless Chromium when one is there). A mesh with no COLOR_0 is white. Tint,
   highlight, isolate and explode do nothing on a field.
+- **Lit field mode** (design P2; `createViewer({..., field: true, light: "scene"})`,
+  or a field whose `view.meta.light` is `scene`): a solved field drawn as a scene,
+  the way its still was drawn. Each mesh is drawn with `MeshStandardMaterial`
+  (`roughness` 0.6, `metalness` 0, `toneMapped: false`, both sides) and its vertex
+  colours, under a rig of its own that turns with the camera, as ParaView's light kit
+  does: an ambient light of 1.0, a key light of 2.2 above and to the left of the
+  reader and a fill of 0.5 from below and to the right (three.js divides each by
+  pi). The model mode's three lights are fixed in the world, and from ParaView's
+  camera they lit the motorBike from behind, every colour near black (measured), so
+  the side the reader sees is always the lit side here, also as the view turns.
+  Normals are computed where the file has none (ParaView's glTF holds none). The
+  first view is the file's first perspective camera, else the box's diagonal; the
+  view turns about the world axis nearest that camera's up (+Z for ParaView's), so a
+  drag or a spin never turns the body end over end. The output stays
+  `LinearSRGBColorSpace` with `NoToneMapping`. Light and shade make a colour darker
+  or lighter than the key's, so the viewer keeps each mesh's unlit material, and
+  `setFlat(true)` swaps it in: then each pixel is the file's byte within 2, as in the
+  field mode. The "Flat colours" toggle (`turn.flat_word`) calls it on the claim
+  card, on the engineering hero and on the marketing hero; the technical record shows
+  a "Flat colours" button beside Wireframe. `tests/test_field_browser.TheBrowserDrawsALitField`
+  holds the flat colours to the bytes, and requires the lit drawing to differ from
+  them, each hue to stay the file's and faces at other angles to be drawn at other
+  brightnesses; `TheCardTurnsALitField` does the same through the claim card, and
+  `ALitFieldTurnsAboutItsUp` holds the turn. A plain field (no `light`, or `none`)
+  is the field mode above.
 
 ## The marketing page
 
@@ -1291,11 +1324,16 @@ as the disk resolved it (`page.figure_for`), under each claim its gate covers:
   "bytes": 10800, "field_src": "", "data_src": "",
   "marks": [ { "at": 0.25, "text": "upstream plane" } ],
   "scale": { ... },                          // the sidecar's, a pack constant
+  "scales": [ { "on": "surface", "on_word": "On the surface", ... } ],
+                                             // only where the sidecar states scales: each
+                                             //   a scale, with the words of its glyph
+  "light": "scene",                          // only where the sidecar states a light
   "chart": {},                               // a chart: { "limit": { "value", "comparator",
                                              //   "units", "label" } | null, "current":
                                              //   { "x", "y", "margin_text" } | null,
                                              //   "spec": <the whole Vega-Lite spec> }
-  "turn": {} }                               // a 3D file: { "word", "live_word" }
+  "turn": {} }                               // a 3D file: { "word", "live_word" }, and
+                                             //   "flat_word" where `light` is "scene"
 ```
 
 A step group (one per milestone, natural order; `project` with no milestone, over the
@@ -1611,7 +1649,10 @@ that result.
    that is missing, crashes, hangs or is refused moves no status and deletes no
    committed figure: views never reach the resolution.
 4. A colour range is a pack constant times a named evidence value, never a claim's
-   limit. One `scale` object gives the pixels and the HTML legend.
+   limit. One `scale` object gives the pixels and the HTML legend; a picture with
+   several ramps (design P2: the pressure on a body, the speed on its stream lines)
+   states a `scales` list instead, each entry such an object with `on` set to
+   `surface` or `lines`, and each held to the same rule.
 5. A chart draws only numbers its entry's verified evidence holds. Its limit and its
    judged point are the floor row's, set by the spine, and only on a chart of the
    served entry: an `older` chart draws its own run's series with no limit and no
@@ -1657,7 +1698,8 @@ it.
 | a chart names no file and holds none of `site.CHART_FORBIDDEN_KEYS` (`limit`, `limits`, `current`, `marker`, `now`, `markers`) | a chart's limit and its point are the claim's |
 | every number under `series`, `band`, `estimates` and `rule` is a JSON leaf or a CSV cell of a verified evidence file | the chart holds a number no evidence file holds |
 | every bound input and verified evidence file hashes the same after the call | the inputs moved while the picture was drawn |
-| `scale.lo` and `scale.hi` equal no `limit` or `limit_hi` of a claim the gate covers, nor the entry's verdict limit (relative 1e-9); no `scale.source[].key` holds `limit` | a colour range taken from a limit |
+| `scale.lo` and `scale.hi`, and each `scales[].lo` and `.hi`, equal no `limit` or `limit_hi` of a claim the gate covers, nor the entry's verdict limit (relative 1e-9); no `source[].key` of any of them holds `limit` | a colour range taken from a limit |
+| `scale` is an object; `scales` is a list of objects, each `on` `surface` or `lines`, no two on the same, never beside a `scale`; `light` is `scene` or `none` (`page.scales_problem`) | its colour scale is not an object; a colour scale and a list of scales; is on …; two colour scales on …; its light … |
 | the caption holds no status word (`page.CAPTION_STATUS_PHRASES`) | a caption may not say a status |
 
 **Where it lands** (`site._publish_figure`):
@@ -1685,6 +1727,13 @@ site/assets/live/<gate>/<entry>/<view>.<sha12>.gltf           IGNORED: any other
   "scale": { ... }, "marks": [ { "at": 0.25, "text": "upstream plane" } ],
   "tool": { ... } }                       // the viewgen's meta.tool, as it gave it
 ```
+
+Schema 2 (design P2) is schema 1 with two more keys, `"scales": [ { "on": "surface",
+... }, { "on": "lines", ... } ]` and `"light": "scene"` (or `"none"`, or `""`). The
+build writes schema 2 only for a figure that states `scales` or `light`, so a
+one-scale figure's sidecar keeps its bytes; the reader takes both schemas, each with
+its exact key set (`page.SIDECAR_KEYS_BY_SCHEMA`), and refuses one whose colour keys
+are not of their shape (`page.scales_problem`).
 
 The sidecar holds no clock and no machine path. It is shown only when its folder's
 gate and entry are its own, the verdict cache holds that entry

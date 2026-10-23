@@ -852,7 +852,7 @@ def pic(ctx):
                 "--field", bound["<out>/demo/field.txt"], "--entry", ctx.entry.name,
                 "--value", repr(found["value"]), "--mode", cfg.get("mode", "ok")]
         if glb:
-            argv += ["--glb", glb_path]
+            argv += ["--glb", glb_path, "--shape", cfg.get("shape", "box")]
         subprocess.run(argv, check=True, capture_output=True,
                        timeout=float(cfg.get("timeout_s", 20)))
         with open(png_path, "rb") as fh:
@@ -874,11 +874,19 @@ def pic(ctx):
                   {"at": 1.0, "value": hi, "text": f"{hi:g} Pa"}],
         "source": [{"key": "u_ref", "factor": 4.0}],
         "source_text": "The scale is 4 times the reference value of the run."})
-    return View(id="demo.pic", kind=ViewKind.IMAGE, src=src,
-                meta={"caption": cfg.get("caption", "The field of the demo, from the run "
-                                                    "that wrote this result."),
-                      "alt": "A strip of colour", "scale": scale,
-                      "marks": cfg.get("marks", [{"at": 0.5, "text": "the middle"}])})
+    meta = {"caption": cfg.get("caption", "The field of the demo, from the run "
+                                          "that wrote this result."),
+            "alt": "A strip of colour", "scale": scale,
+            "marks": cfg.get("marks", [{"at": 0.5, "text": "the middle"}])}
+    # design P2: several scales on one figure (``scale`` then goes, unless
+    # ``keep_scale`` plants both), and the figure's light
+    if "scales" in cfg:
+        if not cfg.get("keep_scale"):
+            del meta["scale"]
+        meta["scales"] = cfg["scales"]
+    if "light" in cfg:
+        meta["light"] = cfg["light"]
+    return View(id="demo.pic", kind=ViewKind.IMAGE, src=src, meta=meta)
 '''
 
 _FIGURE_CHART = _FIGURE_DRAW_COMMON + '''

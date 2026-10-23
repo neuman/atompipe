@@ -37,7 +37,7 @@ import { renderProse } from "./lib/sections.js";
 import { readBuild, watchBuild } from "./lib/live.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
-import { figureTag, scaleLegend, figureStill } from "./lib/figures.js";
+import { figureTag, figureLegends, figureStill } from "./lib/figures.js";
 import { leadOf, tallyList } from "./lib/verdict.js";
 import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
@@ -289,7 +289,7 @@ function stage(rep) {
       const fig = rep.figure;
       mount(host, el("figure", { class: fig ? "mk-flat mk-figure" : "mk-flat" },
         fig ? figureStill(fig, view.src) : renderImage(view, [], null), caption,
-        fig ? figureTag(fig, words) : null, fig ? scaleLegend(fig.scale) : null,
+        fig ? figureTag(fig, words) : null, fig ? figureLegends(fig) : null,
         fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null));
       return;
     }
@@ -387,10 +387,10 @@ function startViewer(view, box, canvas, size) {
   const fig = mk.repFigure && mk.repFigure.view === view.id ? mk.repFigure : null;
   if (fig) {
     const words = (mk.doc && mk.doc.words) || {};
-    box.after(el("div", { class: "mk-figure-tag" }, figureTag(fig, words), scaleLegend(fig.scale)));
+    box.after(el("div", { class: "mk-figure-tag" }, figureTag(fig, words), figureLegends(fig)));
   }
   mk.viewer = createViewer({
-    host: canvas, view, field: !!fig,
+    host: canvas, view, field: !!fig, light: fig ? (fig.light || "") : undefined,
     onProgress: (loaded, total) => {
       const whole = total || expected;
       if (whole > 0) bar.style.width = `${Math.min(100, (loaded / whole) * 100).toFixed(1)}%`;
@@ -401,7 +401,8 @@ function startViewer(view, box, canvas, size) {
       api.setFrameShift(WIDE && WIDE.matches ? FRAME_SHIFT : 0);
       restoreTints(view, api);
       api.setSpin(pressed.spin);
-      spinButton = controls(view, api, box, pressed, fig ? mk.repControls : null);
+      spinButton = controls(view, api, box, pressed, fig ? mk.repControls : null,
+        fig ? ((fig.turn || {}).flat_word || "") : "");
       watchSight(api);
     },
     onSpinStop: () => { pressed.spin = false; if (spinButton) spinButton.setAttribute("aria-pressed", "false"); },
@@ -448,6 +449,7 @@ const ICONS = {
   wire: "M12 3l8 5v8l-8 5-8-5V8l8-5zm0 0v18M4 8l16 8M20 8L4 16",
   reset: "M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4",
   full: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  flat: "M4 4h16v16H4zM4 20L20 4",
 };
 
 function icon(name) {
@@ -466,7 +468,7 @@ function ctl(name, label, spec = {}) {
  *  baked model views), wireframe, reset and full screen (where the browser
  *  has it). Returns the spin button, which the viewer turns off when a hand
  *  stops the model. */
-function controls(view, api, box, pressed, only = null) {
+function controls(view, api, box, pressed, only = null, flatWord = "") {
   const tools = [];
   let slider = null;
   // A figure hero's baked `controls` (spin): nothing else applies to a field.
@@ -478,6 +480,17 @@ function controls(view, api, box, pressed, only = null) {
       api.setSpin(pressed.spin);
     });
     if (only.includes("spin")) tools.push(spinOnly);
+    // A lit figure's flat colours (design P2), as the engineering card's
+    // toggle (`flatToggle` in lib/figures.js) in the pill's look.
+    if (api.lit && flatWord) {
+      const flat = ctl("flat", flatWord, { "aria-pressed": "false" });
+      flat.addEventListener("click", () => {
+        const on = flat.getAttribute("aria-pressed") !== "true";
+        flat.setAttribute("aria-pressed", String(on));
+        api.setFlat(on);
+      });
+      tools.push(flat);
+    }
     box.appendChild(el("div", { class: "mk-pill", role: "toolbar", "aria-label": "Viewer controls" }, ...tools));
     box.appendChild(el("p", { class: "mk-hint", text: "Drag to turn. Scroll to zoom." }));
     return spinOnly;

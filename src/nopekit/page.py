@@ -161,6 +161,8 @@ WORD_KEYS = frozenset({
     "currency_word", "drawn_text", "caption", "alt", "provenance", "tool_word",
     "over_word", "under_word", "source_text", "binding_text", "live_word", "margin_text",
     "quantity",
+    # design P2: a scale's legend glyph in words, and the 3D view's toggle
+    "on_word", "flat_word",
     # review of P2: a chart's baked table (`chart_table`), its cells and the
     # sentence that counts the rows left out
     "rows",
@@ -189,6 +191,9 @@ RECORD_KEYS = frozenset({
     # issue #15, B.4.3: a bound figure's ids, paths, digests and tokens
     "figures", "figure", "currency", "entry", "sha256", "field_src", "data_src", "scale",
     "over", "under", "colour", "ticks", "chart", "turn", "controls",
+    # design P2: several colour scales on one figure, each ``on`` a surface or
+    # lines, and the figure's ``light`` (tokens of `SCALE_ON` and `LIGHTS`)
+    "scales", "on", "light",
     # P1.5: a bound chart's Vega-Lite spec (`chart_spec`), under ``chart.spec``.
     # Its strings are Vega-Lite's vocabulary (a mark's ``type`` and ``shape``,
     # a theme ``style`` name, a data ``field``, ``width: "container"``, a text
@@ -1092,14 +1097,78 @@ LIVE_DIR = "assets/live"
 
 #: The tracked sidecar beside a figure's files: ``<view>.view.json``. It names
 #: each file with its sha256, so a swapped file is told by content, and it
-#: holds no clock and no machine path. Schema 1: `SIDECAR_KEYS`. *Rejected:*
-#: stamps inside the PNG and the GLB (one reader per format, and a canonical
-#: PNG keeps no ancillary chunk); a field on ``models.View`` (a second spine
-#: edit, and a strict-reader change, for one use).
+#: holds no clock and no machine path. *Rejected:* stamps inside the PNG and
+#: the GLB (one reader per format, and a canonical PNG keeps no ancillary
+#: chunk); a field on ``models.View`` (a second spine edit, and a
+#: strict-reader change, for one use).
+#:
+#: Schema 2 (the aero pack's hero, design P2) adds ``scales`` (several colour
+#: scales on one picture, each tagged ``on``: `SCALE_ON`) and ``light``
+#: (`LIGHTS`). A figure that states neither is written at schema 1, its bytes
+#: as before, and both schemas are read: a project's committed sidecars never
+#: move because the spine learned a key they do not use. *Rejected:* one
+#: schema with ``scales`` and ``light`` always present (every committed
+#: sidecar would be rewritten on the next build, for keys it does not hold);
+#: optional keys in one schema (the reader's exact key set is what refuses a
+#: hand-added key).
 SIDECAR_SUFFIX = ".view.json"
-SIDECAR_SCHEMA = 1
-SIDECAR_KEYS = ("schema", "view", "gate", "entry", "kind", "recipe", "files", "title",
-                "caption", "alt", "scale", "marks", "tool")
+SIDECAR_KEYS_BY_SCHEMA = {
+    1: ("schema", "view", "gate", "entry", "kind", "recipe", "files", "title",
+        "caption", "alt", "scale", "marks", "tool"),
+}
+SIDECAR_KEYS_BY_SCHEMA[2] = SIDECAR_KEYS_BY_SCHEMA[1] + ("scales", "light")
+SIDECAR_SCHEMA = 2
+SIDECAR_KEYS = SIDECAR_KEYS_BY_SCHEMA[SIDECAR_SCHEMA]
+
+#: Where each colour scale of a figure's ``scales`` is drawn: on a surface
+#: (the body, a cut, a wake surface) or on lines (stream tubes). The legend
+#: shows a filled swatch or a line beside each, so a reader tells two ramps on
+#: one picture apart. *Rejected:* a free label (the legend's glyph would be a
+#: guess); more than one scale on the same ``on`` (two ramps the glyph cannot
+#: tell apart).
+SCALE_ON = ("surface", "lines")
+
+#: A figure's ``light``: ``scene`` when the picture is drawn with lights and
+#: shade (its colours are darker or lighter than the key's), ``none`` when
+#: each pixel is a colour of the key. The 3D viewer turns a ``scene`` field
+#: lit, with a toggle to its flat colours (`lib/viewer3d.js`). No key is
+#: ``none`` for a figure written before schema 2.
+LIGHTS = ("scene", "none")
+
+
+def sidecar_schema(meta: Mapping) -> int:
+    """The lowest sidecar schema that holds what ``meta`` states: 2 when it
+    states ``scales`` or ``light``, else 1."""
+    return 2 if (meta.get("scales") or meta.get("light")) else 1
+
+
+def scales_problem(scale: Any, scales: Any, light: Any) -> str:
+    """Why a figure's colour keys are not of the sidecar's shape, or ``""``:
+    ``scale`` an object, ``scales`` a list of objects each with an ``on`` of
+    `SCALE_ON`, no two on the same, never beside a ``scale``; ``light`` one
+    of `LIGHTS` or empty. One rule for the build's refusal
+    (`site._figure_refusal`) and the reader (`read_sidecar`)."""
+    if scale and not isinstance(scale, Mapping):
+        return "its colour scale is not an object"
+    if scales:
+        if not isinstance(scales, (list, tuple)):
+            return "its colour scales are not a list"
+        if scale:
+            return "it states a colour scale and a list of scales; a figure states one or the other"
+        seen: set = set()
+        for entry in scales:
+            if not isinstance(entry, Mapping):
+                return "a colour scale in its list is not an object"
+            on = entry.get("on")
+            if on not in SCALE_ON:
+                return (f"a colour scale in its list is on {on!r}, not on "
+                        f"{' or '.join(repr(o) for o in SCALE_ON)}")
+            if on in seen:
+                return f"two colour scales in its list are on {on!r}"
+            seen.add(on)
+    if light and light not in LIGHTS:
+        return f"its light {light!r} is not {' or '.join(repr(x) for x in LIGHTS)}"
+    return ""
 
 #: The roles a sidecar's files play: the still (a PNG), the 3D field (a GLB or
 #: a self-contained glTF, ``live`` when it is under `LIVE_DIR`) and the
@@ -1180,7 +1249,8 @@ def _entry_file(root: str, gate: str, entry: str) -> str | None:
 def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | None, str]:
     """``(sidecar, "")`` for the valid sidecar of ``view`` in ``figures/<gate>/
     <entry>/``, else ``(None, why)``. Valid: it parses, its keys are
-    `SIDECAR_KEYS`, its ``view``, ``gate`` and ``entry`` are the folder's,
+    those of its schema (`SIDECAR_KEYS_BY_SCHEMA`), its colour keys are of
+    their shape (`scales_problem`), its ``view``, ``gate`` and ``entry`` are the folder's,
     the verdict cache holds the entry (``.nopekit/verdicts/<gate>/<entry>.json``),
     and each file it names that is not live is a plain name in the folder, at
     most `EVIDENCE_MAX_BYTES`, whose sha256 and size are the sidecar's. A live
@@ -1202,9 +1272,15 @@ def read_sidecar(root: str, gate: str, entry: str, view: str) -> tuple[dict | No
             doc = json.load(fh)
     except (OSError, ValueError):
         return None, f"{view}{SIDECAR_SUFFIX} does not parse"
-    if not isinstance(doc, dict) or set(doc) != set(SIDECAR_KEYS) \
-            or doc.get("schema") != SIDECAR_SCHEMA:
-        return None, f"{view}{SIDECAR_SUFFIX} is not a sidecar of schema {SIDECAR_SCHEMA}"
+    schema = doc.get("schema") if isinstance(doc, dict) else None
+    keys = SIDECAR_KEYS_BY_SCHEMA.get(schema) \
+        if isinstance(schema, int) and not isinstance(schema, bool) else None
+    if keys is None or set(doc) != set(keys):
+        return None, (f"{view}{SIDECAR_SUFFIX} is not a sidecar of schema "
+                      f"{' or '.join(str(n) for n in sorted(SIDECAR_KEYS_BY_SCHEMA))}")
+    shape = scales_problem(doc.get("scale"), doc.get("scales"), doc.get("light"))
+    if shape:
+        return None, f"{view}{SIDECAR_SUFFIX}: {shape}"
     if (doc.get("view"), doc.get("gate"), doc.get("entry")) != (view, gate, entry):
         return None, (f"{view}{SIDECAR_SUFFIX} names {doc.get('gate')}/{doc.get('entry')}/"
                       f"{doc.get('view')}, not the folder it is in")
@@ -2194,6 +2270,24 @@ def figure_row(root: str, bound: BoundFigure, *, claim: Any, floor_row: Mapping 
             warnings.append(f"view {bound.view}: {warning}")
     field = (sidecar.get("files") or {}).get("field")
     tool = sidecar.get("tool") if isinstance(sidecar.get("tool"), Mapping) else {}
+    # Schema 2's keys (design P2), baked only where the sidecar states them,
+    # so a one-scale figure's row is the bytes it was: each scale with the
+    # words its legend glyph stands for, and the light. A lit 3D view's turn
+    # carries the word of its flat-colours toggle.
+    lit_words = _site_words()["light"]
+    scales = [dict(s) for s in (sidecar.get("scales") or []) if isinstance(s, Mapping)]
+    light = str(sidecar.get("light") or "")
+    stated: dict = {}
+    if scales:
+        stated["scales"] = [{**s, "on_word": str(lit_words[s.get("on")])} for s in scales]
+    if light:
+        stated["light"] = light
+    turn: dict = {}
+    if isinstance(field, Mapping):
+        turn = {"word": said["turn"], "live_word": said["live"] if field.get("live") is True
+                else ""}
+        if light == "scene":
+            turn["flat_word"] = str(lit_words["flat"])
     return {
         "id": f"{bound.gate}/{entry or 'none'}/{bound.view}",
         "view": bound.view, "kind": bound.kind, "gate": bound.gate, "entry": entry,
@@ -2207,9 +2301,9 @@ def figure_row(root: str, bound: BoundFigure, *, claim: Any, floor_row: Mapping 
         else "",
         **files,
         "marks": list(sidecar.get("marks") or []), "scale": dict(sidecar.get("scale") or {}),
+        **stated,
         "chart": chart,
-        "turn": ({"word": said["turn"], "live_word": said["live"] if field.get("live") is True
-                  else ""} if isinstance(field, Mapping) else {}),
+        "turn": turn,
     }
 
 
@@ -4181,6 +4275,7 @@ __all__ = [
     "EVIDENCE_MAX_BYTES", "EVIDENCE_DIR", "PROSE_SUBJECTS", "WORD_KEYS", "RECORD_KEYS",
     # issue #15: figures bound to a verdict entry
     "FIGURES_DIR", "LIVE_DIR", "SIDECAR_SUFFIX", "SIDECAR_SCHEMA", "SIDECAR_KEYS",
+    "SIDECAR_KEYS_BY_SCHEMA", "SCALE_ON", "LIGHTS", "sidecar_schema", "scales_problem",
     "FIGURE_ROLES", "FIGURE_CURRENCIES", "Figure", "figure_folder", "live_folder",
     "figure_currency_word", "read_sidecar", "figure_for", "evidence_source",
     "CAPTION_STATUS_PHRASES", "FIGURE_CONTROLS", "caption_status", "BoundFigure",

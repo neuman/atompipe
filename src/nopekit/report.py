@@ -610,6 +610,18 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "chart_empty": "This chart has no series. There is nothing to draw.",
         "turn_failed": "The 3D view did not load.",
     }),
+    # Design P2: a figure with several colour scales (`page.SCALE_ON`) names
+    # where each is drawn beside its legend's glyph (a swatch for a surface, a
+    # line for lines), and a lit 3D view (`page.LIGHTS`) has a toggle to its
+    # flat colours, whose pixels are the key's. Baked into the figure row only
+    # where a sidecar states them (`page.figure_row`), so a one-scale page
+    # bakes the bytes it did. *Rejected:* "Unlit" for the toggle (a word of
+    # the renderer, not of the reader).
+    "light": MappingProxyType({
+        "surface": "On the surface",
+        "lines": "On the lines",
+        "flat": "Flat colours",
+    }),
     # A rejected alternative on the marketing page (`rejection_words(register=
     # "site")`), branch for branch `HUMAN["rejection"]`'s: the type, and the
     # state of the return condition with no record text inside it (the
