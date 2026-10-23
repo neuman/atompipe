@@ -43,7 +43,9 @@ pressure in Pa, which the site's pictures draw), and removes the case's: the num
 (`foamDictionary -expand`) must hold exactly the pack's function objects and
 residual targets and the case's nu, and the solver's log must report the pack's
 convergence criteria; any difference is an error. Every tool runs with a
-private HOME that turns off `allowSystemOperations` and with floating-point
+private HOME that holds only a controlDict turning off `allowSystemOperations`
+(anything else found there is removed before the run: OpenFOAM reads etc files
+from it before the install's) and with floating-point
 trapping forced on, and a log whose banner does not show both is an error. These gates read inside a
 subprocess, so they are **opaque**: they re-run on every check where OpenFOAM
 exists (the baseline's six gates take about 10 s in all). Between check runs their
@@ -279,8 +281,8 @@ limits, the residual target and the refinement ratio have pack defaults, marked
 `constant/{transportProperties,turbulenceProperties}` and `0/{U,p}`
 (`system/decomposeParDict` may sit beside them; `constant/polyMesh` is ignored).
 No other file or directory. No directive, except the
-`#includeEtc "caseDicts/setConstraintTypes"` that ESI's own 0/ files carry in
-`boundaryField`. Macros (`$name`) only in `blockMeshDict`, never a whole
+`#includeEtc "caseDicts/setConstraintTypes"` that ESI's own 0/ files carry as
+the first entry of `boundaryField`. Macros (`$name`) only in `blockMeshDict`, never a whole
 dictionary expanded in place (`$name;`). A quoted (regular-expression) keyword
 only under `boundaryField`, `solvers`, `equations` or `fields`. No `#calc`,
 `#codeStream`, `coded*` or `libs`. Boundary conditions whose value is written in

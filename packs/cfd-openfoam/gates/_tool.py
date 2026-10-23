@@ -158,9 +158,21 @@ _USER_CONTROLDICT = ("FoamFile { version 2.0; format ascii; class dictionary; "
 
 def home(out_dir: str, api: int) -> str:
     """A HOME of the gate's own under its out directory, holding only the user
-    controlDict above. The person's own ``~/.OpenFOAM`` never reaches a run."""
+    controlDict above. The person's own ``~/.OpenFOAM`` never reaches a run.
+
+    Anything else found under it is removed first: OpenFOAM looks up every
+    ``#includeEtc`` and etc file in ``$HOME/.OpenFOAM/<api>/`` and then
+    ``$HOME/.OpenFOAM/`` before the install (``foamEtcFile -list``, v2606), and
+    this directory outlives the run in an ignored place no verdict key reads.
+    What slipped through review of P1: a ``caseDicts/setConstraintTypes``
+    planted here was merged into a 0/ file's boundaryField at run time, so the
+    solver ran an inlet the tier-0 reader never read. Rejected: a fresh
+    directory per run (one more sourcing of etc/bashrc per gate, and a
+    directory left behind each time); refusing the run (the HOME is the gate's
+    own, so the gate puts it back)."""
     root = os.path.join(out_dir, "cfd-openfoam", "home")
     cfg = os.path.join(root, ".OpenFOAM", str(api), "controlDict")
+    _only(root, (".OpenFOAM", str(api), "controlDict"))
     os.makedirs(os.path.dirname(cfg), exist_ok=True)
     try:
         with open(cfg, encoding="utf-8") as fh:
@@ -171,6 +183,34 @@ def home(out_dir: str, api: int) -> str:
         with open(cfg, "w", encoding="utf-8") as fh:
             fh.write(_USER_CONTROLDICT)
     return root
+
+
+def _remove(path: str) -> None:
+    """``path`` gone, whatever it is (a link is removed, never followed)."""
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def _only(root: str, keep: tuple) -> None:
+    """Remove everything under ``root`` but the one path ``keep`` names, and
+    any link or file standing where a directory on that path belongs."""
+    d = root
+    for name in keep:
+        if os.path.islink(d) or (os.path.lexists(d) and not os.path.isdir(d)):
+            _remove(d)
+        if not os.path.isdir(d):
+            return
+        for entry in os.listdir(d):
+            if entry != name:
+                _remove(os.path.join(d, entry))
+        d = os.path.join(d, name)
+    if os.path.islink(d) or os.path.isdir(d):
+        _remove(d)
 
 
 def environment(inst: Install, home_dir: str) -> dict:

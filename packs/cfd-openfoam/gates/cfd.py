@@ -424,6 +424,16 @@ IGNORED_DIRS = ("constant/polyMesh",)
 #: writes (the motorBike tutorial's included). An unquoted argument, another
 #: install file (``"caseDicts/setConstraintType"`` too) or a second token stays
 #: refused.
+#: It must also be the first entry of its ``boundaryField``, where ESI writes it:
+#: a dictionary entry read later merges into an earlier one of the same name, so
+#: the case's own patch entries, read after it, win on every keyword they state.
+#: What slipped through review of P1: OpenFOAM looks the name up in the user
+#: directory (``$HOME/.OpenFOAM/<api>/``, then ``$HOME/.OpenFOAM/``) before the
+#: install's, so a ``caseDicts/setConstraintTypes`` planted in the gate's HOME,
+#: included after the inlet, made ``foamDictionary -expand`` read a
+#: ``uniformFixedValue`` inlet at another value where this reader read
+#: ``fixedValue``. ``_tool.home`` now holds only its controlDict; this rule keeps
+#: the case's patches the case's even if a HOME ever held more.
 ALLOWED_DIRECTIVE = ("#includeEtc", "caseDicts/setConstraintTypes")
 
 #: Where a quoted (regular-expression) keyword may stand: under patch names and
@@ -513,11 +523,11 @@ def _check(d, rel: str, problems: list[str], parent: str = "", macros: bool = Fa
     dictionary expansion, a macro (outside blockMeshDict), a computed value, a
     quoted keyword where a keyword the pack decides on could stand, a ``type``
     that is not a literal word, and every spelling of compiled code."""
-    for e in d.entries:
+    for i, e in enumerate(d.entries):
         where = f"{rel}: {parent + '/' if parent else ''}{e.key}"
         if e.directive:
             if not (_allowed_directive(e) and parent == "boundaryField"
-                    and rel.startswith("0/")):
+                    and rel.startswith("0/") and i == 0):
                 problems.append(f"{rel}: {e.key}, a directive OpenFOAM evaluates and this "
                                 f"pack's reader does not")
             continue

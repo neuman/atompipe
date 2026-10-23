@@ -568,7 +568,12 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
             path = os.path.join(case, *rel.split("/"))
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            if where:
+            if where == "boundaryField, last":
+                head = "boundaryField\n{\n"
+                self.assertEqual(text.count(head), 1, rel)
+                at = text.index("\n}\n", text.index(head)) + 1
+                text = text[:at] + "    " + line + "\n" + text[at:]
+            elif where:
                 head = "boundaryField\n{\n"
                 self.assertEqual(text.count(head), 1, rel)
                 text = text.replace(head, head + "    " + line + "\n\n")
@@ -604,12 +609,65 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
                            ("system/controlDict",)),
             "another directive": ('#include "caseDicts/setConstraintTypes"', "boundaryField",
                                   ("0/U",)),
+            # Review of P1: read after the patches, an etc file found first in
+            # the user's directory merged into them at run time.
+            "after the patches": ('#includeEtc "caseDicts/setConstraintTypes"',
+                                  "boundaryField, last", ("0/U",)),
         }
         for name, (line, where, rels) in cases.items():
             with self.subTest(name):
                 v = self._with_directive(line, rels=rels, where=where)
                 self.assertEqual(v.outcome, "fail", v.render())
                 self.assertIn("a directive OpenFOAM evaluates", v.detail)
+
+    def test_the_gates_home_holds_only_its_control_dict(self):
+        """Review of P1: OpenFOAM finds ``#includeEtc "caseDicts/
+        setConstraintTypes"`` in ``$HOME/.OpenFOAM/<api>/`` (then
+        ``$HOME/.OpenFOAM/``) before the install, and the gate's HOME outlives
+        its run. Whatever was planted there, a run's HOME holds the controlDict
+        alone, with the pack's text."""
+        out = self.tmp()
+        root = os.path.join(out, "cfd-openfoam", "home")
+        user = os.path.join(root, ".OpenFOAM")
+        planted = {
+            os.path.join(user, "2606", "caseDicts", "setConstraintTypes"):
+                "inlet { type uniformFixedValue; uniformValue constant (2 0 0); }\n",
+            os.path.join(user, "caseDicts", "setConstraintTypes"): "inlet { }\n",
+            os.path.join(user, "controlDict"): "InfoSwitches { allowSystemOperations 1; }\n",
+            os.path.join(root, ".bashrc"): "export FOAM_SIGFPE=false\n",
+        }
+        for path, text in planted.items():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        elsewhere = os.path.join(self.tmp(), "elsewhere")
+        with open(elsewhere, "w", encoding="utf-8") as fh:
+            fh.write("InfoSwitches { allowSystemOperations 1; }\n")
+        cfg = os.path.join(user, "2606", "controlDict")
+        os.symlink(elsewhere, cfg)
+        for _ in range(2):
+            self.assertEqual(T.home(out, 2606), root)
+            found = sorted(os.path.relpath(os.path.join(d, f), root)
+                           for d, dirs, files in os.walk(root) for f in files + [
+                               x for x in dirs if os.path.islink(os.path.join(d, x))])
+            self.assertEqual(found, [os.path.join(".OpenFOAM", "2606", "controlDict")])
+            self.assertFalse(os.path.islink(cfg))
+            with open(cfg, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), T._USER_CONTROLDICT)
+        with open(elsewhere, encoding="utf-8") as fh:
+            self.assertIn("allowSystemOperations 1", fh.read())
+        # A link where the user directory belongs is removed, never followed.
+        shutil.rmtree(user)
+        target = os.path.join(self.tmp(), "target")
+        os.makedirs(os.path.join(target, "2606", "caseDicts"))
+        with open(os.path.join(target, "2606", "caseDicts", "setConstraintTypes"), "w") as fh:
+            fh.write("inlet { }\n")
+        os.symlink(target, user)
+        T.home(out, 2606)
+        self.assertFalse(os.path.islink(user))
+        self.assertTrue(os.path.exists(os.path.join(target, "2606", "caseDicts",
+                                                    "setConstraintTypes")))
+        self.assertFalse(os.path.exists(os.path.join(user, "2606", "caseDicts")))
 
     def _appended(self, rel: str, text: str):
         case = _copy_case(os.path.join(self.tmp(), "case"))
