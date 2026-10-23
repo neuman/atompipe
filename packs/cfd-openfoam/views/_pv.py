@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""How cfd-openfoam finds, checks and runs ParaView's ``pvbatch`` to draw its
+"""How a pack finds, checks and runs ParaView's ``pvbatch`` to draw its
 pictures. Standard library only; ParaView's own Python (with Pillow) runs the
 scripts this module hands it, in a subprocess, never in nopekit's process.
 
@@ -23,6 +23,16 @@ Every rule here was measured on ParaView 6.2.0 (conda-forge,
   successful run, so stderr decides nothing.
 - ParaView 6.2 calls matplotlib's viridis ``Viridis``; the name older ParaView
   used, ``Viridis (matplotlib)``, raises in ``ApplyPreset``.
+
+**One file, two packs.** cfd-openfoam's ``views/_pv.py`` and aero-openfoam's
+are the same bytes but for `KNOWN` (each pack's map at 0.5), and a test holds
+them so (``test_aero_views.TheSharedHelpersHaveNotDrifted``): what names the
+pack is read from the folder this file is in (`PACK_NAME`). What slipped
+through the aero pack's first copy: the module names and the reference path
+typed as cfd-openfoam's, so the copy loaded cfd-openfoam's ``_scales`` (Viridis)
+when that pack's views were loaded first. *Rejected:* one module loaded across
+packs (a pack installed alone would break, and the helper would be code of
+the other pack).
 - A lit display draws a cell about 22% darker than its colour on the scale,
   and a lookup table without an above-range colour draws a value past the
   scale in the end colour. The renderer control below catches both (planted
@@ -52,6 +62,8 @@ import tempfile
 from dataclasses import dataclass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+#: The pack this file is in: the name of the folder that holds ``views/``.
+PACK_NAME = os.path.basename(os.path.dirname(HERE))
 
 #: The launcher this pack finds ParaView through: a short shell script on PATH
 #: whose exec line names ``<prefix>/bin/pvbatch`` (references/rendering.md).
@@ -96,11 +108,12 @@ BANNER_TIMEOUT_S = 60
 
 def sibling(stem: str):
     """``views/<stem>.py`` of this pack, loaded once under a name of the
-    pack's own (``nopekit_cfd_openfoam<stem>``): the view loader puts the
-    pack root on ``sys.path``, not ``views/``, and a bare ``import _scales``
-    would take another pack's ``_scales`` if one were first. ``flow.py``
-    loads this module the same way, so both share one copy of each."""
-    name = f"nopekit_cfd_openfoam{stem}"
+    pack's own (``nopekit_<pack><stem>``, ``nopekit_cfd_openfoam_scales`` in
+    cfd-openfoam): the view loader puts the pack root on ``sys.path``, not
+    ``views/``, and a bare ``import _scales`` would take another pack's
+    ``_scales`` if one were first. The pack's viewgens load this module the
+    same way, so all share one copy of each."""
+    name = f"nopekit_{PACK_NAME.replace('-', '_')}{stem}"
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, os.path.join(HERE, f"{stem}.py"))
         module = importlib.util.module_from_spec(spec)
@@ -139,7 +152,7 @@ KNOWN = (0.5, (33, 145, 140))
 
 #: The words a picture's absence says on the page and in ``doctor``.
 NO_PICTURES = "The CFD pictures are not drawn. No status depends on them."
-SEE = "See packs/cfd-openfoam/references/rendering.md."
+SEE = f"See packs/{PACK_NAME}/references/rendering.md."
 
 
 class Unavailable(Exception):
@@ -504,7 +517,7 @@ def judge_control(result: dict) -> list[str]:
                 known_seen = True
                 if max(abs(a - b) for a, b in zip(want, KNOWN[1])) > CONTROL_TOLERANCE:
                     problems.append(f"{label}: the scale's colour at {KNOWN[0]} is {want}, "
-                                    f"not viridis's {KNOWN[1]}")
+                                    f"not {PRESET.lower()}'s {KNOWN[1]}")
         else:
             end = OVER if where == "above" else UNDER
             word = "above" if where == "above" else "below"

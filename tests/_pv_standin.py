@@ -37,7 +37,8 @@ written); ``dirty-home`` (writes into its HOME, then a good result);
 ``other-preset`` (a scene job reports another preset than viridis);
 ``huge-field`` (the glTF padded with spaces past the 2 MiB cap: still JSON);
 ``other-field`` (the result names another glTF's sha256); ``other-png`` (the
-result names another PNG's sha256); ``one-mark`` (one plane line for two
+result names another PNG's sha256); ``empty`` (an aero scene that drew no cell
+of its first piece); ``other-bands`` (the y+ bands in other colours); ``one-mark`` (one plane line for two
 planes); ``same-mark`` (both lines at one place, as a flow along y drew them
 before the review of P2); ``half-cut`` (a cut of half the case's cells). A
 scene job's ``cut_cells`` is the cell count the case's ``owner`` file states
@@ -110,6 +111,15 @@ LIT = [(100, 99, 95), (100, 99, 95), (53, 1, 62), (56, 29, 87), (51, 52, 100),
 #: Past the scale with no above-range or below-range colour, the end colours
 #: (measured, with both turned off in a copy of the control).
 CLIPPED = {"above": (253, 231, 37), "below": (68, 1, 84)}
+
+#: The same control with aero-openfoam's ``Turbo`` (the job's ``preset``), as
+#: ParaView 6.2.0 drew it on 2026-10-23 (the motorBike design's P0): each
+#: cell's pixel and the table's colour, all 15 equal. Past the scale with no
+#: above-range or below-range colour: Turbo's end colours.
+TURBO = [(128, 128, 128), (128, 128, 128), (48, 18, 59), (69, 90, 205), (62, 155, 254),
+         (25, 214, 204), (70, 248, 132), (163, 253, 60), (225, 221, 55), (254, 165, 49),
+         (240, 91, 18), (196, 37, 3), (122, 4, 3), (255, 0, 255), (255, 0, 255)]
+TURBO_CLIPPED = {"above": (122, 4, 3), "below": (48, 18, 59)}
 
 GL = "llvmpipe (LLVM 23.1.3, 256 bits)"
 
@@ -284,6 +294,14 @@ def _log(prefix: str, argv: list, job: dict | None = None) -> None:
         row["case_files"] = sorted(
             os.path.relpath(os.path.join(d, f), case).replace(os.sep, "/")
             for d, _dirs, names in os.walk(case) for f in names)
+    if job is not None and "scene" in job:
+        # What ParaView would have read: each file the job names, with its
+        # sha256 (an aero scene job, ``views/_scene3d.py``).
+        row["job"] = job
+        named = [job.get("body"), job.get("wake"), job.get("yplus"), *(job.get("tracks") or ()),
+                 *(job.get("cuts") or ())]
+        row["scene_files"] = {path: hashlib.sha256(open(path, "rb").read()).hexdigest()
+                              for path in named if path and os.path.isfile(path)}
     with open(os.path.join(prefix, "calls.jsonl"), "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
 
@@ -322,12 +340,17 @@ def main(prefix: str) -> int:
             fh.write("a file a run left in its HOME\n")
     if "case" in job:
         return _still(job, raw, out_dir, kind)
+    if "scene" in job:
+        return _scene3d(job, raw, out_dir, kind)
     with open(os.path.join(out_dir, "control.png"), "wb") as fh:
         fh.write(PNG)
     cells = []
-    for (index, value, where, pixel, want), lit in zip(CELLS, LIT):
+    turbo = job.get("preset") == "Turbo"
+    for (index, value, where, pixel, want), lit, tb in zip(CELLS, LIT, TURBO):
+        if turbo:
+            pixel = want = tb
         if kind == "no-overrange" and where != "in":
-            pixel = CLIPPED[where]
+            pixel = (TURBO_CLIPPED if turbo else CLIPPED)[where]
         if kind == "lit":
             pixel = lit
         cells.append({"index": index, "value": value, "where": where, "pixel": list(pixel),
@@ -375,6 +398,54 @@ def _still(job: dict, raw: bytes, out_dir: str, kind: str) -> int:
     if solid is not None:
         result["gltf_sha256"] = hashlib.sha256(
             solid if kind != "other-field" else solid + b" ").hexdigest()
+    with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:
+        json.dump(result, fh, indent=1, sort_keys=True)
+    return 0
+
+
+#: What ParaView 6.2.0 drew of ``tests/aero_fixtures/views/`` for each aero
+#: scene (``make_standin.py``): the PNG, the hero's glTF and the result, less
+#: what names a run.
+AERO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aero_fixtures", "views",
+                    "standin")
+
+
+def _scene3d(job: dict, raw: bytes, out_dir: str, kind: str) -> int:
+    """An aero scene job: the committed PNG of the job's scene (and the
+    hero's glTF when the job names one), and its result with this job's
+    ``done`` and the sha256 of each file written."""
+    scene = job["scene"]
+    try:
+        with open(os.path.join(AERO, scene + ".png"), "rb") as fh:
+            png = fh.read()
+        with open(os.path.join(AERO, scene + ".json"), encoding="utf-8") as fh:
+            result = json.load(fh)
+    except OSError:
+        sys.stderr.write(f"the stand-in has no picture of the scene {scene}\n")
+        return 1
+    with open(os.path.join(out_dir, job["png"]), "wb") as fh:
+        fh.write(png)
+    if job.get("gltf"):
+        with open(os.path.join(AERO, "hero.gltf"), "rb") as fh:
+            solid = fh.read()
+        if kind == "huge-field":
+            solid += b" " * HUGE
+        with open(os.path.join(out_dir, job["gltf"]), "wb") as fh:
+            fh.write(solid)
+        result["gltf_sha256"] = hashlib.sha256(
+            solid if kind != "other-field" else solid + b" ").hexdigest()
+    result["done"] = hashlib.sha256(raw if kind != "no-done" else raw + b" ").hexdigest()
+    result["png_sha256"] = hashlib.sha256(png if kind != "other-png" else png + b" ").hexdigest()
+    if kind == "other-preset":
+        result["preset_sha256"] = hashlib.sha256(b"Jet").hexdigest()
+    if kind == "gpu":
+        result["gl_renderer"] = "D3D12 (NVIDIA GeForce RTX 4070)"
+    if kind == "empty":
+        first = next(iter(sorted(k for k in result["counts"] if k != "body")), "body")
+        value = result["counts"][first]
+        result["counts"][first] = [0 for _ in value] if isinstance(value, list) else 0
+    if kind == "other-bands" and result.get("band_colours"):
+        result["band_colours"] = [[c[2], c[1], c[0]] for c in result["band_colours"]]
     with open(os.path.join(out_dir, "result.json"), "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=1, sort_keys=True)
     return 0

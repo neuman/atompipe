@@ -1,0 +1,60 @@
+{
+ "counts": {
+  "body": 5058,
+  "tracks": 78
+ },
+ "gl_renderer": "llvmpipe (LLVM 23.1.3, 256 bits)",
+ "gltf_counts": {
+  "body": {
+   "cells": 1264,
+   "points": 1594
+  },
+  "tubes": {
+   "cells": 468,
+   "points": 1332
+  }
+ },
+ "lit": true,
+ "paraview": "paraview version 6.2.0",
+ "preset_sha256": "05f02e232d73ca28d679ab8d8c5171de43ae855f2810a8d44d67cff673c4c94f",
+ "scales": {
+  "cp": {
+   "tick_texts": [
+    "\u22121.5",
+    "\u22121.0",
+    "\u22120.5",
+    "0.0",
+    "0.5",
+    "1.0"
+   ],
+   "ticks": [
+    -1.5,
+    -1.0,
+    -0.5,
+    0.0,
+    0.5,
+    1.0
+   ]
+  },
+  "speed": {
+   "tick_texts": [
+    "0",
+    "10",
+    "20",
+    "30",
+    "40"
+   ],
+   "ticks": [
+    0.0,
+    10.0,
+    20.0,
+    30.0,
+    40.0
+   ]
+  }
+ },
+ "size": [
+  320,
+  200
+ ]
+}

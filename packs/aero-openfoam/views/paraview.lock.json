@@ -1,0 +1,16 @@
+{
+  "_provenance": "The ParaView builds cfd-openfoam checked: the sha256 of each locked package as conda-forge published it (conda-meta/<package>.json), read from the install that drew and checked the pictures on 2026-10-21. The whole environment, with md5 values, is references/paraview-6.2-linux-64.lock (micromamba env export --explicit); it installs this build.",
+  "accepted": [
+    {
+      "paraview": "6.2.0",
+      "build": "py312ha24fc4a_1",
+      "packages": {
+        "paraview": "24e7bc58bea08671986190cb6029cb50e780b77b5b78f65e14b9ee3fbe13e46e",
+        "mesalib": "73028fcea2275979e8d7b61a61701315b246d159ad0a28d4df1dafe57d654bee",
+        "mesa-libgallium": "d42e13beadc416397837075a712e48625b42279e1cf5d2b4e449f827ca3c1697",
+        "mesa-llvmpipe": "f3d4287c19034a332108e9fccc7fe9aeb1380acd7a52956d9c6356bb9978c080",
+        "pillow": "68462fdd07bb502f791338e88976d741265ec5ab9abe2e63126ed86d9787fa64"
+      }
+    }
+  ]
+}
