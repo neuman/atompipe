@@ -559,6 +559,58 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("#include, a directive OpenFOAM evaluates", v.detail)
 
+    def _with_directive(self, line: str, *, rels=("0/U", "0/p"), where="boundaryField"):
+        """A copy of the baseline with ``line`` written where ESI writes it:
+        the first entry of each 0/ file's ``boundaryField`` (or at the top of
+        the file, ``where=""``)."""
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        for rel in rels:
+            path = os.path.join(case, *rel.split("/"))
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            if where:
+                head = "boundaryField\n{\n"
+                self.assertEqual(text.count(head), 1, rel)
+                text = text.replace(head, head + "    " + line + "\n\n")
+            else:
+                text = text.rstrip("\n") + "\n\n" + line + "\n"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        return self._readable(case)
+
+    def test_the_one_allowed_directive_is_allowed(self):
+        """What slipped through: the comparison held the quoted spelling and the
+        reader's token holds none, so the include PACK.md allows, in every 0/
+        file ESI writes, was refused."""
+        v = self._with_directive('#includeEtc "caseDicts/setConstraintTypes"')
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertNotIn("#includeEtc", v.detail)
+
+    def test_every_other_include_etc_is_refused(self):
+        cases = {
+            "one letter short": ('#includeEtc "caseDicts/setConstraintType"', "boundaryField",
+                                 ("0/U",)),
+            "one letter long": ('#includeEtc "caseDicts/setConstraintTypess"', "boundaryField",
+                                ("0/U",)),
+            "another file": ('#includeEtc "caseDicts/mesh/generation/meshQualityDict"',
+                             "boundaryField", ("0/p",)),
+            "unquoted": ("#includeEtc caseDicts/setConstraintTypes", "boundaryField",
+                         ("0/U",)),
+            "a path to it": ('#includeEtc "../caseDicts/setConstraintTypes"', "boundaryField",
+                             ("0/U",)),
+            "outside boundaryField": ('#includeEtc "caseDicts/setConstraintTypes"', "",
+                                      ("0/U",)),
+            "outside 0/": ('#includeEtc "caseDicts/setConstraintTypes"', "",
+                           ("system/controlDict",)),
+            "another directive": ('#include "caseDicts/setConstraintTypes"', "boundaryField",
+                                  ("0/U",)),
+        }
+        for name, (line, where, rels) in cases.items():
+            with self.subTest(name):
+                v = self._with_directive(line, rels=rels, where=where)
+                self.assertEqual(v.outcome, "fail", v.render())
+                self.assertIn("a directive OpenFOAM evaluates", v.detail)
+
     def _appended(self, rel: str, text: str):
         case = _copy_case(os.path.join(self.tmp(), "case"))
         with open(os.path.join(case, *rel.split("/")), "a", encoding="utf-8") as fh:

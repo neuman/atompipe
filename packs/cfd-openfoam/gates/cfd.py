@@ -417,7 +417,14 @@ IGNORED_DIRS = ("constant/polyMesh",)
 #: pack's own function objects, so every gate passed at half the pressure drop;
 #: and an include through a symlinked ``$FOAM_CASE`` that read a file outside
 #: the case.
-ALLOWED_DIRECTIVE = ("#includeEtc", '"caseDicts/setConstraintTypes"')
+#: The argument is compared as the reader holds it: one string token, quoted in
+#: the file, its text without the quotes. What slipped through: the first
+#: version compared the token's text with the quoted spelling, which no token
+#: holds, so the one directive PACK.md allows was refused in every 0/ file ESI
+#: writes (the motorBike tutorial's included). An unquoted argument, another
+#: install file (``"caseDicts/setConstraintType"`` too) or a second token stays
+#: refused.
+ALLOWED_DIRECTIVE = ("#includeEtc", "caseDicts/setConstraintTypes")
 
 #: Where a quoted (regular-expression) keyword may stand: under patch names and
 #: field names. Anywhere else it could stand for a keyword the pack decides on:
@@ -492,6 +499,15 @@ def _tokens(value):
             yield from _tokens(v)
 
 
+def _allowed_directive(e) -> bool:
+    """Whether a directive entry is :data:`ALLOWED_DIRECTIVE`, spelled as
+    PACK.md spells it: the keyword, then one quoted string and nothing else."""
+    value = e.value if isinstance(e.value, list) else []
+    return (e.key == ALLOWED_DIRECTIVE[0] and len(value) == 1
+            and isinstance(value[0], F.Tok) and value[0].kind == "string"
+            and value[0].text == ALLOWED_DIRECTIVE[1])
+
+
 def _check(d, rel: str, problems: list[str], parent: str = "", macros: bool = False) -> None:
     """Everything in a dictionary the reader cannot vouch for: a directive, a
     dictionary expansion, a macro (outside blockMeshDict), a computed value, a
@@ -500,8 +516,8 @@ def _check(d, rel: str, problems: list[str], parent: str = "", macros: bool = Fa
     for e in d.entries:
         where = f"{rel}: {parent + '/' if parent else ''}{e.key}"
         if e.directive:
-            if not (e.key == ALLOWED_DIRECTIVE[0] and F.words(e) == [ALLOWED_DIRECTIVE[1]]
-                    and parent == "boundaryField" and rel.startswith("0/")):
+            if not (_allowed_directive(e) and parent == "boundaryField"
+                    and rel.startswith("0/")):
                 problems.append(f"{rel}: {e.key}, a directive OpenFOAM evaluates and this "
                                 f"pack's reader does not")
             continue
