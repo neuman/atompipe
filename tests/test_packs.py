@@ -981,17 +981,24 @@ EDGES: dict[str, list[tuple[str, str]]] = {
                      ("cfd.converged", "cfd.regime"),
                      ("cfd.mesh_independence", "cfd.converged"),
                      ("cfd.pressure_drop", "cfd.mesh_independence")],
+    # Each guard needs the case read first; nothing reaches a drag area past a
+    # guard that did not pass.
+    "aero-openfoam": [("aero.reference", "aero.case_readable"),
+                      ("aero.regime", "aero.case_readable"),
+                      ("aero.domain", "aero.case_readable"),
+                      ("aero.mesh_quality", "aero.case_readable")],
 }
 BRACKET_EDGES = [("bracket.deflection", "bracket.model_validity"),
                  ("bracket.bending_stress", "bracket.model_validity")]
 
 #: Edges whose pair needs no third-party tool: the floor the isolation test
 #: checks on any machine, CI without trimesh or omc included — beam 7, fdm 6,
-#: fluids 2, sourcing 2, pcb 2, cfd 1 (20 until the review of P2.2 dropped three
-#: of sourcing's: ``AGuardFailureNeverHidesAnIndependentFail``; pcb-kicad's two
-#: tier-0 edges joined with the pack, and cfd-openfoam's one tier-0 edge,
-#: ``cfd.regime`` on ``cfd.case_readable``, with its).
-_EDGE_FLOOR = 20
+#: fluids 2, sourcing 2, pcb 2, cfd 1, aero 2 (20 until the review of P2.2 dropped
+#: three of sourcing's: ``AGuardFailureNeverHidesAnIndependentFail``; pcb-kicad's
+#: two tier-0 edges joined with the pack, and cfd-openfoam's one tier-0 edge,
+#: ``cfd.regime`` on ``cfd.case_readable``, with its; aero-openfoam's two,
+#: ``aero.reference`` and ``aero.regime`` on ``aero.case_readable``, with its).
+_EDGE_FLOOR = 22
 
 #: A pair that is NOT isolated, measured (P2.2's isolation probe): beam's
 #: ``shear_governed`` control is L/h 6.0, where Euler-Bernoulli omits about 32%
@@ -1398,7 +1405,7 @@ class ControlsAreIsolated(unittest.TestCase):
             if edges:
                 declared[name] = sorted(edges)
         self.assertEqual(declared, {name: sorted(e) for name, e in EDGES.items()})
-        self.assertEqual(sum(len(e) for e in declared.values()), 31)
+        self.assertEqual(sum(len(e) for e in declared.values()), 35)
         registry = gates_mod.Registry()
         gates_mod.load_project_gates(os.path.join(REPO, "examples", "bracket"), registry)
         self.assertEqual(sorted(_declared_edges(registry)), sorted(BRACKET_EDGES))

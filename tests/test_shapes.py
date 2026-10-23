@@ -1059,7 +1059,8 @@ class TranscriptShapes(unittest.TestCase):
         self.assertEqual(summary.group("unqualified"), "0")
         row = next(line for line in text.splitlines() if PACK_ROW.fullmatch(line))
         for label, mutant in (
-                ("the time removed", sub_line(text, T.QUALIFIED_SUMMARY, r" in \S+:", ":")),
+                ("the time removed", sub_line(text, T.QUALIFIED_SUMMARY, r" in (?:\d+m )?\S+:",
+                                              ":")),
                 ("prose after the summary", text + PROSE + "\n"),
                 ("a pack row the summary disagrees with", text.replace(
                     row, re.sub(r"(\d+) qualified",

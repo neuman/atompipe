@@ -1,0 +1,27 @@
+Refined mesh : cells:36754  faces:118617  points:45252  unbalance:0.00908744626435
+...
+Snapped mesh : cells:36754  faces:117405  points:44360  unbalance:0.00908744626435
+...
+Extruding 2396 out of 2396 faces (100%). Removed extrusion at 0 faces.
+...
+Mesh with layers : cells:41546  faces:132421  points:49796  unbalance:0.297549703943
+...
+Layer mesh : cells:41546  faces:132421  points:49796  unbalance:0.00996485822943
+...
+Checking final mesh ...
+Checking faces in error :
+    non-orthogonality > 65  degrees                        : 0
+    faces with face pyramid volume < 1e-13                 : 0
+    faces with face-decomposition tet quality < 1e-15      : 0
+    faces with concavity > 80  degrees                     : 0
+    faces with skewness > 4   (internal) or 20  (boundary) : 0
+    faces with interpolation weights (0..1)  < 0.05        : 0
+    faces with volume ratio of neighbour cells < 0.01      : 0
+    faces with face twist < 0.02                           : 0
+    faces on cells with determinant < 0.001                : 0
+Finished meshing without any errors
+Finished meshing in = 2.52 s.
+Memory per-node = (340740)
+End
+
+Finalising parallel run
