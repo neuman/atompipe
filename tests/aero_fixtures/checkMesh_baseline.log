@@ -1,0 +1,99 @@
+Create time
+
+Create mesh for time = constant
+
+Check mesh...
+    Enabling user-defined geometry checks.
+
+Time = constant
+
+Mesh stats 
+    points:           52540
+    faces:            134873
+    internal faces:   124632
+    cells:            41546
+    faces per cell:   6.24620902133
+    boundary patches: 6 (7 9)
+    point zones:      1
+    face zones:       0
+    cell zones:       0
+
+Overall number of cells of each type:
+    hexahedra:     35752
+    prisms:        432
+    wedges:        0
+    pyramids:      0
+    tet wedges:    0
+    tetrahedra:    0
+    polyhedra:     5362
+    Breakdown of polyhedra by number of faces:
+        faces   number of cells
+            4   248
+            5   284
+            6   988
+            7   848
+            8   216
+            9   2272
+           12   404
+           15   101
+           18   1
+
+Checking topology...
+    Boundary definition OK.
+    Cell to face addressing OK.
+    Point usage OK.
+    Upper triangular ordering OK.
+    Face vertices OK.
+    Number of regions: 1 (OK).
+
+Checking patch topology for multiply connected surfaces...
+                   Patch    Faces   Points  Surface topology
+            frontAndBack      448      550  ok (non-closed singly connected)
+                   inlet       96      117  ok (non-closed singly connected)
+                  outlet       96      117  ok (non-closed singly connected)
+               lowerWall     1965     2232  ok (non-closed singly connected)
+               upperWall      336      391  ok (non-closed singly connected)
+                spheroid     2396     2787      ok (closed singly connected)
+                    ".*"     5337     5992      ok (closed singly connected)
+
+
+Checking faceZone topology for multiply connected surfaces...
+    No faceZones found.
+
+Checking basic cellZone addressing...
+    No cellZones found.
+
+Checking basic pointZone addressing...
+               PointZone  PointsBoundingBox
+            frozenPoints       0(1e+150 1e+150 1e+150) (-1e+150 -1e+150 -1e+150)
+
+Checking geometry...
+    Overall domain bounding box (-4 -3 0) (10 3 4)
+    Mesh has 3 geometric (non-empty/wedge) directions (1 1 1)
+    Mesh has 3 solution (non-empty) directions (1 1 1)
+    Boundary openness (3.41700723097e-17 1.1449343499e-17 4.74547658504e-17) OK.
+    Max cell openness = 3.4629641133e-16 OK.
+    Max aspect ratio = 4.28412865505 OK.
+    Minimum face area = 3.2002559649e-05. Maximum face area = 0.251273939458.  Face area magnitudes OK.
+    Min volume = 5.00779086569e-07. Max volume = 0.125663024899.  Total volume = 335.967446377.  Cell volumes OK.
+    Mesh non-orthogonality Max: 40.0556477051 average: 8.97637502699
+    Non-orthogonality check OK.
+    Face pyramids OK.
+    Max skewness = 0.613474384561 OK.
+    Coupled point location match (average 0) OK.
+Checking faces in error :
+    non-orthogonality >  65 degrees                        : 0
+    faces with face pyramid volume < 1e-13                 : 0
+    faces with face-decomposition tet quality < 1e-15      : 0
+    faces with concavity >  80 degrees                     : 0
+    faces with skewness >   4 (internal) or  20 (boundary) : 0
+    faces with interpolation weights (0..1)  <  0.05       : 0
+    faces with volume ratio of neighbour cells <  0.01     : 0
+    faces with face twist <  0.02                          : 0
+    faces on cells with determinant < 0.001                : 0
+
+Mesh OK.
+
+End
+
+Finalising parallel run

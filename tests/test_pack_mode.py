@@ -44,7 +44,11 @@ PACKS_DIR = os.path.join(_env.REPO, "packs")
 #: The summary, in qualification's words from P2.3 (R-6, words only — `N
 #: control(s) in T: F fired, B BROKEN, S skipped (tooling)` before): evaluators,
 #: qualified, unqualified, skipped, the groups in the order they had.
-SUMMARY = re.compile(r"^(\d+) evaluators? in \S+: (\d+) qualified, (\d+) unqualified, "
+#: The time is ``0.6s`` or, past a minute, ``1m 07s`` (cli's duration): a
+#: pattern of one word read every run past a minute as a malformed line, which
+#: became every root run once aero-openfoam's OpenFOAM gates joined the bundled
+#: packs (P3: 75 evaluators in 1m 07s).
+SUMMARY = re.compile(r"^(\d+) evaluators? in (?:\d+m )?\S+: (\d+) qualified, (\d+) unqualified, "
                      r"(\d+) skipped$")
 
 #: The message that stops `--junit` eating the argument after it (cli:H7).

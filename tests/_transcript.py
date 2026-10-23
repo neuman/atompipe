@@ -268,9 +268,10 @@ QUALIFICATION_DETAIL = re.compile(
 
 #: `gate selftest`'s summary, both modes, in qualification's words (P2.3; R-6,
 #: words only: `N control(s) in T: F fired, B BROKEN, S skipped (tooling)`
-#: before). `\S+` for the time: `human_duration` renders one token below a minute.
+#: before). `\S+` for the time: `human_duration` renders one token below a minute,
+#: and `1m 07s` past one (P3: every root run, once aero-openfoam's gates joined).
 QUALIFIED_SUMMARY = re.compile(
-    r"^(?P<evaluators>\d+) evaluators? in (?P<time>\S+): (?P<qualified>\d+) qualified, "
+    r"^(?P<evaluators>\d+) evaluators? in (?P<time>(?:\d+m )?\S+): (?P<qualified>\d+) qualified, "
     r"(?P<unqualified>\d+) unqualified, (?P<skipped>\d+) skipped$")
 
 #: Pack mode's row per pack.
@@ -543,7 +544,7 @@ STEPS: Tuple[Step, ...] = (
     )),
     Step("pack-mode-selftest", (1, 1), Nopekit(("gate", "selftest"), where="empty"), (
         exit_code(0),
-        last_line(r"^\d+ evaluators in \S+: \d+ qualified, 0 unqualified, \d+ skipped$"),
+        last_line(r"^\d+ evaluators in (?:\d+m )?\S+: \d+ qualified, 0 unqualified, \d+ skipped$"),
     )),
     Step("check-junit", (1, 1), Nopekit(("check", "--junit")), (
         exit_code(1),

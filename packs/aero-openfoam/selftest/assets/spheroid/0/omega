@@ -1,0 +1,48 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  aero-openfoam's selftest baseline: a prolate spheroid over a moving ground
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform 1.78;
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 1.78;
+    }
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 1.78;
+        value           uniform 1.78;
+    }
+    lowerWall
+    {
+        type            omegaWallFunction;
+        value           uniform 1.78;
+    }
+    "(upperWall|frontAndBack)"
+    {
+        type            slip;
+    }
+    bodyGroup
+    {
+        type            omegaWallFunction;
+        value           uniform 1.78;
+    }
+}
+
+// ************************************************************************* //

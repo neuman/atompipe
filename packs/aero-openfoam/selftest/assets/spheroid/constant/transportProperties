@@ -1,0 +1,16 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  aero-openfoam's selftest baseline: a prolate spheroid over a moving ground
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      transportProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+transportModel  Newtonian;
+nu              1.5e-05;
+
+// ************************************************************************* //

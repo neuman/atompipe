@@ -1,0 +1,40 @@
+{
+  "_description": "A prolate spheroid, 1 m long and 0.25 m across (selftest/assets/spheroid: OpenFOAM v2606's searchableSphere with three radii), its centre 0.4 m over a ground that moves with the air, in a 20 m/s stream of air at nu 1.5e-5 m^2/s: Re 1.33e6 on its length. simpleFoam with k-omega SST and Spalding's wall function, 300 iterations. Measured in P0 (2026-10-23, 8 ranks): 41 574 cells after snappyHexMesh, 0 faces in error against ESI's meshQualityDict, layers on 100% of the body, the drag area settled to 2e-5 of itself by iteration 134 (CdA 0.00443 m^2 on this mesh), y+ at most 300 on all of the body. The domain meets Franke et al. 2007 with the sides the nearest (5.48 H against 5 H). Chosen over P0's ground-mounted cube, which is unsteady in steady RANS on the finer meshes.",
+
+  "aero_case": "selftest/assets/spheroid",
+  "aero_body_group": "bodyGroup",
+
+  "aero_u_inf_m_s": 20.0,
+  "aero_ref_length_m": 1.0,
+  "aero_sound_speed_m_s": 343.0,
+
+  "aero_ranks": 4,
+  "aero_max_global_cells": 20000000,
+  "aero_iter_unc_max_pct": 1.0,
+  "aero_timeout_s": 900.0,
+
+  "_claims": [
+    {"id": "B1",
+     "statement": "The spheroid's drag area at 20 m/s is at most 0.0042 m^2",
+     "kind": "measurable",
+     "acceptance": {"quantity": "drag area", "comparator": "<=", "limit": 0.0042, "units": "m^2"},
+     "tags": ["drag-area"]}
+  ],
+
+  "_notes": {
+    "_units": "SI throughout: metres, m/s, m^2/s, seconds. The drag area CdA is in m^2: forceCoeffs with Aref 1 writes it as its Cd column.",
+    "_paths": "aero_case resolves against the PROJECT ROOT (ctx.root). Each gate copies the case's 0/, constant/ (not constant/polyMesh or triSurface) and system/ under its out directory, writes the pack's own dictionaries into the copy, and runs there; the project's directory is never written.",
+    "aero_case": "the OpenFOAM case: system/controlDict (no functions), fvSchemes, fvSolution, blockMeshDict (one axis-aligned box), snappyHexMeshDict; constant/transportProperties and turbulenceProperties (RAS kOmegaSST); 0/U, p, k, omega, nut. The air enters along +x through the box's low-x side.",
+    "aero_body_group": "the patch group snappyHexMesh puts the body's patches in (patchInfo inGroups): the drag is summed over it.",
+    "aero_geometry": "(not used here) the surface file a case's snappyHexMeshDict names, when the body is one: a path against the project root, or $FOAM_TUTORIALS/... in the OpenFOAM install. Never committed to a project when its licence forbids it.",
+    "aero_geometry_sha256": "(not used here) the sha256 of aero_geometry: the gates run the body they were told, by content.",
+    "aero_u_inf_m_s": "the air's speed far from the body, m/s: the inlet's, and the speed every coefficient is made dimensionless by.",
+    "aero_ref_length_m": "the body's reference length, m: the Reynolds number's length.",
+    "aero_sound_speed_m_s": "the speed of sound in the air, m/s: the Mach number's.",
+    "aero_ranks": "MPI ranks for each parallel run (pack default 8). 4 here: the spheroid's 41 574 cells give each rank about 10 000.",
+    "aero_max_global_cells": "the cell cap snappyHexMesh may refine to (pack default 2e7, ten times the motorBike tutorial's). A mesh that reaches it fails aero.mesh_quality.",
+    "aero_iter_unc_max_pct": "the largest iterative uncertainty U_I = (max - min) / 2 of the drag area over the last window, in percent of its mean (pack default 1, the author's choice D3).",
+    "aero_timeout_s": "seconds each OpenFOAM tool may run before it is killed with every rank and the gate skips (pack default 3600).",
+    "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area, which every gate of this pack covers. aero.drag_area (P6) reads its limit."
+  }
+}

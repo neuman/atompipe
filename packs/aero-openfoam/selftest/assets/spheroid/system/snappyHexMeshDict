@@ -1,0 +1,137 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  aero-openfoam's selftest baseline: a prolate spheroid over a moving ground
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+castellatedMesh true;
+snap            true;
+addLayers       true;
+
+geometry
+{
+    // A prolate spheroid: OpenFOAM v2606's searchableSphere takes three radii.
+    // 1 m long, 0.25 m across, its centre 0.4 m over the ground.
+    spheroid
+    {
+        type    searchableSphere;
+        origin  (0.5 0 0.4);
+        radius  (0.5 0.125 0.125);
+    }
+    wakeBox
+    {
+        type    searchableBox;
+        min     (-0.5 -0.75 0);
+        max     (3 0.75 1);
+    }
+}
+
+castellatedMeshControls
+{
+    maxLocalCells       2000000;
+    maxGlobalCells      20000000;
+    minRefinementCells  10;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels 3;
+    features            ();
+    refinementSurfaces
+    {
+        spheroid
+        {
+            level (5 5);
+            patchInfo
+            {
+                type        wall;
+                inGroups    (bodyGroup);
+            }
+        }
+    }
+    resolveFeatureAngle 30;
+    refinementRegions
+    {
+        wakeBox
+        {
+            mode    inside;
+            levels  ((1e15 3));
+        }
+        // Without it the body sits inside one 0.5 m cell and no cell is
+        // refined at its surface (P0: 180 faces, y+ about 1076).
+        spheroid
+        {
+            mode    distance;
+            levels  ((0.03 5));
+        }
+    }
+    locationInMesh (3.0001 2.0001 2.0001);
+    allowFreeStandingZoneFaces true;
+}
+
+snapControls
+{
+    nSmoothPatch    3;
+    tolerance       2.0;
+    nSolveIter      30;
+    nRelaxIter      5;
+    nFeatureSnapIter 10;
+    implicitFeatureSnap true;
+    explicitFeatureSnap false;
+    multiRegionFeatureSnap false;
+}
+
+addLayersControls
+{
+    relativeSizes   true;
+    layers
+    {
+        "spheroid.*"
+        {
+            nSurfaceLayers 2;
+        }
+    }
+    expansionRatio  1.2;
+    finalLayerThickness 0.3;
+    minThickness    0.1;
+    nGrow           0;
+    featureAngle    60;
+    slipFeatureAngle 30;
+    nRelaxIter      3;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals  3;
+    nSmoothThickness 10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle 90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter      50;
+}
+
+// The pack writes its own (ESI's etc/caseDicts/meshQualityDict); these are
+// the same values, so the case also meshes as it is.
+meshQualityControls
+{
+    maxNonOrtho 65;
+    maxBoundarySkewness 20;
+    maxInternalSkewness 4;
+    maxConcave 80;
+    minVol 1e-13;
+    minTetQuality 1e-15;
+    minArea -1;
+    minTwist 0.02;
+    minDeterminant 0.001;
+    minFaceWeight 0.05;
+    minVolRatio 0.01;
+    minTriangleTwist -1;
+    minEdgeLength -1;
+    nSmoothScale 4;
+    errorReduction 0.75;
+}
+
+mergeTolerance 1e-6;
+
+// ************************************************************************* //
