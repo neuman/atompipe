@@ -1810,6 +1810,37 @@ class TheScaleIsAPackConstant(_env.EnvCase):
                             for w in summary["warnings"]), summary["warnings"])
         self.assertEqual(page_figure(root, CHART)["currency"], "none")
 
+    def test_every_aero_scale_is_a_pack_constant(self):
+        """(the motorBike design, P5) Every scale aero-openfoam draws, walked
+        from its ``_scales.SCALES``: built from the summary alone (its one
+        argument), each end a constant or a factor of ``source`` times a
+        summary value, no source keyed to a limit, and the same scale when
+        the summary also holds a limit's number under any key. A scale added
+        to the pack is walked here with no test edit."""
+        import inspect
+        import test_aero_views as aero
+        scales = aero._scales()
+        self.assertEqual(sorted(scales.SCALES), ["cp", "cpt", "speed", "yplus"])
+        for name, build in scales.SCALES.items():
+            with self.subTest(name):
+                self.assertEqual(list(inspect.signature(build).parameters), ["summary"])
+                for u in (20.0, 33.0):
+                    summary = {"u_inf_m_s": u}
+                    scale = build(summary)
+                    planted = build({**summary, "limit_m2": 0.35, "drag_area_limit": 0.35,
+                                     "acceptance": {"limit": 0.35}})
+                    self.assertEqual(planted, scale)
+                    source = scale.get("source") or []
+                    self.assertFalse(any("limit" in s["key"].lower() for s in source))
+                    for end in ("lo", "hi"):
+                        if end not in scale:
+                            continue
+                        if source:
+                            self.assertEqual(scale[end], sum(s[end] * summary[s["key"]]
+                                                             for s in source))
+                        else:
+                            self.assertEqual(scale[end], build({"u_inf_m_s": 2 * u})[end])
+
 
 
 class SeveralScalesAndALight(_env.EnvCase):

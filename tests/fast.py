@@ -1101,6 +1101,9 @@ FAST: list[str] = [
     "test_figures.AFigureSaysWhichResultItIs.test_a_new_entry_with_no_renderer_reads_older",
     "test_figures.TheClaimsStatusSitsBesideEveryFigure.test_every_figure_carries_its_claims_chips",
     "test_figures.TheScaleIsAPackConstant.test_the_scale_never_moves_with_the_limit",
+    # The motorBike design's P5: every scale of aero-openfoam's `_scales.SCALES`
+    # built from a summary alone, in process (~0.05 s: no build, no tool).
+    "test_figures.TheScaleIsAPackConstant.test_every_aero_scale_is_a_pack_constant",
 ]
 
 

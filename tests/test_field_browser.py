@@ -648,6 +648,76 @@ class TheBrowserDrawsAParaViewField(_ViewerPage):
                         f"the lit drawing kept every band's colour: {counts}")
 
 
+#: aero-openfoam's hero glTF as ParaView 6.2.0 exported it from the committed
+#: motorBike fixtures (``tests/aero_fixtures/views/make_standin.py``): the
+#: body by Cp and the tracks by speed, ``COLOR_0`` on the Turbo ramp, its
+#: camera in the file.
+HERO = os.path.join(ROOT, "tests", "aero_fixtures", "views", "standin", "hero.gltf")
+
+
+def _interior(png: str, margin: int = 2):
+    """The pixels of ``png`` that are drawn (not the page's black) with every
+    pixel within ``margin`` of them drawn too: the faces, not their edges or
+    the one-pixel tubes, where the browser blends with the background."""
+    import numpy
+    from PIL import Image
+    with Image.open(png) as image:
+        rgb = numpy.asarray(image.convert("RGB")).astype(int)
+    drawn = (rgb != 0).any(-1)
+    inner = drawn.copy()
+    for dy in range(-margin, margin + 1):
+        for dx in range(-margin, margin + 1):
+            inner &= numpy.roll(numpy.roll(drawn, dy, 0), dx, 1)
+    return rgb[inner]
+
+
+#: How near the Turbo ramp a flat face must be, and on what share of the
+#: faces' pixels, in bytes. The browser blends the vertex colours of each
+#: triangle, and the fixture's triangles are large (its body decimated by
+#: 0.95, then by 0.75 for the file), so a blend of two far colours leaves the
+#: ramp. Measured on 2026-10-23 (Chromium 1228, SwiftShader): 55% of the
+#: flat faces' pixels within 4, the lit drawing's 4.4%; the lit hue within 6
+#: degrees of the flat one on 98.3% of the saturated pixels. *Rejected:* 2
+#: bytes on every pixel (the strip tests hold that, where each face is one
+#: colour; a blend across a face is not a colour of the key, flat or lit).
+HERO_RAMP_BYTES, HERO_FLAT_SHARE, HERO_HUE_SHARE = 4.0, 0.5, 0.95
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsTheHero(_ViewerPage):
+    """(the motorBike design, P7) The hero's glTF, lit (``light: "scene"``)
+    and with its "Flat colours" toggle: flat, the faces are on the Turbo ramp
+    the key is made from, and the lit drawing is not; lit, each pixel keeps
+    the flat pixel's hue. The ramp is read here from the exported preset,
+    with no code of the pack."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        with open(HERO, "rb") as fh:
+            return {"hero.gltf": fh.read()}
+
+    def faces(self, mode: str):
+        import test_aero_views as aero
+        png = shoot(self, self.server, mode, "hero.gltf", size=(640, 400))
+        return png, aero.off_ramp(_interior(png))
+
+    def test_the_flat_toggle_shows_the_keys_colours_and_the_lit_mode_does_not(self):
+        _png, flat = self.faces("flat")
+        _png, lit = self.faces("scene")
+        flat_share = float((flat <= HERO_RAMP_BYTES).mean())
+        lit_share = float((lit <= HERO_RAMP_BYTES).mean())
+        self.assertGreater(len(flat), 20000)
+        self.assertGreaterEqual(flat_share, HERO_FLAT_SHARE, (flat_share, lit_share))
+        self.assertLess(lit_share, flat_share / 5, (flat_share, lit_share))
+
+    def test_the_lit_hero_keeps_each_hue_of_the_file(self):
+        import test_aero_views as aero
+        flat, _ = self.faces("flat")
+        lit, _ = self.faces("scene")
+        share = aero.same_hue_share(lit, flat, background=(0, 0, 0))
+        self.assertGreaterEqual(share, HERO_HUE_SHARE)
+
+
 #: A page that mounts `scaleLegend` and `figureStill` from ``lib/figures.js``
 #: with ``page.css``, in a box of each width, and writes what it measured
 #: into ``#out`` as JSON: each tick's mark against its value's place on the
