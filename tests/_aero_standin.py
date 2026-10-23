@@ -206,5 +206,53 @@ if TOOL == "checkMesh":
     print(text, end="")
     sys.exit(0)
 
+if TOOL == "potentialFoam":
+    end("Calculating potential flow\n")
+
+if TOOL == "simpleFoam":
+    # The drag-area history the real simpleFoam wrote on the baseline
+    # (spheroid_coefficient.dat, 300 iterations), cut at the staged endTime:
+    # the first iterations of a longer run are those of a shorter one.
+    m = MODE.get("simpleFoam", {})
+    control = open(os.path.join("system", "controlDict")).read()
+    budget = int(float(re.search(r"^endTime\s+(\S+);", control, re.M).group(1)))
+    text = fixture("spheroid_coefficient.dat")
+    head = [ln for ln in text.splitlines() if ln.startswith("#")]
+    rows = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+    if budget > len(rows):
+        sys.stderr.write(f"stand-in: the fixture holds {len(rows)} iterations, not {budget}\n")
+        sys.exit(2)
+    rows = rows[:budget]
+    out = os.path.join("postProcessing", "forceCoeffs1", "0")
+    os.makedirs(out, exist_ok=True)
+    body = "\n".join(head) + "\n" + "\n".join(rows[:budget - m.get("rows_short", 0)]) + "\n"
+    for old_text, new_text in m.get("replace", []):
+        body = body.replace(old_text, new_text)
+    with open(os.path.join(out, "coefficient.dat"), "w") as fh:
+        fh.write(body)
+    if "surfaces1" in control and not m.get("no_pictures"):
+        files = [f"postProcessing/surfaces1/{budget}/{n}.vtp"
+                 for n in ("body", "wakeIso", "wakeCut1", "wakeCut2", "wakeCut3")]
+        files += [f"postProcessing/sets/{n}/{budget}/track0.vtp" for n in ("tracksCentre",
+                                                                            "tracksFar")]
+        for name in files:
+            os.makedirs(os.path.dirname(name), exist_ok=True)
+            with open(name, "w") as fh:
+                fh.write(f"<!-- stand-in {name}, {budget} iterations -->\n")
+    log = ["SIMPLE: no convergence criteria found. Calculations will run for "
+           f"{budget} steps.\n"]
+    for it in range(1, budget + 1):
+        r = max(1e-6, 0.2 * 0.97 ** it)
+        if it == budget and m.get("residual_climb"):
+            r *= m["residual_climb"]
+        log.append(f"Time = {it}\n")
+        for f in ("Ux", "Uy", "Uz", "p", "omega", "k"):
+            log.append(f"smoothSolver:  Solving for {f}, Initial residual = {r:.10g}, Final "
+                       f"residual = {r / 10:.10g}, No Iterations 2")
+        if it <= m.get("bounding", 0):
+            log.append("bounding omega, min: -75096.5 max: 394078169 average: 1379.3")
+        log.append("ExecutionTime = 0.01 s  ClockTime = 0 s\n")
+    end("\n".join(log) + "\n")
+
 sys.stderr.write(f"stand-in: unknown tool {TOOL}\n")
 sys.exit(2)

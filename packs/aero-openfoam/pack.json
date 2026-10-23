@@ -37,7 +37,8 @@
     "aero.reference",
     "aero.regime",
     "aero.domain",
-    "aero.mesh_quality"
+    "aero.mesh_quality",
+    "aero.converged"
   ],
   "provides_views": [],
   "provides_generators": [],
@@ -45,7 +46,7 @@
     "openfoam2606"
   ],
   "requires_python": [],
-  "max_tier": 1,
+  "max_tier": 2,
   "lenses": [
     "the body that was meshed",
     "the stream that was stated",

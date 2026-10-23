@@ -170,3 +170,15 @@ def cell_cap(ctx):
     def edit(params):
         params["aero_max_global_cells"] = CELL_CAP
     return _variant(ctx, "cell_cap", params_edit=edit)
+
+
+def cut_short(ctx):
+    """aero.converged — endTime 110: the window of the last 100 iterations
+    (iterations 11 to 110) closes inside the start-up.
+
+    Measured: U_I 11.1% of the drag area at 110 (P0 on 8 ranks, and P4 on the
+    baseline's 4 with the pack's decomposition), at least 1.15% at every end up
+    to 131 (P0); the baseline's 300 reads 0.0148% (P4).
+    The run exits 0 and prints End: only the history can refuse it. The case
+    reads, meshes and is the stated flow, so every guard before it passes."""
+    return _variant(ctx, "cut_short", {"system/controlDict": [("endTime", "110")]})

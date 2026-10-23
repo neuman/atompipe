@@ -45,7 +45,7 @@ BUNDLED_BASES: dict[str, str] = {
     "cfd.case_readable": "model-only",
     **{g: "model-only" for g in ("aero.case_readable", "aero.reference")},
     **{g: "sourced" for g in ("aero.regime", "aero.domain")},
-    "aero.mesh_quality": "established",
+    **{g: "established" for g in ("aero.mesh_quality", "aero.converged")},
     **{g: "sourced" for g in ("cfd.regime", "cfd.mesh_independence")},
     **{g: "established" for g in ("cfd.mesh_quality", "cfd.converged", "cfd.pressure_drop")},
     **{g: "model-only" for g in ("fdm.overhang", "fdm.bridge_span", "fdm.bed_fit",

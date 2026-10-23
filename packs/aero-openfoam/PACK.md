@@ -5,8 +5,8 @@ v2606 (openfoam.com): snappyHexMesh builds the mesh around the body, simpleFoam
 solves it with the k-omega SST model. The claim this pack is for is the **drag
 area**, CdA in m^2, at a stated air speed. Guards run first: the case is one this
 pack can read and vouch for, the run is the stated flow, the flow is turbulent at
-the wall and incompressible, the domain is large enough, and the mesh has no face
-in error.
+the wall and incompressible, the domain is large enough, the mesh has no face
+in error, and the run settled on the base mesh.
 
 **Before you trust a Checked claim from this pack,** know what it is: the
 steady RANS equations with k-omega SST, solved on the body in the case's
@@ -23,9 +23,10 @@ right equations or the right body. `lenses.md` lists what to attack.
 | `aero.regime` | 0 | sourced | Re on `aero_ref_length_m` at least 5e5; Mach below 0.3 |
 | `aero.domain` | 1 | sourced | inlet 5 H, outlet 15 H, sides and top 5 H from the body; blockage at most 3%, each directional blockage at most 17% (Franke et al. 2007, Blocken 2015) |
 | `aero.mesh_quality` | 1 | established | snappyHexMesh finished without errors and reached no cell cap; `checkMesh -meshQuality` counts no face in error against the pack's limits |
+| `aero.converged` | 2 | established | on the base mesh, `simpleFoam` ran to its end on every rank, no residual climbed in the last window, and the drag area's iterative uncertainty U_I = (max - min) / 2 over the last 100 iterations is at most `aero_iter_unc_max_pct` of its mean (ITTC 7.5-03-01-01) |
 
 `aero.reference`, `aero.regime`, `aero.domain` and `aero.mesh_quality` each
-need `aero.case_readable`. Each gate covers the tag `drag-area`, so a drag-area
+need `aero.case_readable`; `aero.converged` needs all four. Each gate covers the tag `drag-area`, so a drag-area
 claim never reads Checked past a guard that did not pass.
 
 Known-bad controls (`selftest/bad_cases.py`, one edit each to the baseline
@@ -33,7 +34,7 @@ spheroid, each 15% past its limit): `coded_inlet` (a `codedFixedValue` inlet),
 `wrong_speed` (the inlet at 23 m/s against 20), `thick_air` (Re 4.35e5),
 `short_wake` (the outlet 13.0 H behind the body), `cell_cap`
 (`aero_max_global_cells` 20 000: snappyHexMesh stops at the cap and still says
-it finished without errors).
+it finished without errors), `cut_short` (endTime 110: U_I 11.1%).
 
 The tier-0 gates read the case with the pack's own dictionary reader
 (`gates/_foam.py`, cfd-openfoam's, standard library only): they run without
@@ -42,7 +43,8 @@ directive, a macro outside blockMeshDict, a coded condition or a file it does
 not read is a fail. The tier-1 gates copy the case under the gate's out
 directory and run OpenFOAM there. On that copy the pack writes its own
 dictionaries (`gates/_fo.py`): the mesh-quality limits for snappyHexMesh and
-checkMesh, the cell cap, the decomposition and the write precision. Before any
+checkMesh, the cell cap, the decomposition, the write precision and every
+function object. Before any
 run, OpenFOAM's own reading of every dictionary (`foamDictionary -expand`) must
 equal the reader's. Every tool runs with a private HOME that turns off
 `allowSystemOperations`, with floating-point trapping on, and every parallel
@@ -66,7 +68,10 @@ with the cause *unseen inputs*.
   modelled as turbulent.
 - **omega bounding.** k-omega SST clips omega where it goes negative. The
   motorBike's L0 mesh does this on every iteration (min omega -1.75e5, P0) and
-  still settles. The count is reported, not judged.
+  still settles. `aero.converged` reports the count; it does not judge it.
+- **Drift.** The half-range does not see a slow drift of the mean (P0: +0.59%
+  on the motorBike's L0 between iterations 500 and 1000, while U_I read 0.27%).
+  `aero.converged` reports the drift; no source found sets a limit on it.
 - **Layer coverage.** snappyHexMesh may not extrude layers everywhere (56.5% of
   the motorBike's faces at L0). It is reported, not judged here.
 - **Lift, side force, moments.** forceCoeffs writes them; no gate reads them.
@@ -83,10 +88,12 @@ with the cause *unseen inputs*.
 | `flow-regime` | `aero.regime` |
 | `domain-size` | `aero.domain` |
 | `mesh-quality` | `aero.mesh_quality` |
+| `convergence` | `aero.converged` |
 
 Write a drag-area claim as `"quantity": "drag area"`, `"units": "m^2"`, an upper
 limit (`<=`). The other gates' quantities are `aero case readability`, `aero flow
-reference`, `aero flow regime`, `aero domain size` and `aero mesh quality`.
+reference`, `aero flow regime`, `aero domain size`, `aero mesh quality` and
+`aero solver convergence`.
 
 ## Units, frames and which object
 
@@ -107,16 +114,29 @@ reference`, `aero flow regime`, `aero domain size` and `aero mesh quality`.
 |---|---|---|
 | `aero_case` | every gate | none: the case directory, against the project root |
 | `aero_geometry`, `aero_geometry_sha256` | every gate, when the body is a surface file | none; `$FOAM_TUTORIALS/...` reads from the install |
-| `aero_body_group` | reference | none |
-| `aero_u_inf_m_s` | reference, regime | none |
+| `aero_body_group` | reference, converged | none |
+| `aero_u_inf_m_s` | reference, regime, converged | none |
 | `aero_ref_length_m` | regime | none |
 | `aero_sound_speed_m_s` | regime | none |
 | `aero_ranks` | tier 1+ | 8 `[pack default]` |
-| `aero_max_global_cells` (the cap), `aero_max_local_cells` (when to balance; not a cap) | tier 1+ | 2e7, 2e6 `[pack default]` |
+| `aero_max_global_cells` | tier 1+ | 2e7 `[pack default]` |
+| `aero_iter_unc_max_pct` | converged | 1 `[pack default]` |
 | `aero_timeout_s` | tier 1+ | 3600 s per tool run |
 
 A missing input is a skip, never a default, except the settings marked
 `[pack default]` in the verdict.
+
+## Pictures
+
+`aero.converged` writes the picture data with OpenFOAM's own function objects,
+at the last iteration, on the base mesh: the body with Cp (`static(p)_coeff`),
+CpT (`total(p)_coeff`) and the speed (`mag(U)`), the wake surface CpT = 0,
+three wake cuts behind the body (at 0.12, 0.6 and 1.35 body lengths), and two
+rakes of stream tracks (`streamLine`, `postProcessing/sets/`). Its summary.json
+names each file with its sha256 (`fields`), with the body's box, the ground and
+the flow direction, and no limit: a viewgen binds those digests, so a figure
+draws this run and no other. A figure bound to `aero.converged` still shows when
+a later gate fails, beside its claim's status.
 
 ## The physics, in one paragraph
 
@@ -139,6 +159,13 @@ CdA, is a broken run, not a design.
   the cap or the faces in error.
 - **A stated speed that is not the run's.** `aero.reference` fails: every
   coefficient is made dimensionless by the stated speed.
+- **A limit cycle.** A steady run of an unsteady wake swings about a mean for
+  ever. `aero.converged` fails when the swing's half-range is past its ceiling;
+  a longer run does not help (P0: the motorBike's L2 swings by 1.0-1.7% from
+  iteration 1000 to 1500). A drift of the mean between windows is in the detail.
+- **A run cut short.** simpleFoam exits 0 and prints End when it runs out of
+  iterations. `aero.converged` reads the history: a window that never filled,
+  or one still in the start-up, fails.
 - **A run that hangs on one rank.** Every parallel run has a timeout that kills
   all ranks; a timeout is a skip.
 

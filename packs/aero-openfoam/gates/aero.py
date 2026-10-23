@@ -181,15 +181,18 @@ RANKS_MAX = 64
 #: Rejected: the tutorial's 2e6 (it caps the motorBike's L2).
 DEFAULT_MAX_GLOBAL_CELLS = 20_000_000
 
-#: ``maxLocalCells``: not a cap. snappyHexMesh's own comment (v2606 tutorial):
-#: "If local number of cells is >= maxLocalCells on any processor switches
-#: from refinement followed by balancing ... to (weighted) balancing before
-#: refinement." Measured (P3): the spheroid at 2 000 meshes to the same 41 574
-#: cells as at 2e6. The pack writes it so the case cannot move it; 2e6 (the
+#: ``maxLocalCells``, which the pack writes and no project states: not a cap.
+#: snappyHexMesh's own comment (v2606 tutorial): "If local number of cells is
+#: >= maxLocalCells on any processor switches from refinement followed by
+#: balancing ... to (weighted) balancing before refinement." Measured (P3): the
+#: spheroid at 2 000 meshes to the same 41 574 cells as at 2e6. 2e6 (the
 #: design's) keeps the first path for every mesh the pack has run. Rejected:
-#: the tutorial's 100 000 (the motorBike's L2 passes it on 8 ranks: the order
-#: of refinement and balancing would change between ladder levels).
-DEFAULT_MAX_LOCAL_CELLS = 2_000_000
+#: the tutorial's 100 000 (the motorBike's L2 passes it on 8 ranks: the order of
+#: refinement and balancing would change between ladder levels); a parameter,
+#: ``aero_max_local_cells`` (P3's: a key no judgment needs, and each key a
+#: verdict reads is a rung of test_mutation's walk, a full solve each in
+#: aero.converged).
+MAX_LOCAL_CELLS = 2_000_000
 
 
 def _skip(gid: str, reason: str) -> Verdict:
@@ -1132,13 +1135,12 @@ def _positive(ctx, gid, key, default, *, integer=False, top=None):
 
 _SETTINGS = (("timeout", "aero_timeout_s", DEFAULT_TIMEOUT_S, False, None),
              ("ranks", "aero_ranks", DEFAULT_RANKS, True, RANKS_MAX),
-             ("global", "aero_max_global_cells", DEFAULT_MAX_GLOBAL_CELLS, True, None),
-             ("local", "aero_max_local_cells", DEFAULT_MAX_LOCAL_CELLS, True, None))
+             ("global", "aero_max_global_cells", DEFAULT_MAX_GLOBAL_CELLS, True, None))
 
 
-def _run_settings(ctx: GateContext, gid: str, which=("timeout", "ranks", "global", "local")):
+def _run_settings(ctx: GateContext, gid: str, which=("timeout", "ranks", "global")):
     """``{case, geometry, marks}`` and the settings ``which`` names
-    (``timeout``, ``ranks``, ``global``, ``local``), or a Verdict: what every
+    (``timeout``, ``ranks``, ``global``), or a Verdict: what every
     gate that runs OpenFOAM reads first. A gate reads only the settings it
     uses: each read is a key of its verdict (aero.domain, which runs at most
     surfaceCheck, read the ranks and the caps until P3's review)."""
@@ -1211,7 +1213,7 @@ def _prepare(stage: str, s: dict, functions: str | None = None) -> None:
         text = F.put_entry(text, "castellatedMeshControls/maxGlobalCells",
                            f"maxGlobalCells {s['global']};")
         return F.put_entry(text, "castellatedMeshControls/maxLocalCells",
-                           f"maxLocalCells {s['local']};")
+                           f"maxLocalCells {MAX_LOCAL_CELLS};")
     _edit(stage, "system/snappyHexMeshDict", snappy)
 
     def control(text: str) -> str:
@@ -1537,7 +1539,7 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     ``checkMesh -meshQuality -parallel`` on a staged copy, every one of them
     reading the pack's quality limits (``_fo.QUALITY``, ESI's own
     ``etc/caseDicts/meshQualityDict``) and the pack's cell limits
-    (``aero_max_global_cells``, ``aero_max_local_cells``). Passes only when
+    (``aero_max_global_cells``, and ``MAX_LOCAL_CELLS``). Passes only when
     snappyHexMesh finished without errors, reached no cap and its final check
     found no face in error, and checkMesh counts no face in error.
 
@@ -1592,3 +1594,283 @@ def mesh_quality(ctx: GateContext) -> Verdict:
                    detail=f"snappyHexMesh finished without errors, checkMesh -meshQuality: 0 "
                           f"faces in error against the pack's limits; {said}",
                    evidence=evidence)
+
+
+# --------------------------------------------------------------------------- #
+# convergence
+# --------------------------------------------------------------------------- #
+#: The window U_I is taken over: the last 100 iterations. P0 (2026-10-23)
+#: measured the motorBike at W = 100 and W = 200: L0 0.24% and 0.27%, L2 1.09%
+#: and 1.84%; the spheroid settles inside 150 iterations at every level. 100 is
+#: longer than the spheroid's settling and the motorBike's limit-cycle period
+#: (about 16 iterations on P0's cube), and short enough that a 300-iteration
+#: baseline compares two windows for drift. Rejected: 200 (a baseline of 400+
+#: iterations, and every window the motorBike L1 passed at 100 it fails at 200:
+#: a longer window is a stricter claim, which the ceiling already states);
+#: 30 (the design's first reading of the motorBike: a 30-iteration window ending
+#: at 60 gave 1.26%, inside the transient).
+WINDOW = 100
+
+#: The iterative uncertainty's ceiling when the project states none: 1% of the
+#: drag area (the author's choice D3, 2026-10-23: common RANS verification
+#: practice; the motorBike L0 measured 0.24% at W = 100). Marked ``[pack
+#: default]``.
+DEFAULT_ITER_UNC_MAX_PCT = 1.0
+
+#: How far any field's initial residual may climb at the last iteration over
+#: the least it reached in the window: 10 times. The pack does not judge
+#: residual levels (a limit cycle holds them up), only a climb: a run that
+#: diverges or restarts in its last window. Measured (P0, every spheroid and
+#: motorBike run, every window end from 110 to 1500): at most 5.7. Rejected:
+#: the max over the min in the window (114 on a run still converging fast, the
+#: spheroid x1.1 at 300: a fall, not a climb).
+RESIDUAL_RISE_MAX = 10.0
+
+#: forceCoeffs' reference length: 1 m. It scales only the moment
+#: coefficients, which no gate reads; the drag area needs none. Rejected:
+#: ``aero_ref_length_m`` (the design's: the Reynolds number's length, read by
+#: aero.regime; read here too it was one more key on a drag area for a number
+#: nothing judges, and one more rung of test_mutation's walk, a solve each).
+L_REF = 1.0
+
+#: The body's centre of rotation for forceCoeffs' moments: the origin. No gate
+#: reads a moment, so no project states one. Rejected: a parameter (one more
+#: input to key a drag area on, for a number nothing judges).
+COFR = (0.0, 0.0, 0.0)
+
+
+def _restore_zero(stage: str) -> None:
+    """Each rank's ``0/`` replaced with the case's own fields after
+    snappyHexMesh: decomposePar wrote them for the background mesh, whose
+    patches snappy changed (OpenFOAM's ``restore0Dir -processor``). The case's
+    0/ files name the body by its group and carry the constraint include, so
+    the same files fit every rank."""
+    src = os.path.join(stage, "0")
+    ranks = sorted(n for n in os.listdir(stage) if re.fullmatch(r"processor\d+", n))
+    if not ranks:
+        raise T.RunError("decomposePar wrote no processor directories")
+    for name in ranks:
+        dst = os.path.join(stage, name, "0")
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
+
+def _last_dir(path: str):
+    """The name of the numerically latest time directory under ``path``, or
+    None."""
+    best = None
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return None
+    for name in names:
+        try:
+            t = float(name)
+        except ValueError:
+            continue
+        if math.isfinite(t) and os.path.isdir(os.path.join(path, name)) \
+                and (best is None or t > best[0]):
+            best = (t, name)
+    return None if best is None else best[1]
+
+
+def _fields(ctx: GateContext, stage: str):
+    """``{stage, time, sha256}`` of the picture files the function objects
+    wrote at the last iteration (``_fo.picture_files``), or None when they
+    wrote none. ``stage`` is written ``<out>/...``, relative to the gate's out
+    directory, as ``BoundContext.bind`` reads it. A file the run did not write
+    is left out: the picture that needs it says so, and no verdict depends on
+    it. The files stay in the out directory and are never cited as evidence:
+    the body and the wake surface are about 3 MB each on the motorBike (P0),
+    past what a page publishes."""
+    time = _last_dir(os.path.join(stage, "postProcessing", FO.SURFACES))
+    if time is None:
+        return None
+    rel = os.path.relpath(stage, ctx.out_path()).replace(os.sep, "/")
+    sha = {}
+    for name in FO.picture_files(time):
+        path = F.case_file(stage, name)
+        if os.path.isfile(path):
+            sha[name] = _sha256(path)
+    return {"stage": f"<out>/{rel}", "time": time, "sha256": sha}
+
+
+def _coefficients(stage: str, u: float) -> "P.Coefficients":
+    """forceCoeffs' history, held to the reference values the pack wrote:
+    T.RunError on a file that is missing or reports another speed, length,
+    area or drag direction."""
+    path = os.path.join(stage, "postProcessing", FO.FORCE, "0", "coefficient.dat")
+    if not os.path.isfile(path):
+        raise T.RunError("simpleFoam wrote no forceCoeffs history: the body group may name "
+                         "no patch", [])
+    try:
+        co = P.coefficients(path)
+    except ValueError as exc:
+        raise T.RunError(str(exc), [path])
+
+    def num(key):
+        try:
+            return float(co.header.get(key, "nan"))
+        except ValueError:
+            return float("nan")
+    drag = co.header.get("dragDir", "")
+    if not (abs(num("magUInf") - u) <= 1e-9 * u and num("lRef") == L_REF
+            and num("Aref") == 1.0 and F.vector(F.parse(f"d {drag};").entry("d").value[0])
+            == (1.0, 0.0, 0.0)):
+        raise T.RunError(f"forceCoeffs ran with magUInf {co.header.get('magUInf')}, lRef "
+                         f"{co.header.get('lRef')}, Aref {co.header.get('Aref')}, dragDir "
+                         f"{drag}: not the pack's", [path])
+    if not co.cda or not T.finite(*co.cda):
+        raise T.RunError("the drag area holds a value that is not finite", [path])
+    return co
+
+
+def _history(ctx: GateContext, gid: str, co) -> str:
+    """The drag area's history beside summary.json: one row per iteration,
+    ``iteration`` and ``cda_m2``. A CSV, never a list in summary.json
+    (cfd-openfoam's rule: the site's prose scan reads every number of a JSON
+    evidence file). The chart draws these numbers and computes none."""
+    path = ctx.out_path(PACK, gid.replace(".", "_"), "history.csv")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write("iteration,cda_m2\n")
+        for it, v in zip(co.iterations, co.cda):
+            fh.write(f"{it},{v!r}\n")
+    return path
+
+
+@gate(
+    id="aero.converged",
+    basis="established",
+    title="simpleFoam settled on the base mesh: the drag area's iterative uncertainty is inside its ceiling",
+    claims=[DRAG_TAG, "convergence"],
+    tier=Tier.SOLVE,
+    settles="aero solver convergence",
+    requires_tools=list(T.WRAPPERS),
+    needs=["aero.mesh_quality", "aero.regime", "aero.reference", "aero.domain"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_cases.py:cut_short",
+        note="the baseline spheroid with endTime 110: the window of 100 iterations closes "
+             "inside the start-up, and the drag area still swings by about 11%",
+    ),
+)
+def converged(ctx: GateContext) -> Verdict:
+    """The case's own mesh (the base mesh, as aero.mesh_quality builds it),
+    then ``potentialFoam -writephi`` and ``simpleFoam`` on ``aero_ranks``
+    ranks, with the pack's function objects (``_fo.functions``). Passes only
+    when the run printed ``End`` on every rank, the window of the last
+    ``WINDOW`` iterations filled, no residual climbed more than
+    ``RESIDUAL_RISE_MAX`` times over its window's least, and the drag area's
+    iterative uncertainty U_I = (max - min) / 2 over the window (ITTC
+    7.5-03-01-01, the oscillatory case) is at most ``aero_iter_unc_max_pct`` of
+    its mean. The value is U_I in % against that ceiling.
+
+    Reported, not judged: the drift of the window's mean from the window
+    before, the iterations in which k-omega SST bounded omega or k, and the
+    layer coverage. The same run writes the picture files (the body with Cp,
+    CpT and the speed, the wake surface CpT = 0, three wake cuts, two sets of
+    stream tracks), named with their sha256 in summary.json for a viewgen to
+    bind: a figure drawn from them is this run's, on the base mesh."""
+    gid = "aero.converged"
+    s = _run_settings(ctx, gid)
+    if isinstance(s, Verdict):
+        return s
+    u = _settings_number(ctx, gid, *_U_INF)
+    if isinstance(u, Verdict):
+        return u
+    group = ctx.param("aero_body_group")
+    if not group:
+        return _skip(gid, "no aero_body_group: the patch group of the body's surfaces, the "
+                          "drag is summed over")
+    got = _positive(ctx, gid, "aero_iter_unc_max_pct", DEFAULT_ITER_UNC_MAX_PCT)
+    if isinstance(got, Verdict):
+        return got
+    ceiling, default = got
+    marks = list(s["marks"]) + (["aero_iter_unc_max_pct"] if default else [])
+    opened = _open(ctx, gid)
+    if isinstance(opened, Verdict):
+        return opened
+    inst, env = opened
+    stage = _stage_dir(ctx, gid, "case")
+    n, timeout = s["ranks"], s["timeout"]
+    try:
+        box, box_logs = _body_bounds(env, ctx, gid, s, timeout)
+        _prepare(stage, s, FO.functions(group=str(group), u_inf=u, l_ref=L_REF, cofr=COFR,
+                                        box=box))
+        mesh = _mesh(env, stage, s, timeout)
+        bad = mesh.problems(s["global"])
+        if bad:
+            # aero.mesh_quality passed this recipe, or this gate would not run,
+            # but the mesh solved here is built again in this gate's own stage:
+            # it is judged where it is solved. (P0 read the meshes of two runs
+            # as differing; P3 traced that to scotch, which the pack no longer
+            # uses. The rule holds whatever the cause.)
+            raise T.RunError("the mesh this run built fails the rule aero.mesh_quality passed: "
+                             + "; ".join(bad), mesh.logs)
+        _restore_zero(stage)
+        pot = P.run_parallel(env, stage, ["potentialFoam", "-writephi"], n, timeout)
+        sol = P.run_parallel(env, stage, ["simpleFoam"], n, timeout)
+        co = _coefficients(stage, u)
+    except P.Timeout as exc:
+        return _skip(gid, str(exc))
+    except (T.RunError, ValueError, KeyError, OSError) as exc:
+        return _error(gid, str(exc), getattr(exc, "evidence", []))
+    logs = [*box_logs, *mesh.logs, pot.log, sol.log]
+    blocks = P.iterations(sol.stdout)
+    if len(blocks) != len(co.cda) or co.iterations != list(range(1, len(co.cda) + 1)):
+        return _error(gid, f"simpleFoam's log has {len(blocks)} iterations and forceCoeffs "
+                           f"{len(co.cda)} rows: the history is not the run's", logs)
+    hist = _history(ctx, gid, co)
+    hr = P.half_range(co.cda, WINDOW)
+    dr = P.drift(co.cda, WINDOW)
+    bounded = P.bounding(blocks)
+    payload = {"stage": f"<out>/{os.path.relpath(stage, ctx.out_path()).replace(os.sep, '/')}",
+               "mesh_level": "base", "u_inf_m_s": u,
+               "time": (_fields(ctx, stage) or {}).get("time"),
+               "flow_dir": [1.0, 0.0, 0.0], "up_dir": [0.0, 0.0, 1.0],
+               "ground_z_m": s["case"].ground(), "body_bbox": [list(box[0]), list(box[1])],
+               "cells": mesh.cells, "ranks": n, "iterations": len(co.cda), "window": WINDOW,
+               "history": os.path.basename(hist), "bounding": bounded,
+               "layer_coverage_pct": (mesh.snappy.layers or (0, 0, None))[2],
+               "fields": _fields(ctx, stage), "install": inst.root, "build": inst.build,
+               "pack_default": marks}
+    said = (f"{mesh.cells} cells (base mesh), {mesh.layers()}; "
+            + (", ".join(f"{k} bounded in {v} iterations" for k, v in sorted(bounded.items()))
+               or "nothing bounded") + " (reported, not judged)")
+    mark = f" [pack default: {', '.join(marks)}]" if marks else ""
+    if hr is None:
+        ev = _evidence(ctx, gid, payload)
+        return Verdict(gate=gid, passed=False, evidence=[ev, hist, *logs],
+                       detail=f"the window never filled: {len(co.cda)} iterations, fewer than "
+                              f"the {WINDOW} the iterative uncertainty is taken over; {said}")
+    u_i, lo, hi, mean = hr
+    if not mean > 0:
+        return _error(gid, f"the drag area's mean over the window is {mean:.6g} m^2: a body "
+                           f"in a stream has a positive drag", [hist, *logs])
+    pct = 100.0 * u_i / mean
+    drift_pct = None if dr is None else 100.0 * (dr[0] - dr[1]) / abs(dr[0])
+    payload.update({"cda_mean_m2": mean, "cda_last_m2": co.cda[-1], "window_lo_m2": lo,
+                    "window_hi_m2": hi, "u_i_m2": u_i, "u_i_pct": pct,
+                    "drift_pct": drift_pct})
+    ev = _evidence(ctx, gid, payload)
+    climbs = []
+    for name, series in sorted(P.initial_residuals(blocks).items()):
+        w = series[-WINDOW:]
+        least = min(w)
+        if least > 0 and w[-1] > RESIDUAL_RISE_MAX * least:
+            climbs.append(f"{name} {w[-1]:.3g} at the last iteration, {w[-1] / least:.3g} "
+                          f"times its window's least")
+    first = len(co.cda) - WINDOW + 1
+    drift = ("drift not computed (fewer than two windows)" if drift_pct is None else
+             f"drift {drift_pct:+.3g}% from the window before (reported, not judged)")
+    passed = pct <= ceiling and not climbs
+    detail = (f"U_I {pct:.3g}% of the drag area {mean:.6g} m^2 over iterations {first}-"
+              f"{len(co.cda)} ({'within' if pct <= ceiling else 'past'} {ceiling:g}%){mark}; "
+              f"{drift}; {said}")
+    if climbs:
+        detail = ("a residual climbs at the end of the run: " + "; ".join(climbs)
+                  + f" (more than {RESIDUAL_RISE_MAX:g} times). " + detail)
+        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, hist, *logs])
+    return Verdict(gate=gid, passed=passed,
+                   measured=_shown(pct, lambda x: x <= ceiling, passed, 6), limit=ceiling,
+                   comparator="<=", units=PCT, detail=detail, evidence=[ev, hist, *logs])

@@ -26,6 +26,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_aero_openfoam
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -692,6 +693,174 @@ class TheBodysBoundsAreOpenFOAMs(_StandinCase):
                                       "aero_geometry_sha256": sha})
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("below the ground", v.detail)
+
+
+# --------------------------------------------------------------------------- #
+# convergence
+# --------------------------------------------------------------------------- #
+def _motorbike_history() -> list[float]:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aero_fixtures",
+                        "motorbike_L0_cda.csv")
+    with open(path, encoding="utf-8") as fh:
+        return [float(line.split(",")[1]) for line in fh if line[:1].isdigit()]
+
+
+class TheIterativeUncertaintyIsTheHalfRange(unittest.TestCase):
+    """U_I = (max - min) / 2 over the last window (ITTC 7.5-03-01-01, the
+    oscillatory case), held to what P0 measured on the motorBike tutorial's L0
+    history (tests/aero_fixtures/motorbike_L0_cda.csv, 1500 iterations), and
+    to a decaying oscillation whose limit is known."""
+
+    def pct(self, values, window):
+        u_i, _lo, _hi, mean = P.half_range(values, window)
+        return 100.0 * u_i / mean
+
+    def test_the_motorbike_numbers_p0_measured(self):
+        cda = _motorbike_history()
+        self.assertEqual(len(cda), 1500)
+        self.assertAlmostEqual(self.pct(cda, 100), 0.24, delta=0.005)
+        self.assertAlmostEqual(self.pct(cda, 200), 0.27, delta=0.005)
+        first = next(e for e in range(100, 1501) if self.pct(cda[:e], 100) <= 1.0)
+        self.assertEqual(first, 148)
+
+    def test_the_half_range_misses_a_drift_the_drift_term_shows(self):
+        """P0: the window mean moved +0.59% between iteration 500 and 1000
+        while U_I at 500 read 0.27%."""
+        cda = _motorbike_history()
+        at500, at1000 = P.half_range(cda[:500], 100), P.half_range(cda[:1000], 100)
+        self.assertAlmostEqual(100 * at500[0] / at500[3], 0.27, delta=0.005)
+        self.assertAlmostEqual(100 * (at1000[3] - at500[3]) / at500[3], 0.59, delta=0.01)
+        now, before = P.drift(cda[:1000], 100)
+        self.assertNotEqual(now, before)
+
+    def test_a_decaying_oscillation_is_covered(self):
+        """A history c (1 + a r^i sin(2 pi i / T)) settles to c: the window's
+        mean sits within U_I of it."""
+        c = 0.3
+        for a, r, period in ((0.05, 0.995, 16), (0.2, 0.99, 7), (0.01, 0.999, 31)):
+            values = [c * (1 + a * r ** i * math.sin(2 * math.pi * i / period))
+                      for i in range(1, 501)]
+            u_i, lo, hi, mean = P.half_range(values, 100)
+            self.assertLessEqual(abs(mean - c), u_i, (a, r, period))
+            self.assertTrue(lo <= c <= hi, (a, r, period))
+
+    def test_a_short_history_has_no_uncertainty(self):
+        self.assertIsNone(P.half_range([1.0] * 99, 100))
+        self.assertIsNone(P.half_range([1.0] * 99 + [float("nan")], 100))
+        self.assertIsNone(P.drift([1.0] * 199, 100))
+
+
+class TheGateSettlesOnTheBaseMesh(_StandinCase):
+    """``aero.converged`` through the stand-in: the baseline's real history,
+    cut where the staged endTime cuts it."""
+
+    def test_the_baseline_passes_and_names_its_pictures(self):
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.comparator, v.limit), ("%", "<=", 1.0))
+        summary = next(p for p in v.evidence if p.endswith("summary.json"))
+        with open(summary, encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.assertEqual(v.measured, float(f"{data['u_i_pct']:.6g}"))
+        self.assertAlmostEqual(data["u_i_pct"], 0.0148, delta=0.0005)
+        self.assertEqual(data["mesh_level"], "base")
+        self.assertEqual(data["body_bbox"], [[0.0, -0.125, 0.275], [1.0, 0.125, 0.525]])
+        self.assertEqual(sorted(data["fields"]["sha256"]), sorted(FO.picture_files("300")))
+        self.assertTrue(data["fields"]["stage"].startswith("<out>/"))
+        self.assertFalse([k for k in data if "limit" in k or "max" in k],
+                         "a picture's scale is never taken from a limit: the summary holds "
+                         "none")
+        hist = next(p for p in v.evidence if p.endswith("history.csv"))
+        with open(hist, encoding="utf-8") as fh:
+            self.assertEqual(len(fh.read().splitlines()), 301)
+        self.assertIn("iterations 201-300", v.detail)
+        calls = self.calls()
+        self.assertLess(calls.index("snappyHexMesh"), calls.index("potentialFoam"))
+        self.assertLess(calls.index("potentialFoam"), calls.index("simpleFoam"))
+
+    def test_the_staged_function_objects_are_the_packs(self):
+        """The case carries none (aero.case_readable refuses them); the staged
+        controlDict carries exactly the pack's, at the stated speed and over the
+        body's box."""
+        self.gate("aero.converged")
+        control = F.parse(self.staged("aero.converged", "system/controlDict"))
+        want = F.parse(FO.functions(group="bodyGroup", u_inf=20.0, l_ref=1.0,
+                                    cofr=(0.0, 0.0, 0.0),
+                                    box=((0.0, -0.125, 0.275), (1.0, 0.125, 0.525))))
+        A = _module(self.registry)
+        self.assertEqual(A["_canon"](control.sub("functions")), A["_canon"](want.sub("functions")))
+        self.assertEqual(F.scalar(control, "writePrecision"), 12)
+
+    def test_a_merge_into_the_function_objects_is_an_error(self):
+        self.mode({"expand_append": {"system/controlDict":
+                                     "\nfunctions { forceCoeffs1 { Aref 0.75; } }\n"}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("system/controlDict", v.error)
+        self.assertNotIn("simpleFoam", self.calls())
+
+    def test_a_history_at_another_speed_is_an_error(self):
+        self.mode({"simpleFoam": {"replace": [["# magUInf           : 2.000000000000e+01",
+                                               "# magUInf           : 2.300000000000e+01"]]}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("not the pack's", v.error)
+
+    def test_a_history_that_is_not_the_runs_is_an_error(self):
+        self.mode({"simpleFoam": {"rows_short": 5}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("295 rows", v.error)
+
+    def test_a_residual_that_climbs_at_the_end_fails(self):
+        self.mode({"simpleFoam": {"residual_climb": 40}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("a residual climbs at the end", v.detail)
+        self.assertIsNone(v.measured)
+
+    def test_bounding_is_reported_and_never_judged(self):
+        self.mode({"simpleFoam": {"bounding": 300}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertIn("omega bounded in 300 iterations", v.detail)
+
+    def test_missing_pictures_move_nothing(self):
+        self.mode({"simpleFoam": {"no_pictures": True}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+
+    def test_a_mesh_that_fails_the_rule_where_it_is_solved_is_an_error(self):
+        """The mesh this gate solves on is built again in its own stage and
+        judged again: one that fails the rule aero.mesh_quality passed is the two
+        disagreeing."""
+        self.mode({"snappyHexMesh": {"log": "capped"}})
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("fails the rule aero.mesh_quality passed", v.error)
+        self.assertNotIn("simpleFoam", self.calls())
+
+
+class ACutShortRunFails(_StandinCase):
+    """A run that stopped early exits 0 and prints End: its history decides.
+    It fails, never errors: the run did what it was told and settled nothing."""
+
+    def case(self, end: str) -> str:
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/controlDict", "endTime", end)
+        return case
+
+    def test_the_control_lands_past_the_ceiling(self):
+        v = self.gate("aero.converged", {"aero_case": self.case("110")})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertGreaterEqual(v.measured, 1.15 * v.limit)
+        self.assertIn("iterations 11-110", v.detail)
+
+    def test_a_window_that_never_filled_fails_with_no_value(self):
+        v = self.gate("aero.converged", {"aero_case": self.case("60")})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("the window never filled: 60 iterations", v.detail)
+        self.assertIsNone(v.measured)
 
 
 # --------------------------------------------------------------------------- #

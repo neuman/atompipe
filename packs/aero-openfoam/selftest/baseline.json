@@ -10,7 +10,6 @@
 
   "aero_ranks": 4,
   "aero_max_global_cells": 20000000,
-  "aero_max_local_cells": 2000000,
   "aero_iter_unc_max_pct": 1.0,
   "aero_timeout_s": 900.0,
 
@@ -30,11 +29,10 @@
     "aero_geometry": "(not used here) the surface file a case's snappyHexMeshDict names, when the body is one: a path against the project root, or $FOAM_TUTORIALS/... in the OpenFOAM install. Never committed to a project when its licence forbids it.",
     "aero_geometry_sha256": "(not used here) the sha256 of aero_geometry: the gates run the body they were told, by content.",
     "aero_u_inf_m_s": "the air's speed far from the body, m/s: the inlet's, and the speed every coefficient is made dimensionless by.",
-    "aero_ref_length_m": "the body's reference length, m: the Reynolds number's length and forceCoeffs' lRef.",
+    "aero_ref_length_m": "the body's reference length, m: the Reynolds number's length.",
     "aero_sound_speed_m_s": "the speed of sound in the air, m/s: the Mach number's.",
     "aero_ranks": "MPI ranks for each parallel run (pack default 8). 4 here: the spheroid's 41 574 cells give each rank about 10 000.",
     "aero_max_global_cells": "the cell cap snappyHexMesh may refine to (pack default 2e7, ten times the motorBike tutorial's). A mesh that reaches it fails aero.mesh_quality.",
-    "aero_max_local_cells": "the cell count per rank past which snappyHexMesh balances before it refines (pack default 2e6). Not a cap.",
     "aero_iter_unc_max_pct": "the largest iterative uncertainty U_I = (max - min) / 2 of the drag area over the last window, in percent of its mean (pack default 1, the author's choice D3).",
     "aero_timeout_s": "seconds each OpenFOAM tool may run before it is killed with every rank and the gate skips (pack default 3600).",
     "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area, which every gate of this pack covers. aero.drag_area (P6) reads its limit."

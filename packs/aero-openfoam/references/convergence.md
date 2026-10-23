@@ -51,7 +51,9 @@ therefore fails at L2, and the demo ships C1 Failing at
 `aero.mesh_independence` with its reason (D6).
 
 The spheroid baseline settles fast: U_I 0.002% at L0 (W = 100, end 400),
-settled from iteration 134; L1 and L2 from 145 and 127.
+settled from iteration 134; L1 and L2 from 145 and 127. As the selftest runs it
+(4 ranks, `hierarchical`, end 300): U_I 0.0148%, the drag area 0.00443257 m^2,
+the same to the last digit in three runs.
 
 **Where a cut-short run lands.** On the spheroid, endTime 110 gives U_I 11.1%;
 every end up to 131 gives at least 1.15%. On the motorBike L0, every end up to

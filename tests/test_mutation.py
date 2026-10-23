@@ -2323,7 +2323,7 @@ class MutationIsSealed(_env.EnvCase):
 class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     """(C12, R-4's detector for the mutation clause) The restated aimed walk
     over every bundled pack gate on its own baseline: no conclusive mutation
-    passes an honest bundled gate — measured 43 gates with a conclusive
+    passes an honest bundled gate — measured 44 gates with a conclusive
     mutation, 5 walked with none, 27 with no boundary (a value exactly at its
     limit, mostly a defect count 0 against 0, or no value: aero-openfoam's two
     tier-0 checks) where trimesh, numpy, omc, kicad-cli, ngspice, cadquery and
@@ -2332,8 +2332,10 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     about 7.5 min with them before aero-openfoam: their opaque gates re-run
     kicad-cli, ngspice, OpenCascade and OpenFOAM for every rung; cfd-openfoam's
     gates alone take about 4.5 min, each rung solving its own three meshes;
-    aero-openfoam's add about 6 min, measured alone in P3, each rung of
-    aero.mesh_quality a snappyHexMesh run on up to 40 ranks): the refusal it
+    aero-openfoam's add about 6 min for aero.mesh_quality, each rung a
+    snappyHexMesh run on up to 40 ranks, and about 31 min for aero.converged,
+    each rung a solve, both measured alone in P3-P4 before P4 dropped two keys
+    it read: aero_max_local_cells and aero_ref_length_m): the refusal it
     licenses is held in the fast tier by V2.
 
     What slipped through P3 here: aero.regime reported whichever of Re (a
@@ -2368,9 +2370,9 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
                     if run[0] == "pass":
                         passes.append(f"{spec.id}: {w.key} -> {after!r}")
         self.assertEqual(passes, [])
-        self.assertEqual(sum(kinds.values()) + unavailable, 75, kinds)
+        self.assertEqual(sum(kinds.values()) + unavailable, 76, kinds)
         if not unavailable:
-            self.assertEqual(dict(kinds), {"conclusive": 43, "none-conclusive": 5,
+            self.assertEqual(dict(kinds), {"conclusive": 44, "none-conclusive": 5,
                                            "no-boundary": 27})
 
     def test_the_planted_drifted_limit_is_one_hit(self):

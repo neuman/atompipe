@@ -7,8 +7,9 @@ On a copy of the case under the gate's out directory:
 1. The pack writes its own `system/meshQualityDict`, `system/decomposeParDict`
    (`hierarchical`, `aero_ranks` ranks split as (nx ny 1), x first), and in `snappyHexMeshDict` its own
    `meshQualityControls`, the cell cap `maxGlobalCells`
-   (`aero_max_global_cells`) and `maxLocalCells` (`aero_max_local_cells`: not a
-   cap, the count per rank past which snappyHexMesh balances before it refines).
+   (`aero_max_global_cells`) and `maxLocalCells` 2e6 (not a cap: the count per
+   rank past which snappyHexMesh balances before it refines; no project states
+   it).
    `controlDict` gets `writePrecision 12`.
 2. `foamDictionary -expand` of every dictionary the reader read (controlDict,
    fvSchemes, fvSolution, snappyHexMeshDict, transportProperties,
