@@ -89,9 +89,12 @@ function sanitise(name) {
  *  a solved field drawn as a scene, the way its still was drawn, so a reader
  *  reads the shape of the body and the paths of the air. Each mesh gets
  *  three.js's ``MeshStandardMaterial`` (roughness 0.6, no metal) with its
- *  vertex colours, under the model mode's three lights; normals are computed
+ *  vertex colours, under a rig that turns with the camera (``litRig``, not the
+ *  model mode's lights, which are fixed in the world); normals are computed
  *  where the file has none (ParaView's glTF writes none, measured); the first
- *  view is the file's own camera when it has one, else the box's diagonal.
+ *  view is the file's own camera when it has one, else the box's diagonal,
+ *  and the view turns about the world axis nearest that camera's up
+ *  (``orbitAbout``).
  *  Light and shade make a colour darker or lighter than the key's, so the
  *  viewer keeps the unlit material too, and ``setFlat(true)`` (the "Flat
  *  colours" toggle) swaps it in: then each pixel is the file's byte, as in
@@ -129,6 +132,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
   mount(host, canvasHost, pinLayer);
 
   let THREE, renderer, scene, camera, controls, root, raycaster, pointer;
+  let Orbit = null;              // three.js's OrbitControls class: `makeControls`
   let dirty = true, frameHandle = 0;
   const basePos = new Map();     // Object3D -> original local position
   const baseMat = new Map();     // Mesh -> original material, for EVERY mesh
@@ -192,10 +196,8 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       scene.add(key, fill);
     }
 
-    controls = new mods.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.12;
-    controls.addEventListener("change", invalidate);
+    Orbit = mods.OrbitControls;
+    makeControls();
 
     raycaster = new THREE.Raycaster();
     pointer = new THREE.Vector2();
@@ -320,6 +322,42 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     for (const light of [key, fill]) { light.target = aim; camera.add(light); }
   }
 
+  /** The orbit controls, built new; a second call carries the target and the
+   *  spin of the old ones over and disposes of them. */
+  function makeControls() {
+    const old = controls;
+    controls = new Orbit(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.12;
+    controls.addEventListener("change", invalidate);
+    if (!old) return;
+    controls.target.copy(old.target);
+    controls.autoRotate = old.autoRotate;
+    controls.autoRotateSpeed = old.autoRotateSpeed;
+    old.dispose();
+  }
+
+  /** Orbit about ``up``: the camera's up, and controls built after it.
+   *  three.js's OrbitControls (r169) reads ``camera.up`` once, when it is
+   *  built, and turns about that axis for its life. What slipped through
+   *  review of P2: the lit field set the up of ParaView's Z-up camera on
+   *  controls built about +Y, so a drag or the hero's spin turned the
+   *  motorBike end over end and took the camera under the ground. */
+  function orbitAbout(up) {
+    if (camera.up.equals(up)) return;
+    camera.up.copy(up);
+    makeControls();
+  }
+
+  /** The world axis nearest ``v``, with its sign: a camera's up tilted with
+   *  its line of sight (13 degrees on the motorBike's) stands for the up of
+   *  the data, and an orbit about the tilted one would rock the floor. */
+  function nearestAxis(v) {
+    const a = [v.x, v.y, v.z];
+    const k = a.map(Math.abs).indexOf(Math.max(...a.map(Math.abs)));
+    return new THREE.Vector3().setComponent(k, Math.sign(a[k]) || 1);
+  }
+
   /** A lit field's flat colours on (the unlit material) or off (the lit). */
   function applyFlat() {
     for (const [obj, mats] of fieldMats) {
@@ -346,7 +384,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     const reach = Math.max(centre.clone().sub(position).dot(ahead), 1e-3);
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
     camera.fov = fileCamera.fov || camera.fov;
-    camera.up.copy(up);
+    orbitAbout(nearestAxis(up));
     camera.near = Math.max(reach / 1000, 1e-4);
     camera.far = (reach + radius) * 100;
     camera.position.copy(position);
@@ -572,7 +610,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     const tilt = (20 * Math.PI) / 180;
     const direction = look.clone().multiplyScalar(Math.cos(tilt))
       .add(across.clone().multiplyScalar(-Math.sin(tilt)));
-    camera.up.copy(across);
+    orbitAbout(across);
     const vfov = (camera.fov * Math.PI) / 180;
     const hfov = 2 * Math.atan(Math.tan(vfov / 2) * (camera.aspect || 1));
     const half = Math.max(sides[long[0]] / 2 / Math.tan(hfov / 2),

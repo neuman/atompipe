@@ -101,12 +101,23 @@ import { createViewer } from "./lib/viewer3d.js";
 const query = new URLSearchParams(location.search);
 const mode = query.get("mode");
 const lit = mode === "lit";
-const scene = mode === "scene" || mode === "flat";
+const scene = mode === "scene" || mode === "flat" || mode === "drag";
+// A reader's drag across the canvas, as pointer events reach OrbitControls:
+// 30 moves of 6 px to the right, each one an update of the controls.
+function drag() {
+  const canvas = document.querySelector("#v canvas");
+  const at = (type, x) => canvas.dispatchEvent(new PointerEvent(type, { pointerId: 1,
+    pointerType: "mouse", isPrimary: true, button: type === "pointermove" ? -1 : 0,
+    buttons: type === "pointerup" ? 0 : 1, clientX: x, clientY: 180, bubbles: true }));
+  at("pointerdown", 200);
+  for (let i = 1; i <= 30; i++) at("pointermove", 200 + 6 * i);
+  at("pointerup", 380);
+}
 createViewer({ host: document.getElementById("v"),
   view: { id: "f", kind: lit ? "model3d" : "field", src: query.get("src") || "field.glb",
           meta: {} },
   field: !lit, light: scene ? "scene" : "",
-  onReady: (api) => { if (mode === "flat") api.setFlat(true); },
+  onReady: (api) => { if (mode === "flat") api.setFlat(true); if (mode === "drag") drag(); },
   onError: () => { document.body.style.background = "#ff0000"; } });
 </script></body></html>
 """
@@ -230,9 +241,10 @@ def serve_viewer(files: dict[str, bytes]):
     shutil.copytree(os.path.join(three, "vendor"), os.path.join(site, "vendor"))
     lib = os.path.join(site, "lib")
     os.makedirs(lib)
-    for name in ("viewer3d.js", "dom.js"):
-        with open(os.path.join(lib, name), "w", encoding="utf-8") as fh:
-            fh.write(_template.template_files(".js")[f"lib/{name}"])
+    for rel, text in _template.template_files(".js").items():
+        if rel.startswith("lib/"):
+            with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                fh.write(text)
     with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(HARNESS)
     for name, data in files.items():
@@ -251,7 +263,7 @@ def stop_viewer(site: str, server) -> None:
 
 
 def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
-          size: tuple[int, int] = (480, 360)) -> str:
+          size: tuple[int, int] = (480, 360), page: str = "index.html") -> str:
     """The path of a headless Chromium screenshot of ``src`` drawn in the
     field mode, in the model mode (lights, shading) when ``mode`` is ``lit``,
     in the lit field mode when it is ``scene``, and in the lit field mode
@@ -259,7 +271,7 @@ def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
     red when the viewer reports an error."""
     out = os.path.join(case.tmp(), f"{mode}.png")
     profile = case.tmp()
-    url = f"http://127.0.0.1:{server.server_address[1]}/index.html?mode={mode}&src={src}"
+    url = f"http://127.0.0.1:{server.server_address[1]}/{page}?mode={mode}&src={src}"
     browser = _browser()
     shell = browser.endswith("chrome-headless-shell")
     _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
@@ -374,6 +386,25 @@ def hue_counts(png: str, colours=LIT_RAMP, *, within: float = 12.0,
     return counts
 
 
+def brightness(png: str, colours=LIT_RAMP) -> list[float]:
+    """For each of ``colours``, the median over the pixels of its hue
+    (`hue_counts`' rule) of the pixel's brightest channel over the colour's:
+    1 where a face is drawn at the file's colour, less in shade."""
+    import colorsys
+    pixels = _pixels(png)
+    out = []
+    for rgb in colours:
+        want = colorsys.rgb_to_hls(*(c / 255 for c in rgb))[0] * 360
+        ratios = []
+        for p in pixels:
+            h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in p))
+            if s >= 0.25 and min(abs(h * 360 - want), 360 - abs(h * 360 - want)) <= 12:
+                ratios.append(max(p) / max(rgb))
+        ratios.sort()
+        out.append(round(ratios[len(ratios) // 2], 3) if ratios else 0.0)
+    return out
+
+
 @unittest.skipIf(_missing(), f"not walked: {_missing()}")
 class TheBrowserDrawsALitField(_ViewerPage):
     """(design P2) A lit field (``light: "scene"``) is drawn with lights and
@@ -399,6 +430,164 @@ class TheBrowserDrawsALitField(_ViewerPage):
         hues = hue_counts(png)
         for rgb, n in zip(LIT_RAMP, hues):
             self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb}'s hue is drawn on {n} pixels: {hues}")
+        # Shade follows the angle of each face (review of P2): the four quads,
+        # each at its own tilt, are each drawn at their own brightness. What
+        # slipped through: a drawing lit by the ambient light alone (no
+        # normals, or the key and the fill dead) dims every colour by the same
+        # third, kept every hue and passed the two checks above.
+        shades = brightness(png)
+        self.assertGreater(max(shades) / max(min(shades), 1e-6), 1.5,
+                           f"the quads are all drawn at about one brightness: {shades}")
+        for i, a in enumerate(shades):
+            for b in shades[i + 1:]:
+                self.assertGreater(abs(a - b), 0.05,
+                                   f"two quads at other tilts have one shade: {shades}")
+
+
+#: A page that mounts a claim's figure card (``figureCards`` in
+#: ``lib/figures.js``) for one lit 3D figure, as page.json bakes it, presses
+#: its "Turn it in 3D" button, and, with ``mode=flat``, the "Flat colours"
+#: toggle once the viewer has mounted it. The viewer fills the window.
+CARD = """<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html, body { margin: 0; background: #000; }
+.fig-viewer { position: fixed; inset: 0; z-index: 1; }
+.viewer-canvas { position: absolute; inset: 0; }
+canvas { display: block; width: 100%; height: 100%; }</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.js",
+"three/addons/": "./vendor/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { figureCards } from "./lib/figures.js";
+const query = new URLSearchParams(location.search);
+const fig = { id: "aero.hero", view: "aero.hero", kind: "field", src: query.get("src"),
+  title: "The flow", currency: "current", light: "scene",
+  turn: { word: "Turn it in 3D", flat_word: "Flat colours" } };
+const page = { claims: { C1: { id: "C1", statement: "", token: "checked", word: "Checked",
+  figures: [fig] } }, words: { figure: {} } };
+document.body.append(...figureCards({ claims: ["C1"] }, page));
+document.querySelector(".fig-turn").click();
+(function press() {
+  const flat = document.querySelector(".fig-flat");
+  if (!flat) { setTimeout(press, 50); return; }
+  if (query.get("mode") === "flat") flat.click();
+})();
+</script></body></html>
+"""
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheCardTurnsALitField(_ViewerPage):
+    """(review of P2) The claim card's 3D view passes its figure's ``light``
+    to the viewer and mounts the "Flat colours" toggle, which draws the
+    file's bytes: turned, the lit figure is shaded; with the toggle pressed,
+    each colour is the file's within 2. What slipped through: the browser
+    tests drove the viewer alone, so the card could drop the light (the
+    figure drawn unlit, no toggle) or mount a toggle that did nothing, and
+    every test stayed green. The engineering and marketing heroes are held
+    in `test_site_truth` (``TheTemplateShowsWhatItIsGiven``)."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"lit.glb": lit_glb(), "card.html": CARD.encode("utf-8")}
+
+    def test_the_card_draws_it_lit(self):
+        png = shoot(self, self.server, "lit", "lit.glb", page="card.html")
+        counts = drawn_counts(png, LIT_RAMP)
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the card drew the lit figure unlit: {counts}")
+        hues = hue_counts(png)
+        for rgb, n in zip(LIT_RAMP, hues):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb}'s hue is drawn on {n} pixels: {hues}")
+
+    def test_the_cards_flat_toggle_draws_the_bytes(self):
+        png = shoot(self, self.server, "flat", "lit.glb", page="card.html")
+        counts = drawn_counts(png, LIT_RAMP)
+        for rgb, n in zip(LIT_RAMP, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+
+#: The ground of `ground_glb`, and its two posts: one colour each, of its own
+#: hue, so a pixel says which it shows.
+GROUND, EAST, WEST = (40, 90, 200), (200, 40, 40), (40, 170, 60)
+
+
+def ground_glb() -> bytes:
+    """A Z-up scene as ParaView exports one (design P2): a round ground at
+    z = 0 about the Z axis, a post on it at +x and one at -x, and the file's
+    own camera 15 degrees above the ground, aimed at the middle of the box,
+    its up tilted with its line of sight. trimesh writes the camera."""
+    import math
+    import numpy
+    import trimesh
+    n, radius = 96, 3.0
+    ring = [[radius * math.cos(2 * math.pi * k / n), radius * math.sin(2 * math.pi * k / n), 0]
+            for k in range(n)]
+    ground = trimesh.Trimesh(vertices=numpy.array([[0, 0, 0]] + ring, dtype=float),
+                             faces=numpy.array([[0, 1 + k, 1 + (k + 1) % n] for k in range(n)]),
+                             process=False)
+    parts = [(ground, GROUND)]
+    for x, rgb in ((1.5, EAST), (-1.5, WEST)):
+        post = trimesh.creation.box(extents=(0.4, 0.4, 1.0))
+        post.apply_translation((x, 0, 0.5))
+        parts.append((post, rgb))
+    scene = trimesh.Scene()
+    for mesh, rgb in parts:
+        mesh.visual = trimesh.visual.ColorVisuals(
+            mesh, vertex_colors=numpy.array([list(rgb) + [255]] * len(mesh.vertices),
+                                            dtype=numpy.uint8))
+        scene.add_geometry(mesh)
+    target = numpy.array([0.0, 0.0, 0.5])
+    el, az, distance = math.radians(15), math.radians(-130), 11.0
+    position = target + distance * numpy.array([math.cos(el) * math.cos(az),
+                                                math.cos(el) * math.sin(az), math.sin(el)])
+    ahead = (target - position) / numpy.linalg.norm(target - position)
+    right = numpy.cross(ahead, [0, 0, 1])
+    right /= numpy.linalg.norm(right)
+    up = numpy.cross(right, ahead)
+    pose = numpy.eye(4)
+    pose[:3, 0], pose[:3, 1], pose[:3, 2], pose[:3, 3] = right, up, -ahead, position
+    scene.camera_transform = pose
+    return scene.export(file_type="glb")
+
+
+def hue_mask(png: str, rgb, *, within: float = 12.0, saturation: float = 0.25) -> set:
+    """The pixels of ``png`` (as row-major indices) whose hue is ``rgb``'s
+    (`hue_counts`' rule)."""
+    import colorsys
+    want = colorsys.rgb_to_hls(*(c / 255 for c in rgb))[0] * 360
+    out = set()
+    for i, p in enumerate(_pixels(png)):
+        h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in p))
+        if s >= saturation and min(abs(h * 360 - want), 360 - abs(h * 360 - want)) <= within:
+            out.add(i)
+    return out
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class ALitFieldTurnsAboutItsUp(_ViewerPage):
+    """(review of P2) A lit field whose file camera is Z-up, as ParaView's
+    is, turns about the data's up: dragged across, the round ground keeps its
+    place on the screen and the posts on it move. What slipped through:
+    OrbitControls reads the camera's up once, when built, and the viewer set
+    the file's up after, so a drag or the hero's spin (the same rotation)
+    turned the motorBike end over end about the world's Y and took the camera
+    under the ground."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"ground.glb": ground_glb()}
+
+    def test_a_drag_keeps_the_ground_in_its_place(self):
+        still, spun = self.shot("scene", "ground.glb"), self.shot("drag", "ground.glb")
+        ground = [hue_mask(png, GROUND) for png in (still, spun)]
+        self.assertGreater(len(ground[0]), 5000, "the ground is not drawn")
+        overlap = len(ground[0] & ground[1]) / len(ground[0] | ground[1])
+        moved = [len(hue_mask(still, rgb) ^ hue_mask(spun, rgb)) for rgb in (EAST, WEST)]
+        # The control: the drag turned the scene, so the posts moved.
+        self.assertGreater(min(moved), 200, f"the posts did not move: {moved}")
+        self.assertGreater(overlap, 0.9, f"the ground moved on the screen: {overlap:.2f} of "
+                                         f"its pixels in common")
 
 
 #: ParaView 6.2.0's own glTF of seven bands of known values on the
@@ -631,6 +820,7 @@ for (const width of [1000, 358]) {
     return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
   const legends = [...box.querySelectorAll(".fig-legend")].map((l) => ({ ...rect(l),
     glyph: (l.querySelector(".fig-on") || {}).className || "",
+    hidden: (l.querySelector(".fig-on") || { getAttribute: () => "" }).getAttribute("aria-hidden"),
     label: (l.querySelector(".fig-on") || { getAttribute: () => "" }).getAttribute("aria-label"),
     title: (l.querySelector(".fig-legend-title") || {}).textContent || "" }));
   out.push({ width, box: rect(box), legends, overflow: box.scrollWidth - box.clientWidth,
@@ -716,10 +906,14 @@ class TheLegendsOfSeveralScalesFit(_env.EnvCase):
             surface, lines = box["legends"]
             self.assertIn("fig-on--surface", surface["glyph"])
             self.assertIn("fig-on--lines", lines["glyph"])
-            self.assertEqual((surface["label"], lines["label"]),
-                             ("On the surface", "On the lines"))
+            # The words say where, once: the glyph beside them is hidden from
+            # a screen reader (review of P2: an image labelled with the same
+            # words had it read twice).
+            self.assertEqual((surface["hidden"], lines["hidden"]), ("true", "true"))
+            self.assertEqual((surface["label"], lines["label"]), (None, None))
             self.assertTrue(surface["title"].strip().startswith("On the surface: static pressure"),
                             surface["title"])
+            self.assertTrue(lines["title"].strip().startswith("On the lines"), lines["title"])
 
     def test_the_dark_theme_reaches_the_legend(self):
         """The legend's words are the dark theme's ink (page.css's ``--ink-2``

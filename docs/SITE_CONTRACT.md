@@ -942,18 +942,27 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   or a field whose `view.meta.light` is `scene`): a solved field drawn as a scene,
   the way its still was drawn. Each mesh is drawn with `MeshStandardMaterial`
   (`roughness` 0.6, `metalness` 0, `toneMapped: false`, both sides) and its vertex
-  colours, under the model mode's three lights; normals are computed where the file
-  has none (ParaView's glTF holds none); the first view is the file's first
-  perspective camera, else the box's diagonal. The output stays
+  colours, under a rig of its own that turns with the camera, as ParaView's light kit
+  does: an ambient light of 1.0, a key light of 2.2 above and to the left of the
+  reader and a fill of 0.5 from below and to the right (three.js divides each by
+  pi). The model mode's three lights are fixed in the world, and from ParaView's
+  camera they lit the motorBike from behind, every colour near black (measured), so
+  the side the reader sees is always the lit side here, also as the view turns.
+  Normals are computed where the file has none (ParaView's glTF holds none). The
+  first view is the file's first perspective camera, else the box's diagonal; the
+  view turns about the world axis nearest that camera's up (+Z for ParaView's), so a
+  drag or a spin never turns the body end over end. The output stays
   `LinearSRGBColorSpace` with `NoToneMapping`. Light and shade make a colour darker
   or lighter than the key's, so the viewer keeps each mesh's unlit material, and
   `setFlat(true)` swaps it in: then each pixel is the file's byte within 2, as in the
   field mode. The "Flat colours" toggle (`turn.flat_word`) calls it on the claim
-  card and on the marketing hero; the technical record shows a "Flat colours" button
-  beside Wireframe. `tests/test_field_browser.TheBrowserDrawsALitField` holds the
-  flat colours to the bytes and requires the lit drawing to differ from them while
-  each hue stays the file's. A plain field (no `light`, or `none`) is the field mode
-  above.
+  card, on the engineering hero and on the marketing hero; the technical record shows
+  a "Flat colours" button beside Wireframe. `tests/test_field_browser.TheBrowserDrawsALitField`
+  holds the flat colours to the bytes, and requires the lit drawing to differ from
+  them, each hue to stay the file's and faces at other angles to be drawn at other
+  brightnesses; `TheCardTurnsALitField` does the same through the claim card, and
+  `ALitFieldTurnsAboutItsUp` holds the turn. A plain field (no `light`, or `none`)
+  is the field mode above.
 
 ## The marketing page
 

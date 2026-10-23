@@ -1463,6 +1463,46 @@ def js_function(code: str, name: str) -> str:
     return code[at:end]
 
 
+def lit_wiring_problems(sources: dict) -> list:
+    """Each place a lit figure's 3D view mounts without the figure's
+    ``light`` or without a "Flat colours" toggle that calls ``setFlat``."""
+    import _template
+    code = {n: _template.js_code(t) for n, t in sources.items()
+            if n in ("lib/figures.js", "page.js", "marketing.js", "lib/stage.js")}
+    light = r"createViewer\(\{[^;]*\blight: fig(?:\.light| \? \(fig\.light)"
+    out = []
+    turn = js_function(code["lib/figures.js"], "turnButton")
+    if not re.search(light, turn):
+        out.append("lib/figures.js turnButton: no light")
+    if "flatToggle(ready, turn.flat_word)" not in turn or "frame.after(flat)" not in turn:
+        out.append("lib/figures.js turnButton: no flat toggle")
+    toggle = js_function(code["lib/figures.js"], "flatToggle")
+    if not re.search(r"addEventListener\(\"\", \(\) => \{[^}]*api\.setFlat\(on\)", toggle):
+        out.append("lib/figures.js flatToggle: never calls setFlat")
+    hero = js_function(code["page.js"], "representation")
+    if not re.search(light, hero):
+        out.append("page.js representation: no light")
+    if "flatToggle(api, fig && (fig.turn || {}).flat_word)" not in hero \
+            or "box.after(flat)" not in hero:
+        out.append("page.js representation: no flat toggle")
+    start = js_function(code["marketing.js"], "startViewer")
+    if not re.search(light, start):
+        out.append("marketing.js startViewer: no light")
+    if not re.search(r"controls\(view, api, box, pressed, [^;]*\.flat_word", start):
+        out.append("marketing.js startViewer: no flat word to the pill")
+    pill = js_function(code["marketing.js"], "controls")
+    at = pill.find("if (api.lit && flatWord) {")
+    end = pill.find("tools.push(flat);", at)
+    if at < 0 or end < 0 or "api.setFlat(on)" not in pill[at:end]:
+        out.append("marketing.js controls: no flat toggle that calls setFlat")
+    stage = code["lib/stage.js"]
+    at = stage.find("viewer.lit\n")
+    end = stage.find(": null", at)
+    if at < 0 or end < 0 or "viewer.setFlat(on)" not in stage[at:end]:
+        out.append("lib/stage.js: no flat toggle that calls setFlat")
+    return out
+
+
 def browser_truth(sources: dict) -> list:
     """Each line of a page script that computes truth: ``name:line: rule``."""
     import _template
@@ -1965,6 +2005,33 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         wide = css[css.index("@media (min-width: 720px) { .fig-stills"):]
         self.assertIn("repeat(2, minmax(0, 1fr))", wide[:120])
         self.assertTrue(any("width: 100%" in b for b in self._rules(css, ".fig-still img")))
+
+    def test_every_lit_viewer_gets_its_light_and_its_flat_toggle(self):
+        """(review of P2) Each place a figure's 3D view mounts passes the
+        figure's ``light`` to `createViewer` and gives a lit view its "Flat
+        colours" toggle, which calls ``setFlat``: the claim card
+        (``turnButton``, held in a browser by `test_field_browser`'s
+        ``TheCardTurnsALitField`` too), the engineering hero
+        (``representation``), the marketing hero (``startViewer`` and its
+        pill, ``controls``) and the technical page's stage. What slipped
+        through: no test read this wiring, so deleting the light from any
+        call, or a toggle that never called ``setFlat``, left the suite
+        green."""
+        self.assertEqual(lit_wiring_problems(self.js), [])
+        for name, old, new in (
+                ("lib/figures.js", 'field: true, light: fig.light || "",', "field: true,"),
+                ("lib/figures.js", "if (flat) frame.after(flat);", ""),
+                ("lib/figures.js", "    api.setFlat(on);", ""),
+                ("page.js", 'light: fig ? (fig.light || "") : undefined,', ""),
+                ("page.js", "if (flat) box.after(flat);", ""),
+                ("marketing.js", 'light: fig ? (fig.light || "") : undefined,', ""),
+                ("marketing.js", "        api.setFlat(on);", ""),
+                ("marketing.js", "      tools.push(flat);", ""),
+                ("lib/stage.js", "viewer && viewer.setFlat(on);", "")):
+            with self.subTest(name=name, removed=old):
+                self.assertEqual(self.js[name].count(old), 1, old)
+                planted = dict(self.js, **{name: self.js[name].replace(old, new)})
+                self.assertNotEqual(lit_wiring_problems(planted), [])
 
     def test_the_card_headlines_only_a_compared_value(self):
         """(walkthrough after P2.6) A claim card's large value is the binding

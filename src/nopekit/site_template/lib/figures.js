@@ -269,9 +269,12 @@ export function scaleLegend(scale) {
   const title = [scale.quantity, scale.units ? `(${scale.units})` : ""].filter(Boolean).join(" ");
   // A scale of a figure's `scales` (design P2) names where it is drawn: a
   // glyph (a filled swatch for a surface, a line for lines) with the baked
-  // words, before its title. A one-scale figure's legend is as it was.
-  const on = scale.on ? el("span", { class: `fig-on fig-on--${scale.on}`, role: "img",
-    "aria-label": scale.on_word || "", title: scale.on_word || "" }) : null;
+  // words, before its title. A one-scale figure's legend is as it was. The
+  // glyph is hidden from a screen reader: the words beside it say the same.
+  // What slipped through (review of P2): the glyph was an image labelled
+  // with those words, so a screen reader read "On the surface" twice.
+  const on = scale.on ? el("span", { class: `fig-on fig-on--${scale.on}`,
+    "aria-hidden": "true" }) : null;
   return el("div", { class: scale.on ? "fig-legend fig-legend--on" : "fig-legend" },
     on ? el("p", { class: "fig-legend-title" }, on, ` ${scale.on_word || ""}${title ? ": " + title : ""}`)
       : title ? el("p", { class: "fig-legend-title", text: title }) : null,
