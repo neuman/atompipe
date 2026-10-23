@@ -3906,6 +3906,10 @@ def state(
             # whole channel list (often 2 KB of solver paths) is `doctor`'s.
             reason = report_logic.unseen_words("meta", resolution, {verdict.gate})
         row["stale_reason"] = reason or (_MARKED_STALE if everything else "")
+        # Which of the two: the technical page's flag reads the resolver's word
+        # for each (review of D1: every unseen row there read "≈ invalidated"),
+        # and the engineering page's Failing cause text, for a fail of one.
+        row["unseen"] = bool(verdict.gate in unseen and not everything)
         # No clock here (architecture phase 5, SPEC 32): a verdict's `when` and
         # age go to `data/build.json` (`ages`), which git ignores, so a rebuild
         # that judged nothing new changes no tracked byte. What slipped through
@@ -4050,6 +4054,18 @@ def state(
             "stale": everything or bool(stale_gates),
             "stale_reason": (_MARKED_STALE if everything
                              else _stale_reason(resolution, stale_gates)),
+            # Review of issue #15's D1: every gate not current is not current
+            # only for a channel nopekit cannot see. The page's notice reads it
+            # (not its Stale claims: a Failing claim's unseen fail read "Some
+            # results are older than the design"), and the technical page's
+            # banner. `stale_check` is the command that reaches the stale gates
+            # — a plain `nopekit check` is tier 0 — which `site status` and the
+            # banner print (each said a plain `nopekit check` for a tier-2
+            # solver).
+            "stale_unseen": bool(not everything and stale_gates
+                                 and set(stale_gates) <= set(unseen)),
+            "stale_check": ("nopekit check" + report_logic._tier_flag(registry, stale_gates)
+                            if everything or stale_gates else ""),
             # Which records this page was built from: `store.records_digest`,
             # over the record files' paths and bytes and `project.json`. The
             # page's own staleness (`cli._site_state`) compares it with the

@@ -1292,10 +1292,10 @@ class GoalpostAndContextLinesShape(unittest.TestCase):
                 self.assertIsNone(T.UNQUALIFIED_ROW.fullmatch(bad))
                 self.assertIsNone(T.CONTEXT_LINE.fullmatch(bad))
         self.assertRegex("  acceptance condition not met: bracket.bearing : 0.195 MPa against "
-                         "C3's bearing stress <= 0.1 MPa (its own limit 15 MPa)",
+                         "C3's bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)",
                          T.ACCEPTANCE_REASON)
         for bad in ("acceptance condition not met: bracket.bearing : 0.195 MPa against C3's "
-                    "bearing stress <= 0.1 MPa (its own limit 15 MPa)",
+                    "bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)",
                     "  [ok  ] bracket.bearing : 0.19 MPa on 77 mm^2 across 2 bolt(s)"):
             with self.subTest(bad=bad):
                 self.assertIsNone(T.ACCEPTANCE_REASON.fullmatch(bad))

@@ -908,7 +908,8 @@ class StatusWordsComeFromOneTable(unittest.TestCase):
                  "claim.reason || \"No gate covers this claim.\""),
                 ("format.js", "Each row says whether its owner has recorded it.",
                  "An assumption nobody owns is a gap."),
-                ("app.js", 'text: `≈ ${phrase("invalidated")}`', 'text: "≈ STALE"'),
+                ("app.js", 'text: `≈ ${phrase(meta.stale_unseen ? "unseen" : "invalidated")}`',
+                 'text: "≈ STALE"'),
                 ("panels.js", "tag(needWord(g.status),", 'tag(g.status === "open" ? '
                                                           '"identified" : g.status,')):
             with self.subTest(name=name, new=new):

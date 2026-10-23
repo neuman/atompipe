@@ -138,8 +138,10 @@ function topbar(state) {
       // `meta.stale` says a VERDICT is invalidated — not that a claim reads
       // Stale (an invalidated fail stays Failing, D-08), so the flag says the
       // ledger's word for the verdict, never the status (review of P2.1).
+      // `unseen inputs` when every one is not current only for inputs nopekit
+      // cannot see (`meta.stale_unseen`, review of issue #15's D1).
       meta.stale ? el("span", { class: "stale-flag", title: meta.stale_reason || "",
-        text: `≈ ${phrase("invalidated")}` }) : null,
+        text: `≈ ${phrase(meta.stale_unseen ? "unseen" : "invalidated")}` }) : null,
       el("span", { class: "muted", text: app.build && app.build.built
         ? `Built ${stamp(app.build.built)}` : "No build time" }),
       el("a", { class: "btn btn-ghost", href: "engineering/", text: "Engineering page" }),

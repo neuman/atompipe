@@ -1733,6 +1733,64 @@ def _text_mark(style: str, align: str, dx: int, dy: int) -> dict:
             "dx": dx, "dy": dy}
 
 
+#: How far a point's words slant from the horizontal, in degrees: enough that
+#: the words of two points 55 px apart (a ladder of ratio 2 on a 390 px card)
+#: do not meet, little enough to read without turning the head. *Rejected:*
+#: words centred over each point (they met at 390 px, review of issue #15's
+#: P3); a label every other point (a mesh with no name); 45 degrees (harder
+#: to read, and no wider gap at these spacings).
+POINT_LABEL_SLANT = 35
+
+
+def _y_share(y: float, span: tuple[float, float], log: bool = False) -> float:
+    """Where ``y`` sits in ``span`` (the lowest and highest y the chart draws),
+    from 0 at the bottom to 1 at the top, on a log axis in decades; 0.5 for a
+    span of no height."""
+    lo, hi = span
+    if log:
+        if min(y, lo, hi) <= 0:
+            return 0.5
+        y, lo, hi = math.log10(y), math.log10(lo), math.log10(hi)
+    return 0.5 if hi <= lo else (y - lo) / (hi - lo)
+
+
+def _point_label_marks(labelled: list[dict], rows: list[dict],
+                       span: tuple[float, float], log: bool = False) -> list[tuple]:
+    """``[(mark, rows)]``: the text marks of the labelled points. A point's
+    words slant away from it, to the right, on the side of the chart with room:
+    under a point in the upper half of what the chart draws (``span``, its
+    lowest and highest y), over one in the lower half — so they never cross
+    the x axis's numbers, and the words of two points 55 px apart never meet.
+    The last point's (the largest x) slant to the left, so they stay on the
+    chart. What it decides is where words sit, from the numbers the chart
+    already draws; never a value."""
+    if not labelled:
+        return []
+    slant = POINT_LABEL_SLANT
+    hi_x = max(r["x"] for r in rows)
+    lo_x = min(r["x"] for r in rows)
+
+    def mark(align: str, angle: int, dx: int, dy: int, baseline: str) -> dict:
+        return {"type": "text", "style": "nk-point-label", "align": align,
+                "baseline": baseline, "angle": angle % 360, "dx": dx, "dy": dy}
+
+    # (align, angle, dx, dy, baseline) by (last point?, upper half?): under
+    # the point the words hang from it ("top"); over it they stand on it, a
+    # little off it so they clear the judged point's ring.
+    looks = {(False, True): ("left", slant, 4, 6, "top"),
+             (False, False): ("left", -slant, 10, -2, "bottom"),
+             (True, True): ("right", -slant, -4, 6, "top"),
+             (True, False): ("right", slant, -10, -2, "bottom")}
+    out = []
+    for key, look in looks.items():
+        chosen = [r for r in labelled
+                  if ((r["x"] == hi_x and hi_x != lo_x),
+                      _y_share(r["y"], span, log) >= 0.5) == key]
+        if chosen:
+            out.append((mark(*look), chosen))
+    return out
+
+
 def _listed(value: Any) -> list:
     """``value`` as a list of mappings: a list's mappings, a mapping alone, or []."""
     items = value if isinstance(value, list) else [value]
@@ -1770,8 +1828,13 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
     x_axis = payload.get("x") if isinstance(payload.get("x"), Mapping) else {}
     y_axis = payload.get("y") if isinstance(payload.get("y"), Mapping) else {}
     x_title, y_title = _axis_title(x_axis), _axis_title(y_axis)
+    # ``nice`` off: the padding widens the domain by CHART_PAD pixels, and a
+    # nice domain then rounds that out to a whole tick — what slipped through
+    # (review of issue #15's P2): "relative cell size" read -0.4 and -0.2, and
+    # the settling chart's iteration -10, of quantities that are never
+    # negative. Unrounded, the few pixels of padding hold no tick.
     x_enc = {"field": "x", "type": "quantitative", "title": x_title,
-             "scale": {"zero": False, "padding": CHART_PAD}}
+             "scale": {"zero": False, "nice": False, "padding": CHART_PAD}}
     # A y axis starts at zero unless the payload says ``"zero": false``. What
     # slipped through (GitHub #15, P2.1): a mesh ladder's three levels differ by
     # 0.4% of the drop, and from zero they drew as one point. Zero stays the
@@ -1852,6 +1915,14 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
             for b in payload.get("band") or () if isinstance(b, Mapping)
             and all(_finite_number(b.get(k)) for k in ("x", "lo", "hi"))]
     located = {str(loc["series"]) for loc in _listed(list(locators)) if loc.get("series")}
+    # The lowest and highest y the chart draws — its points, its band, its
+    # judged points and its limits on y — for where words go (`_y_share`).
+    drawn_y = [r["y"] for r in rows] + [b[k] for b in band for k in ("lo", "hi")]
+    drawn_y += [c["y"] for c in _listed(current) if _finite_number(c.get("y"))]
+    drawn_y += [one[k] for one in _listed(limit) if one.get("axis") != "x"
+                for k in ("value", "value_hi") if _finite_number(one.get(k))]
+    y_span = (min(drawn_y), max(drawn_y)) if drawn_y else (0.0, 0.0)
+    worded = any(r.get("text") for r in rows)
     if rows:
         layers.append({"mark": {"type": "line", "style": "nk-series"},
                        "encoding": {"x": x_enc, "y": y_enc, "color": colour,
@@ -1873,12 +1944,16 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
         # A series may ask for its words under its points (``"labels_below":
         # true``): on a phone the ladder's "zero cell size" and "8000 cells"
         # ran into each other above two points 60 px apart (review of P2).
-        for below, dy in ((False, -12), (True, 26)):
-            labelled = [r for r in rows if r.get("text") and bool(r.get("below")) is below]
-            if labelled:
-                layers.append({"data": {"values": labelled},
-                               "mark": _text_mark("nk-point-label", "center", 0, dy),
-                               "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
+        # Now the spine places every point's words by where the point sits
+        # and slants them away from it (`_point_label_marks`), and the flag
+        # decides nothing: at 390 px "8000 cells" still sat over "2000 cells",
+        # 55 px apart, "zero cell size", centred on the first point, over the
+        # y axis's numbers, and "4% past the limit" under "2000 cells" (review
+        # of issue #15's P3).
+        for mark, chosen in _point_label_marks([r for r in rows if r.get("text")], rows,
+                                               y_span, log):
+            layers.append({"data": {"values": chosen}, "mark": mark,
+                           "encoding": {"x": at_x, "y": at_y, "text": {"field": "text"}}})
     # The band over the points, its ends drawn as short bars: a GCI band of
     # 0.16% is about 2 px tall on a card, and drawn as a line under the
     # points and the judged point it was never seen, while the caption
@@ -1920,6 +1995,7 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
             layers.append({"mark": _text_mark("nk-loc-label", "left", 5, -8),
                            "encoding": {"x": _datum(loc["x"]), "y": {"value": "height"},
                                         "text": {"value": str(loc["label"])}}})
+    titles: list[str] = []
     for current in _listed(current):
         if not _finite_number(current.get("y")):
             continue
@@ -1931,16 +2007,13 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
         # chart's right edge from a point at the right end.
         last = not any(r["x"] > current.get("x") for r in rows) if _finite_number(
             current.get("x")) else False
-        # And under the point when a series point's own words are above it at
-        # the same x. What slipped through (cfd-openfoam.ladder, P2.1): "8000
+        # (Beside points with words of their own they go to a corner, below.
+        # What slipped through there first (cfd-openfoam.ladder, P2.1): "8000
         # cells" and "13% inside the limit" were drawn over each other at the
-        # finest mesh; lifted above them (P2.1), they ran into the next
-        # mesh's words on a phone (review of P2).
-        crowded = _finite_number(current.get("x")) and any(
-            r.get("text") and r["x"] == current["x"] for r in rows)
-        dy = 26 if crowded else -12
-        label_mark = (_text_mark("nk-current-label", "right", -10, dy) if last
-                      else _text_mark("nk-current-label", "left", 10, dy))
+        # finest mesh; lifted above or put under them, they ran into the next
+        # mesh's words on a phone, review of P2 and of issue #15's P3.)
+        label_mark = (_text_mark("nk-current-label", "right", -10, -12) if last
+                      else _text_mark("nk-current-label", "left", 10, -12))
         if _finite_number(current.get("x")):
             at = {"x": _datum(current["x"]), "y": _datum(current["y"])}
             # A ring, never a filled dot: the filled dot of 14 px hid the
@@ -1952,7 +2025,15 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
             at = {"x": {"value": 0}, "y": _datum(current["y"])}
             layers.append({"mark": {"type": "rule", "style": "nk-current-rule"},
                            "encoding": {"y": _datum(current["y"])}})
-        if text:
+        if text and worded and _finite_number(current.get("x")):
+            # Beside points that carry words of their own, the judged point's
+            # words go over the chart, as its title: the ring stays on the
+            # point, and the caption names it. What slipped through (review
+            # of issue #15's P3, at 390 px): beside the ring they met "2000
+            # cells" under it; in a corner of the plot, the limit's line or
+            # its words.
+            titles.append(text)
+        elif text:
             layers.append({"mark": label_mark,
                            "encoding": {**at, "text": {"value": text}}})
     # A layer that places only constants (a limit, a rule, a label, the judged
@@ -1963,8 +2044,11 @@ def chart_spec(payload: Any, limit: Mapping | list | None, current: Mapping | li
     for layer in layers:
         if "data" not in layer and '"field"' not in json.dumps(layer["encoding"]):
             layer["data"] = {"values": [{}]}
-    return {"width": "container", "height": CHART_HEIGHT, "data": {"values": rows},
+    spec = {"width": "container", "height": CHART_HEIGHT, "data": {"values": rows},
             "layer": layers}
+    if titles:
+        spec["title"] = {"text": "; ".join(titles), "anchor": "start"}
+    return spec
 
 
 def chart_table(payload: Any) -> dict | None:
@@ -2204,6 +2288,11 @@ def settle(claim: Any, composed: Any, *, milestone: str | None = None,
         # No milestone names the claim, so no `export` builds its article: the
         # text says how to build one, and how to let `export` build it.
         key = "article_free"
+    if key == "unseen" and milestone:
+        # The boundary re-runs every evaluator a required claim rests on: the
+        # one step that settles it for the spend (review of issue #15's D1:
+        # "Run the check." came back after every check run).
+        key, commands = "unseen_spend", ("nopekit export {milestone} --dry-run",)
     out = []
     for command in commands:
         if "{milestone}" in command and not milestone:
@@ -3157,7 +3246,11 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
             "requirements": list(getattr(claim, "requirements", None) or ()),
             "token": token, "word": _word(token), "errored": token == "errored",
             "marks": list(marks.get(cid) or ()), "hint": said["hint"][token],
-            "cause": str(found.cause.value), "cause_text": said["cause"][str(found.cause.value)],
+            "cause": str(found.cause.value), "cause_text": said["cause"][
+                "failed_unseen" if found.cause is ClaimCause.FAILED
+                and found.verdict is not None
+                and (vrows.get(found.verdict.gate) or {}).get("unseen")
+                else str(found.cause.value)],
             "mechanism": {"by": by, "by_word": said["by"].get(by, ""),
                           "how": str(getattr(claim, "note", "") or ""),
                           "evaluators": list(getattr(claim, "evaluators", None) or ())},
@@ -3200,14 +3293,18 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                          "claims": list(board.members), "prose": None})
 
     unresolved = claim_logic.unresolved(view, composed)
-    stale = bool((payload.get("meta") or {}).get("stale"))
-    # Issue #15, D1: when every Stale claim is Stale only for evaluators
-    # nopekit cannot see into, the notice says so — never "older than the
-    # design" of an untouched design — with the tier that reaches them.
-    stale_claims = [c for c in composed.values() if c.status is ClaimStatus.STALE]
-    unseen_only = bool(stale_claims) and all(c.cause is ClaimCause.UNSEEN
-                                             for c in stale_claims)
-    unseen_tier = max((tiers.get(g, 0) for c in stale_claims for g in c.cites), default=0)
+    meta_in = payload.get("meta") or {}
+    stale = bool(meta_in.get("stale"))
+    # Issue #15, D1: when every gate not current is not current only for a
+    # channel nopekit cannot see, the notice says so — never "older than the
+    # design" of an untouched design — with the tier that reaches them. Read
+    # off the resolution's stale gates (`site.state`'s `meta.stale_unseen`),
+    # never off the Stale claims. What slipped through (review of D1): with
+    # C1 Failing on an unseen fail, no claim read Stale, and the notice fell
+    # back to "older than the design. Run nopekit check" — false twice.
+    unseen_rows = [r for r in payload.get("verdicts") or () if r.get("unseen")]
+    unseen_only = bool(meta_in.get("stale_unseen"))
+    unseen_tier = max((tiers.get(r.get("gate"), 0) for r in unseen_rows), default=0)
     notice = ("" if not stale
               else said["notices"]["unseen"].format(
                   tier_flag=f" --tier {unseen_tier}" if unseen_tier > 0 else "")

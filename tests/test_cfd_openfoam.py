@@ -115,6 +115,36 @@ def _edit(case: str, rel: str, entry: str, value: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# what the gates cover
+# --------------------------------------------------------------------------- #
+class EachGateCoversOnlyWhatItJudges(unittest.TestCase):
+    """Review of issue #15's D2: every gate also covered ``cfd``,
+    ``fluid-dynamics`` and ``internal-flow``, so a claim tagged ``cfd`` alone,
+    "static pressure drop <= 0.5 Pa", read Checked — `check` said ready — on
+    cfd.pressure_drop's pass against the 5 Pa of the claim tagged
+    ``pressure-drop``. Now no gate here covers those tags: such a claim reads
+    Gap, and the claim tagged ``pressure-drop`` keeps all six."""
+
+    def test_a_claim_tagged_only_broadly_reads_gap(self):
+        from nopekit.models import Acceptance, Claim, Verdict
+        registry = _registry()
+        broad = Claim(id="C2", statement="The static pressure drop is at most 0.5 Pa",
+                      acceptance=Acceptance(quantity="static pressure drop",
+                                            comparator=Comparator.LE, limit=0.5, units="Pa"),
+                      tags=["cfd", "fluid-dynamics", "internal-flow"], critical=True)
+        claims = [*_claims(5.0), broad]
+        verdicts = [Verdict(gate=spec.id, claims=["C1"], passed=True)
+                    for spec in (spec for spec, _fn in (registry.get(g)
+                                                        for g in registry.ids()))]
+        ledger = Ledger(meta=ProjectMeta(name="cfd"), claims=claims, verdicts=verdicts)
+        cover = claims_mod.effective_gates(ledger, registry)
+        self.assertEqual(list(cover.get("C2") or ()), [])
+        self.assertEqual(sorted(cover.get("C1") or ()), sorted(registry.ids()))
+        found = claims_mod.compositions(ledger, registry=registry)
+        self.assertEqual(found["C2"].status, claims_mod.ClaimStatus.UNCLAIMED)
+
+
+# --------------------------------------------------------------------------- #
 # the GCI arithmetic
 # --------------------------------------------------------------------------- #
 class TheGciIsCeliksArithmetic(unittest.TestCase):
@@ -692,6 +722,22 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
             self.assertIn(said, v.detail)
         self.assertGreater(claims_mod.margin(v).fraction, 0.99)
 
+    def test_a_value_a_hair_under_its_limit_never_reads_at_it(self):
+        """Review of issue #15's D3: regime judged the raw Re and reported nine
+        digits, so Re 2299.9999999 read a pass at "2300 Re" against "< 2300"
+        (Mach 0.3 the same): a pass at a value its own condition rejects."""
+        cases = (("Re", dict(self.params, cfd_velocity_m_s=(2300 - 1e-7) * 1e-5 / 0.02),
+                  2300.0),
+                 ("Mach", dict(self.params, cfd_velocity_m_s=(0.3 - 1e-11) * 1400.0,
+                               cfd_length_m=1e-9), 0.3))
+        for units, params, limit in cases:
+            with self.subTest(units):
+                v = _run(self.registry, "cfd.regime", self.tmp(), params, tier=0)
+                self.assertEqual((v.outcome, v.units, v.limit), ("pass", units, limit),
+                                 v.render())
+                self.assertLess(v.measured, limit)
+                self.assertNotEqual(claims_mod.margin(v).why, "disagrees")
+
     def test_a_plane_with_no_normal_is_an_error(self):
         params = dict(self.params)
         params["cfd_dp_planes"] = [{"point": [0, 0, 0], "normal": [0, 0, 0]},
@@ -1004,6 +1050,20 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
                 self.assertEqual(v.outcome, "error", v.render())
                 self.assertIn(said, v.error)
                 self.assertFalse(os.path.exists(calls), "a tool ran")
+
+    def test_a_tiny_drop_is_judged_whole(self):
+        """Review of issue #15's D2: the gate judged ``round(top, 9)``, so a band
+        top of 6.0e-13 Pa read 0.0 and passed a limit of 1e-13 Pa, its own
+        detail saying "6.0021e-13 Pa, within 1e-13 Pa"."""
+        v = self.gate("cfd.pressure_drop", {"cfd_density_kg_m3": 1e-9},
+                      claims=_claims(1e-13))
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertGreater(v.measured, 1e-13)
+        v = self.gate("cfd.pressure_drop", {"cfd_density_kg_m3": 1e-9},
+                      claims=_claims(1e-11))
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertAlmostEqual(v.measured / 6.0e-13, 1.0, places=2)
+        self.assertNotEqual(claims_mod.margin(v).why, "disagrees")
 
     def test_the_summary_holds_no_limit(self):
         v = self.gate("cfd.pressure_drop")

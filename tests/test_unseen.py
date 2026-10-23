@@ -21,7 +21,18 @@ of channel paths each; and `check` said nothing to join its *ready* to theirs.
 * ``TheWordsAreTheirOwn`` — `reason`, the status lines, the report's failing
   section and the page's settle say the new words and never the old ones.
 * ``TheCfdReadersSayIt`` — the whole loop on the stand-in OpenFOAM: `check`'s
-  ready and its note, `status`, `report`, `site build`, `page.json` and `doctor`.
+  ready and its note (its terminal, JSON and JUnit), `status`, `report`, `site
+  build`, `site status`, `page.json`, `gate show` and `doctor`.
+* ``AnUnseenFailSaysSo`` — the same loop with the claims' limit under the
+  stand-in's pressure drop: the fail is the last check run's and still counts,
+  and no reader says "invalidated", "older than the design" or the channel list.
+
+What slipped through D1, each held here (its review): a Failing claim on such a
+fail read "(invalidated: opaque inputs: <21 paths>)" in four readers and the
+page said "Some results are older than the design"; every remedy the readers
+gave was a check run, after which they read the same; `doctor` promised "the
+next check run qualifies it" after every check run; and the JUnit file said
+`ready=true` beside nothing that joined it to the NOT ready of every reader after.
 """
 from __future__ import annotations
 
@@ -29,6 +40,7 @@ import dataclasses
 import json
 import os
 import unittest
+import xml.etree.ElementTree as ET
 
 import _env
 import _projects
@@ -39,7 +51,7 @@ from nopekit import claims as claims_mod
 from nopekit import page as page_mod
 from nopekit import report as report_mod
 from nopekit.claims import ClaimCause, ClaimStatus
-from nopekit.models import GateSpec, NegativeControl, Tier, Verdict
+from nopekit.models import GateSpec, Milestone, NegativeControl, Tier, Verdict
 
 #: Words no reader may say of a claim Stale only for unseen inputs: the false
 #: reason D1 removed, and the verdict word for a read set that moved.
@@ -185,6 +197,28 @@ class TheWordsAreTheirOwn(unittest.TestCase):
                    "unseen_gates": frozenset({"g.a", "g.b"})}
         self.found = claims_mod.compositions(self.ledger, registry=self.reg, **self.kw)["C1"]
 
+    def test_an_unseen_fail(self):
+        """A fail of an unseen evaluator: the last check run's, still counting —
+        never "invalidated" and never the channel list, also behind a chain of
+        prerequisite marks. A moved fail keeps its words."""
+        ledger, _reg = _one("g.a", passed=False)
+        claim = ledger.claims[0]
+        op = claims_mod.OPAQUE_REASON + "out:solver/p.dat, subprocess:simpleFoam"
+        found = claims_mod.compose(claim, ledger.verdicts, stale_gates={"g.a"},
+                                   unseen_gates={"g.a"})
+        for why in (op, "prerequisite g.b invalidated: " + op):
+            for full in (False, True):
+                with self.subTest(why=why[:30], full=full):
+                    text = report_mod.reason(found, ledger, claim, full=full,
+                                             stale_reasons={"g.a": why})
+                    self.assertTrue(text.endswith(
+                        f"({report_mod.HUMAN['unseen']['failed']})"), text)
+                    for old in (*OLD_WORDS, "out:solver", "opaque inputs"):
+                        self.assertNotIn(old, text)
+        moved = report_mod.reason(found, ledger, claim,
+                                  stale_reasons={"g.a": "config.load 10 -> 12"})
+        self.assertIn("(invalidated: config.load 10 -> 12)", moved)
+
     def test_the_reason(self):
         for full in (False, True):
             text = report_mod.reason(self.found, self.ledger, self.ledger.claims[0], full=full,
@@ -207,13 +241,27 @@ class TheWordsAreTheirOwn(unittest.TestCase):
                                tiers={"g.a": 2, "g.b": 1})
         self.assertEqual(done["commands"], ["nopekit check --tier 2"])
         self.assertIn("cannot see", done["text"])
+        self.assertNotIn("Run the check", done["text"],
+                         "review of D1: the page read the same after the check run")
+        # Required by a milestone: the boundary runs the evaluators again.
+        done = page_mod.settle(self.ledger.claims[0], self.found, milestone="order",
+                               cover=["g.a", "g.b"], tiers={"g.a": 2, "g.b": 1})
+        self.assertEqual(done["commands"], ["nopekit export order --dry-run"])
+        self.assertIn("nopekit export order runs it again", done["text"])
 
     def test_the_status_lines(self):
         text = report_mod.render_terminal(self.ledger, self.reg, **self.kw)
         self.assertIn("gates: 2 ran, 2 with unseen inputs", text)
-        self.assertIn("next: nopekit check --tier 2 ;", text)
+        # Review of D1: no check run makes this line read otherwise, so it
+        # offers none; with a milestone, the boundary that runs them again.
+        self.assertIn("next: nopekit gap --propose ; nopekit report --write", text)
+        self.assertNotIn("next: nopekit check", text)
         for old in OLD_WORDS:
             self.assertNotIn(old, text)
+        spend = dataclasses.replace(self.ledger, milestones=[
+            Milestone(id="order", requires=["C1"])])
+        text = report_mod.render_terminal(spend, self.reg, **self.kw)
+        self.assertIn("next: nopekit export order --dry-run ; nopekit gap --propose", text)
         plain = report_mod.render_terminal(self.ledger, self.reg,
                                            stale_gates=self.kw["stale_gates"])
         self.assertIn("2 invalidated", plain, "without the mark the old words stand")
@@ -250,13 +298,24 @@ class TheCfdReadersSayIt(unittest.TestCase):
         cls.root = _projects.wrap_pack_baseline("cfd-openfoam", os.path.join(cls.dir, "proj"))
         run = lambda *argv: _env.nopekit(list(argv), cwd=cls.root, env=env,  # noqa: E731
                                           timeout=900)
-        cls.check = run("check", "--tier", "2")
+        cls.check = run("check", "--tier", "2", "--junit")
+        cls.check_json = run("check", "--tier", "2", "--json")
+        with open(os.path.join(cls.root, ".nopekit", "out", "junit.xml"),
+                  encoding="utf-8") as fh:
+            cls.junit = ET.fromstring(fh.read())
+        # A spend that requires half the claims: its steps are the boundary's.
+        os.makedirs(os.path.join(cls.root, "milestones"), exist_ok=True)
+        with open(os.path.join(cls.root, "milestones", "order.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"description": "Order the part", "requires": ["G1", "G2", "G3"]}, fh)
         cls.status = run("status")
         cls.status_json = run("status", "--json")
         cls.report = run("report")
         cls.init = run("site", "init")
         cls.build = run("site", "build")
+        cls.site_status = run("site", "status")
         cls.doctor = run("doctor", "--json")
+        cls.gate_show = run("gate", "show", "cfd.pressure_drop")
         with open(os.path.join(cls.root, "site", "data", "page.json"), encoding="utf-8") as fh:
             cls.page = json.load(fh)
 
@@ -273,11 +332,28 @@ class TheCfdReadersSayIt(unittest.TestCase):
                                                  "only."), lines[at + 1])
         self.assertIn("read their claims stale", lines[at + 1])
 
+    def test_the_json_and_the_junit_say_it_too(self):
+        """Review of D1: the JUnit file said ``ready=true`` beside nothing that
+        joined it to the NOT ready of every reader a second later."""
+        data = json.loads(self.check_json.stdout)
+        self.assertTrue(data["ready"])
+        self.assertTrue(data["ready_note"].startswith("this ready holds for this check run "
+                                                      "only."), data["ready_note"])
+        props = {p.get("name"): p.get("value") for p in self.junit.iter("property")}
+        self.assertEqual(props.get("ready"), "true")
+        self.assertIn("this ready holds for this check run only", props.get("ready_note", ""))
+
     def test_status_says_unseen_in_a_count_and_one_example(self):
         out = self.status.stdout
         self.assertIn("unseen inputs:", out)
         self.assertIn("for example subprocess:", out)
-        self.assertIn("next: nopekit check --tier 2 ;", out)
+        # Review of D1: the remedy each reader gave was a check run, after
+        # which it read the same. The step is the boundary's (a milestone
+        # requires the claims), and the line says where the results are from.
+        self.assertIn("next: nopekit export order --dry-run ;", out)
+        self.assertNotIn("next: nopekit check", out)
+        self.assertIn("Their results are from the last check run", out)
+        self.assertIn("before a spend, nopekit export <milestone> runs them again", out)
         for old in ("The design changed after the result", "invalidated:"):
             self.assertNotIn(old, out)
         self.assertNotIn("out:cfd-openfoam/", out, "the channel list is doctor's")
@@ -306,6 +382,7 @@ class TheCfdReadersSayIt(unittest.TestCase):
         verdict = self.page["verdict"]
         self.assertEqual(verdict["notice"], report_mod.HUMAN["site"]["notices"]["unseen"]
                          .format(tier_flag=" --tier 2"))
+        self.assertNotIn("build the site again", verdict["notice"])
         self.assertEqual(verdict["notice_public"],
                          report_mod.HUMAN["site"]["notices"]["unseen_public"])
         for cid, claim in self.page["claims"].items():
@@ -313,7 +390,29 @@ class TheCfdReadersSayIt(unittest.TestCase):
                 self.assertEqual((claim["token"], claim["cause"]), ("stale", "unseen"))
                 self.assertEqual(claim["cause_text"],
                                  report_mod.HUMAN["site"]["cause"]["unseen"])
-                self.assertEqual(claim["settle"]["commands"], ["nopekit check --tier 2"])
+                self.assertEqual(claim["settle"]["commands"],
+                                 ["nopekit export order --dry-run"]
+                                 if cid in ("G1", "G2", "G3") else ["nopekit check --tier 2"])
+        steps = self.page["next"]["milestones"][0]["steps"]
+        self.assertEqual({tuple(step["commands"]) for step in steps},
+                         {("nopekit export order --dry-run",)})
+
+    def test_site_status_and_the_technical_page(self):
+        """Review of D1: `site status` said a plain `nopekit check` (tier 0,
+        which runs none of them) and "then rebuild"; the technical page called
+        each row "invalidated"."""
+        line = next(row for row in self.site_status.stdout.splitlines()
+                    if "the verdicts on the page are stale" in row)
+        self.assertTrue(line.endswith("— `nopekit check --tier 2`"), line)
+        with open(os.path.join(self.root, "site", "data", "state.json"),
+                  encoding="utf-8") as fh:
+            state = json.load(fh)
+        self.assertEqual((state["meta"]["stale_unseen"], state["meta"]["stale_check"]),
+                         (True, "nopekit check --tier 2"))
+        self.assertEqual({r["gate"] for r in state["verdicts"] if r.get("unseen")},
+                         {"cfd.mesh_quality", "cfd.converged", "cfd.mesh_independence",
+                          "cfd.pressure_drop"})
+        self.assertEqual(state["phrases"]["unseen"], "unseen inputs")
 
     def test_doctor_keeps_the_full_list(self):
         rows = {row["check"]: row for row in json.loads(self.doctor.stdout)["checks"]}
@@ -321,6 +420,94 @@ class TheCfdReadersSayIt(unittest.TestCase):
         self.assertEqual(row["status"], "warn")
         self.assertIn("inputs that nopekit cannot see", row["detail"])
         self.assertIn("subprocess:simpleFoam", row["detail"])
+
+    def test_qualification_says_it_was_qualified(self):
+        """Review of D1: right after a check run had run their controls,
+        `doctor` and `gate show` said "not yet qualified at this version — the
+        next check run qualifies it", and after every check run since."""
+        rows = {row["check"]: row for row in json.loads(self.doctor.stdout)["checks"]}
+        detail = rows["qualification"]["detail"]
+        self.assertNotIn("next check run qualifies", detail)
+        self.assertIn("qualified at their version in the check run that ran their controls",
+                      detail)
+        line = next(row for row in self.gate_show.stdout.splitlines()
+                    if row.strip().startswith("qualification:"))
+        self.assertIn(report_mod.HUMAN["unseen"]["qualification"], line)
+        self.assertTrue(report_mod.OPAQUE_CONTROL_REASON.startswith("control inputs moved: "))
+
+
+# --------------------------------------------------------------------------- #
+class AnUnseenFailSaysSo(unittest.TestCase):
+    """The stand-in loop with every claim's limit under the stand-in's pressure
+    drop, so cfd.pressure_drop fails: the fail is the last check run's and
+    still counts, in every reader. What slipped through D1 (its review): "(in-
+    validated: opaque inputs: <21 paths>)" after the fail in `status`, the
+    report and `check`'s BLOCKING row, and on the page "Some results are older
+    than the design. Run nopekit check" beside "An evaluator failed the current
+    design."."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        _inst, bin_ = cfd_tests.install_standin(os.path.join(cls.dir, "tool"))
+        env = {"PATH": bin_ + os.pathsep + "/usr/bin:/bin"}
+        cls.root = _projects.wrap_pack_baseline("cfd-openfoam", os.path.join(cls.dir, "proj"))
+        ledger_path = os.path.join(cls.root, ".nopekit", "ledger.json")
+        with open(ledger_path, encoding="utf-8") as fh:
+            ledger = json.load(fh)
+        for claim in ledger["claims"]:
+            claim["acceptance"]["limit"] = 0.1
+        with open(ledger_path, "w", encoding="utf-8") as fh:
+            json.dump(ledger, fh, indent=2, sort_keys=True)
+        run = lambda *argv: _env.nopekit(list(argv), cwd=cls.root, env=env,  # noqa: E731
+                                          timeout=900)
+        cls.check = run("check", "--tier", "2")
+        cls.status = run("status")
+        cls.report = run("report")
+        cls.check0 = run("check")
+        cls.init = run("site", "init")
+        cls.build = run("site", "build")
+        with open(os.path.join(cls.root, "site", "data", "page.json"), encoding="utf-8") as fh:
+            cls.page = json.load(fh)
+        with open(os.path.join(cls.root, "site", "data", "state.json"),
+                  encoding="utf-8") as fh:
+            cls.state = json.load(fh)
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+
+    def test_it_fails(self):
+        self.assertEqual(self.check.returncode, 1, self.check.stdout[-2000:])
+        self.assertIn("[FAIL] cfd.pressure_drop", self.check.stdout)
+
+    def test_every_reader_says_the_last_check_run(self):
+        said = report_mod.HUMAN["unseen"]["failed"]
+        for name, out in (("status", self.status.stdout), ("report", self.report.stdout),
+                          ("check", self.check0.stdout)):
+            with self.subTest(name):
+                self.assertIn(said, out)
+                for old in ("invalidated: opaque", "out:cfd-openfoam/"):
+                    self.assertNotIn(old, out)
+        self.assertNotIn("next: nopekit check", self.status.stdout,
+                         "a check run makes nothing here read otherwise")
+        reasons = [c.get("reason", "") for c in self.state["claims"]]
+        self.assertTrue(reasons and all(said in r for r in reasons), reasons)
+        self.assertNotIn("invalidated: opaque", json.dumps(self.state))
+
+    def test_the_page(self):
+        verdict = self.page["verdict"]
+        self.assertTrue(verdict["stale"])
+        self.assertEqual(verdict["notice"], report_mod.HUMAN["site"]["notices"]["unseen"]
+                         .format(tier_flag=" --tier 2"))
+        self.assertEqual(verdict["notice_public"],
+                         report_mod.HUMAN["site"]["notices"]["unseen_public"])
+        for cid, claim in self.page["claims"].items():
+            with self.subTest(cid=cid):
+                self.assertEqual(claim["token"], "failing")
+                self.assertEqual(claim["cause_text"],
+                                 report_mod.HUMAN["site"]["cause"]["failed_unseen"])
 
 
 if __name__ == "__main__":

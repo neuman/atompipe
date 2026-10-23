@@ -97,12 +97,17 @@ is an error; a timeout is a skip.
 
 | Tag | Bound by |
 |---|---|
-| `cfd`, `fluid-dynamics`, `internal-flow` | every gate here (too broad for a claim) |
 | `pressure-drop` | every gate here: the guards bind it too, so a pressure-drop claim is never Checked past a guard that did not pass |
 | `flow-regime` | `cfd.regime` |
 | `mesh-quality` | `cfd.mesh_quality` |
 | `convergence` | `cfd.converged` |
 | `mesh-independence` | `cfd.mesh_independence` |
+
+The tags `cfd`, `fluid-dynamics` and `internal-flow` bind no gate. A claim
+with only these tags reads Gap. In earlier versions they bound every gate here.
+Then a claim tagged `cfd` with its own limit, 0.5 Pa, read Checked at 0.52 Pa,
+because `cfd.pressure_drop` judged the limit of the claim tagged
+`pressure-drop` (5 Pa).
 
 **The claim's quantity.** nopekit compares a value with a claim's limit only
 when the claim's `acceptance.quantity` is the quantity the gate settles, word

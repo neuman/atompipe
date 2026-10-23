@@ -92,7 +92,7 @@ from .util import NopekitError, iter_suffix_unique, seal
 
 
 __all__ = [
-    "OPAQUE_REASON", "unseen_gates",
+    "OPAQUE_REASON", "unseen_gates", "unseen_reason",
     "ClaimCause",
     "Attribution",
     "Composed",
@@ -376,6 +376,23 @@ OPAQUE_REASON = "opaque inputs: "
 _PREREQUISITE_MARK = re.compile(r"^prerequisite \S+ invalidated: ")
 
 
+def unseen_reason(why: str) -> bool:
+    """Is ``why`` — a resolver's stale reason, as `Resolution.rows[g].stale_reason`
+    and every reader's ``stale_reasons`` hold it — the reason of an entry not
+    current only for a channel nopekit cannot see: ``OPAQUE_REASON``, alone or
+    at the end of a chain of prerequisite marks? The words-only half of
+    `unseen_gates`, for a reader that holds the reason and not the row
+    (`report.reason`'s Failing branch). What slipped through without it (review
+    of issue #15's D1): a fail on such an entry read "(invalidated: opaque
+    inputs: <21 solver paths>)" in `status`, the report, `check`'s BLOCKING row
+    and ``state.json`` — "invalidated" of a design nobody touched, and the 2 KB
+    list D1 had taken off every other line."""
+    text = str(why or "")
+    while _PREREQUISITE_MARK.match(text):
+        text = _PREREQUISITE_MARK.sub("", text, count=1)
+    return text.startswith(OPAQUE_REASON)
+
+
 def unseen_gates(resolution: Any) -> frozenset:
     """The gates the resolver calls not current ONLY because they read through
     a channel nopekit cannot see: each in ``resolution.stale_gates`` whose row's
@@ -404,9 +421,7 @@ def unseen_gates(resolution: Any) -> frozenset:
         if _PREREQUISITE_MARK.match(why):
             # A dependent under such a prerequisite: the mark carries the
             # root's own reason, as `verdicts.apply_prerequisites` writes it.
-            while _PREREQUISITE_MARK.match(why):
-                why = _PREREQUISITE_MARK.sub("", why, count=1)
-            if why.startswith(OPAQUE_REASON):
+            if unseen_reason(why):
                 out.add(gid)
             continue
         reads = getattr(getattr(row, "entry", None), "reads", None)

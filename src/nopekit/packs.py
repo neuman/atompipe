@@ -43,8 +43,8 @@ import sys
 import tempfile
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, NamedTuple, Sequence
 
-from .models import (BASES, BASIS_UNDECLARED, Claim, GateSpec, KeyCollision, Ledger, Need,
-                     PackManifest, Tier)
+from .models import (BASES, BASIS_UNDECLARED, Acceptance, Claim, GateSpec, KeyCollision,
+                     Ledger, Need, PackManifest, Tier)
 from .store import NOPEKIT_DIR, PACKS_NAME, PROPOSER_ID as _PROPOSER_ID, find_root
 from .util import NopekitError, read_json
 
@@ -1595,8 +1595,9 @@ def baseline_claims(baseline: Mapping[str, Any]) -> list[Claim]:
     ``ctx.ledger``.
 
     Raises ``NopekitError`` when ``_claims`` is not a list of objects, a row has
-    no ``id`` or repeats one, or names a key a claim record does not hold: a
-    typo there would leave the gate reading a condition nobody wrote."""
+    no ``id`` or repeats one, or names a key a claim record — or, inside
+    ``acceptance``, a condition — does not hold: a typo there would leave the
+    gate reading a condition nobody wrote."""
     where = f"{SELFTEST_DIR}/{BASELINE_NAME}"
     rows = baseline.get(BASELINE_CLAIMS)
     if rows is None:
@@ -1620,6 +1621,18 @@ def baseline_claims(baseline: Mapping[str, Any]) -> list[Claim]:
         if unknown:
             raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] ({cid}) has keys a claim "
                                f"record does not hold: {', '.join(unknown)}")
+        # The condition too: `Acceptance.from_dict` drops a key it does not
+        # know. What slipped through (review of issue #15's D2): a baseline
+        # that wrote "comparater": ">=" read as "<=", and `pack validate` said
+        # publishable — the controls calibrated on a condition nobody wrote.
+        acceptance = row.get("acceptance")
+        if acceptance is not None and not isinstance(acceptance, dict):
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] ({cid}) acceptance must be "
+                               f"an object, not a {type(acceptance).__name__}")
+        stray = sorted(set(acceptance or {}) - {f.name for f in dataclasses.fields(Acceptance)})
+        if stray:
+            raise NopekitError(f"{where}: {BASELINE_CLAIMS}[{n}] ({cid}) acceptance has keys "
+                               f"a condition does not hold: {', '.join(stray)}")
         try:
             claims.append(Claim.from_dict(json.loads(json.dumps(row))))
         except (TypeError, ValueError) as exc:

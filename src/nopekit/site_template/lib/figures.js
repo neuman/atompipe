@@ -102,6 +102,10 @@ function chartTheme() {
     line: { strokeWidth: 2 },
     point: { size: 60, strokeWidth: 2 },
     text: { fontSize: 12, color: ink },
+    // A chart's title is the judged point's words, beside points with words
+    // of their own (`page.chart_spec`, review of issue #15's P3): the ring's
+    // label, in its look. A style does not reach a title's colour.
+    title: { color: ink, fontSize: 12, fontWeight: 600, anchor: "start" },
     // Each style's colour is `color`, never `stroke` or `fill`: Vega-Lite
     // writes a mark's default colour into the mark itself, over a style's
     // stroke or fill, and reads a style's `color` first (seen on the figure

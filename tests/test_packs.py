@@ -343,7 +343,14 @@ class PacksValidate(unittest.TestCase):
                 ("not a list", {"C1": row}, "must be a list"),
                 ("no id", [{**row, "id": ""}], "has no id"),
                 ("twice", [row, row], "states 'C1' twice"),
-                ("unknown key", [{**row, "limt": 1}], "limt")):
+                ("unknown key", [{**row, "limt": 1}], "limt"),
+                # Review of D2: inside ``acceptance`` too — "comparater": ">="
+                # read as the default "<=", and `pack validate` said publishable.
+                ("unknown condition key",
+                 [{**row, "acceptance": {**row["acceptance"], "comparater": ">="}}],
+                 "comparater"),
+                ("condition not an object", [{**row, "acceptance": ["<=", 1.0]}],
+                 "acceptance must be an object")):
             with self.subTest(label):
                 with self.assertRaises(NopekitError) as caught:
                     packs_mod.baseline_claims({"_claims": bad})

@@ -1615,9 +1615,11 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
         for want in (("rect", "nk-past"), ("rule", "nk-limit"), ("rule", "nk-rule"),
                      ("rule", "nk-band"), ("line", "nk-series"), ("point", "nk-point"),
                      ("point", "nk-hollow"), ("text", "nk-point-label"),
-                     ("point", "nk-estimate"), ("point", "nk-current"),
-                     ("text", "nk-current-label")):
+                     ("point", "nk-estimate"), ("point", "nk-current")):
             self.assertIn(want, marks)
+        # Beside points with words of their own, the judged point's words are
+        # the chart's title (review of issue #15's P3), a baked string.
+        self.assertEqual(spec["title"], {"text": "13% inside the limit", "anchor": "start"})
         datums = [l["encoding"]["y"].get("datum") for l in layers
                   if l["mark"].get("style") == "nk-limit"]
         self.assertEqual(datums, [0.4, 0.6], "the limit lines are the floor's")

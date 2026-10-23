@@ -585,7 +585,7 @@ class AValueOutsideTheAcceptanceIsNeverChecked(_env.EnvCase):
                          (ClaimStatus.FAIL, claims.ClaimCause.ACCEPTANCE))
         self.assertEqual(report.reason(found, Ledger(claims=[_c3()]), _c3()),
                          "acceptance condition not met: bracket.bearing : 0.195 MPa against "
-                         "C3's bearing stress <= 0.1 MPa (its own limit 15 MPa)")
+                         "C3's bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)")
         self.assertEqual(claims.compose(_c3(0.25), [_bearing()]).status, ClaimStatus.PASS)
 
     def test_what_is_not_compared_and_what_is(self):
@@ -634,7 +634,7 @@ class AValueOutsideTheAcceptanceIsNeverChecked(_env.EnvCase):
         project = bracket(self)
         edit_claim(project, "C3", limit=0.1)
         reason = ("acceptance condition not met: bracket.bearing : 0.195 MPa against C3's "
-                  "bearing stress <= 0.1 MPa (its own limit 15 MPa)")
+                  "bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)")
         proc = run(self, project, "check", "--junit", code=1)
         self.assertIn(f"[FAIL ] C3 Fastener bearing stress within the design allowable — "
                       f"{reason}", proc.stdout)

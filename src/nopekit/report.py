@@ -344,6 +344,13 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # did not); "is not current" (nopekit does not know that either).
         "unseen": "An evaluator reads inputs that nopekit cannot see. Only a check run can "
                   "show that its result is current.",
+        # Not a cause of its own: Failing `failed`, when the failing evaluator
+        # is unseen (`page.bake_page`). What slipped through (review of D1):
+        # "An evaluator failed the current design." sat over the row that said
+        # nopekit cannot show that the same result is current.
+        "failed_unseen": "An evaluator failed the design in the last check run. It reads "
+                         "inputs that nopekit cannot see, and a fail counts until a check "
+                         "run passes it.",
         "no-article": "No test on a built part is recorded.",
         "owned": "Its owner accepts this assumption for now.",
         "physical-pass": "A pass is recorded. It does not count for the current design.",
@@ -378,8 +385,15 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
                 "again.",
         "run": "Run the check. It runs the evaluators and shows that each one can fail.",
-        "unseen": "{gate} reads inputs that nopekit cannot see. Run the check. Only a check "
-                  "run can show that its result is current.",
+        # Review of D1: "Run the check." promised what a check run cannot do —
+        # the page reads the same after it. With a milestone that requires the
+        # claim, the step is the boundary's, which runs the evaluator again.
+        "unseen": "{gate} reads inputs that nopekit cannot see. Its result is from the last "
+                  "check run, and this page cannot show that it is still current. Only the "
+                  "output of a check run can.",
+        "unseen_spend": "{gate} reads inputs that nopekit cannot see. Its result is from the "
+                        "last check run, and this page cannot show that it is still current. "
+                        "Before the spend, nopekit export {milestone} runs it again.",
         "outside": "The design is outside the range that the evaluator was tested on.",
         "find": "No evaluator checks {id} yet. Find one or write one.",
         "owner": "{id} is an assumption. Its owner records it in their own shell.",
@@ -451,9 +465,14 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # Issue #15, D1: every result that is not current reads inputs that
         # nopekit cannot see. The command carries the tier that reaches them
         # (a plain `nopekit check` is tier 0 and runs no solver).
-        "unseen": "Some evaluators read inputs that nopekit cannot see. Only a check run "
-                  "can show that their results are current. Run nopekit check{tier_flag}, "
-                  "then build the site again.",
+        # Review of D1: "Run nopekit check --tier 2, then build the site
+        # again." gave back this same notice after both; and the notice is
+        # chosen by the resolution's stale gates, not the Stale claims, so a
+        # Failing claim's unseen fail reads it too (`site.state`'s
+        # `meta.stale_unseen`).
+        "unseen": "Some evaluators read inputs that nopekit cannot see. Their results are "
+                  "from the last check run, and this page cannot show that they are still "
+                  "current. Only the output of a check run can: nopekit check{tier_flag}.",
         # The marketing page's stale notice: the fact without the command. A
         # reader of that page is not the person who runs `nopekit check`, and
         # the engineering page one link away says what to run.
@@ -1060,10 +1079,35 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
     # answer).
     "unseen": MappingProxyType({
         "only": "only a check run can show that the result is current",
+        # Review of D1: the line said "Only a check run can show that their
+        # results are current: nopekit check --tier 2", and a person who ran
+        # it got this same line back, every time — no reader after a check run
+        # can say more. It says where the results are from, what can show them
+        # current (a check run's own output), and, with a milestone, the
+        # command that runs them again where it counts (`export`).
         "status": "unseen inputs: {shown} — {n} {evaluators} {read} inputs that nopekit "
                   "cannot see ({k} in all, for example {example}; the full list: "
-                  "nopekit doctor). Only a check run can show that {their} {results} {are} "
-                  "current: nopekit check{tier_flag}",
+                  "nopekit doctor). {Their} {results} {are} from the last check run, and no "
+                  "reader after it can show that {they} {are} still current. Only the "
+                  "output of a check run can: nopekit check{tier_flag}{spend}",
+        # `status`'s clause when the project has a milestone: the boundary that
+        # spends re-runs every evaluator a required claim rests on (invariant 12).
+        "spend": "; before a spend, nopekit export <milestone> runs them again",
+        # A fail's suffix (`reason`): the fail still counts (D-08).
+        "failed": "from the last check run: nopekit cannot see all of its inputs, and a fail "
+                  "counts until a check run passes it",
+        # `gate show` and `doctor`, for an evaluator whose controls read
+        # through such a channel (`verdicts._control_moved`: "an opaque control
+        # is never current"). What slipped through (review of D1): both said
+        # "not yet qualified at this version — the next check run qualifies
+        # it" right after a check run had, and after every check run since.
+        "qualification": "qualified at this version in the check run that ran its "
+                         "controls; they read inputs that nopekit cannot see, so between "
+                         "check runs no reader can show that this qualification is current",
+        "doctor_q": "{n} {evaluators} qualified at {their} version in the check run that ran "
+                    "{their} controls; the controls read inputs that nopekit cannot see, so "
+                    "between check runs no reader can show that the qualification is "
+                    "current: {rows}",
         # `meta.stale_reason`'s clause for them (`site._stale_reason`), which
         # `site build`, `site status`, `doctor` and the technical page print.
         "meta": "{shown} {read} inputs that nopekit cannot see ({k} in all, for example "
@@ -1082,7 +1126,13 @@ HUMAN: Mapping[str, Any] = MappingProxyType({
     # `Gate`, a Never-say, beside the word it moved), the not-compared note and
     # the limit-disagreement warning.
     "acceptance": MappingProxyType({
-        "reason": "{gate} : {value} against {claim}'s {condition} (its own limit {limit})",
+        # "its limit when it ran", not "its own limit" (review of issue #15's
+        # D2): a gate that reads the claim's condition (`ctx.acceptance`) has
+        # no limit of its own, and after the claim's limit moved the verdict's
+        # is the claim's old one — "its own limit 5 Pa" told the reader the
+        # evaluator kept a second limit, the S-35 slip D2 removed.
+        "reason": "{gate} : {value} against {claim}'s {condition} (its limit when it ran: "
+                  "{limit})",
         "reason_no_limit": "{gate} : {value} against {claim}'s {condition}",
         "columns": ("Claim", "Acceptance", "Value", "Evaluator", "Evidence"),
         "no_value": "(no value compared with it)",
@@ -2586,7 +2636,13 @@ def reason(composed: Any, ledger: Ledger, claim: Claim, *, full: bool = False,
         body = _verdict_body(verdict)
         text = f"{verdict.gate} : {cut_(body, 56)}" if body else f"{verdict.gate} did not pass"
         moved = stale_reasons.get(verdict.gate)
-        if moved:
+        if moved and claim_logic.unseen_reason(moved):
+            # Issue #15, review of D1: the fail of an evaluator nopekit cannot
+            # see into is the last check run's, and still counts — never
+            # "invalidated" of a design nobody touched, and never its channel
+            # list (often 2 KB of solver paths: `doctor`'s).
+            text += f" ({HUMAN['unseen']['failed']})"
+        elif moved:
             text += f" ({HUMAN['lead'][ClaimCause.INVALIDATED]}: {cut_(moved, 80)})"
         return text
     if cause in (ClaimCause.PHYSICAL_FAIL, ClaimCause.CONTRADICTION, ClaimCause.JUDGED_FAIL):
@@ -3886,6 +3942,12 @@ def page_phrases() -> dict[str, Any]:
     site never owns a word (D-16)."""
     hints = HUMAN["outcome_hint"]
     return {"invalidated": HUMAN["lead"][ClaimCause.INVALIDATED],
+            # A verdict not current only for a channel nopekit cannot see
+            # (`claims.unseen_gates`; the row's `unseen`): the technical page's
+            # flag, label and chip for it. What slipped through (review of issue
+            # #15's D1): each read "≈ invalidated" beside a reason that said
+            # nothing moved.
+            "unseen": HUMAN["lead"][ClaimCause.UNSEEN],
             # The title the page puts on a claim whose status its evidence does
             # not back (P2.1-D18) — the page's own words until P2.5a, which said
             # "contradict", a second sense for GLOSSARY's *contradiction*
@@ -5260,18 +5322,41 @@ def _tier_flag(registry: Any, gates_: Iterable[str]) -> str:
     return f" --tier {tier}" if tier > 0 else ""
 
 
+#: The head of `verdicts._admission`'s reason for an evaluator whose control
+#: entries at this version are not current only because they read through a
+#: channel nopekit cannot see (``_not_yet(... f"control inputs moved: {why}")``
+#: over ``_control_moved``'s ``"opaque control inputs: "``). Spelled here, as
+#: `claims.OPAQUE_REASON` is, because no reader may edit `verdicts` for a word;
+#: `test_unseen.TheCfdReadersSayIt` holds it to a real admission.
+OPAQUE_CONTROL_REASON = "control inputs moved: opaque control inputs: "
+
+
+def unseen_qualification(admission: Any) -> bool:
+    """Is ``admission`` (`verdicts.admission_state`'s) an evaluator qualified at
+    this version — its newest control entry here is paired — whose controls are
+    not current only because they read inputs nopekit cannot see? Then `gate
+    show` and `doctor` say ``HUMAN["unseen"]["qualification"]``, never "the
+    next check run qualifies it": every check run since had (review of issue
+    #15's D1)."""
+    entry = getattr(admission, "entry", None)
+    return (getattr(admission, "state", "") == "undemonstrated"
+            and str(getattr(admission, "reason", "") or "").startswith(OPAQUE_CONTROL_REASON)
+            and getattr(entry, "admitted", "") == "paired")
+
+
 #: Programs a gate runs only to start another (`bash -c`, `sh -c`): a poor
 #: example of what nopekit cannot see, so `unseen_words` names another first.
 _LAUNCHERS = frozenset({"subprocess:bash", "subprocess:sh", "subprocess:env"})
 
 
 def unseen_words(key: str, resolution: Any, unseen: Iterable[str], *,
-                 registry: Any = None, rows: str = "") -> str:
+                 registry: Any = None, rows: str = "", spend: bool = False) -> str:
     """``HUMAN["unseen"][key]`` for the gates in ``unseen`` (`claims.unseen_gates`),
     in the resolution's order: how many, the first by name, how many channels
     their entries recorded and one of them — a program first, never a launcher
     shell (`_LAUNCHERS`) — and the tier flag that reaches them; ``""`` when
-    there are none. ``rows`` is `doctor`'s per-gate list. One producer for
+    there are none. ``rows`` is `doctor`'s per-gate list; ``spend`` (the project
+    has a milestone) adds the boundary that runs them again. One producer for
     `status`, `site build`, `check` and `doctor` (issue #15, D1)."""
     wanted = set(unseen or ())
     order = [g for g in (getattr(resolution, "rows", None) or {}) if g in wanted]
@@ -5289,11 +5374,13 @@ def unseen_words(key: str, resolution: Any, unseen: Iterable[str], *,
     example = (programs or channels or ["?"])[0]
     n = len(order)
     shown = order[0] + (f", +{n - 1}" if n > 1 else "")
+    their = _plural(n, "its", "their")
     return HUMAN["unseen"][key].format(
         shown=shown, n=n, evaluators=_plural(n, "evaluator"), read=_plural(n, "reads", "read"),
-        their=_plural(n, "its", "their"), results=_plural(n, "result"),
-        are=_plural(n, "is", "are"), k=len(channels), example=example,
-        tier_flag=_tier_flag(registry, order), rows=rows)
+        their=their, Their=their.capitalize(), they=_plural(n, "it", "they"),
+        results=_plural(n, "result"), are=_plural(n, "is", "are"), k=len(channels),
+        example=example, tier_flag=_tier_flag(registry, order), rows=rows,
+        spend=HUMAN["unseen"]["spend"] if spend else "")
 
 
 #: The statuses listed one by one under the failing section: GLOSSARY §9's
@@ -5882,10 +5969,22 @@ def render_terminal(ledger: Ledger, registry: Any, *, stale: bool = False,
     # through (review of P2): the line always said `--tier 0`, so a project
     # whose stale claims rest on a tier-2 solver was told to run a check that
     # cannot reach them.
-    reach = set(moved) | {s.id for s in unrun}
+    # A gate not current only for a channel nopekit cannot see is left out:
+    # no check run makes this line read otherwise (review of issue #15's D1,
+    # where `next: nopekit check --tier 2` came back after every such run).
+    # When nothing else needs a check run, a milestone's boundary is the step:
+    # `export` runs those evaluators again where it counts.
+    unseen_set = set(unseen_gates or ())
+    reach = (set(moved) - unseen_set) | {s.id for s in unrun}
     tier = max((int(s.tier) for s in _specs(registry) if s.id in reach), default=0)
-    lines.append(f"next: nopekit check --tier {tier} ; nopekit gap --propose ; "
-                 "nopekit report --write")
+    first = [f"nopekit check --tier {tier}"]
+    if not reach and unseen_set & set(moved):
+        waiting = [m for m in sorted(getattr(ledger, "milestones", None) or (),
+                                     key=lambda m: str(m.id))
+                   if not claim_logic.unresolved(ledger, composed, m).ready]
+        first = [f"nopekit export {waiting[0].id} --dry-run"] if waiting else []
+    lines.append("next: " + " ; ".join(first + ["nopekit gap --propose",
+                                                "nopekit report --write"]))
     return "\n".join(lines) + "\n"
 
 
@@ -6176,7 +6275,7 @@ def render_junit(ledger: Ledger, verdicts: Iterable[Verdict], registry: Any, *,
                  stale: bool = False, spine: str = "",
                  stale_gates: Collection[str] = (),
                  stale_reasons: Mapping[str, str] | None = None,
-                 unseen_gates: Collection[str] = ()) -> str:
+                 unseen_gates: Collection[str] = (), ready_note: str = "") -> str:
     """This command's run as JUnit XML — never greener than its exit code.
 
     A CI system renders this file, not the exit code, so the file carries the
@@ -6214,7 +6313,10 @@ def render_junit(ledger: Ledger, verdicts: Iterable[Verdict], registry: Any, *,
     GLOSSARY §4's sense, `claims.summarise`'s — critique of the P2.1 design: a
     `ready=true` property beside a claim waiting for an article was READY on
     one more channel), `when`, and `spine` when given (the spine digest, from
-    Phase 1.2). `when` is the caller's timestamp; this function reads no clock.
+    Phase 1.2); and `ready_note` when given — `check`'s note that its *ready*
+    holds for this run only, its evaluators reading inputs nopekit cannot see
+    (review of issue #15's D1: the file said `ready=true` beside nothing that
+    joined it to the NOT ready of every reader after it). `when` is the caller's timestamp; this function reads no clock.
     Every attribute and text value goes through `junit_safe`, so the file
     parses whatever a gate wrote.
     """
@@ -6230,6 +6332,8 @@ def render_junit(ledger: Ledger, verdicts: Iterable[Verdict], registry: Any, *,
              ("when", when)]
     if spine:
         props.append(("spine", spine))
+    if ready_note:
+        props.append(("ready_note", ready_note.removeprefix("note: ")))
     _xml_properties(root, props)
     suites = {name: _xml_sub(root, "testsuite", name=name) for name in _JUNIT_SUITES}
 
@@ -6378,6 +6482,8 @@ __all__ = [
     "readiness",
     "not_ready_line",
     "unseen_words",
+    "unseen_qualification",
+    "OPAQUE_CONTROL_REASON",
     "render_terminal",
     "render_markdown",
     "write_report",

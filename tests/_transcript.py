@@ -136,7 +136,7 @@ UNQUALIFIED_ROW = re.compile(
 #: (review of P2.4): the composition's reason, indented two.
 ACCEPTANCE_REASON = re.compile(
     r"^  acceptance condition not met: (?P<gate>\S+) : (?P<value>\S+(?: \S+)?) against "
-    r"(?P<claim>\S+)'s (?P<condition>.+?)(?: \(its own limit (?P<limit>[^)]+)\))?$")
+    r"(?P<claim>\S+)'s (?P<condition>.+?)(?: \(its limit when it ran: (?P<limit>[^)]+)\))?$")
 
 #: `check`'s warning for an evaluator whose own limit is not its claim's (P2.4,
 #: S-35): one line per compared pair, after the qualification lines.

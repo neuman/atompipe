@@ -357,14 +357,37 @@ class ChartsNeedNoTool(_OnTheStandIn):
         # The judged point's words sit under the point, the finest mesh's "8000
         # cells" above it: drawn over each other until P2.1, then lifted above
         # into the next mesh's words on a phone (review of P2).
-        [words] = [l for l in spec["layer"] if l["mark"].get("style") == "nk-current-label"]
-        cells, under = [l for l in spec["layer"] if l["mark"].get("style") == "nk-point-label"]
-        self.assertGreater(words["mark"]["dy"], 0)
-        self.assertLess(cells["mark"]["dy"], 0)
-        # "zero cell size" under its point, apart from "8000 cells" above the
-        # next (review of P2: the two ran into each other on a phone).
-        self.assertEqual([r["text"] for r in under["data"]["values"]], ["zero cell size"])
-        self.assertGreater(under["mark"]["dy"], 0)
+        labels = [l for l in spec["layer"] if l["mark"].get("style") == "nk-point-label"]
+        texts = {r["text"]: l["mark"] for l in labels for r in l["data"]["values"]}
+        self.assertEqual(sorted(texts), ["2000 cells", "500 cells", "8000 cells",
+                                         "zero cell size"])
+        # Review of issue #15's P3, at 390 px: centred, "8000 cells" sat over
+        # "2000 cells" 55 px away, "zero cell size" over the y axis's numbers,
+        # and the judged point's words beside the ring ran into the next
+        # mesh's. Each point's words slant away from it, under a point in the
+        # upper half of the chart (these: the band reaches above them) and to
+        # the right, the last point's to the left; the judged point's words
+        # are the chart's title, the ring alone on the point.
+        for text in ("zero cell size", "8000 cells", "2000 cells"):
+            self.assertEqual((texts[text]["align"], texts[text]["angle"],
+                              texts[text]["baseline"]),
+                             ("left", page.POINT_LABEL_SLANT, "top"), text)
+        self.assertEqual(texts["500 cells"]["align"], "right")
+        self.assertEqual(spec["title"], {"text": "13% inside", "anchor": "start"})
+        self.assertFalse([l for l in spec["layer"]
+                          if l["mark"].get("style") == "nk-current-label"])
+        # A chart whose points carry no words keeps the words by the ring.
+        bare = dict(view.data, series=[dict(item, labels=None)
+                                       for item in view.data["series"]])
+        spec_bare = page.chart_spec(bare, None, current)
+        self.assertNotIn("title", spec_bare)
+        [words] = [l for l in spec_bare["layer"]
+                   if l["mark"].get("style") == "nk-current-label"]
+        self.assertEqual(words["encoding"]["text"], {"value": "13% inside"})
+        # And no negative tick on a cell size: the padded domain is not
+        # rounded out to a whole tick (review of P2: -0.4 and -0.2).
+        self.assertEqual(line["encoding"]["x"]["scale"],
+                         {"zero": False, "nice": False, "padding": page.CHART_PAD})
         # The band and its two end bars are drawn over the points, and the
         # judged point is a ring: the filled dot hid the band (review of P2).
         styles = [l["mark"].get("style") for l in spec["layer"]]

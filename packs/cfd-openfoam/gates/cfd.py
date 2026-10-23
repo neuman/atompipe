@@ -256,6 +256,18 @@ WRITE_PRECISION = 12
 #: (every project would add one more tag to the one claim it already tags).
 #: Two claims tagged so with different limits make the gate error: state one
 #: such claim per case.
+#:
+#: It is also the one broad tag every gate here covers (each guard adds its
+#: own quantity's tag), so the claim whose limit cfd.pressure_drop reads is
+#: the claim it settles. What slipped through (review of issue #15's D2): each
+#: gate also covered ``cfd``, ``fluid-dynamics`` and ``internal-flow``, so a
+#: claim tagged ``cfd`` alone, "static pressure drop <= 0.5 Pa", read Checked
+#: and ``check`` said ready on a pass judged against another claim's 5 Pa —
+#: S-35's second home for one number, now another claim. Without those tags
+#: such a claim is covered by no gate here and reads Gap. *Rejected:* erroring
+#: when a covered claim states a Pa condition the gate did not read (the gate
+#: would read every claim of the ledger, a channel no control holds);
+#: narrowing cfd.pressure_drop alone (the claim read Checked on the guards).
 DP_CLAIM_TAG = "pressure-drop"
 
 #: The units cfd.pressure_drop computes in, and the only units of a limit it
@@ -292,6 +304,31 @@ def _case(ctx: GateContext) -> str | None:
         return None
     rel = str(rel)
     return rel if os.path.isabs(rel) else os.path.join(ctx.root, rel)
+
+
+#: The significant digits a verdict's value is reported to: as many as a
+#: double's decimal form needs to stay itself in all but the last ulps, and no
+#: more, so a value reads ``0.522182`` and not ``0.52218199999999996``.
+#: Significant digits, never decimal places. What slipped through (review of
+#: issue #15's D2 and D3): cfd.pressure_drop reported ``round(top, 9)``, so a
+#: band top of 6.0e-13 Pa read 0.0 and passed a limit of 1e-13 Pa; and
+#: cfd.regime judged the raw Re but reported 9 digits, so Re 2299.9999999 read
+#: a pass at "2300 Re" against "< 2300". *Rejected:* decimal places (a small
+#: quantity rounds to zero); the raw value always (17 digits on every tile).
+REPORTED_DIGITS = 9
+
+
+def _shown(value: float, holds, passed: bool, digits: int = REPORTED_DIGITS):
+    """``value`` as the verdict reports it: rounded to ``digits`` significant
+    digits when the rounded value is on the same side of the limit as the
+    verdict (``holds(rounded) == passed``), else the value whole, else ``None``
+    (no value that agrees with the verdict: none is reported). The judgment is
+    the caller's, made on the value whole; this only keeps the number shown
+    from contradicting it."""
+    for candidate in (float(f"{value:.{digits}g}"), float(value)):
+        if bool(holds(candidate)) == bool(passed):
+            return candidate
+    return None
 
 
 def _number(ctx: GateContext, key: str):
@@ -843,7 +880,7 @@ def _planes(ctx: GateContext):
     id="cfd.case_readable",
     basis="model-only",
     title="The OpenFOAM case is one this pack can run and vouch for",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow"],
+    claims=[DP_CLAIM_TAG],
     tier=Tier.INSTANT,
     settles="cfd case readability",
     negative_control=NegativeControl(
@@ -887,7 +924,7 @@ def case_readable(ctx: GateContext) -> Verdict:
     id="cfd.regime",
     basis="sourced",
     title="The flow is laminar and incompressible: Reynolds and Mach numbers",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "flow-regime"],
+    claims=[DP_CLAIM_TAG, "flow-regime"],
     tier=Tier.INSTANT,
     settles="cfd flow regime",
     needs=["cfd.case_readable"],
@@ -946,7 +983,8 @@ def regime(ctx: GateContext) -> Verdict:
             f"plane, hydraulic diameter Dh {dh:g} m, nu {case.nu:g} m^2/s from the case; "
             f"limit {RE_LAMINAR_MAX:g}, the onset of transition in a pipe. Mach {ma:.3g} = "
             f"U / c, c {c:g} m/s; limit {MACH_MAX:g}")
-    return Verdict(gate=gid, passed=not problems, measured=float(f"{measured:.9g}"),
+    return Verdict(gate=gid, passed=not problems,
+                   measured=_shown(measured, lambda x: x < limit, not problems),
                    limit=limit, comparator="<", units=units,
                    detail="; ".join(problems) + f" ({said})" if problems else said)
 
@@ -1303,7 +1341,7 @@ def _noise(solve: Solve) -> float:
     id="cfd.mesh_quality",
     basis="established",
     title="checkMesh finds the case's mesh sound, inside stated limits",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "mesh-quality"],
+    claims=[DP_CLAIM_TAG, "mesh-quality"],
     tier=Tier.BUILD,
     settles="cfd mesh quality",
     requires_tools=list(T.WRAPPERS),
@@ -1402,7 +1440,8 @@ def mesh_quality(ctx: GateContext) -> Verdict:
         # limit, this read "0.002 fraction of limit" under Failing).
         return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, *logs])
     v, lim, units = ratios[binding]
-    return Verdict(gate=gid, passed=mc.ok and not over, measured=float(f"{v:.9g}"),
+    return Verdict(gate=gid, passed=mc.ok and not over,
+                   measured=_shown(v, lambda x: x <= lim, mc.ok and not over),
                    limit=lim, comparator="<=", units=units, detail=detail,
                    evidence=[ev, *logs])
 
@@ -1414,7 +1453,7 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     id="cfd.converged",
     basis="established",
     title="simpleFoam met the pack's residual targets, and the pressure drop settled",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "convergence"],
+    claims=[DP_CLAIM_TAG, "convergence"],
     tier=Tier.SOLVE,
     settles="cfd solver convergence",
     requires_tools=list(T.WRAPPERS),
@@ -1511,7 +1550,8 @@ def converged(ctx: GateContext) -> Verdict:
     # percentage and reports no value.
     if pct is None:
         return Verdict(gate=gid, passed=True, detail=detail, evidence=[ev, hist, *logs])
-    return Verdict(gate=gid, passed=True, measured=float(f"{pct:.6g}"),
+    return Verdict(gate=gid, passed=True,
+                   measured=_shown(pct, lambda x: x <= STABLE_TOL * 100.0, True, 6),
                    limit=STABLE_TOL * 100.0, comparator="<=", units=ITERATIVE_ERROR_UNITS,
                    detail=detail, evidence=[ev, hist, *logs])
 
@@ -1795,7 +1835,7 @@ def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
     id="cfd.mesh_independence",
     basis="sourced",
     title="Three meshes agree: the grid convergence index (Celik et al. 2008) is inside its limit",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "mesh-independence"],
+    claims=[DP_CLAIM_TAG, "mesh-independence"],
     tier=Tier.SOLVE,
     settles="cfd mesh independence",
     requires_tools=list(T.WRAPPERS),
@@ -1840,7 +1880,8 @@ def mesh_independence(ctx: GateContext) -> Verdict:
         return Verdict(gate=gid, passed=False, detail="; ".join(why)[:400] + f" ({cells} cells)",
                        evidence=ev)
     passed = gci_pct <= lim
-    return Verdict(gate=gid, passed=passed, measured=round(gci_pct, 6), limit=lim,
+    return Verdict(gate=gid, passed=passed,
+                   measured=_shown(gci_pct, lambda x: x <= lim, passed, 6), limit=lim,
                    comparator="<=", units="%",
                    detail=f"GCI {gci_pct:.3g}% {'within' if passed else 'past'} "
                           f"{lim:g}%: {cells} cells (ratio {r:g}{rnote}), monotone at observed "
@@ -1856,7 +1897,7 @@ def mesh_independence(ctx: GateContext) -> Verdict:
     id="cfd.pressure_drop",
     basis="established",
     title="The static pressure drop between two planes, with its GCI band, is under the limit",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow"],
+    claims=[DP_CLAIM_TAG],
     tier=Tier.SOLVE,
     settles="pressure drop from cfd",
     requires_tools=list(T.WRAPPERS),
@@ -1922,8 +1963,11 @@ def pressure_drop(ctx: GateContext) -> Verdict:
     ev = _ladder_evidence(ctx, gid, case, levels, res, noise,
                           {"density_kg_m3": rho, "dp_pa": dp_pa, "band_top_pa": top,
                            "dp_ext_pa": rho * res.phi_ext21}, rho, planes)
-    measured = round(top, 9)
-    passed = acc.holds(measured)
+    # Judged on the band top whole; reported in significant digits on its
+    # side of the limit (`_shown`). Until review of D2 it was judged on
+    # `round(top, 9)`: a top under 5e-10 Pa read 0.0 and passed every limit.
+    passed = acc.holds(top)
+    measured = _shown(top, acc.holds, passed)
     return Verdict(gate=gid, passed=passed, measured=measured, limit=acc.limit,
                    comparator=comparator, units=DP_UNITS,
                    detail=f"pressure drop {dp_pa:.5g} Pa on the finest mesh "

@@ -590,7 +590,11 @@ an agent can read the site's state without a browser.
   registered in this project`, or — from P2.2 — `prerequisite <root> invalidated: …`
   / `prerequisite <root> unrun` for a verdict kept under a prerequisite that is not
   current), `""` when it is. A
-  claim covered by a row with a `stale_reason` is never `pass`.
+  claim covered by a row with a `stale_reason` is never `pass`. `unseen` (issue
+  #15) is true on a row whose gate is not current only because it reads inputs
+  nopekit cannot see: the technical page flags it `≈ unseen inputs` (the phrase
+  `unseen`), never `≈ invalidated`, and the engineering page's Failing cause text
+  says that its fail is the last check run's.
 - A row carries `blocked_by` and `blocked_kind` (P2.2) — `[]` and `""`, or the roots
   of the prerequisites that were not established when its gate was not run, and the
   first one's kind. Such a row is `skipped`, never `ok`; its `skip_reason` says
@@ -683,6 +687,8 @@ where the page's staleness lives.
 | `name`, `summary`, `created`, `revision`, `model_entry`, `packs`, `spine_version` | `.nopekit/project.json`, verbatim (`ProjectMeta`) | the project, as its own record states it; a field `ProjectMeta` gains arrives here and in this table together — except `people` (architecture phase 6), never baked (`site._UNPUBLISHED_META`): the page is published, and the names and addresses a round may commit as are not its to publish |
 | `stale` | the resolution: any row not current | whether the VERDICTS are current |
 | `stale_reason` | the resolution | the stale gates with their reasons (the first three, then `(+n more)`) |
+| `stale_unseen` | the resolution and `claims.unseen_gates` | every stale gate is stale only because it reads inputs nopekit cannot see (issue #15): the page's notice, the technical page's flag and its banner read it, never the Stale claims |
+| `stale_check` | `report._tier_flag` over the stale gates | the command that reaches them (`nopekit check --tier 2`), `""` when nothing is stale; `site status` and the technical page's banner print it |
 | `records_digest` | `store.records_digest(root)` at build time | which records the page was built from — whether the PAGE is current, half one |
 | `resolution_digest` | `site.resolution_digest` of this document, set last by `site.state` | what the page judged from the records and the verdict cache — whether the PAGE is current, half two (phase 3a's `judgement_digest`, renamed) |
 | `generated` | a constant | that this file is an output of the records and the verdict cache, not a source |

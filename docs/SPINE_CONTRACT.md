@@ -2546,6 +2546,9 @@ OPAQUE_REASON = "opaque inputs: "    # the head of the resolver's reason for an 
 def unseen_gates(resolution) -> frozenset    # stale ONLY through a channel nopekit cannot see
                                              #   (the row's reason and its entry's opaque list,
                                              #   or a prerequisite mark that ends in one)
+def unseen_reason(why) -> bool               # the words-only half: OPAQUE_REASON, alone or
+                                             #   after prerequisite marks (`report.reason`'s
+                                             #   Failing suffix: "from the last check run")
 class Attribution(NamedTuple): owner: str; reason: str     # the signing channel's record of an owner
 @dataclass(frozen=True)
 class Composed: status: ClaimStatus; cause: ClaimCause; cites: tuple; verdict: Verdict | None
@@ -3102,9 +3105,14 @@ def result_facts(claim, entry, *, register="cli") -> dict  # {counts, token, why
 def latency_words(claim, exports) -> str     # "measured 26 h on article <a12> (expected 1 day)" |
                                              #   "expected 1 day (declared)" | that none is declared
 def not_ready_line(ledger, composed) -> str  # `check`'s line when nothing blocks it
-def unseen_words(key, resolution, unseen, *, registry=None, rows="") -> str
+def unseen_words(key, resolution, unseen, *, registry=None, rows="", spend=False) -> str
                                             # issue #15 D1: HUMAN["unseen"][key] for the gates
-                                            #   claims.unseen_gates found: a count, one example
+                                            #   claims.unseen_gates found: a count, one example;
+                                            #   spend: name `export` (a milestone exists)
+OPAQUE_CONTROL_REASON = "control inputs moved: opaque control inputs: "
+def unseen_qualification(admission) -> bool  # qualified at this version, its controls opaque:
+                                             #   `gate show` and `doctor` say so, never "the
+                                             #   next check run qualifies it"
 RATIONALE_UNKNOWN = "Parameter rationales are not known"  # + ": <why>" — no view, or no model
 def render_terminal(ledger, registry, *, stale=False, stale_gates=(), params=None,
                     stale_reasons=None, unseen_gates=()) -> str
@@ -3115,8 +3123,10 @@ def write_report(root, ledger, registry, *, stale=False, stale_gates=(), model_e
                  params=None, stale_reasons=None, unseen_gates=()) -> str  # REPORT.md (P2.5b)
 def render_junit(ledger, verdicts, registry, *, tier, ready, exit_code, when,
                  not_run=None, cached=frozenset(), stale=False, spine="",
-                 stale_gates=(), stale_reasons=None, unseen_gates=()) -> str
-    # `check --junit`: suites gates / claims.critical / claims.not-critical
+                 stale_gates=(), stale_reasons=None, unseen_gates=(),
+                 ready_note="") -> str
+    # `check --junit`: suites gates / claims.critical / claims.not-critical;
+    #   ready_note: the property that says a ready holds for this check run only
 def render_selftest_junit(results, *, exit_code, when, baselines=None) -> str
     # `gate selftest --junit`: suite controls, plus baselines in pack mode
 def junit_safe(text) -> str                  # XML-1.0-illegal code points -> visible "\xNN" / "\uNNNN"

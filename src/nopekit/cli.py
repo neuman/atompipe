@@ -1236,7 +1236,7 @@ def _never_run(resolution: verdicts.Resolution, registry: gates.Registry | None)
 
 
 def _stale_lines(resolution: verdicts.Resolution, registry: gates.Registry | None, *,
-                 model_error: str = "") -> list[str]:
+                 model_error: str = "", spend: bool = False) -> list[str]:
     """`status`'s `invalidated:` block (spec §3.13): one line per gate whose
     verdict is not current, with its reasons, continuation lines indented under
     the head, and the counts on the last — `(N verdicts current[, n unrun])`, a
@@ -1276,7 +1276,8 @@ def _stale_lines(resolution: verdicts.Resolution, registry: gates.Registry | Non
         why = (why.splitlines() or ["invalidated"])[0]
         lines.append(f"{'invalidated: ' if not lines else '             '}{gate_id} — {why}")
     if unseen:
-        lines.append(report.unseen_words("status", resolution, unseen, registry=registry))
+        lines.append(report.unseen_words("status", resolution, unseen, registry=registry,
+                                         spend=spend))
     lines[-1] += counts
     return lines
 
@@ -1488,7 +1489,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         _say(report.HUMAN["milestone"]["report_head"])
         for milestone_ in view.milestones:
             _say("  " + report.milestone_line(view, composed, milestone_))
-    for line in _stale_lines(resolution, registry, model_error=model_error):
+    for line in _stale_lines(resolution, registry, model_error=model_error,
+                             spend=bool(getattr(view, "milestones", None))):
         _say(line)
     # "last check run" (GLOSSARY §6: one invocation of `check` is a check run):
     # `last check:` read as a noun for an evaluator one line under the claims.
@@ -2003,12 +2005,24 @@ def cmd_check(args: argparse.Namespace) -> int:
     # review). Each once, in the order they arose.
     notes = [str(note) for note in dict.fromkeys(result.notes)]
 
+    # Invariant 12: every reader but `export` says *ready* as last evaluated.
+    # A ready that rests on evaluators nopekit cannot see into holds in this run
+    # only — `status`, the report and the site read those claims Stale the
+    # moment it ends — so every channel of this run says so: the line under
+    # `ready:`, the JSON and the JUnit file (issue #15, D1; the JUnit file and
+    # the JSON in its review: a CI reader saw `ready=true` and nothing that
+    # joined it to the NOT ready every other reader said a second later).
+    rests = _unseen_in_run(rows, view, composed) if (view.claims and not blockers) else []
+    ready_note = (report.unseen_words("ready", resolution, rests, registry=registry)
+                  if rests and claims.unresolved(view, composed).ready else "")
+
     spine = verdicts.spine_digest()
     written = _junit_write(junit, lambda: report.render_junit(
         view, [row.verdict for row in rows], registry, tier=tier, ready=ready,
         exit_code=code, when=now, not_run=result.not_run,
         cached={row.verdict.gate for row in rows if row.cached}, spine=spine,
-        stale_gates=stale_gates, stale_reasons=stale_reasons, unseen_gates=unseen))
+        stale_gates=stale_gates, stale_reasons=stale_reasons, unseen_gates=unseen,
+        ready_note=ready_note))
 
     if args.json:
         _dump({
@@ -2033,6 +2047,9 @@ def cmd_check(args: argparse.Namespace) -> int:
             # project waiting for an article as ready).
             "ready": ready,
             "all_required_checked": bool(summary["all_required_checked"]),
+            # Additive (review of issue #15's D1): the note `check` prints under
+            # `ready:` when that ready holds for this run only; "" otherwise.
+            "ready_note": ready_note.removeprefix("note: "),
             "claims_recorded": len(view.claims),
             # Stale BEFORE the sweep (cli:H19): after a recorded full sweep
             # everything it touched is current by construction, so "stale" read
@@ -2130,15 +2147,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         # `ready: no critical claim is blocking` printed while a claim waited
         # for an article and an assumption had no owner.
         _say(report.not_ready_line(view, composed))
-        # Invariant 12: every reader but `export` says *ready* as last
-        # evaluated. A ready that rests on evaluators nopekit cannot see into
-        # holds in this run only — `status`, the report and the site read those
-        # claims Stale the moment it ends — so it says so on the next line
-        # (issue #15, D1). What slipped through: `check` said ready and every
+        # The note on the next line (`ready_note`, above). What slipped
+        # through before it (issue #15, D1): `check` said ready and every
         # other reader, a second later, NOT ready, with nothing to join them.
-        rests = _unseen_in_run(rows, view, composed)
-        if rests and claims.unresolved(view, composed).ready:
-            _say(report.unseen_words("ready", resolution, rests, registry=registry))
+        if ready_note:
+            _say(ready_note)
     else:
         # In severity order (P2.1-D16): what slipped through (P2.0 F-2), record
         # order put a missing tool's `[skip ]` above a crash's row.
@@ -4965,10 +4978,20 @@ def _qualification_rows(gate_id: str, spec: Any, admission: verdicts.Admission, 
     elif state == "not-admitted":
         rows = [f"  qualification: "
                 f"{report.qualification_reason(admission.reason, pruned_by=pruned_by)}"]
+    elif report.unseen_qualification(admission):
+        rows = [f"  qualification: {report.HUMAN['unseen']['qualification']}"]
     else:
+        # With the tier that reaches it: a plain `check` is tier 0 (review of
+        # issue #15's D1).
         rows = [f"  qualification: "
-                f"{report.qualification_reason(verdicts.NOT_YET, pruned_by=pruned_by)}"]
+                f"{report.qualification_reason(_not_yet_token(spec), pruned_by=pruned_by)}"]
     return rows + report.qualification_detail(entry, spec, facts=facts)
+
+
+def _not_yet_token(spec: Any) -> str:
+    """`verdicts.NOT_YET` with ``spec``'s tier, as `verdicts._not_yet` writes it,
+    so the words name the check run that reaches the evaluator."""
+    return f"{verdicts.NOT_YET}|{int(getattr(spec, 'tier', 0) or 0)}"
 
 
 def cmd_gate_show(args: argparse.Namespace) -> int:
@@ -6777,6 +6800,8 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         "stale_reason": "",
         "verdicts_stale": False,
         "verdicts_stale_reason": "",
+        "verdicts_stale_check": "",
+        "verdicts_stale_unseen": False,
         "assets": 0,
         "asset_bytes": 0,
         "vendored": False,
@@ -6851,6 +6876,10 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
     info["locator_problems"] = list(payload.get("locator_problems") or [])
     info["verdicts_stale"] = bool(meta.get("stale"))
     info["verdicts_stale_reason"] = str(meta.get("stale_reason") or "")
+    # The command the build baked, with the tier that reaches the stale gates
+    # (a page from before it: a plain `nopekit check`, as it said then).
+    info["verdicts_stale_check"] = str(meta.get("stale_check") or "nopekit check")
+    info["verdicts_stale_unseen"] = bool(meta.get("stale_unseen"))
     info["claims"] = len(payload.get("claims") or [])
     info["verdicts"] = len(payload.get("verdicts") or [])
 
@@ -8273,7 +8302,10 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         _say(f"{_tag('warn')} {site.OLD_LAYOUT_WARNING}")
     if info["verdicts_stale"]:
         _say(f"{_tag('warn')} the verdicts on the page are stale: "
-             f"{info['verdicts_stale_reason']} — `nopekit check`, then rebuild")
+             f"{info['verdicts_stale_reason']} — `{info['verdicts_stale_check']}`"
+             # Unseen only: the rebuild after a check run reads the same, so
+             # it is not promised (review of issue #15's D1).
+             + ("" if info["verdicts_stale_unseen"] else ", then rebuild"))
     if info["locator_problems"]:
         _say(f"{_tag('warn')} {len(info['locator_problems'])} dangling locator(s):")
         for problem in info["locator_problems"][:6]:
@@ -8906,6 +8938,7 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
     q = report.HUMAN["qualification"]["doctor"]
     unqualified: list[str] = []
     waiting: list[str] = []
+    unseen: list[str] = []
     pruned = {v.gate: (list(v.blocked_by or ()) or [""])[0] for v in resolution.verdicts
               if getattr(v, "blocked_by", None)}
     for gate_id in registry.ids():
@@ -8918,9 +8951,15 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
             admission = verdicts.admission_state(root, spec, fn, projection=projection,
                                                  ledger=ledger, anchors=resolution.anchors)
         kind = verdicts.parse_token(admission.reason)[0]
-        if admission.state == "undemonstrated" or (admission.state == "not-admitted"
-                                                   and kind == verdicts.NOT_YET):
-            token = admission.reason if kind == verdicts.NOT_YET else verdicts.NOT_YET
+        if report.unseen_qualification(admission):
+            # Issue #15, review of D1: qualified by the check run that ran its
+            # controls, which read inputs nopekit cannot see — never "the next
+            # check run qualifies it", which every check run since had.
+            unseen.append(gate_id)
+        elif admission.state == "undemonstrated" or (admission.state == "not-admitted"
+                                                     and kind == verdicts.NOT_YET):
+            spec_, _fn = registry.get(gate_id)
+            token = admission.reason if kind == verdicts.NOT_YET else _not_yet_token(spec_)
             how = report.qualification_reason(token, pruned_by=pruned.get(gate_id, ""))
             waiting.append(f"{gate_id} ({how})")
         elif admission.state == "not-admitted":
@@ -8930,9 +8969,15 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
         if waiting:
             text += q["also_waiting"].format(n=len(waiting))
         _check(results, "qualification", "FAIL", text)
-    elif waiting:
-        _check(results, "qualification", "warn",
-               q["not_yet"].format(n=len(waiting), list=_listed(waiting, ", ")))
+    elif waiting or unseen:
+        said = ([q["not_yet"].format(n=len(waiting), list=_listed(waiting, ", "))]
+                if waiting else [])
+        if unseen:
+            n = len(unseen)
+            said.append(report.HUMAN["unseen"]["doctor_q"].format(
+                n=n, evaluators="evaluator" if n == 1 else "evaluators",
+                their="its" if n == 1 else "their", rows=_listed(unseen, ", ")))
+        _check(results, "qualification", "warn", "; ".join(said))
     else:
         _check(results, "qualification", "ok", q["ok"])
     missing = [] if os.path.isfile(os.path.join(root, "selftest", "known_good.py")) else [
