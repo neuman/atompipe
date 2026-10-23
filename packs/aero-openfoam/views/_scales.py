@@ -58,16 +58,23 @@ UNDER = (128, 128, 128)
 #: covers carries every figure); every 8th (2.3 off).
 STOP_EVERY = 4
 
-#: Cp on [-1.5, 1.0], OpenFOAM's ``static(p)_coeff`` (the ``pressure`` function
+#: Cp on [-1.5, 1.05], OpenFOAM's ``static(p)_coeff`` (the ``pressure`` function
 #: object, mode staticCoeff, pInf 0, the free-stream speed and rhoInf 1): a
 #: pack constant, no summary value, as OpenFOAM did the arithmetic. 1 is the
 #: stagnation value. Measured on the motorBike's L0 body (P0): point Cp -2.73
 #: to 0.98, 0.10% of the area below -1.5, which draws grey and the legend
-#: names. *Rejected:* [-1, 1] (the design's first choice: 0.78% of the area
-#: grey, the helmet's and the arms' suction peaks lost); [-3, 1] (no grey, but
-#: Cp 0 sits at 0.75 of the ramp and the whole body reads one orange,
-#: ``hero_speed_0_2.0.png``); [-2, 1] (one yellow-green body).
-CP_RANGE = (-1.5, 1.0)
+#: names. The top is 1.05, not 1: what slipped through the two branches
+#: (merged 2026-10-23) is that 1.0 is also aero.converged's own default
+#: ceiling (``aero_iter_unc_max_pct``, 1%), its verdict limit, and the spine
+#: refuses a colour range with an end equal to a limit of the entry (a colour
+#: range taken from a limit): on the motorBike demo's first build the hero and
+#: the Cp still were refused, while the tests, which held the ends against C1's
+#: 0.35 alone, stayed green. 1.05 still holds the stagnation value with no
+#: magenta. *Rejected:* [-1.5, 1] (above); [-1, 1] (the design's first choice:
+#: 0.78% of the area grey, the helmet's and the arms' suction peaks lost);
+#: [-3, 1] (no grey, but Cp 0 sits at 0.75 of the ramp and the whole body reads
+#: one orange, ``hero_speed_0_2.0.png``); [-2, 1] (one yellow-green body).
+CP_RANGE = (-1.5, 1.05)
 #: |U| on [0, 2.0] times the summary's ``u_inf_m_s``: the free stream sits at
 #: the middle of the ramp (green), the wake reads blue, and nothing measured
 #: lies past the top. Measured on OpenFOAM's tracks at L0 (P0): at most 1.38
@@ -78,11 +85,13 @@ CP_RANGE = (-1.5, 1.0)
 #: a ratio |U|/U_inf on the legend (a division the pack would compute: the
 #: ticks are values of OpenFOAM's ``mag(U)`` in m/s).
 SPEED_FACTORS = (0.0, 2.0)
-#: CpT on [-0.2, 1.0], OpenFOAM's ``total(p)_coeff``: 1 is air with all of its
+#: CpT on [-0.2, 1.05], OpenFOAM's ``total(p)_coeff``: 1 is air with all of its
 #: free-stream energy, 0 the edge of the wake surface. Measured on the L0
-#: cuts: -0.115 to 1.040. *Rejected:* [0, 1] (the cut through the seat's wake
-#: holds values below 0: grey patches).
-CPT_RANGE = (-0.2, 1.0)
+#: cuts: -0.115 to 1.040, so 1.05 holds the top with no magenta. *Rejected:*
+#: [-0.2, 1] (its top is aero.converged's default verdict limit, 1%, and the
+#: spine refuses the cuts whole: see `CP_RANGE`); [0, 1] (the cut through the
+#: seat's wake holds values below 0: grey patches).
+CPT_RANGE = (-0.2, 1.05)
 #: The cuts hide the air with CpT above this: the free stream, which would fill
 #: each plane from wall to wall in one red. A drawing choice, which the caption
 #: states. Measured on L0: kept 310, 275 and 307 cells of about 1330 a cut.
@@ -136,8 +145,10 @@ CUTS_CAMERA = {"focal": [1.0, 0.0, -0.1], "azimuth_deg": -35.0, "elevation_deg":
 #: ``points`` seeds from ``start`` to ``end``, each a fraction of (L, W, H)
 #: from the box's minimum corner, x before the box. The centre rake rises
 #: through the middle of the bike; the far one runs beside its far side. The
-#: gate seeds its function objects from these (``rakes``), so the picture's
-#: tracks are where this file says. *Rejected:* a horizontal rake
+#: gate seeds its function objects from its own copy (``gates/_fo.RAKES``: a
+#: pack's views/ and gates/ load nothing from each other), and
+#: ``TheViewsReadWhatTheGateWrites`` holds the two equal on two boxes, so the
+#: picture's tracks are where this file says. *Rejected:* a horizontal rake
 #: (``hero_cull_grad.png``: a flat sheet through the bike) and a near-side rake
 #: (it hid the body, ``d_hero.png``). Measured on L0: 60 + 18 tracks, 68 441
 #: points. (P0 seeded the centre rake about y = 0, 9 mm from the middle of the
@@ -165,7 +176,10 @@ GLTF = {"body_reduction": 0.75, "track_reduction": 0.95, "sides": 4}
 SIZE = (1600, 1000)
 #: At most this many intervals between a legend's ticks (matplotlib's
 #: ``MaxNLocator``, in the scene): Cp -1.5 to 1 by 0.5, speed 0 to 40 by 10.
-TICK_BINS = 5
+#: *Rejected:* 5 (with Cp's top at 1.05 the locator's 0.5 steps need six
+#: intervals, and it fell back to steps of 1: a legend of -1, 0 and 1 only,
+#: measured 2026-10-23).
+TICK_BINS = 6
 
 #: How the lit pictures look (design 6.1, each measured on d_hero3): the light
 #: kit's key light at warmth 0.5 (white: the hue survives the light), FXAA on

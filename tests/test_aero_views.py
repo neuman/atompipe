@@ -43,6 +43,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_aero_views.py
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import json
 import os
@@ -83,8 +84,19 @@ TURBO_JSON = os.path.join(VIEWS, "turbo.json")
 
 
 def _views() -> site_mod.ViewRegistry:
+    """The pack's views as a build loads them, and the two it registers with
+    their gates in P6 (``flow3d.LATER``), so their drawing is held now."""
     registry = site_mod.ViewRegistry()
     cli._load_viewgens(VIEWS, registry, pack="aero-openfoam", root=REPO)
+    module = sys.modules[registry.get("aero.hero")[1].__module__]
+    for kwargs, fn in module.LATER.values():
+        # A wrapper, never ``fn`` itself: ``viewgen`` sets ``view_spec`` on the
+        # function it decorates, and the loader finds a viewgen by that
+        # attribute on the cached module, so the next load would register the
+        # two and ``pack validate`` refuse the pack (what slipped through: the
+        # full suite's PacksValidate, after this file ran).
+        site_mod.viewgen(registry=registry, pack="aero-openfoam",
+                         **kwargs)(functools.wraps(fn)(lambda ctx, _fn=fn: _fn(ctx)))
     return registry
 
 
@@ -132,7 +144,8 @@ def make_entries(root: str, *, summary_edit=None) -> dict:
               for k, (c, lv) in enumerate(zip(cells, runs["ladder"]))]
     plan = {GATE: (("body", "tracksCentre", "tracksFar", "wake", "cut1", "cut2", "cut3"),
                    {"u_inf_m_s": U_INF, "ground_z_m": 0.0, "mesh_level": "base",
-                    "cda_history": history, "window": 100, "u_i": _half_range(history, 100)}),
+                    "history": "history.csv", "window": 100,
+                    "u_i_m2": _half_range(history, 100)}),
             WALL_GATE: (("yplus",), {}),
             LADDER_GATE: ((), {"levels": levels})}
     files_of = _flow3d().FILES
@@ -150,16 +163,33 @@ def make_entries(root: str, *, summary_edit=None) -> dict:
         summary = {**extra}
         if roles:
             summary["fields"] = {"stage": f"<out>/{folder}/case", "time": TIME, "sha256": shas}
+        if gate == GATE:
+            summary["cda_history"] = history
         if summary_edit is not None:
             summary_edit(gate, summary)
         os.makedirs(run, exist_ok=True)
+        files = {}
+        rows = summary.pop("cda_history", None)
+        if rows is not None:
+            # As aero.converged writes it: a CSV beside summary.json, never a
+            # list inside it (the gate's `_history`).
+            csv_path = os.path.join(run, "history.csv")
+            with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+                fh.write("iteration,cda_m2\n")
+                fh.writelines(f"{it},{v!r}\n" for it, v in rows)
+            files[os.path.relpath(csv_path, out).replace(os.sep, "/")] = csv_path
         path = os.path.join(run, "summary.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(summary, fh, indent=1)
-        files = {os.path.relpath(path, out).replace(os.sep, "/"): path}
+        files[os.path.relpath(path, out).replace(os.sep, "/")] = path
         entries[gate] = (site_mod.BoundEntry(gate=gate, name="0" * 16 + "-" + "0" * 8,
                                              fresh=True, files=files), files)
     return entries
+
+
+def _summary_of(files: dict) -> str:
+    """The summary.json among an entry's files (beside it, the history CSV)."""
+    return next(p for p in files.values() if p.endswith("summary.json"))
 
 
 def bound_context(root: str, entries: dict, view_id: str, scratch: str):
@@ -179,8 +209,17 @@ def draw(root: str, entries: dict, view_id: str, scratch: str):
     spec, fn = _views().get(view_id)
     ctx = bound_context(root, entries, view_id, scratch)
     view, note = site_mod.run_viewgen(spec, fn, ctx)
-    refusal = site_mod._figure_refusal(spec, view, ctx, [0.35]) if view is not None else None
+    refusal = site_mod._figure_refusal(spec, view, ctx, list(LIMITS)) if view is not None else None
     return view, note, ctx, refusal
+
+
+#: The limits the spine holds every figure's colour ends against
+#: (`site._gate_limits`): D1's 0.35 m^2 on C1, and the entry's own verdict limit,
+#: aero.converged's default ceiling of 1 (%). What slipped through the two
+#: branches: these tests held the ends against 0.35 alone, Cp's and CpT's tops
+#: were 1.0, and the demo's first build refused the hero, the Cp still and the
+#: cuts as "a colour range taken from a limit".
+LIMITS = (0.35, 1.0)
 
 
 def _turbo_rows():
@@ -305,8 +344,8 @@ class TheJobIsThePacksConstants(_env.EnvCase):
         job = self.job("hero", gltf="field.gltf")
         self.assertEqual(job["preset"], "Turbo")
         self.assertEqual((tuple(job["over"]), tuple(job["under"])), (OVER, UNDER))
-        self.assertEqual(job["ranges"], {"cp": [-1.5, 1.0], "speed": [0.0, 2.0 * U_INF],
-                                         "cpt": [-0.2, 1.0]})
+        self.assertEqual(job["ranges"], {"cp": [-1.5, 1.05], "speed": [0.0, 2.0 * U_INF],
+                                         "cpt": [-0.2, 1.05]})
         self.assertEqual(job["bands"], [0.0, 5.0, 30.0, 300.0])
         self.assertEqual(job["cut_clip"], 0.95)
         self.assertEqual(job["size"], [1600, 1000])
@@ -448,7 +487,7 @@ class ChartsNeedNoTool(_env.EnvCase):
     def test_a_window_that_is_not_the_gates_draws_no_chart(self):
         def edit(gate, summary):
             if gate == GATE:
-                summary["u_i"] *= 1.5
+                summary["u_i_m2"] *= 1.5
         view, _note, ctx, _r = self.chart("aero.history", make_entries(self.tmp(), summary_edit=edit))
         self.assertIsNone(view)
         self.assertTrue(any("not the window the gate judged" in n for n in ctx.notes), ctx.notes)
@@ -457,7 +496,7 @@ class ChartsNeedNoTool(_env.EnvCase):
         def edit(gate, summary):
             if gate == GATE:
                 summary["cda_history"] = summary["cda_history"][:50]
-                summary.pop("u_i")
+                summary.pop("u_i_m2")
         view, _note, ctx, _r = self.chart("aero.history", make_entries(self.tmp(), summary_edit=edit))
         self.assertIsNone(view)
         self.assertTrue(any("never filled" in n for n in ctx.notes), ctx.notes)
@@ -548,7 +587,7 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
         self.assertEqual(view.meta["light"], "scene")
         self.assertNotIn("scale", view.meta)
         (cp, speed) = view.meta["scales"]
-        self.assertEqual((cp["on"], cp["lo"], cp["hi"]), ("surface", -1.5, 1.0))
+        self.assertEqual((cp["on"], cp["lo"], cp["hi"]), ("surface", -1.5, 1.05))
         self.assertEqual((speed["on"], speed["lo"], speed["hi"]), ("lines", 0.0, 2.0 * U_INF))
         self.assertEqual([t["value"] for t in speed["ticks"]], [0.0, 10.0, 20.0, 30.0, 40.0])
         self.assertEqual(page.scales_problem(None, view.meta["scales"], view.meta["light"]), "")
@@ -569,7 +608,7 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
             self.draw(view_id)
         entry_shas = {}
         for gate, (_entry, files) in self.entries.items():
-            with open(next(iter(files.values())), encoding="utf-8") as fh:
+            with open(_summary_of(files), encoding="utf-8") as fh:
                 entry_shas.update((json.load(fh).get("fields") or {}).get("sha256") or {})
         for call in self.scenes():
             self.assertTrue(call["scene_files"])
@@ -579,7 +618,7 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
 
     def test_another_runs_file_draws_nothing_and_says_why(self):
         _entry, files = self.entries[GATE]
-        with open(next(iter(files.values())), encoding="utf-8") as fh:
+        with open(_summary_of(files), encoding="utf-8") as fh:
             stage = json.load(fh)["fields"]
         body = os.path.join(self.root, ".nopekit", "out", "aero_converged", "case",
                             *_flow3d().FILES["body"].format(time=TIME).split("/"))
@@ -634,6 +673,102 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
 
 
 #: Each picture's scene, as the stand-in names its committed files.
+@unittest.skipIf(os.name == "nt", "the stand-ins are #! scripts")
+class TheViewsReadWhatTheGateWrites(_env.EnvCase):
+    """aero.converged run through the stand-in OpenFOAM (``tests/_aero_standin.py``),
+    and its own summary, history and picture files handed to every view bound
+    to it, as the spine hands them: the contract in flow3d.py's docstring is
+    what the gate writes, not a copy of it typed into `make_entries`. What
+    slipped through the two branches (merged 2026-10-23): each side's tests
+    held its own picture of summary.json, the views read ``cda_history`` and
+    ``u_i`` and the gate wrote ``history.csv`` and ``u_i_m2``, and every test
+    stayed green while the history chart drew nothing on a real run."""
+
+    def setUp(self):
+        super().setUp()
+        import test_aero_openfoam as gate_tests
+        from nopekit import gates as gates_mod, store
+        from nopekit.models import Ledger, ProjectMeta
+        self.root = self.tmp()
+        _root, bin_dir = gate_tests.install_standin(self.tmp())
+        with open(os.path.join(_root, "standin.json"), "w") as fh:
+            json.dump({}, fh)
+        self.pv = _pv()
+        self.pv._identity.cache_clear()
+        self.addCleanup(self.pv._identity.cache_clear)
+        self.stand = pv_standin.install(self.tmp())
+        patch = mock.patch.dict(os.environ, {
+            "PATH": os.pathsep.join((bin_dir, self.stand["bin"], "/usr/bin:/bin")),
+            self.pv.EXTRA_LOCK_ENV: self.stand["extra_lock"]})
+        patch.start()
+        self.addCleanup(patch.stop)
+        registry = gate_tests._registry()
+        out = store.out_dir(self.root)
+        # The out directory a check hands a gate: the project's .nopekit/out,
+        # which the summary's "<out>/" stage is relative to.
+        ctx = gates_mod.GateContext(
+            root=self.root, ledger=Ledger(meta=ProjectMeta(name="aero"),
+                                          claims=gate_tests._claims()),
+            model=None, params=gate_tests._baseline(), out_dir=out, tier=2,
+            log=lambda _m: None, extra={})
+        self.verdict = gates_mod.run_gate(*registry.get(GATE), ctx)
+        self.assertEqual(self.verdict.outcome, "pass", self.verdict.render())
+        files = {os.path.relpath(p, out).replace(os.sep, "/"): p for p in self.verdict.evidence
+                 if os.path.realpath(p).startswith(os.path.realpath(out) + os.sep)}
+        self.entries = {GATE: (site_mod.BoundEntry(gate=GATE, name="0" * 16 + "-" + "0" * 8,
+                                                   fresh=True, files=files), files)}
+
+    def test_every_key_a_view_reads_is_one_the_gate_wrote(self):
+        with open(_summary_of(self.entries[GATE][1]), encoding="utf-8") as fh:
+            summary = json.load(fh)
+        for key in ("u_inf_m_s", "ground_z_m", "fields", "history", "window", "u_i_m2"):
+            self.assertIn(key, summary)
+        f3 = _flow3d()
+        want = {f3.FILES[r].format(time=summary["fields"]["time"])
+                for r in ("body", "tracksCentre", "tracksFar", "wake", "cut1", "cut2", "cut3")}
+        self.assertEqual(want, set(summary["fields"]["sha256"]))
+
+    def test_the_rakes_are_the_gates(self):
+        """``_scales.RAKES`` (what the page says the tracks are seeded from)
+        is where ``_fo.rakes`` seeds OpenFOAM's streamLine, on any box: two
+        copies of one constant, one in gates/ and one in views/, held equal
+        here, not by a load across the two folders."""
+        from nopekit.modelio import load_path
+        fo = load_path(os.path.join(PACK, "gates", "_fo.py"))
+        for box in (((-0.291665, -0.350289, -4.232e-05), (1.75115, 0.332267, 1.35152)),
+                    ((0.0, -0.125, 0.275), (1.0, 0.125, 0.525))):
+            (x0, y0, z0), (x1, y1, z1) = box
+            views = _scales().rakes([x0, x1, y0, y1, z0, z1])
+            for name, (start, end, n) in fo.rakes(box).items():
+                with self.subTest(name=name, box=box):
+                    self.assertEqual(views[name]["points"], n)
+                    for a, b in zip(views[name]["start"] + views[name]["end"],
+                                    list(start) + list(end)):
+                        self.assertAlmostEqual(a, b, places=9)
+
+    def test_the_history_draws_from_the_gates_own_csv(self):
+        view, note, ctx, refusal = draw(self.root, self.entries, "aero.history",
+                                        os.path.join(self.root, "s"))
+        self.assertIsNotNone(view, note or ctx.notes)
+        self.assertEqual(refusal, "")
+        run, window = view.data["series"]
+        self.assertEqual(len(window["points"]), 100)
+        self.assertEqual(run["points"][-1][0], 300)
+
+    def test_every_picture_bound_to_it_draws(self):
+        for view_id in [v for v in PICTURES if BINDS[v] == GATE]:
+            with self.subTest(view_id):
+                view, note, ctx, refusal = draw(self.root, self.entries, view_id,
+                                                os.path.join(self.root, "s"))
+                self.assertIsNotNone(view, note or ctx.notes)
+                self.assertEqual(refusal, "")
+                calls = [c for c in pv_standin.calls(self.stand["prefix"]) if "scene_files" in c]
+                self.assertTrue(calls)
+                with open(_summary_of(self.entries[GATE][1]), encoding="utf-8") as fh:
+                    shas = set(json.load(fh)["fields"]["sha256"].values())
+                self.assertTrue(set(calls[-1]["scene_files"].values()) <= shas)
+
+
 ROLES_SCENE = {"aero.hero": "hero", "aero.surface_cp": "surface_cp", "aero.wake": "wake",
                "aero.wake_cuts": "wake_cuts", "aero.wall": "wall"}
 

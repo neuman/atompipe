@@ -138,6 +138,13 @@ the flow direction, and no limit: a viewgen binds those digests, so a figure
 draws this run and no other. A figure bound to `aero.converged` still shows when
 a later gate fails, beside its claim's status.
 
+The views (`views/flow3d.py`) draw these files with ParaView (`pvbatch62`) and
+OpenFOAM's history with Vega-Lite: `aero.hero` (the body by Cp, the stream
+tracks by speed, lit, with its 3D file), `aero.surface_cp` (Cp, unlit: each
+pixel a colour of the key), `aero.history` (the drag area at each iteration and
+the judged window), `aero.wake` and `aero.wake_cuts`. The colour map is Turbo.
+Without ParaView the pictures are left out and no status moves.
+
 ## The physics, in one paragraph
 
 Drag force F_D = 1/2 rho U^2 CdA. CdA is the force over the dynamic pressure, so
@@ -177,5 +184,6 @@ CdA, is a broken run, not a design.
 | `references/meshing.md` | snappyHexMesh as the pack runs it, the quality limits, the cell cap, the ranks |
 | `references/convergence.md` | iterative uncertainty (ITTC 7.5-03-01-01), drift, the windows P0 measured |
 | `references/wall-treatment.md` | y+ and the wall functions (Spalding), the bands, P0's measurements |
+| `references/rendering.md` | ParaView for the pictures: the build, its checks, Turbo, lit and unlit pictures |
 | `references/motorbike.md` | the motorBike geometry: where it comes from, its licence, its digest, its bounds |
 | `lenses.md` | what to attack before anyone builds from a result |

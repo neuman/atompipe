@@ -40,10 +40,17 @@
     "aero.mesh_quality",
     "aero.converged"
   ],
-  "provides_views": [],
+  "provides_views": [
+    "aero.hero",
+    "aero.surface_cp",
+    "aero.history",
+    "aero.wake",
+    "aero.wake_cuts"
+  ],
   "provides_generators": [],
   "requires_tools": [
-    "openfoam2606"
+    "openfoam2606",
+    "pvbatch62"
   ],
   "requires_python": [],
   "max_tier": 2,

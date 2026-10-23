@@ -15,6 +15,9 @@ and the mesh ladder bound to aero.mesh_independence's.
     aero.wall        the body coloured by y+ in four bands, unlit
     aero.ladder      the drag area on each mesh of the ladder
 
+``aero.wall`` and ``aero.ladder`` are registered with the gates they bind to
+(`LATER`): until then they are drawn in the tests and listed nowhere.
+
 **OpenFOAM computes every field and every geometry; ParaView only draws.**
 Each picture reads the files the gate's function objects wrote (``surfaces``:
 the body, the wake surface, the cuts; ``streamLine``: the tracks), bound by
@@ -45,9 +48,15 @@ by aero.drag_area, so neither draws its limit or a judged point.
 - aero.converged: ``u_inf_m_s``; ``ground_z_m`` (optional: the floor of the
   picture, else the bottom of the body); ``fields`` ``{"stage", "time",
   "sha256": {<path under stage>: <sha256>}}`` naming each file of `FILES`;
-  ``cda_history`` ``[[iteration, CdA in m^2], ...]``; ``window`` (the
-  iterations of the last window, an integer); ``u_i`` (half the range of CdA
-  over the window, m^2).
+  ``history`` (the base name of the entry's evidence CSV, ``iteration,cda_m2``
+  one row per iteration); ``window`` (the iterations of the last window, an
+  integer); ``u_i_m2`` (half the range of CdA over the window, m^2). What
+  slipped through the two branches (merged 2026-10-23): the views read a
+  ``cda_history`` list and ``u_i`` in summary.json, the gate wrote the
+  history as a CSV (a list in a JSON evidence file puts every number of the
+  run in the prose scan's pool) and ``u_i_m2``, so the chart drew nothing on
+  a real run; `TheViewsReadWhatTheGateWrites` now runs the gate's own
+  summary through each view.
 - aero.wall_treatment: ``fields`` as above, naming `FILES` ``yplus``.
 - aero.mesh_independence: ``levels`` ``[{"k", "cells", "h_rel", "cda_m2"}]``,
   and, when the gate computed them, ``cda_ext_m2`` at ``h_rel_ext`` and the
@@ -58,6 +67,7 @@ and no number (the chips beside the figure say the status).
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import importlib.util
 import json
@@ -390,7 +400,24 @@ def wake_cuts(ctx):
                     light="none", scales={"cpt": _scales.cpt})
 
 
-@viewgen(id="aero.wall", kind=ViewKind.IMAGE, title="The wall value y+",
+#: The figures bound to gates this pack does not have yet (aero.wall_treatment
+#: and aero.mesh_independence come with the design's P6): ``{view id: (the
+#: viewgen's arguments, its function)}``. Drawn and tested now, registered with
+#: their gates. What it closes: a figure registered before its gate is one
+#: ``pack validate`` refuses ("a pack's figure draws its own gate's result"),
+#: and a build would list it as never drawn. *Rejected:* registering them with
+#: a stand-in gate (a gate with no negative control is refused, invariant 3).
+LATER: dict = {}
+
+
+def _later(**kwargs):
+    def decorate(fn):
+        LATER[kwargs["id"]] = (kwargs, fn)
+        return fn
+    return decorate
+
+
+@_later(id="aero.wall", kind=ViewKind.IMAGE, title="The wall value y+",
          description=PICTURE_PROVENANCE, evidence_of=WALL_GATE, recipe=RECIPE,
          requires_tools=[_pv.WRAPPER], order=60)
 def wall(ctx):
@@ -403,6 +430,27 @@ def wall(ctx):
 # --------------------------------------------------------------------------- #
 # the charts
 # --------------------------------------------------------------------------- #
+def _cda_history(ctx, summary: dict) -> list:
+    """``[[iteration, CdA in m^2], ...]`` from the entry's history CSV (the
+    file summary.json's ``history`` names, verified with the entry), or []
+    when there is none. A row whose numbers do not read is left out, never
+    replaced (cfd-openfoam's ``settle`` rule)."""
+    name = summary.get("history")
+    path = ctx.entry.path(name) if isinstance(name, str) and name else None
+    if path is None:
+        return []
+    out = []
+    with open(path, encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            try:
+                it, cda = int(row["iteration"]), float(row["cda_m2"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(cda):
+                out.append([it, cda])
+    return out
+
+
 @viewgen(id="aero.history", kind=ViewKind.CHART,
          title="How the drag area settled on the base mesh",
          description=CHART_PROVENANCE, evidence_of=GATE, order=30)
@@ -415,8 +463,7 @@ def history(ctx):
     summary = _summary(ctx, GATE)
     if summary is None:
         return None
-    rows = [r for r in summary.get("cda_history") or ()
-            if isinstance(r, (list, tuple)) and len(r) == 2 and all(_number(v) for v in r)]
+    rows = _cda_history(ctx, summary)
     window = summary.get("window")
     if not rows or not isinstance(window, int) or isinstance(window, bool) or window < 2:
         ctx.note(f"the summary of this result holds no drag area history and window: "
@@ -429,7 +476,7 @@ def history(ctx):
     judged = rows[-window:]
     values = [r[1] for r in judged]
     top, bottom = max(values), min(values)
-    u_i = summary.get("u_i")
+    u_i = summary.get("u_i_m2")
     if _number(u_i) and not math.isclose(0.5 * (top - bottom), u_i, rel_tol=1e-6,
                                          abs_tol=1e-15):
         ctx.note(f"the history's last {window} iterations are not the window the gate "
@@ -450,7 +497,7 @@ def history(ctx):
                 meta={"caption": HISTORY_CAPTION})
 
 
-@viewgen(id="aero.ladder", kind=ViewKind.CHART, title="The drag area on each mesh",
+@_later(id="aero.ladder", kind=ViewKind.CHART, title="The drag area on each mesh",
          description=CHART_PROVENANCE, evidence_of=LADDER_GATE, order=70)
 def ladder(ctx):
     """``levels[].cda_m2`` against ``levels[].h_rel``, each point named by its
