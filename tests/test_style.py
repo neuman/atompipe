@@ -227,7 +227,8 @@ class EveryBakedKeyIsClassified(_env.EnvCase):
         self.assertEqual(style_problems(words), [])
         said = {where.rsplit(".", 1)[-1] for where, _text in words}
         for key in ("currency_word", "drawn_text", "caption", "alt", "binding_text",
-                    "live_word", "margin_text", "over_word", "source_text", "label"):
+                    "live_word", "margin_text", "over_word", "source_text", "label",
+                    "on_word", "flat_word"):
             self.assertIn(key, said)
 
     def test_a_planted_key_is_caught(self):
@@ -241,7 +242,7 @@ def _figure_rows(case: unittest.TestCase) -> list[dict]:
     """Three figures as `page.figure_row` bakes them, from sidecars and a cache
     entry written in a temporary root: a current still with a live 3D file,
     an older still, and a chart beside its floor row."""
-    from test_figures import SCALE
+    from test_figures import SCALE, SCALES
     root = tempfile.mkdtemp(prefix="nopekit-figure-keys-")
     case.addCleanup(_env._rmtree, root)
     gate, now, then = "g.one", "1" * 16 + "-" + "a" * 8, "2" * 16 + "-" + "b" * 8
@@ -256,7 +257,7 @@ def _figure_rows(case: unittest.TestCase) -> list[dict]:
         json.dump({"series": {"value": [[1.0, 2.0]]}, "y": {"units": "Pa"}}, fh)
     row = {"name": "x", "sha256": "0" * 64, "bytes": 70}
 
-    def still(view: str, entry: str, currency: str) -> page.BoundFigure:
+    def still(view: str, entry: str, currency: str, lit: bool = False) -> page.BoundFigure:
         sidecar = {"view": view, "gate": gate, "entry": entry, "kind": "image",
                    "files": {"image": {**row, "name": view + ".0.png"},
                              "field": {**row, "name": view + ".0.glb", "live": True}},
@@ -264,6 +265,9 @@ def _figure_rows(case: unittest.TestCase) -> list[dict]:
                    "alt": "A strip of colour from blue to yellow.", "scale": SCALE,
                    "marks": [{"at": 0.25, "text": "the upstream plane"}],
                    "tool": {"name": "draw", "accepted_by": "environment"}}
+        if lit:
+            # design P2: two scales and a light, with the 3D view's toggle
+            sidecar.update(schema=2, scale={}, scales=SCALES, light="scene")
         return page.BoundFigure(view, "image", gate, "The speed", "A tool drew it.",
                                 page.Figure(view, gate, now, entry, currency, sidecar, ()))
 
@@ -278,7 +282,7 @@ def _figure_rows(case: unittest.TestCase) -> list[dict]:
              "compared": False, "margin_text": "80% inside the limit"}
     return [page.figure_row(root, fig, claim=None, floor_row=floor, chips=chip, outcome="pass")
             for fig in (still("g.speed", now, "current"), still("g.old", then, "older"),
-                        chart_fig)]
+                        chart_fig, still("g.hero", now, "current", lit=True))]
 
 
 # --------------------------------------------------------------------------- #

@@ -99,11 +99,14 @@ canvas { display: block; width: 100%; height: 100%; }</style>
 <script type="module">
 import { createViewer } from "./lib/viewer3d.js";
 const query = new URLSearchParams(location.search);
-const lit = query.get("mode") === "lit";
+const mode = query.get("mode");
+const lit = mode === "lit";
+const scene = mode === "scene" || mode === "flat";
 createViewer({ host: document.getElementById("v"),
   view: { id: "f", kind: lit ? "model3d" : "field", src: query.get("src") || "field.glb",
           meta: {} },
-  field: !lit,
+  field: !lit, light: scene ? "scene" : "",
+  onReady: (api) => { if (mode === "flat") api.setFlat(true); },
   onError: () => { document.body.style.background = "#ff0000"; } });
 </script></body></html>
 """
@@ -250,8 +253,10 @@ def stop_viewer(site: str, server) -> None:
 def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
           size: tuple[int, int] = (480, 360)) -> str:
     """The path of a headless Chromium screenshot of ``src`` drawn in the
-    field mode, or in the model mode (lights, shading) when ``mode`` is
-    ``lit``. The page goes red when the viewer reports an error."""
+    field mode, in the model mode (lights, shading) when ``mode`` is ``lit``,
+    in the lit field mode when it is ``scene``, and in the lit field mode
+    with its flat colours on when it is ``flat`` (design P2). The page goes
+    red when the viewer reports an error."""
     out = os.path.join(case.tmp(), f"{mode}.png")
     profile = case.tmp()
     url = f"http://127.0.0.1:{server.server_address[1]}/index.html?mode={mode}&src={src}"
@@ -314,6 +319,86 @@ class TheBrowserDrawsTheField(_ViewerPage):
         counts = self.shot("lit")
         self.assertTrue(any(n < MIN_PIXELS for n in counts),
                         f"the lit drawing kept every colour of the ramp: {counts}")
+
+
+#: The lit field's four colours (design P2): saturated, each of its own hue
+#: and below full brightness, so light and shade move each byte and keep
+#: its hue.
+LIT_RAMP = ((200, 40, 40), (40, 170, 60), (40, 90, 200), (150, 60, 170))
+
+#: The tilt of each of the lit strip's four quads about its long side, in
+#: degrees: each face meets the lights at its own angle.
+LIT_TILTS = (-35, -12, 12, 35)
+
+
+def lit_glb() -> bytes:
+    """Four unit quads in a row, each tilted by its `LIT_TILTS` angle and in
+    one colour of `LIT_RAMP`, as trimesh exports a mesh with vertex colours
+    and no normals (ParaView's glTF holds none)."""
+    import math
+    import numpy
+    import trimesh
+    vertices, faces, colours = [], [], []
+    for i, (rgb, tilt) in enumerate(zip(LIT_RAMP, LIT_TILTS)):
+        c, s = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+        base = len(vertices)
+        vertices += [[i, 0, 0], [i + 1, 0, 0], [i + 1, c, s], [i, c, s]]
+        faces += [[base, base + 1, base + 2], [base, base + 2, base + 3]]
+        colours += [list(rgb) + [255]] * 4
+    mesh = trimesh.Trimesh(vertices=numpy.array(vertices, dtype=float),
+                           faces=numpy.array(faces), process=False,
+                           vertex_colors=numpy.array(colours, dtype=numpy.uint8))
+    return mesh.export(file_type="glb")
+
+
+def hue_counts(png: str, colours=LIT_RAMP, *, within: float = 12.0,
+               saturation: float = 0.25) -> list[int]:
+    """For each of ``colours``, the pixels of ``png`` whose hue is within
+    ``within`` degrees of its hue, at a saturation of at least
+    ``saturation``: a colour drawn lighter or darker, never another colour."""
+    import colorsys
+
+    def hs(rgb):
+        h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in rgb))
+        return h * 360, s
+
+    want = [hs(rgb)[0] for rgb in colours]
+    counts = [0] * len(colours)
+    for p in _pixels(png):
+        h, s = hs(p)
+        if s < saturation:
+            continue
+        for k, target in enumerate(want):
+            if min(abs(h - target), 360 - abs(h - target)) <= within:
+                counts[k] += 1
+    return counts
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsALitField(_ViewerPage):
+    """(design P2) A lit field (``light: "scene"``) is drawn with lights and
+    shade, its hue the file's colours; its "Flat colours" toggle draws each
+    colour as the file holds it, within 2, as the key shows it. The lit
+    drawing is not held to the bytes: it must differ from them, so the flat
+    check can fail."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"lit.glb": lit_glb()}
+
+    def test_the_flat_toggle_shows_the_bytes_the_file_holds(self):
+        counts = drawn_counts(self.shot("flat", "lit.glb"), LIT_RAMP)
+        for rgb, n in zip(LIT_RAMP, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+    def test_the_lit_mode_shades_and_keeps_each_hue(self):
+        png = self.shot("scene", "lit.glb")
+        counts = drawn_counts(png, LIT_RAMP)
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the lit drawing kept every byte of the file: {counts}")
+        hues = hue_counts(png)
+        for rgb, n in zip(LIT_RAMP, hues):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb}'s hue is drawn on {n} pixels: {hues}")
 
 
 #: ParaView 6.2.0's own glTF of seven bands of known values on the
@@ -521,6 +606,125 @@ class TheLegendAndTheMarksSitOnTheirValues(_env.EnvCase):
             words = sorted(box["marks"], key=lambda m: m["left"])
             for a, b in zip(words, words[1:]):
                 self.assertLessEqual(a["right"], b["left"], "two plane words overlap")
+
+
+#: A page that mounts `figureLegends` from ``lib/figures.js`` with
+#: ``page.css`` in the dark theme, for a figure of two scales (design P2), in
+#: a box 1000 px wide and in one of a phone's column (390 px less two 16 px
+#: gutters), and writes each legend's box, its glyph and the box's overflow
+#: into ``#out``.
+LEGENDS = """<!doctype html>
+<html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="page.css">
+<style>body { margin: 0; padding: 16px; } .box { margin-bottom: 40px; }</style>
+</head><body><pre id="out">pending</pre>
+<script type="module">
+import { figureLegends } from "./lib/figures.js";
+const FIG = __FIG__;
+const out = [];
+for (const width of [1000, 358]) {
+  const box = document.createElement("div");
+  box.className = "box";
+  box.style.width = width + "px";
+  document.body.appendChild(box);
+  box.appendChild(figureLegends(FIG));
+  const rect = (e) => { const r = e.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  const legends = [...box.querySelectorAll(".fig-legend")].map((l) => ({ ...rect(l),
+    glyph: (l.querySelector(".fig-on") || {}).className || "",
+    label: (l.querySelector(".fig-on") || { getAttribute: () => "" }).getAttribute("aria-label"),
+    title: (l.querySelector(".fig-legend-title") || {}).textContent || "" }));
+  out.push({ width, box: rect(box), legends, overflow: box.scrollWidth - box.clientWidth,
+             page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+             ink: getComputedStyle(box.querySelector(".fig-legend-title")).color });
+}
+document.getElementById("out").textContent = JSON.stringify(out);
+</script></body></html>
+"""
+
+#: The two scales as `page.figure_row` bakes them: each with its ``on`` and
+#: the words of its glyph.
+LEGENDS_FIG = {"scales": [
+    {**LAYOUT_FIGS[1]["scale"], "on": "surface", "on_word": "On the surface"},
+    {**LAYOUT_FIGS[0]["scale"], "on": "lines", "on_word": "On the lines"}]}
+
+
+@unittest.skipIf(_browser() is None, "not walked: no headless Chromium under "
+                                     "~/.cache/ms-playwright/ (build 1228)")
+class TheLegendsOfSeveralScalesFit(_env.EnvCase):
+    """(design P2) A figure's two legends, in a real browser with the real
+    ``page.css`` in the dark theme: side by side in a wide box, stacked in a
+    phone's column, never past the box's edge, each with its glyph (a swatch
+    for the surface, a line for the lines) and the words that name it."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        site = tempfile.mkdtemp(prefix="nopekit-legends-")
+        cls.addClassCleanup(shutil.rmtree, site, True)
+        os.makedirs(os.path.join(site, "lib"))
+        for rel, text in _template.template_files(".js").items():
+            if rel.startswith("lib/"):
+                with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        with open(os.path.join(site, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write(_template.template_files(".css")["page.css"])
+        with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write(LEGENDS.replace("__FIG__", json.dumps(LEGENDS_FIG)))
+        handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+        server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.server_close)
+        cls.addClassCleanup(server.shutdown)
+        browser = _browser()
+        profile = tempfile.mkdtemp(prefix="nopekit-legends-profile-")
+        cls.addClassCleanup(shutil.rmtree, profile, True)
+        shell = browser.endswith("chrome-headless-shell")
+        done = _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+                         "--force-device-scale-factor=1", "--window-size=1200,1200",
+                         "--virtual-time-budget=5000", f"--user-data-dir={profile}",
+                         "--dump-dom",
+                         f"http://127.0.0.1:{server.server_address[1]}/index.html"],
+                        cwd=profile, timeout=120)
+        import html
+        import re
+        found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
+        cls.measured = json.loads(html.unescape(found.group(1))) if found else None
+        cls.dom = done.stdout[-2000:]
+
+    def setUp(self):
+        super().setUp()
+        self.assertIsInstance(self.measured, list, self.dom)
+        self.wide, self.phone = self.measured
+
+    def test_side_by_side_when_wide_and_stacked_on_a_phone(self):
+        first, second = self.wide["legends"]
+        self.assertAlmostEqual(first["top"], second["top"], delta=1.0)
+        self.assertLessEqual(first["right"], second["left"])
+        first, second = self.phone["legends"]
+        self.assertGreaterEqual(second["top"], first["bottom"])
+
+    def test_nothing_runs_past_the_box(self):
+        for box in self.measured:
+            with self.subTest(width=box["width"]):
+                self.assertLessEqual(box["overflow"], 0)
+                self.assertLessEqual(box["page"], 0)
+                for legend in box["legends"]:
+                    self.assertLessEqual(legend["right"], box["box"]["right"] + 0.5)
+
+    def test_each_legend_names_where_it_is_drawn(self):
+        for box in self.measured:
+            surface, lines = box["legends"]
+            self.assertIn("fig-on--surface", surface["glyph"])
+            self.assertIn("fig-on--lines", lines["glyph"])
+            self.assertEqual((surface["label"], lines["label"]),
+                             ("On the surface", "On the lines"))
+            self.assertTrue(surface["title"].strip().startswith("On the surface: static pressure"),
+                            surface["title"])
+
+    def test_the_dark_theme_reaches_the_legend(self):
+        """The legend's words are the dark theme's ink (page.css's ``--ink-2``
+        under ``data-theme="dark"``), not the light theme's."""
+        self.assertEqual(self.phone["ink"], "rgb(195, 194, 183)")
 
 
 if __name__ == "__main__":

@@ -83,10 +83,32 @@ function sanitise(name) {
  *  *Rejected:* re-encoding the vertex colours into linear values ourselves (a
  *  GLB repacker is code a trusted tool already is); an unlit material with the
  *  renderer's default sRGB output (``KHR_materials_unlit`` alone): it encodes
- *  each raw byte again, and drew 64 as 137 and 128 as 188 (measured). */
+ *  each raw byte again, and drew 64 as 137 and 128 as 188 (measured).
+ *
+ *  LIT FIELD MODE (``light: "scene"``, from the figure's sidecar; design P2):
+ *  a solved field drawn as a scene, the way its still was drawn, so a reader
+ *  reads the shape of the body and the paths of the air. Each mesh gets
+ *  three.js's ``MeshStandardMaterial`` (roughness 0.6, no metal) with its
+ *  vertex colours, under the model mode's three lights; normals are computed
+ *  where the file has none (ParaView's glTF writes none, measured); the first
+ *  view is the file's own camera when it has one, else the box's diagonal.
+ *  Light and shade make a colour darker or lighter than the key's, so the
+ *  viewer keeps the unlit material too, and ``setFlat(true)`` (the "Flat
+ *  colours" toggle) swaps it in: then each pixel is the file's byte, as in
+ *  the plain field mode, and `tests/test_field_browser.py` holds it within 2.
+ *  The output stays ``LinearSRGBColorSpace`` with no tone mapping in both, so
+ *  the toggle changes the material and nothing else. Faces are drawn on both
+ *  sides, lit by the side the camera sees. *Rejected:* ``BackSide`` alone
+ *  (ParaView's front-face cull on the motorBike body): it draws nothing of a
+ *  mesh whose faces wind toward the camera, and which way a file winds is
+ *  the exporter's (P7 checks the motorBike's baffles in the browser); an sRGB
+ *  output for the lit material (the flat toggle would then move every
+ *  colour of the key). */
 export function createViewer({ host, view, onSelect, onReady, onError, onProgress, onSpinStop,
-  field = false }) {
+  field = false, light }) {
   const isField = !!field || (view && view.kind === "field");
+  const lightMode = light !== undefined ? light : ((view && view.meta && view.meta.light) || "");
+  const isLit = isField && lightMode === "scene";
   const state = {
     explode: 0, isolate: null, wireframe: false,
     isolateNodes: null,          // Set of Object3D, or null: `isolateNodes`
@@ -98,6 +120,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     highlights: new Map(),       // node name -> severity
     pins: [],                    // { locator, verdict, object, elem }
     missing: new Set(),          // locator targets this GLB does not contain
+    flat: false,                 // a lit field drawn in its flat colours: `setFlat`
     ready: false, disposed: false,
   };
 
@@ -110,6 +133,8 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
   const basePos = new Map();     // Object3D -> original local position
   const baseMat = new Map();     // Mesh -> original material, for EVERY mesh
   const clones = new Set();      // the materials this viewer cloned, disposed on restore
+  const fieldMats = new Map();   // a lit field's Mesh -> { lit, flat }: `setFlat`
+  let fileCamera = null;         // the file's first camera, a lit field's first view
   let home = null;               // the first framing's direction: `home()`
   let shift = 0;                 // the share of the width the model moves right: `setFrameShift`
 
@@ -155,8 +180,12 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     // Three lights, no environment map: an environment would need a texture the
     // site would have to ship, and a matte three-point rig reads shape better on
     // untextured engineering geometry anyway. A field gets none (field mode,
-    // above): its colours are a scale, and a light would shade them.
-    if (!isField) {
+    // above): its colours are a scale, and a light would shade them. A lit
+    // field (lit field mode, above) gets a rig that turns with the camera, as
+    // ParaView's light kit does, so the side the reader looks at is the lit
+    // side from any first view the file gives.
+    if (isLit) litRig();
+    else if (!isField) {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.5));
       const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(1, 2, 1.6);
       const fill = new THREE.DirectionalLight(0xffffff, 0.7); fill.position.set(-1.4, 0.4, -1);
@@ -193,11 +222,16 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       });
       return;
     }
-    if (isField) unlit(root);
+    if (isLit) litField(root);
+    else if (isField) unlit(root);
     scene.add(root);
     indexNodes();
     readExplodeManifest();
-    if (isField) {
+    if (isLit && state.flat) applyFlat();      // asked for before the file loaded
+    if (isLit) {
+      resize();
+      firstLitView();
+    } else if (isField) {
       // A field is a cut, flat across its thinnest side: the first view looks
       // down on it, tilted 20 degrees so it reads as 3D, and fills the frame
       // (`fitField`). What slipped through (review of P2): the general
@@ -222,7 +256,10 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       const progress = onProgress
         ? (ev) => onProgress(ev.loaded || 0, ev.lengthComputable ? ev.total : 0)
         : undefined;
-      loader.load(src, (gltf) => resolve(gltf.scene || gltf.scenes[0]), progress, reject);
+      loader.load(src, (gltf) => {
+        fileCamera = (gltf.cameras || []).find((c) => c && c.isPerspectiveCamera) || null;
+        resolve(gltf.scene || gltf.scenes[0]);
+      }, progress, reject);
     });
   }
 
@@ -238,6 +275,85 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
         toneMapped: false, side: THREE.DoubleSide });
       for (const m of [].concat(old || [])) m && m.dispose && m.dispose();
     });
+  }
+
+  /** Lit field mode: each mesh gets a lit material and keeps an unlit one,
+   *  both with its vertex colours; normals are computed where the file has
+   *  none. The lit one is shown first. */
+  function litField(object) {
+    object.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const geometry = obj.geometry;
+      const coloured = !!(geometry && geometry.getAttribute("color"));
+      if (geometry && !geometry.getAttribute("normal")) geometry.computeVertexNormals();
+      const old = obj.material;
+      const mats = {
+        lit: new THREE.MeshStandardMaterial({ vertexColors: coloured, roughness: 0.6,
+          metalness: 0, toneMapped: false, side: THREE.DoubleSide }),
+        flat: new THREE.MeshBasicMaterial({ vertexColors: coloured, toneMapped: false,
+          side: THREE.DoubleSide }),
+      };
+      fieldMats.set(obj, mats);
+      obj.material = mats.lit;
+      for (const m of [].concat(old || [])) m && m.dispose && m.dispose();
+    });
+  }
+
+  /** A lit field's lights, children of the camera: a key light above and
+   *  to the left of the reader, a weak fill from below and to the right, and
+   *  an ambient floor. Three.js's lights divide by pi (its physical units),
+   *  so the key and the ambient sum to about pi: a face square to the key is
+   *  drawn near the key's colour, and a face in shade at about a third of it.
+   *  What it closes (measured on the motorBike's glTF, design P2): the model
+   *  mode's rig is fixed in the world, and from ParaView's camera, which looks
+   *  from the other side, every colour drew near black. *Rejected:* a light
+   *  on the camera's axis alone (a headlight flattens the shape the light is
+   *  there to show). */
+  function litRig() {
+    scene.add(camera);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+    const aim = new THREE.Object3D();
+    aim.position.set(0, 0, -1);
+    camera.add(aim);
+    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(-0.6, 1.0, 0.8);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.5); fill.position.set(0.8, -0.4, 0.6);
+    for (const light of [key, fill]) { light.target = aim; camera.add(light); }
+  }
+
+  /** A lit field's flat colours on (the unlit material) or off (the lit). */
+  function applyFlat() {
+    for (const [obj, mats] of fieldMats) {
+      const material = state.flat ? mats.flat : mats.lit;
+      material.wireframe = state.wireframe;
+      obj.material = material;
+      baseMat.set(obj, material);
+    }
+    invalidate();
+  }
+
+  /** A lit field's first view: the file's own camera, when it has one, aimed
+   *  at the point of the box nearest its line of sight; else the box's
+   *  diagonal, as a model is framed. */
+  function firstLitView() {
+    if (!fileCamera) { frameObjects(null); return; }
+    const box = boundsOf(null);
+    if (box.isEmpty()) return;
+    fileCamera.updateWorldMatrix(true, false);
+    const position = new THREE.Vector3().setFromMatrixPosition(fileCamera.matrixWorld);
+    const ahead = new THREE.Vector3(0, 0, -1).transformDirection(fileCamera.matrixWorld);
+    const up = new THREE.Vector3(0, 1, 0).transformDirection(fileCamera.matrixWorld);
+    const centre = box.getCenter(new THREE.Vector3());
+    const reach = Math.max(centre.clone().sub(position).dot(ahead), 1e-3);
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
+    camera.fov = fileCamera.fov || camera.fov;
+    camera.up.copy(up);
+    camera.near = Math.max(reach / 1000, 1e-4);
+    camera.far = (reach + radius) * 100;
+    camera.position.copy(position);
+    controls.target.copy(position).addScaledVector(ahead, reach);
+    camera.updateProjectionMatrix();
+    controls.update();
+    invalidate();
   }
 
   /** Every named node by name (and its sanitised alias), and the material of
@@ -438,7 +554,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     invalidate();
   }
 
-  function frameAll() { if (isField && state.ready) fitField(); else frameObjects(null); }
+  function frameAll() { if (isField && !isLit && state.ready) fitField(); else frameObjects(null); }
 
   /** A field's first view: along its box's thinnest side, tilted 20 degrees
    *  about the longest, at the distance that fits the box's two other sides
@@ -474,6 +590,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
   /** Back to the first framing's angle and distance. */
   function goHome() {
     if (!state.ready || !home) return;
+    if (isLit) { firstLitView(); return; }
     camera.position.copy(controls.target).add(home);
     frameAll();
   }
@@ -629,6 +746,12 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     get nodeNames() { return Array.from(new Set(Array.from(state.nodes.keys()))); },
     get missing() { return Array.from(state.missing); },
     get field() { return isField; },
+    /** Whether this is a lit field (``light: "scene"``), which has flat colours. */
+    get lit() { return isLit; },
+    get flat() { return state.flat; },
+    /** A lit field drawn in its flat colours (each pixel the file's byte, as
+     *  the key shows it), or lit again. Does nothing to any other view. */
+    setFlat(on) { if (!isLit) return; state.flat = !!on; if (state.ready) applyFlat(); },
     setExplode(t) { if (isField) return; state.explode = Math.max(0, Math.min(1, Number(t) || 0)); applyExplode(); },
     setWireframe(on) { state.wireframe = !!on; applyHighlights(); applyVisibility(); },
     isolate(name) { if (isField) return; state.isolate = name || null; state.isolateNodes = null; applyVisibility(); if (name) frameObjects(objectsFor(name)); else frameAll(); },
@@ -699,6 +822,7 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
       for (const clone of clones) clone.dispose && clone.dispose();
       clones.clear();
       for (const [, material] of baseMat) material && material.dispose && material.dispose();
+      for (const [, mats] of fieldMats) { mats.lit.dispose(); mats.flat.dispose(); }
       renderer && renderer.domElement.remove();
     },
   };

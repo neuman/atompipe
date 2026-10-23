@@ -25,6 +25,9 @@
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --drawer-w: 520px;
+  /* A figure's frame (design P2): its radius, and the border of a lit
+     picture, whose light sky would otherwise run into the page. */
+  --fig-radius: 10px; --fig-border: #c9cfd6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -42,6 +45,7 @@
     --skip: #6b7580; --line: #4b5561; --line-strong: #c3cbd4;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.6);
+    --fig-border: #3a424c;
   }
 }
 :root[data-theme="dark"] {
@@ -59,6 +63,7 @@
   --skip: #6b7580; --line: #4b5561; --line-strong: #c3cbd4;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --fig-border: #3a424c;
 }
 
 * { box-sizing: border-box; }
@@ -243,7 +248,7 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
 .fig-table table { border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .fig-table th, .fig-table td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--grid); }
 .fig-still-box { min-width: 0; }
-.fig-still { position: relative; display: block; line-height: 0; border-radius: 10px; overflow: hidden;
+.fig-still { position: relative; display: block; line-height: 0; border-radius: var(--fig-radius); overflow: hidden;
   box-shadow: 0 0 0 1px var(--ring); background: var(--surface-2); }
 .fig-still img { display: block; width: 100%; height: auto; image-rendering: auto; }
 /* A plane's words in a row above the picture, over its baked position, with a
@@ -277,6 +282,19 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
 .fig-swatch-sm { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px;
   box-shadow: 0 0 0 1px var(--ring); }
 .fig-legend-words { color: var(--ink-2); }
+/* Several scales on one figure (design P2): side by side where each legend
+   has 300 px, else stacked, so nothing scrolls sideways on a phone. Each
+   legend's title starts with its glyph: a filled swatch for a surface, a
+   line for lines (the colours are the scale's, so the glyph is ink). */
+.fig-legends { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px 24px; min-width: 0; }
+.fig-on { display: inline-block; vertical-align: middle; margin-right: 2px; }
+.fig-on--surface { width: 14px; height: 10px; border-radius: 2px; background: var(--ink-2); }
+.fig-on--lines { width: 18px; height: 0; border-top: 3px solid var(--ink-2); border-radius: 2px; }
+/* A lit picture (``light: "scene"``) and its 3D view have a border. */
+.fig-lit .fig-still, .fig-lit .fig-viewer { box-shadow: 0 0 0 1px var(--fig-border); border-radius: var(--fig-radius); }
+.fig-flat { justify-self: start; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface);
+  border-radius: 999px; padding: 4px 12px; font-size: 13.5px; cursor: pointer; }
+.fig-flat[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .fig-caption { margin: 0; font-size: 14px; color: var(--ink-2); }
 .fig-turn { justify-self: start; border: 1px solid var(--accent); color: var(--accent); background: var(--surface);
   border-radius: 999px; padding: 5px 14px; font-weight: 600; font-size: 14px; cursor: pointer; }

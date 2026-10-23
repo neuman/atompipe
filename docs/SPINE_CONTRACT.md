@@ -3808,7 +3808,15 @@ def evidence_assets(plan) -> dict            # {gate: [href or "", ...]} for sta
 def evidence_source(root, text, *, ignored=None) -> tuple   # (source, outside, reason):
                                              #   one evidence path, as evidence_plan resolves it
 FIGURES_DIR = "assets/figures"; LIVE_DIR = "assets/live"     # a bound figure's folders
-SIDECAR_SUFFIX = ".view.json"; SIDECAR_SCHEMA = 1; SIDECAR_KEYS: tuple
+SIDECAR_SUFFIX = ".view.json"; SIDECAR_SCHEMA = 2; SIDECAR_KEYS: tuple
+SIDECAR_KEYS_BY_SCHEMA: dict                 # {1: the keys, 2: + scales, light} (design P2):
+                                             #   both read, each with its exact key set
+SCALE_ON = ("surface", "lines"); LIGHTS = ("scene", "none")
+def sidecar_schema(meta) -> int              # 2 when meta states scales or light, else 1:
+                                             #   a one-scale figure's sidecar keeps its bytes
+def scales_problem(scale, scales, light) -> str   # why the colour keys are not of their
+                                             #   shape, or "": the build's refusal and the
+                                             #   reader's, one rule
 FIGURE_ROLES = ("image", "field", "chart")
 FIGURE_CURRENCIES = ("current", "stale", "unseen", "older", "none")
 class Figure(NamedTuple): view; gate; served; entry; currency; sidecar; problems

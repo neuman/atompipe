@@ -2757,10 +2757,18 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
         return f"the inputs moved while the picture was drawn ({moved[0]})"
     meta = view.meta if isinstance(view.meta, Mapping) else {}
     scale = meta.get("scale")
-    if scale is not None:
-        if not isinstance(scale, Mapping):
-            return "its colour scale is not an object"
-        ends = [scale.get(end) for end in ("lo", "hi")]
+    if scale is not None and not isinstance(scale, Mapping):
+        return "its colour scale is not an object"
+    shape = page_logic.scales_problem(scale, meta.get("scales"), meta.get("light"))
+    if shape:
+        return shape
+    # Every scale the figure states, the one ``scale`` and each of
+    # ``scales`` (design P2), is held to the same rule: no end equals a limit
+    # and no source is keyed to one. What it closes before it could slip
+    # through: a second ramp on the hero, its top at the claim's limit, under
+    # a check that read ``scale`` alone.
+    for each in [scale or {}, *(meta.get("scales") or ())]:
+        ends = [each.get(end) for end in ("lo", "hi")]
         for end in ends:
             if isinstance(end, bool) or not isinstance(end, (int, float)):
                 continue
@@ -2769,7 +2777,7 @@ def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
                     continue
                 if math.isclose(float(end), float(limit), rel_tol=1e-9, abs_tol=0.0):
                     return f"a colour range taken from a limit ({end!r})"
-        for source in scale.get("source") or ():
+        for source in each.get("source") or ():
             if isinstance(source, Mapping) and "limit" in str(source.get("key") or "").lower():
                 return f"a colour range taken from a limit ({source.get('key')!r})"
     word = _caption_status(str(meta.get("caption") or ""))
@@ -2826,8 +2834,9 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
         files["chart"] = _put_figure_file(site, folder, spec.id, payload, "chart.json",
                                           written)
     meta = view.meta if isinstance(view.meta, Mapping) else {}
+    schema = page_logic.sidecar_schema(meta)
     sidecar = {
-        "schema": page_logic.SIDECAR_SCHEMA, "view": spec.id, "gate": gate_id, "entry": entry,
+        "schema": schema, "view": spec.id, "gate": gate_id, "entry": entry,
         "kind": ViewKind(spec.kind).value, "recipe": recipe, "files": files,
         "title": str(view.title or spec.title or ""),
         "caption": " ".join(str(meta.get("caption") or "").split()),
@@ -2836,6 +2845,11 @@ def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
         "marks": _json_safe(meta.get("marks") or [], []),
         "tool": _json_safe(meta.get("tool") or {}, {}),
     }
+    if schema >= 2:
+        # Schema 2 (design P2): written only for a figure that states its
+        # scales or its light, so a one-scale figure's sidecar keeps its bytes.
+        sidecar["scales"] = _json_safe(list(meta.get("scales") or []), [])
+        sidecar["light"] = str(meta.get("light") or "")
     target = os.path.join(site, *folder.split("/"), spec.id + page_logic.SIDECAR_SUFFIX)
     ensure_dir(os.path.dirname(target))
     if write_json_if_changed(target, sidecar):
@@ -3036,7 +3050,8 @@ def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution:
         extra["binding"] = {"gate": gate_id, "entry": figure.entry,
                             "currency": figure.currency,
                             "currency_word": page_logic.figure_currency_word(figure.currency)}
-        meta = {key: sidecar[key] for key in ("caption", "alt", "scale", "marks")
+        meta = {key: sidecar[key] for key in ("caption", "alt", "scale", "marks", "scales",
+                                              "light")
                 if sidecar.get(key)}
         shown, _note = _stamp_view(View(id=spec.id, kind=spec.kind,
                                         title=str(sidecar.get("title") or spec.title),

@@ -267,8 +267,14 @@ export function scaleLegend(scale) {
   if (!scale || !(scale.stops || []).length) return null;
   const stops = scale.stops.map((s) => `${s.colour} ${(Number(s.at) * 100).toFixed(2)}%`).join(", ");
   const title = [scale.quantity, scale.units ? `(${scale.units})` : ""].filter(Boolean).join(" ");
-  return el("div", { class: "fig-legend" },
-    title ? el("p", { class: "fig-legend-title", text: title }) : null,
+  // A scale of a figure's `scales` (design P2) names where it is drawn: a
+  // glyph (a filled swatch for a surface, a line for lines) with the baked
+  // words, before its title. A one-scale figure's legend is as it was.
+  const on = scale.on ? el("span", { class: `fig-on fig-on--${scale.on}`, role: "img",
+    "aria-label": scale.on_word || "", title: scale.on_word || "" }) : null;
+  return el("div", { class: scale.on ? "fig-legend fig-legend--on" : "fig-legend" },
+    on ? el("p", { class: "fig-legend-title" }, on, ` ${scale.on_word || ""}${title ? ": " + title : ""}`)
+      : title ? el("p", { class: "fig-legend-title", text: title }) : null,
     el("div", { class: "fig-legend-bar" },
       scale.under ? el("span", { class: "fig-swatch", style: { background: scale.under }, "aria-hidden": "true" }) : null,
       el("div", { class: "fig-ramp", style: { background: `linear-gradient(to right, ${stops})` } },
@@ -284,6 +290,15 @@ export function scaleLegend(scale) {
           scale.over_word ? ` ${scale.over_word}` : "")
       : null,
     scale.source_text ? el("p", { class: "small muted", text: scale.source_text }) : null);
+}
+
+/** Every legend of a figure: one for each of its baked `scales` (design P2),
+ *  in a grid that sets them side by side where the box is wide and stacks
+ *  them where it is not (page.css), else the one legend of its `scale`. */
+export function figureLegends(fig) {
+  const scales = (fig && fig.scales) || [];
+  if (!scales.length) return scaleLegend(fig && fig.scale);
+  return el("div", { class: "fig-legends" }, ...scales.map((s) => scaleLegend(s)));
 }
 
 /** Where a tick's words sit on its mark: centred, or from the mark inward
@@ -354,8 +369,12 @@ function turnButton(fig, build, words) {
       mount(box, frame, src === live && turn.live_word
         ? el("p", { class: "small muted", text: turn.live_word }) : null);
       const api = createViewer({ host: frame, view: { id: fig.id, kind: "field", src, meta: {} },
-        field: true,
-        onReady: (ready) => ready.setSpin(false),
+        field: true, light: fig.light || "",
+        onReady: (ready) => {
+          ready.setSpin(false);
+          const flat = flatToggle(ready, turn.flat_word);
+          if (flat) frame.after(flat);
+        },
         onError: (err) => {
           console.warn("3D view", fig.id, err);
           mount(frame, el("p", { class: "nk-notice", role: "note",
@@ -367,6 +386,21 @@ function turnButton(fig, build, words) {
   return box;
 }
 
+/** The "Flat colours" toggle of a lit 3D view (design P2): pressed, the
+ *  viewer draws each colour as the file holds it, the key's; released, lit.
+ *  None where the viewer is not lit or the bake gave no word. Exported for
+ *  the marketing page's hero. */
+export function flatToggle(api, word) {
+  if (!api || !api.lit || !word) return null;
+  const button = el("button", { class: "fig-flat", type: "button", "aria-pressed": "false", text: word });
+  button.addEventListener("click", () => {
+    const on = button.getAttribute("aria-pressed") !== "true";
+    button.setAttribute("aria-pressed", String(on));
+    api.setFlat(on);
+  });
+  return button;
+}
+
 /** One figure: its title, the chips of the claims its gate covers, the
  *  picture (or the chart), the 3D button, the legend and the caption. A
  *  figure with no file shows its currency sentence alone. */
@@ -375,7 +409,8 @@ function figureBlock(fig, words, build) {
   const drawn = fig.src || fig.data_src || fig.field_src;
   const body = fig.kind === "chart" && fig.data_src ? chartBox(fig, words)
     : fig.kind === "image" && fig.src ? figureStill(fig) : null;
-  return el("figure", { class: `fig fig-${fig.kind} currency-${fig.currency}`, id: `figure-${fig.id}` },
+  return el("figure", { class: `fig fig-${fig.kind} currency-${fig.currency}${fig.light === "scene" ? " fig-lit" : ""}`,
+    id: `figure-${fig.id}` },
     el("figcaption", { class: "fig-head" },
       el("span", { class: "fig-title", text: fig.title || fig.view }),
       figureChips(fig, words)),
@@ -385,7 +420,7 @@ function figureBlock(fig, words, build) {
     // The legend and the caption under the picture they explain, then the 3D
     // view, which the same legend explains (review of P2: the button sat
     // between the still and its legend).
-    fig.kind === "image" ? scaleLegend(fig.scale) : null,
+    fig.kind === "image" ? figureLegends(fig) : null,
     fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null,
     turnButton(fig, build, words),
     fig.tool_word ? el("p", { class: "nk-notice", role: "note", text: fig.tool_word }) : null);

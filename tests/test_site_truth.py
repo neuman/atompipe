@@ -1568,8 +1568,9 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
     def test_the_field_mode_never_tints(self):
         """(issue #15) A field's colours are its data: in field mode the
         viewer's tint, highlight, isolate and explode return at once, the card
-        calls none of them, and the field mode draws with no light, no tone
-        mapping and no conversion of the colours on the way out."""
+        calls none of them, and the field mode draws with no light (unless its
+        figure is lit, design P2), no tone mapping and no conversion of the
+        colours on the way out."""
         import _template
         viewer = _template.js_code(self.sources["lib/viewer3d.js"])
         for verb in ("setExplode(t)", "isolate(name)", "highlight(map)", "isolateNodes(names)",
@@ -1577,9 +1578,15 @@ class TheBrowserComputesNoTruth(unittest.TestCase):
             with self.subTest(verb):
                 at = viewer.index(verb + " {")
                 self.assertRegex(viewer[at:at + 80], r"\{\s*if \(isField\) return;", verb)
+        # The lights are a model's, and a lit field's (design P2: only where
+        # its sidecar says ``light: "scene"``, with its flat colours one
+        # toggle away); a plain field gets none.
         for setting in ("THREE.LinearSRGBColorSpace", "THREE.NoToneMapping",
-                        "new THREE.MeshBasicMaterial", "toneMapped: false", "if (!isField)"):
+                        "new THREE.MeshBasicMaterial", "toneMapped: false",
+                        "if (isLit) litRig();\n    else if (!isField) {"):
             self.assertIn(setting, viewer)
+        self.assertIn('const isLit = isField && lightMode === "scene";',
+                      self.sources["lib/viewer3d.js"])
         figures = _template.js_code(self.sources["lib/figures.js"])
         self.assertNotRegex(figures, r"\.(?:tint|highlight|setExplode|isolate|isolateNodes)\(")
         self.assertIn("field: true", figures)
@@ -1948,7 +1955,10 @@ class TheTemplateShowsWhatItIsGiven(unittest.TestCase):
         self.assertIn("figuresLine(row, words)", self.js["lib/drawer.js"])
         for name in ("page.js", "marketing.js"):
             self.assertIn("figureTag(", self.js[name], name)
-            self.assertIn("scaleLegend(", self.js[name], name)
+            # every legend of the figure: its `scales` (design P2), else its
+            # one `scale` (`figureLegends` in lib/figures.js)
+            self.assertIn("figureLegends(fig)", self.js[name], name)
+        self.assertIn("scaleLegend(fig && fig.scale)", figures)
         self.assertIn("view.binding", self.js["lib/stage.js"])
         css = self.css["page.css"]
         self.assertTrue(any("minmax(0, 1fr)" in b for b in self._rules(css, ".fig-stills")))

@@ -39,7 +39,7 @@ import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
-import { figureTag, scaleLegend, figureStill } from "./lib/figures.js";
+import { figureTag, figureLegends, figureStill, flatToggle } from "./lib/figures.js";
 
 const PHONE = window.matchMedia ? window.matchMedia("(max-width: 759px)") : null;
 
@@ -200,10 +200,15 @@ async function representation(rep, words) {
     pill.hidden = true;
     const box = el("div", { class: "viewer", id: "hero3d" }, frame,
       el("div", { class: "hint", text: "Drag to turn. Scroll to zoom." }), pill);
-    mount(host, box, caption, tag, fig ? scaleLegend(fig.scale) : null);
+    mount(host, box, caption, tag, fig ? figureLegends(fig) : null);
     page.viewer = createViewer({
-      host: frame, view, field: !!fig,
-      onReady: (api) => { pill.hidden = !(explodes && api.canExplode); },
+      host: frame, view, field: !!fig, light: fig ? (fig.light || "") : undefined,
+      onReady: (api) => {
+        pill.hidden = !(explodes && api.canExplode);
+        // A lit figure's flat colours (design P2), as on its card.
+        const flat = flatToggle(api, fig && (fig.turn || {}).flat_word);
+        if (flat) box.after(flat);
+      },
       onError: (err) => {
         page.viewer = null;
         mount(frame, el("div", { class: "rep-empty" },
@@ -220,7 +225,7 @@ async function representation(rep, words) {
   if (rep.kind === "image") {
     mount(host, el("div", { class: fig ? "rep-flat rep-figure" : "rep-flat" },
       fig ? figureStill(fig, view.src) : renderImage(view, [], null)), caption, tag,
-      fig ? scaleLegend(fig.scale) : null,
+      fig ? figureLegends(fig) : null,
       fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null);
     return;
   }

@@ -81,9 +81,11 @@ BANNED_WORDS = ("delve", "robust", "seamless", "crucial", "honest")
 #: representation's ``figure`` and a figure's ``chart`` (P1.4): a figure's
 #: numbers are a picture's (its scale, its marks, its file's size), and a
 #: chart's limit and point are the floor's, which the floor rows already pool.
+#: A figure's ``scales`` (design P2: several colour scales on one picture) are
+#: excluded as its ``scale`` is, each for the same reason.
 POOL_EXCLUDED_KEYS = frozenset({"schema", "outline", "order", "column", "columns", "severity",
-                                "rank", "row", "index", "tier", "bytes", "scale", "marks",
-                                "binding", "figures", "figure", "chart"})
+                                "rank", "row", "index", "tier", "bytes", "scale", "scales",
+                                "marks", "binding", "figures", "figure", "chart"})
 
 #: Keys whose numbers (and every number under them) are counts: how many claims,
 #: gaps or evaluators. A count matches only a number written with no unit, so
