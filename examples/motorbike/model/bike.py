@@ -41,9 +41,9 @@ class Config:
     their scratch only. A copy under the project was the rejected alternative."""
 
     aero_geometry_sha256: str = "8ee223c3c3256cd71da52b80eae6569ccf3167eec6f7c3542f83296a0a777aad"
-    """The sha256 of motorBike.obj.gz in ESI OpenFOAM v2606 (measured in the
-    design's P0, 2026-10-23). Another file at the same path is an error naming
-    both digests: the drag area is of this body, by content."""
+    """The sha256 of motorBike.obj.gz in ESI OpenFOAM v2606 (measured on
+    2026-10-23). Another file at the same path is an error naming both
+    digests: the drag area is of this body, by content."""
 
     aero_body_group: str = "motorBikeGroup"
     """The patch group snappyHexMesh puts the body's 67 regions in (the
@@ -79,11 +79,11 @@ class Config:
     """% of the mean drag area: the largest iterative uncertainty U_I = (max -
     min) / 2 over the last 100 iterations that aero.converged accepts (the
     author's choice, design decision D3: common practice for RANS verification).
-    Measured on the tutorial's base mesh: 0.24% at iteration 1500 (P0)."""
+    Measured on the tutorial's base mesh: 0.24% at iteration 1500 (2026-10-23)."""
 
     aero_timeout_s: float = 3600.0
     """s each OpenFOAM tool may run before it is stopped with every rank, and
-    the gate skips. The base mesh's solve took about 4 min on 10 ranks (P0);
+    the gate skips. The base mesh's solve took about 4 min on 10 ranks (2026-10-23);
     an hour is far past it, so only a hung rank reaches it."""
 
 

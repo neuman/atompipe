@@ -2,7 +2,7 @@
   "statement": "The mean of a steady RANS solution stands for the time-mean drag of the real, unsteady wake",
   "kind": "assumption",
   "authority": "Eric Neuman",
-  "rationale": "simpleFoam finds a steady state; the wake behind a bike and rider sheds eddies. On the finer meshes the drag area does not settle but cycles (P0: 1.0 to 1.7% at the finest), which says the flow is not steady",
+  "rationale": "simpleFoam finds a steady state; the wake behind a bike and rider sheds eddies. On the finer meshes of the tutorial's ladder the drag area does not settle but cycles (1.0 to 1.7% of its mean at the finest, measured on 2026-10-23), which says the flow is not steady",
   "mechanism": {
     "by": "human",
     "how": "An engineer with CFD experience reads the drag history of each mesh and the wake pictures, and judges whether the steady mean is a fair stand-in for the time-mean drag at this accuracy"

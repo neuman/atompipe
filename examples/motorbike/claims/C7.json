@@ -6,7 +6,7 @@
   ],
   "mechanism": {
     "by": "solver",
-    "how": "aero.mesh_independence: three meshes, each block 1.5 times finer, each meshed, guarded and solved; Celik et al. 2008's GCI on the drag area. Until it is in the pack, no evaluator covers this claim. The design's P0 measured the tutorial's ladder as oscillatory (0.3075, 0.2964, 0.3007 m^2), so this claim is expected to fail",
+    "how": "aero.mesh_independence: three meshes, each block 1.5 times finer, each meshed, guarded and solved; Celik et al. 2008's GCI on the drag area. Until it is in the pack, no evaluator covers this claim. Measured on the tutorial's own ladder (2026-10-23): 0.3075, 0.2964 and 0.3007 m^2, a drag area that does not converge in one direction",
     "evaluators": [
       "aero.mesh_independence"
     ]

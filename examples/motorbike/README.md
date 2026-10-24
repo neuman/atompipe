@@ -40,9 +40,9 @@ cache:
 
 | Step | Time | What runs |
 |---|---|---|
-| `check --tier 1` | 2 min 41 s | the four tier-0 reads, surfaceCheck, snappyHexMesh and checkMesh (2 min 22 s) |
-| `check --tier 2 --only aero.converged` | 8 min 51 s | the guards again (2 min 2 s for the mesh), then the base mesh again, potentialFoam and 500 iterations of simpleFoam (6 min 4 s), and the gate's control on the pack's spheroid (32 s) |
-| `site build` | 24 s | the renderer control and five pictures in ParaView, the chart |
+| `check --tier 1` | 1 min 32 s | the three tier-0 reads, surfaceCheck twice (for the Reynolds number's length and for the domain), snappyHexMesh and checkMesh (1 min 25 s) |
+| `check --tier 2 --only aero.converged` | 7 min 33 s | the guards again (1 min 35 s for the mesh), then the base mesh again, potentialFoam and 500 iterations of simpleFoam (5 min 28 s), and the gate's control on the pack's spheroid (30 s) |
+| `site build` | 26 s | the renderer control and five pictures in ParaView, the chart |
 
 Every OpenFOAM gate runs again at each check: its tools read files nopekit cannot
 see, so between checks its claims read *stale*, with that cause.
@@ -58,11 +58,14 @@ see, so between checks its claims read *stale*, with that cause.
 - **C2 to C5 are the guards** of the base-mesh run: the flow is the stated one, the
   box is large enough, the mesh is the one asked for, and the drag area settled.
   They pass.
-- **C1 reads gap.** The base mesh alone does not give the drag area. The judge,
+- **C1 reads gap.** It carries the tag `drag-area`, and no guard covers that tag:
+  a guard judges its own quantity, never the drag area. The base mesh alone does
+  not give the drag area. The judge,
   `aero.drag_area`, comes with the mesh ladder (three meshes and their GCI), with
   C6 (the wall model) and C7 (mesh independence). Until then no evaluator covers
-  them. On the tutorial's own ladder the design measured an oscillatory
-  convergence, so C7 is expected to fail, and C1 with it.
+  them. On the tutorial's own ladder (measured 2026-10-23) the drag area was
+  0.3075, 0.2964 and 0.3007 m^2 on the three meshes: it does not converge in
+  one direction.
 - **A1 and A2 are assumptions**: the wheels do not turn, and a steady solution
   stands for an unsteady wake. Each counts only when the person it names records
   it in their own shell (`nopekit claim physical A1 assume`).
