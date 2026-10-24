@@ -388,6 +388,45 @@ class TheJobIsThePacksConstants(_env.EnvCase):
             self.assertEqual((scale["lo"], scale["hi"]), (0.0, 2.0 * u))
         self.assertIsNone(_scales().speed({}))
 
+    def test_the_wake_is_drawn_from_rest_to_the_free_stream(self):
+        """Review of P3-P5: on the tracks' scale (0 to two free streams) 95%
+        of the wake surface sat in the lowest 27% of the ramp and drew one
+        blue. The wake's job and its key both run from 0 to U_inf."""
+        sc = _scales()
+        scale = sc.wake_speed({"u_inf_m_s": U_INF})
+        self.assertEqual((scale["lo"], scale["hi"]), (0.0, U_INF))
+        self.assertEqual(self.job("wake")["ranges"]["speed"], [0.0, U_INF])
+        self.assertEqual(self.job("hero")["ranges"]["speed"], [0.0, 2.0 * U_INF])
+        self.assertIsNone(sc.wake_speed({}))
+        # The measured spread the range is set from (the demo's L0 wakeIso,
+        # area-weighted): its 95th percentile reaches past half the ramp.
+        self.assertGreaterEqual(11.0 / scale["hi"], 0.5)
+
+    def test_each_alt_text_names_the_side_its_camera_is_on(self):
+        """Review of P3-P5: the wake's alt text said "from the right" from a
+        camera on the bike's left. The bike faces -x with +z up, so its left
+        is -y, and the camera sits at azimuth ``az`` from +x toward +y
+        (``_scene3d.py``)."""
+        import math
+        f3, sc = _flow3d(), _scales()
+        for alt, camera in ((f3.HERO_ALT, sc.HERO_CAMERA), (f3.WAKE_ALT, sc.WAKE_CAMERA)):
+            with self.subTest(alt):
+                az = math.radians(camera["azimuth_deg"])
+                side = "left" if math.sin(az) < 0 else "right"
+                end = "behind" if math.cos(az) > 0 else "front"
+                self.assertIn(f"the {side}", alt)
+                self.assertNotIn("the " + ({"left", "right"} - {side}).pop(), alt)
+                self.assertIn(end, alt)
+
+    def test_each_lit_caption_says_light_moves_the_colours_both_ways(self):
+        """Review of P3-P5: the hero said only "darker", while its specular
+        highlights make the nose and the helmet lighter than the key; the
+        wake, lit too, said nothing."""
+        f3 = _flow3d()
+        for caption in (f3.HERO_CAPTION, f3.WAKE_CAPTION):
+            with self.subTest(caption):
+                self.assertIn("darker or lighter than the colours in the key", caption)
+
     def test_the_captions_are_site_text_of_the_base_mesh_with_no_number(self):
         f3 = _flow3d()
         texts = {"hero": (f3.HERO_CAPTION, f3.HERO_ALT),
@@ -483,6 +522,21 @@ class ChartsNeedNoTool(_env.EnvCase):
         self.assertEqual(window["points"], history[-100:])
         values = [v for _, v in history[-100:]]
         self.assertEqual([r["value"] for r in view.data["rule"]], [max(values), min(values)])
+
+    def test_the_window_lines_carry_no_words_over_the_points(self):
+        """Review of P3-P5: on a phone the spine put "highest in the window"
+        at the right end of its line, and the words ran back over the
+        iterations before the window, hidden by their points. The caption
+        names the two lines; the chart draws no words on them."""
+        view, _note, _ctx, _r = self.chart("aero.history")
+        self.assertTrue(all(not r.get("label") for r in view.data["rule"]), view.data["rule"])
+        spec = page.chart_spec(view.data, None, None)
+        styles = [(layer.get("mark") or {}).get("style") for layer in spec["layer"]
+                  if isinstance(layer.get("mark"), dict)]
+        self.assertIn("nk-rule", styles)
+        self.assertNotIn("nk-rule-label", styles)
+        self.assertIn("The two dotted lines are the highest and the lowest value",
+                      _flow3d().HISTORY_CAPTION)
 
     def test_a_window_that_is_not_the_gates_draws_no_chart(self):
         def edit(gate, summary):
@@ -602,6 +656,20 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
                 view, _note, _ctx, _r = self.draw(view_id)
                 self.assertEqual(view.meta["light"], "none")
                 self.assertEqual(view.meta["scale"]["quantity"], quantity)
+
+    def test_every_lit_picture_warns_that_light_moves_its_colours(self):
+        for view_id in PICTURES:
+            with self.subTest(view_id):
+                view, _note, _ctx, _r = self.draw(view_id)
+                if view.meta["light"] == "scene":
+                    self.assertIn(_flow3d().LIGHT_SENTENCE, view.meta["caption"])
+
+    def test_the_wake_states_its_own_scale_and_is_drawn_on_it(self):
+        view, _note, _ctx, _r = self.draw("aero.wake")
+        (speed,) = view.meta["scales"]
+        self.assertEqual((speed["on"], speed["lo"], speed["hi"]), ("surface", 0.0, U_INF))
+        (job,) = [c["job"] for c in self.scenes() if c["job"].get("scene") == "wake"]
+        self.assertEqual(job["ranges"]["speed"], [0.0, U_INF])
 
     def test_paraview_reads_only_the_bound_files(self):
         for view_id in PICTURES:

@@ -1820,7 +1820,7 @@ class TheScaleIsAPackConstant(_env.EnvCase):
         import inspect
         import test_aero_views as aero
         scales = aero._scales()
-        self.assertEqual(sorted(scales.SCALES), ["cp", "cpt", "speed", "yplus"])
+        self.assertEqual(sorted(scales.SCALES), ["cp", "cpt", "speed", "wake_speed", "yplus"])
         for name, build in scales.SCALES.items():
             with self.subTest(name):
                 self.assertEqual(list(inspect.signature(build).parameters), ["summary"])

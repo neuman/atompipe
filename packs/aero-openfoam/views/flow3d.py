@@ -137,10 +137,15 @@ FILES = {
 PICTURE_PROVENANCE = "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them."
 CHART_PROVENANCE = "OpenFOAM solved the flow. The chart shows the numbers of that run."
 
+#: What every lit picture's caption says. What slipped through P3-P5 (review,
+#: 2026-10-23): the hero said only "darker", while its specular highlights
+#: (``_scales.LOOK``) make the nose and the helmet lighter and whiter than the
+#: key's colour, and the wake, lit too, said nothing.
+LIGHT_SENTENCE = ("Light and shade make some colours darker or lighter than the colours in "
+                  "the key.")
 HERO_CAPTION = ("The air comes from the front of the bike. This picture shows the base mesh. "
                 "The colour on the bike and the rider shows the pressure of the air on the "
-                "surface. The colour on the lines shows the speed of the air. Light and shade "
-                "make some colours darker than the colours in the key.")
+                "surface. The colour on the lines shows the speed of the air. " + LIGHT_SENTENCE)
 HERO_ALT = ("A motorcycle with a rider, seen from the front and the left. Coloured lines show "
             "the paths of the air around them.")
 SURFACE_CAPTION = ("The colour shows the pressure of the air on the surface of the bike and the "
@@ -149,9 +154,9 @@ SURFACE_CAPTION = ("The colour shows the pressure of the air on the surface of t
 SURFACE_ALT = "A motorcycle with a rider, coloured by the pressure of the air on the surface."
 WAKE_CAPTION = ("The surface shows the edge of the wake on the base mesh. In the wake, the air "
                 "has less energy than the air that flows past. The colour shows the speed of "
-                "the air on the surface.")
+                "the air on the surface. " + LIGHT_SENTENCE)
 WAKE_ALT = ("A coloured surface that starts on the bike and the rider and goes back behind "
-            "them, seen from behind and from the right.")
+            "them, seen from behind and from the left.")
 CUTS_CAPTION = ("Each cut is a plane across the flow behind the bike, on the base mesh. The "
                 "colour shows the energy that is left in the air. The picture does not show "
                 "the air that has all of its energy.")
@@ -231,7 +236,8 @@ def job_for(scene: str, files: dict, summary: dict, *, camera: dict,
     """The pvbatch job of one scene: the bound files, the pack's constants
     and the scales' ends. Public for the tests, which draw the twin of the
     hero with the hero's own job."""
-    speed = _scales.speed(summary) or {}
+    # The wake surface has a speed range of its own (`_scales.WAKE_SPEED_FACTORS`).
+    speed = (_scales.wake_speed if scene == "wake" else _scales.speed)(summary) or {}
     job = {"scene": scene, "body": files.get("body", ""),
            "tracks": [files[r] for r in ("tracksCentre", "tracksFar") if r in files],
            "wake": files.get("wake", ""),
@@ -316,6 +322,12 @@ def _picture(ctx, view_id: str, gate: str, scene: str, roles: tuple[str, ...], *
             ctx.note(f"{exc}. {_pv.NO_PICTURES} {_pv.SEE}")
             return None
         job = job_for(scene, files, summary, camera=camera, gltf=gltf and "field.gltf")
+        # The scene draws each field on the ends its legend shows: a figure
+        # with a range of its own (the wake's speed) is never drawn on
+        # another figure's.
+        drawn = {name: job["ranges"].get(name) for name, scale in built.items() if "lo" in scale}
+        if any(drawn[n] != [built[n]["lo"], built[n]["hi"]] for n in drawn):
+            raise _pv.RunError(f"the job draws {drawn}, and the key shows other ends")
         run = os.path.join(work, "run")
         try:
             result = _pv.run(inst, SCENE, job, run)
@@ -385,7 +397,7 @@ def wake(ctx):
     """OpenFOAM's iso-surface of CpT = 0 by speed, lit, the body grey."""
     return _picture(ctx, "aero.wake", GATE, "wake", ("body", "wake"),
                     camera=_scales.WAKE_CAMERA, caption=WAKE_CAPTION, alt=WAKE_ALT,
-                    light="scene", scales={"speed": _scales.speed},
+                    light="scene", scales={"speed": _scales.wake_speed},
                     as_list=(("speed", "surface"),))
 
 
@@ -489,8 +501,14 @@ def history(ctx):
                 {"key": "window", "label": "the window",
                  "points": [[r[0], r[1]] for r in judged]}],
             "judged": False,
-            "rule": [{"value": top, "label": "highest in the window"},
-                     {"value": bottom, "label": "lowest in the window"}],
+            # The two lines carry no words: the caption names them, and the
+            # higher is the highest. What slipped through P3-P5 (review,
+            # 2026-10-23): at a phone's width the spine's words at the right
+            # end ("highest in the window") ran back over the iterations
+            # before the window and were hidden by their points. Rejected:
+            # shorter words (where they fall still depends on the run);
+            # moving them in the spine (every pack's tolerance line moves).
+            "rule": [{"value": top}, {"value": bottom}],
             "x": {"label": "iteration"},
             "y": {"label": "drag area", "units": "m^2", "zero": False}}
     return View(id="aero.history", kind=ViewKind.CHART, data=data,

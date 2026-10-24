@@ -75,16 +75,30 @@ STOP_EVERY = 4
 #: [-3, 1] (no grey, but Cp 0 sits at 0.75 of the ramp and the whole body reads
 #: one orange, ``hero_speed_0_2.0.png``); [-2, 1] (one yellow-green body).
 CP_RANGE = (-1.5, 1.05)
-#: |U| on [0, 2.0] times the summary's ``u_inf_m_s``: the free stream sits at
-#: the middle of the ramp (green), the wake reads blue, and nothing measured
-#: lies past the top. Measured on OpenFOAM's tracks at L0 (P0): at most 1.38
-#: U_inf, 31% of the points within 10% of U_inf; on the wake surface at most
-#: 1.32 U_inf. *Rejected:* (0, 1.3) (the free stream at 0.77 of the ramp: the
+#: |U| on the tracks, on [0, 2.0] times the summary's ``u_inf_m_s``: the free
+#: stream sits at the middle of the ramp (green), the wake reads blue, and
+#: nothing measured lies past the top. Measured on OpenFOAM's tracks at L0
+#: (P0): at most 1.38 U_inf, 31% of the points within 10% of U_inf. The wake
+#: surface has its own range (`WAKE_SPEED_FACTORS`). *Rejected:* (0, 1.3)
+#: (the free stream at 0.77 of the ramp: the
 #: tubes drew one orange, ``hero_speed_0_1.3.png``); (0.4, 1.6) (grey wake
 #: segments, ``hero_speed_0.4_1.6.png``); absolute m/s (fits one speed only);
 #: a ratio |U|/U_inf on the legend (a division the pack would compute: the
 #: ticks are values of OpenFOAM's ``mag(U)`` in m/s).
 SPEED_FACTORS = (0.0, 2.0)
+#: |U| on the wake surface (CpT = 0), on [0, 1.0] times ``u_inf_m_s``: from
+#: air at rest to the free stream. Measured on the demo's L0 wakeIso.vtp
+#: (2026-10-23, area-weighted): median 6.3 m/s, 95% below 11.0 m/s, 99% below
+#: 14.4 m/s, at most 20.3 m/s at U_inf 20, and less than 0.01% of the area above U_inf,
+#: which draws magenta and the legend names. What slipped through P3-P5
+#: (review, 2026-10-23): the wake took the tracks' (0, 2.0), so 95% of the
+#: surface sat in the lowest 27% of the ramp, and the picture read as one
+#: blue shape whose light and shade moved its colours more than its speeds
+#: did (the P0 note "at most 1.32 U_inf on the wake surface" was not
+#: measured on this surface). *Rejected:* (0, 2.0) (above); (0, 0.6) (5% of
+#: the area magenta); a range from the run's own values (a scale that moves
+#: with each result, and a number the pack would compute).
+WAKE_SPEED_FACTORS = (0.0, 1.0)
 #: CpT on [-0.2, 1.05], OpenFOAM's ``total(p)_coeff``: 1 is air with all of its
 #: free-stream energy, 0 the edge of the wake surface. Measured on the L0
 #: cuts: -0.115 to 1.040, so 1.05 holds the top with no magenta. *Rejected:*
@@ -127,12 +141,16 @@ HERO_CAMERA = {"focal": [0.11, 0.0, -0.06], "azimuth_deg": -138.0, "elevation_de
 #: camera, ran off the bottom.
 BODY_CAMERA = {"focal": [0.0, 0.0, -0.08], "azimuth_deg": -138.0, "elevation_deg": 13.0,
                "distance_diag": 1.55, "view_angle_deg": 27.0}
-#: The wake surface, from behind and from the right of the bike: the surface
-#: runs back from the rider toward the camera. From the design's wake.py,
-#: brought nearer (1.6 diagonals, not 1.87).
+#: The wake surface, from behind and from the left of the bike: the surface
+#: runs back from the rider toward the camera. The bike faces -x and +z is up,
+#: so its left is -y, where a negative azimuth puts the camera (as the hero's).
+#: What slipped through P3-P5 (review, 2026-10-23): this comment and the alt
+#: text said "from the right"; a camera moved to match them would mirror the
+#: picture. From the design's wake.py, brought nearer (1.6 diagonals, not
+#: 1.87).
 WAKE_CAMERA = {"focal": [0.3, 0.0, -0.1], "azimuth_deg": -42.0, "elevation_deg": 20.0,
                "distance_diag": 1.6, "view_angle_deg": 30.0}
-#: The three cuts, from behind and from the right, far enough that the third
+#: The three cuts, from behind and from the left, far enough that the third
 #: cut (2.3 L behind the box centre on the motorBike) is in the picture.
 #: *Rejected:* the design's first frame (the third cut out of the picture,
 #: ``d_wake_slices.png``); 55 degrees from the flow (each cut seen nearly edge
@@ -284,6 +302,20 @@ def speed(summary: dict) -> dict | None:
                              "from the bike.")
 
 
+def wake_speed(summary: dict) -> dict | None:
+    """The scale of |U| on the wake surface: `WAKE_SPEED_FACTORS` times the
+    summary's free-stream speed, or None when the summary has none above
+    zero."""
+    u = summary.get("u_inf_m_s") if isinstance(summary, dict) else None
+    if not (_number(u) and u > 0):
+        return None
+    source = [{"key": "u_inf_m_s", "lo": WAKE_SPEED_FACTORS[0], "hi": WAKE_SPEED_FACTORS[1]}]
+    return _ramp(SPEED, WAKE_SPEED_FACTORS[0] * u, WAKE_SPEED_FACTORS[1] * u, source,
+                 over_word="faster than {hi} {units}", under_word="", under=False,
+                 source_text="The scale is from 0 to the speed of the air far from the "
+                             "bike.")
+
+
 def cpt(summary: dict | None = None) -> dict | None:
     """The scale of CpT on the wake cuts: `CPT_RANGE`, constants alone."""
     return _ramp(CPT, CPT_RANGE[0], CPT_RANGE[1], [],
@@ -312,7 +344,7 @@ def yplus(summary: dict | None = None) -> dict:
 
 #: Every scale this pack draws, by name: what `TheScaleIsAPackConstant` walks,
 #: so a scale added here is held to the rule with no test edit.
-SCALES = {"cp": cp, "speed": speed, "cpt": cpt, "yplus": yplus}
+SCALES = {"cp": cp, "speed": speed, "wake_speed": wake_speed, "cpt": cpt, "yplus": yplus}
 
 
 def on(scale: dict, where: str) -> dict:

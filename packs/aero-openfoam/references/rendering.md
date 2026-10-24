@@ -63,8 +63,13 @@ cells exact. The result is kept in `.nopekit/cache/pvbatch/`.
   legend comes from the same file. cfd-openfoam's 2D stills keep Viridis.
 - **The ends of each scale are pack constants** (`views/_scales.py`), or a
   factor times the free-stream speed the gate wrote. No end is a limit.
-  Cp -1.5 to 1.0; speed 0 to 2.0 times the free-stream speed; CpT -0.2 to
-  1.0. Magenta is above a scale, grey below it.
+  Cp -1.5 to 1.05; speed on the tracks 0 to 2.0 times the free-stream
+  speed, and on the wake surface 0 to 1.0 times it; CpT -0.2 to 1.05. Each
+  top is 1.05, not 1, because 1 is `aero.converged`'s own limit (1%) and the
+  site refuses a scale with an end at a limit. The wake has its own speed
+  range because its air is slower than the free stream: on the tracks'
+  range, 95% of its surface was in the lowest 27% of the colours and the
+  picture was one blue. Magenta is above a scale, grey below it.
 - **A lit picture's shade is not the key.** The hero and the wake are lit:
   light and shade make a colour darker or lighter than the colour in the key,
   and their captions say so. The Cp still (`aero.surface_cp`) is unlit: each
