@@ -4,6 +4,7 @@
   "members": [
     "aero_u_inf_m_s",
     "aero_ref_length_m",
-    "aero_sound_speed_m_s"
+    "aero_sound_speed_m_s",
+    "aero_rho_kg_m3"
   ]
 }

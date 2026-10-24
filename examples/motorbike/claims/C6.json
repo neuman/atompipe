@@ -6,7 +6,7 @@
   ],
   "mechanism": {
     "by": "solver",
-    "how": "aero.wall_treatment, with the mesh ladder: OpenFOAM's yPlus on each face of the body, area-weighted. Until it is in the pack, no evaluator covers this claim",
+    "how": "aero.wall_treatment solves the base mesh again with OpenFOAM's yPlus and sums the body's area with y+ at most 300, face by face, held to OpenFOAM's own area and area mean of y+ on the same patches",
     "evaluators": [
       "aero.wall_treatment"
     ]

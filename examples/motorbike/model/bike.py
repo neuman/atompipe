@@ -81,6 +81,27 @@ class Config:
     author's choice, design decision D3: common practice for RANS verification).
     Measured on the tutorial's base mesh: 0.24% at iteration 1500 (2026-10-23)."""
 
+    aero_rho_kg_m3: float = 1.225
+    """kg/m^3: ISA sea-level air (15 degC, 101 325 Pa), R1's "still sea-level
+    air". aero.drag_area reports the drag force with it, F_D = 0.5 rho U^2 CdA
+    (0.35 m^2 is about 86 N at 20 m/s); no gate judges a force, and the drag
+    area itself needs no density (the solver's pressure is kinematic)."""
+
+    aero_ladder_ratio: float = 1.5
+    """The mesh ladder's ratio: each level's background block is 1.5 times
+    finer in every direction, (32 16 12), (48 24 18), (72 36 27), and
+    snappyHexMesh refines every cell with it. The tutorial's own ladder at 1.5
+    gave effective ratios 1.42 and 1.37 from its cells (2026-10-23), past the
+    1.3 Celik et al. 2008 ask. What lost is in PARAMS."""
+
+    aero_gci_max_pct: float = 5.0
+    """% of the finest mesh's drag area: the largest mesh error band (GCI)
+    aero.mesh_independence accepts (the author's choice, design decision D3:
+    common practice for RANS verification). The tutorial's ladder does not
+    converge in one direction (0.3075, 0.2964, 0.3007 m^2, 2026-10-23), so no
+    GCI is computed and C7 reads Failing with that reason, whatever this
+    number is."""
+
     aero_timeout_s: float = 3600.0
     """s each OpenFOAM tool may run before it is stopped with every rank, and
     the gate skips. The base mesh's solve took about 4 min on 10 ranks (2026-10-23);
@@ -102,6 +123,17 @@ PARAMS = [
         {"value": "12", "why": "the tutorial's count; on 7 physical cores it needs "
                                "--oversubscribe, and with other work on the "
                                "machine each rank waits for a core"}]},
+    {"name": "aero_ladder_ratio", "units": "", "rejected": [
+        {"value": "2", "why": "Celik's example ratio; the finest mesh of the "
+                              "motorBike would hold about 22 million cells, past the "
+                              "pack's cap of 20 million"},
+        {"value": "1.3", "why": "the effective ratio from the cells comes out under "
+                                "1.3 (P0's box: 1.25 and 1.29), and the ladder fails "
+                                "before it solves"}]},
+    {"name": "aero_gci_max_pct", "units": "%", "rejected": [
+        {"value": "20", "why": "the pack's selftest baseline states it for its "
+                               "spheroid, whose band at the formal order is 15.7%; a "
+                               "drag area known to 20% does not answer R1's 0.35 m^2"}]},
     {"name": "aero_geometry", "units": "", "rejected": [
         {"value": "a copy under the project", "why": "GPL-3.0-or-later with its origin "
                                                     "not stated; this repository is "

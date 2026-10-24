@@ -13,7 +13,7 @@
   "rationale": "R1's number, fixed before any mesh ladder ran: 0.35 m^2 is about 86 N of drag at 20 m/s in air of 1.225 kg/m^3. The tutorial's base mesh reads 0.31 m^2, which is not the drag area until the mesh ladder says how far it is from the answer at zero cell size",
   "mechanism": {
     "by": "solver",
-    "how": "simpleFoam with k-omega SST on three meshes of the same case, each guarded; the drag area of the finest mesh plus its mesh error band (GCI) and its iterative uncertainty, judged against 0.35 m^2. That judge, aero.drag_area, comes with the mesh ladder. No guard covers the tag drag-area, so until then the claim reads as a gap",
+    "how": "simpleFoam with k-omega SST on three meshes of the same case, each guarded; aero.drag_area judges the drag area of the finest mesh plus its mesh error band (GCI) and its iterative uncertainty against 0.35 m^2. The guards reach this claim through aero.drag_area's prerequisites: when the mesh ladder fails, aero.drag_area does not run, and the claim reads Skipped with the name of the gate that failed",
     "evaluators": [
       "aero.drag_area"
     ]

@@ -4,6 +4,8 @@
   "members": [
     "aero_ranks",
     "aero_iter_unc_max_pct",
-    "aero_timeout_s"
+    "aero_timeout_s",
+    "aero_ladder_ratio",
+    "aero_gci_max_pct"
   ]
 }

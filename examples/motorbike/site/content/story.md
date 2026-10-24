@@ -16,7 +16,7 @@ OpenFOAM makes a mesh around the body and calculates the flow with the k-omega S
 
 ## Where the design is now
 
-The pictures show the flow on the base mesh. One mesh does not give the drag area: a finer mesh can give a different value. The ladder of three meshes is not in the pack yet, so no evaluator settles the drag area claim (C1).
+The pictures show the flow on the base mesh. One mesh does not give the drag area: a finer mesh can give a different value. The pack makes two finer meshes and compares the three values. Only then does a gate judge the drag area claim (C1). The finest mesh takes hours to calculate, and this ladder has not run yet.
 
 Two assumptions stay open. The wheels do not turn in the model (A1). A steady solution stands for the mean of a wake that is not steady (A2). A person must record each one.
 

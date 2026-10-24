@@ -42,6 +42,7 @@ cache:
 |---|---|---|
 | `check --tier 1` | 1 min 32 s | the three tier-0 reads, surfaceCheck twice (for the Reynolds number's length and for the domain), snappyHexMesh and checkMesh (1 min 25 s) |
 | `check --tier 2 --only aero.converged` | 7 min 33 s | the guards again (1 min 35 s for the mesh), then the base mesh again, potentialFoam and 500 iterations of simpleFoam (5 min 28 s), and the gate's control on the pack's spheroid (30 s) |
+| `check --tier 2 --only aero.wall_treatment` | 11 min 28 s | the guards and the base mesh's run again, then the base mesh solved once more with OpenFOAM's yPlus, and the controls of both gates on the pack's spheroid. y+ at most 300 on 95.04% of the body |
 | `site build` | 26 s | the renderer control and five pictures in ParaView, the chart |
 
 Every OpenFOAM gate runs again at each check: its tools read files nopekit cannot
@@ -52,20 +53,23 @@ see, so between checks its claims read *stale*, with that cause.
 ```
 [ok  ] aero.mesh_quality : ... 0 faces in error against the pack's limits; 351753 cells on 6 ranks ...
 [ok  ] aero.converged : U_I 0.883% of the drag area 0.297779 m^2 over iterations 401-500 (within 1%) ...
-[gap  ] C1 The drag area of the bike and rider is at most 0.35 m^2 ... — no evaluator
+[ok  ] aero.wall_treatment : y+ at most 300 on 95.04% of the body's area (at least 90%) ...
+[gap  ] C1 The drag area of the bike and rider is at most 0.35 m^2 ... — unqualified: aero.drag_area : not yet qualified at this version ...
 ```
 
-- **C2 to C5 are the guards** of the base-mesh run: the flow is the stated one, the
-  box is large enough, the mesh is the one asked for, and the drag area settled.
-  They pass.
-- **C1 reads gap.** It carries the tag `drag-area`, and no guard covers that tag:
-  a guard judges its own quantity, never the drag area. The base mesh alone does
-  not give the drag area. The judge,
-  `aero.drag_area`, comes with the mesh ladder (three meshes and their GCI), with
-  C6 (the wall model) and C7 (mesh independence). Until then no evaluator covers
-  them. On the tutorial's own ladder (measured 2026-10-23) the drag area was
-  0.3075, 0.2964 and 0.3007 m^2 on the three meshes: it does not converge in
-  one direction.
+- **C2 to C6 are the guards** of the base-mesh run: the flow is the stated one, the
+  box is large enough, the mesh is the one asked for, the drag area settled, and
+  the wall model applies (y+). They pass.
+- **C1 waits for the mesh ladder.** It carries the tag `drag-area`, and only
+  `aero.drag_area` covers that tag: a guard judges its own quantity, never the
+  drag area. `aero.drag_area` judges the finest of three meshes at the top of its
+  band, after C6 (the wall model, `aero.wall_treatment`) and C7 (mesh
+  independence, `aero.mesh_independence`). The ladder is not part of the steps
+  above: its finest mesh alone took 94 min to solve on 8 ranks. On the
+  tutorial's own ladder (measured 2026-10-23) the drag area was 0.3075, 0.2964
+  and 0.3007 m^2 on the three meshes: it does not converge in one direction, so
+  C7 fails with that reason and `aero.drag_area` does not run (design decision
+  D6: the demo ships so).
 - **A1 and A2 are assumptions**: the wheels do not turn, and a steady solution
   stands for an unsteady wake. Each counts only when the person it names records
   it in their own shell (`nopekit claim physical A1 assume`).
