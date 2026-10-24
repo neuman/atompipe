@@ -15,8 +15,9 @@ and the mesh ladder bound to aero.mesh_independence's.
     aero.wall        the body coloured by y+ in four bands, unlit
     aero.ladder      the drag area on each mesh of the ladder
 
-``aero.wall`` and ``aero.ladder`` are registered with the gates they bind to
-(`LATER`): until then they are drawn in the tests and listed nowhere.
+``aero.wall`` and ``aero.ladder`` came with the gates they bind to (P6). Until
+then they were held unregistered: a figure registered before its gate is one
+``pack validate`` refuses ("a pack's figure draws its own gate's result").
 
 **OpenFOAM computes every field and every geometry; ParaView only draws.**
 Each picture reads the files the gate's function objects wrote (``surfaces``:
@@ -57,7 +58,8 @@ by aero.drag_area, so neither draws its limit or a judged point.
   run in the prose scan's pool) and ``u_i_m2``, so the chart drew nothing on
   a real run; `TheViewsReadWhatTheGateWrites` now runs the gate's own
   summary through each view.
-- aero.wall_treatment: ``fields`` as above, naming `FILES` ``yplus``.
+- aero.wall_treatment: ``fields`` as above, naming `FILES` ``yplus`` (the
+  body's y+ surface, ``interpolate false``: each face's own wall value).
 - aero.mesh_independence: ``levels`` ``[{"k", "cells", "h_rel", "cda_m2"}]``,
   and, when the gate computed them, ``cda_ext_m2`` at ``h_rel_ext`` and the
   band from the finest ``cda_m2`` to ``band_top_m2``.
@@ -276,8 +278,14 @@ def _check_result(result: dict, job: dict, work: str) -> bytes:
     if hashlib.sha256(data).hexdigest() != result.get("png_sha256"):
         raise _pv.RunError("the PNG on disk is not the one pvbatch's result names")
     counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+    # Each cut and each set of tracks must hold something; the y+ bands only
+    # together. What slipped through P6's first wall picture: the spheroid has
+    # y+ between 5 and 300 on all of its area, so its lowest and highest bands
+    # are empty, and the band read as "drew nothing" refused a true picture.
+    # Rejected: dropping the count (a wall with no face drawn would pass).
     empty = [name for name, n in counts.items()
-             if (n if isinstance(n, int) else min(n or [0])) <= 0]
+             if (n if isinstance(n, int) else
+                 sum(n or [0]) if name == "bands" else min(n or [0])) <= 0]
     if not counts.get("body") or empty:
         raise _pv.RunError(f"pvbatch drew nothing of {', '.join(empty) or 'the body'}: the "
                            f"picture is not the result's flow")
@@ -412,24 +420,7 @@ def wake_cuts(ctx):
                     light="none", scales={"cpt": _scales.cpt})
 
 
-#: The figures bound to gates this pack does not have yet (aero.wall_treatment
-#: and aero.mesh_independence come with the design's P6): ``{view id: (the
-#: viewgen's arguments, its function)}``. Drawn and tested now, registered with
-#: their gates. What it closes: a figure registered before its gate is one
-#: ``pack validate`` refuses ("a pack's figure draws its own gate's result"),
-#: and a build would list it as never drawn. *Rejected:* registering them with
-#: a stand-in gate (a gate with no negative control is refused, invariant 3).
-LATER: dict = {}
-
-
-def _later(**kwargs):
-    def decorate(fn):
-        LATER[kwargs["id"]] = (kwargs, fn)
-        return fn
-    return decorate
-
-
-@_later(id="aero.wall", kind=ViewKind.IMAGE, title="The wall value y+",
+@viewgen(id="aero.wall", kind=ViewKind.IMAGE, title="The wall value y+",
          description=PICTURE_PROVENANCE, evidence_of=WALL_GATE, recipe=RECIPE,
          requires_tools=[_pv.WRAPPER], order=60)
 def wall(ctx):
@@ -515,7 +506,7 @@ def history(ctx):
                 meta={"caption": HISTORY_CAPTION})
 
 
-@_later(id="aero.ladder", kind=ViewKind.CHART, title="The drag area on each mesh",
+@viewgen(id="aero.ladder", kind=ViewKind.CHART, title="The drag area on each mesh",
          description=CHART_PROVENANCE, evidence_of=LADDER_GATE, order=70)
 def ladder(ctx):
     """``levels[].cda_m2`` against ``levels[].h_rel``, each point named by its

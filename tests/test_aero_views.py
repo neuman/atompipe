@@ -43,7 +43,6 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_aero_views.py
 from __future__ import annotations
 
 import ast
-import functools
 import hashlib
 import json
 import os
@@ -84,19 +83,9 @@ TURBO_JSON = os.path.join(VIEWS, "turbo.json")
 
 
 def _views() -> site_mod.ViewRegistry:
-    """The pack's views as a build loads them, and the two it registers with
-    their gates in P6 (``flow3d.LATER``), so their drawing is held now."""
+    """The pack's views as a build loads them."""
     registry = site_mod.ViewRegistry()
     cli._load_viewgens(VIEWS, registry, pack="aero-openfoam", root=REPO)
-    module = sys.modules[registry.get("aero.hero")[1].__module__]
-    for kwargs, fn in module.LATER.values():
-        # A wrapper, never ``fn`` itself: ``viewgen`` sets ``view_spec`` on the
-        # function it decorates, and the loader finds a viewgen by that
-        # attribute on the cached module, so the next load would register the
-        # two and ``pack validate`` refuse the pack (what slipped through: the
-        # full suite's PacksValidate, after this file ran).
-        site_mod.viewgen(registry=registry, pack="aero-openfoam",
-                         **kwargs)(functools.wraps(fn)(lambda ctx, _fn=fn: _fn(ctx)))
     return registry
 
 
@@ -740,6 +729,33 @@ class ThePicturesOnTheStandIn(_env.EnvCase):
         self.assertTrue(note.startswith("unavailable:") and "pvbatch62" in note, note)
 
 
+class AnEmptyBandIsDrawnAndNoBandIsNot(unittest.TestCase):
+    """The wall's y+ bands may be empty one by one (the spheroid has none
+    under 5 and none over 300), never all together. What slipped through P6's
+    first wall picture: each band was held to the cuts' rule, every one
+    non-empty, and the spheroid's true picture was refused."""
+
+    def test_the_bands_together(self):
+        import tempfile
+        f3, sc = _flow3d(), _scales()
+        with tempfile.TemporaryDirectory() as work:
+            data = b"\x89PNG stand-in"
+            with open(os.path.join(work, "still.png"), "wb") as fh:
+                fh.write(data)
+            job = {"scene": "wall", "png": "still.png"}
+            for bands, ok in (([0, 2396, 15, 0], True), ([0, 0, 0, 0], False)):
+                result = {"preset_sha256": sc.preset_sha256(),
+                          "png_sha256": hashlib.sha256(data).hexdigest(),
+                          "counts": {"body": 2411, "bands": bands},
+                          "band_colours": [sc.preset_colour(at) for at in sc.BAND_AT]}
+                with self.subTest(bands=bands):
+                    if ok:
+                        self.assertEqual(f3._check_result(result, job, work), data)
+                    else:
+                        with self.assertRaises(_pv().RunError):
+                            f3._check_result(result, job, work)
+
+
 #: Each picture's scene, as the stand-in names its committed files.
 @unittest.skipIf(os.name == "nt", "the stand-ins are #! scripts")
 class TheViewsReadWhatTheGateWrites(_env.EnvCase):
@@ -779,12 +795,15 @@ class TheViewsReadWhatTheGateWrites(_env.EnvCase):
                                           claims=gate_tests._claims()),
             model=None, params=gate_tests._baseline(), out_dir=out, tier=2,
             log=lambda _m: None, extra={})
-        self.verdict = gates_mod.run_gate(*registry.get(GATE), ctx)
-        self.assertEqual(self.verdict.outcome, "pass", self.verdict.render())
-        files = {os.path.relpath(p, out).replace(os.sep, "/"): p for p in self.verdict.evidence
-                 if os.path.realpath(p).startswith(os.path.realpath(out) + os.sep)}
-        self.entries = {GATE: (site_mod.BoundEntry(gate=GATE, name="0" * 16 + "-" + "0" * 8,
-                                                   fresh=True, files=files), files)}
+        self.entries = {}
+        # The base mesh's run, and P6's two: the wall's and the ladder's.
+        for gate in (GATE, WALL_GATE, LADDER_GATE):
+            verdict = gates_mod.run_gate(*registry.get(gate), ctx)
+            self.assertEqual(verdict.outcome, "pass", verdict.render())
+            files = {os.path.relpath(p, out).replace(os.sep, "/"): p for p in verdict.evidence
+                     if os.path.realpath(p).startswith(os.path.realpath(out) + os.sep)}
+            self.entries[gate] = (site_mod.BoundEntry(gate=gate, name="0" * 16 + "-" + "0" * 8,
+                                                      fresh=True, files=files), files)
 
     def test_every_key_a_view_reads_is_one_the_gate_wrote(self):
         with open(_summary_of(self.entries[GATE][1]), encoding="utf-8") as fh:
@@ -822,6 +841,34 @@ class TheViewsReadWhatTheGateWrites(_env.EnvCase):
         run, window = view.data["series"]
         self.assertEqual(len(window["points"]), 100)
         self.assertEqual(run["points"][-1][0], 300)
+
+    def test_the_wall_draws_from_the_gates_own_surface(self):
+        with open(_summary_of(self.entries[WALL_GATE][1]), encoding="utf-8") as fh:
+            summary = json.load(fh)
+        self.assertEqual(set(summary["fields"]["sha256"]),
+                         {_flow3d().FILES["yplus"].format(time=summary["fields"]["time"])})
+        view, note, ctx, refusal = draw(self.root, self.entries, "aero.wall",
+                                        os.path.join(self.root, "s"))
+        self.assertIsNotNone(view, note or ctx.notes)
+        self.assertEqual(refusal, "")
+        calls = [c for c in pv_standin.calls(self.stand["prefix"]) if "scene_files" in c]
+        self.assertEqual(set(calls[-1]["scene_files"].values()),
+                         set(summary["fields"]["sha256"].values()))
+
+    def test_the_ladder_draws_from_the_gates_own_levels(self):
+        with open(_summary_of(self.entries[LADDER_GATE][1]), encoding="utf-8") as fh:
+            summary = json.load(fh)
+        view, note, ctx, refusal = draw(self.root, self.entries, "aero.ladder",
+                                        os.path.join(self.root, "s"))
+        self.assertIsNotNone(view, note or ctx.notes)
+        self.assertEqual(refusal, "")
+        meshes, zero = view.data["series"]
+        self.assertEqual([p[1] for p in meshes["points"]],
+                         [lv["cda_m2"] for lv in summary["levels"]])
+        self.assertEqual(zero["points"], [[0.0, summary["cda_ext_m2"]]])
+        (band,) = view.data["band"]
+        self.assertEqual((band["lo"], band["hi"]),
+                         (summary["levels"][-1]["cda_m2"], summary["band_top_m2"]))
 
     def test_every_picture_bound_to_it_draws(self):
         for view_id in [v for v in PICTURES if BINDS[v] == GATE]:

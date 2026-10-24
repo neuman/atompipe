@@ -54,7 +54,9 @@
     "aero.surface_cp",
     "aero.history",
     "aero.wake",
-    "aero.wake_cuts"
+    "aero.wake_cuts",
+    "aero.wall",
+    "aero.ladder"
   ],
   "provides_generators": [],
   "requires_tools": [

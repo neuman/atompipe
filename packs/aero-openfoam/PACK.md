@@ -177,7 +177,10 @@ The views (`views/flow3d.py`) draw these files with ParaView (`pvbatch62`) and
 OpenFOAM's history with Vega-Lite: `aero.hero` (the body by Cp, the stream
 tracks by speed, lit, with its 3D file), `aero.surface_cp` (Cp, unlit: each
 pixel a colour of the key), `aero.history` (the drag area at each iteration and
-the judged window), `aero.wake` and `aero.wake_cuts`. The colour map is Turbo.
+the judged window), `aero.wake` and `aero.wake_cuts`. `aero.wall` draws the
+body's y+ in four bands from `aero.wall_treatment`'s run, and `aero.ladder` the
+drag area on each mesh, its value at zero cell size and the GCI band from
+`aero.mesh_independence`'s. The colour map is Turbo.
 Without ParaView the pictures are left out and no status moves.
 
 ## The physics, in one paragraph
