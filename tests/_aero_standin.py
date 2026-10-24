@@ -185,7 +185,16 @@ if TOOL == "decomposePar":
 
 if TOOL == "snappyHexMesh":
     m = MODE.get("snappyHexMesh", {})
-    text = fixture("snappy_capped.log" if m.get("log") == "capped" else "snappy_baseline.log")
+    # The capped log when the mode asks for it, or when the staged cap is below
+    # the cells the baseline meshed to, as the real snappyHexMesh stops there:
+    # so the pack's own cell_cap control fails on the stand-in, and a project
+    # check qualifies aero.mesh_quality on it (OneSetOfInputsIsOneEntry).
+    base = fixture("snappy_baseline.log")
+    cells = int(re.findall(r"^Layer mesh : cells:(\d+)", base, re.M)[-1])
+    cap = re.search(r"^\s*maxGlobalCells\s+(\d+);",
+                    open(os.path.join("system", "snappyHexMeshDict")).read(), re.M)
+    capped = m.get("log") == "capped" or (cap is not None and int(cap.group(1)) < cells)
+    text = fixture("snappy_capped.log") if capped else base
     for old, new in m.get("replace", []):
         text = text.replace(old, new)
     print(text, end="")

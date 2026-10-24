@@ -646,7 +646,7 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         cfg = os.path.join(user, "2606", "controlDict")
         os.symlink(elsewhere, cfg)
         for _ in range(2):
-            self.assertEqual(T.home(out, 2606), root)
+            self.assertEqual(T.home(out, 2606, "cfd-openfoam"), root)
             found = sorted(os.path.relpath(os.path.join(d, f), root)
                            for d, dirs, files in os.walk(root) for f in files + [
                                x for x in dirs if os.path.islink(os.path.join(d, x))])
@@ -663,7 +663,7 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         with open(os.path.join(target, "2606", "caseDicts", "setConstraintTypes"), "w") as fh:
             fh.write("inlet { }\n")
         os.symlink(target, user)
-        T.home(out, 2606)
+        T.home(out, 2606, "cfd-openfoam")
         self.assertFalse(os.path.islink(user))
         self.assertTrue(os.path.exists(os.path.join(target, "2606", "caseDicts",
                                                     "setConstraintTypes")))
@@ -1437,7 +1437,7 @@ class TheRealOpenFOAM(_env.EnvCase):
         allowSystemOperations 0 stops the compile."""
         inst = T.locate()
         out = self.tmp()
-        env = T.environment(inst, T.home(out, inst.api))
+        env = T.environment(inst, T.home(out, inst.api, "cfd-openfoam"))
         stage = _copy_case(os.path.join(out, "case"))
         _edit(stage, "system/controlDict", "endTime", '#calc "1000*2"')
         with self.assertRaises(T.RunError) as cm:
@@ -1450,7 +1450,7 @@ class TheRealOpenFOAM(_env.EnvCase):
         C = self.registry.get("cfd.converged")[1].__globals__
         inst = T.locate()
         out = self.tmp()
-        env = T.environment(inst, T.home(out, inst.api))
+        env = T.environment(inst, T.home(out, inst.api, "cfd-openfoam"))
         case = C["Case"](CHANNEL)
         planes = C["_planes"](gates_mod.GateContext(root=out, params=self.params, out_dir=out))
         stage = os.path.join(out, "stage")

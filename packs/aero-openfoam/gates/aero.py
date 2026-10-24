@@ -4,21 +4,27 @@ ESI OpenFOAM (openfoam.com) with snappyHexMesh, simpleFoam and k-omega SST.
 
     aero.case_readable  tier 0  the case is one this pack can run and vouch for (the guard)
     aero.reference      tier 0  the run is the stated flow: inlet speed, +x, the body a still wall
-    aero.regime         tier 0  turbulent wall layers and incompressible: Reynolds and Mach numbers
+    aero.regime         tier 1  turbulent wall layers and incompressible: Reynolds and Mach numbers
     aero.domain         tier 1  the domain is large enough: Franke et al. 2007, Blocken 2015
     aero.mesh_quality   tier 1  snappyHexMesh, then checkMesh -meshQuality against the pack's limits
 
 **The guards come first.** A drag number from a domain that squeezes the
 flow, a mesh with folded faces or an air speed nobody stated is the standard
-way to make an assumption look like proof. Every gate here covers the claim
-tagged ``drag-area``, so a claim about a drag area reads Checked only when every
-guard passed.
+way to make an assumption look like proof. Each guard covers its own tag only,
+never ``drag-area``: a guard judges its own quantity (Re, H, faces, %), not a
+drag area, so a pass of every guard says nothing about a drag-area limit. What
+slipped through P3-P5 (review, 2026-10-23): every guard covered ``drag-area``
+before ``aero.drag_area`` existed, so the baseline's B1 (``<= 0.0042 m^2``)
+read Checked at a measured 0.00443 m^2, its limit read by no evaluator. A
+drag-area claim reads Gap until the gate that judges its limit is in the pack;
+the guards reach it then as that gate's prerequisites (``needs``).
 
 **Where each verdict comes from.** The tier-0 gates read the case with the
 pack's own dictionary reader (``_foam.py``), so they run where OpenFOAM is not
 installed and every file they decide on is keyed. ``aero.domain`` reads the
 blockMeshDict and the body's bounds (OpenFOAM's ``surfaceCheck`` for a surface
-file; the dictionary for a sphere or a box). ``aero.mesh_quality`` is OpenFOAM's
+file; the dictionary for a sphere or a box), and ``aero.regime`` holds the
+stated reference length to the same bounds. ``aero.mesh_quality`` is OpenFOAM's
 own output on a staged copy: snappyHexMesh's log and ``checkMesh
 -meshQuality``'s count of faces in error against the PACK's quality limits
 (``_fo.QUALITY``), which snappyHexMesh also meshed to. Both run in a subprocess
@@ -69,12 +75,22 @@ FO = _load_path(os.path.join(_HERE, "_fo.py"))
 
 PACK = "aero-openfoam"
 
-#: The tag every gate here covers, and the claim aero.drag_area will read its
-#: limit from (``ctx.acceptance``): the drag area, CdA in m^2. Each guard adds
-#: its own quantity's tag. Rejected: broad tags (``cfd``, ``aerodynamics``):
-#: cfd-openfoam's review of issue #15 D2 found a claim tagged only broadly
-#: reading Checked on a pass judged against another claim's limit.
+#: The tag of the claim aero.drag_area will read its limit from
+#: (``ctx.acceptance``): the drag area, CdA in m^2. No guard covers it: each
+#: covers its own quantity's tag, and a guard's pass beside a drag-area claim
+#: would be a Checked row whose limit no evaluator read (invariant 4; the
+#: module docstring says what slipped through). Rejected: every gate covering
+#: it (the design's first rule, safe only once aero.drag_area judges the
+#: limit, and even then a guard reaches the claim through ``needs``); broad
+#: tags (``cfd``, ``aerodynamics``): cfd-openfoam's review of issue #15 D2
+#: found a claim tagged only broadly reading Checked on a pass judged against
+#: another claim's limit.
 DRAG_TAG = "drag-area"
+#: The tag of each guard, its own quantity's. ``aero.case_readable`` has one
+#: too, so no gate here covers nothing.
+GUARD_TAGS = {"aero.case_readable": "case-readable", "aero.reference": "flow-reference",
+              "aero.regime": "flow-regime", "aero.domain": "domain-size",
+              "aero.mesh_quality": "mesh-quality", "aero.converged": "convergence"}
 
 #: The solver this pack runs: steady, incompressible, isothermal. Rejected for
 #: now: pimpleFoam (a transient run's mean drag needs a sampling window and a
@@ -109,7 +125,12 @@ MACH_MAX = 0.3
 #: The units each guard reports its value in, by its own symbol, as
 #: cfd-openfoam's guards do (issue #15, D3): the number a person checks
 #: against a textbook, never a fraction of a limit.
-RE_UNITS, MACH_UNITS = "Re", "Mach"
+RE_UNITS, MACH_UNITS, LENGTH_UNITS = "Re", "Mach", "m"
+#: How much longer than the body along the flow ``aero_ref_length_m`` may be:
+#: one part in 1e9, the reader's and surfaceCheck's rounding (the spheroid's
+#: 1 m is 0.5 + 0.5). Rejected: any real slack (a length the body does not have
+#: is the hole this closes).
+LENGTH_SLACK = 1e-9
 H_UNITS, PCT = "H", "%"
 FACE_UNITS, CELL_UNITS = "faces", "cells"
 
@@ -383,9 +404,26 @@ def _check(d, rel: str, problems: list[str], parent: str = "", macros: bool = Fa
     dictionary expansion, a macro (outside blockMeshDict), a computed value, a
     quoted keyword where a keyword the pack decides on could stand, a ``type``
     that is not a literal word, and every spelling of compiled code.
-    cfd-openfoam's rule, over this pack's files."""
+    cfd-openfoam's rule, over this pack's files.
+
+    A keyword written twice in one dictionary is refused too. OpenFOAM merges
+    a repeated dictionary and the reader (``_foam``, cfd-openfoam's bytes) keeps
+    the last one, so the two would read different cases. What slipped through
+    P3-P5 (review, 2026-10-23): a second ``geometry`` and
+    ``castellatedMeshControls`` hid a wall box the width of the domain from the
+    reader, and aero.domain, which runs no ``foamDictionary -expand``, judged
+    the domain on the spheroid alone and passed. Rejected: merging in the
+    reader (a second dictionary reader's rules, beside OpenFOAM's, for a
+    spelling no case needs); leaving it to ``_as_read`` (aero.domain and the
+    tier-0 gates never run it)."""
+    seen: set = set()
     for i, e in enumerate(d.entries):
         where = f"{rel}: {parent + '/' if parent else ''}{e.key}"
+        if not e.directive:
+            if (e.key, e.quoted) in seen:
+                problems.append(f"{where}: written twice in one dictionary; OpenFOAM merges "
+                                f"the two and this pack's reader reads one")
+            seen.add((e.key, e.quoted))
         if e.directive:
             if not (_allowed_directive(e) and parent == "boundaryField"
                     and rel.startswith("0/") and i == 0):
@@ -733,6 +771,7 @@ class Case:
             raise CaseProblem("system/snappyHexMeshDict names no refinementSurfaces: the pack "
                               "reads the body from them")
         self.bodies = {}
+        self.patch_infos = {}
         for e in surfaces.entries:
             if not e.is_dict or e.quoted:
                 raise CaseProblem(f"system/snappyHexMeshDict: refinement surface {e.key} is "
@@ -744,16 +783,21 @@ class Case:
             if kind == "cylinder":
                 raise CaseProblem(f"system/snappyHexMeshDict: the body {e.key} is a cylinder; "
                                   f"a body is a sphere, a box or a surface file")
-            infos = []
-            for holder in [e.value] + [r.value for r in (e.value.sub("regions") or
-                                                          F.FoamDict()).entries if r.is_dict]:
+            infos, own = [], []
+            for k, holder in enumerate([e.value] + [
+                    r.value for r in (e.value.sub("regions") or F.FoamDict()).entries
+                    if r.is_dict]):
                 info = holder.sub("patchInfo")
                 if info is not None:
                     groups = info.entry("inGroups")
                     names = [t.text for t in _tokens(groups.value)] if groups is not None \
                         and not groups.is_dict else []
                     infos.append((F.word(info, "type") or "", names))
+                own.append(infos[-1] if info is not None else None)
             self.bodies[e.key] = infos
+            #: ``[the surface's own patchInfo, then each region's]``, None where
+            #: one states none: the patches each set of words reaches.
+            self.patch_infos[e.key] = own
 
     def body_groups(self) -> dict:
         """``{group: [the patch types of the body patches in it]}``."""
@@ -763,6 +807,17 @@ class Case:
                 for g in groups:
                     out.setdefault(g, []).append(kind)
         return out
+
+    def body_patch_sets(self) -> dict:
+        """``{surface: [the groups of each set of its patches]}``: the
+        surface's own patchInfo first (None when it states none), then each
+        region's. A wall patch is in the group ``wall`` too (OpenFOAM's
+        ``wallPolyPatch`` adds it), so a literal ``wall`` entry in a 0/ file
+        reaches it."""
+        return {name: [None if info is None else
+                       set(info[1]) | ({"wall"} if info[0] == "wall" else set())
+                       for info in infos]
+                for name, infos in self.patch_infos.items()}
 
     def body_box(self):
         """The bounding box of every body the dictionary states, or None when
@@ -881,7 +936,7 @@ def _geometry_or_verdict(ctx: GateContext, gid: str, case: Case):
     id="aero.case_readable",
     basis="model-only",
     title="The OpenFOAM case is one this pack can run and vouch for",
-    claims=[DRAG_TAG],
+    claims=[GUARD_TAGS["aero.case_readable"]],
     tier=Tier.INSTANT,
     settles="aero case readability",
     negative_control=NegativeControl(
@@ -941,7 +996,7 @@ _L_REF = ("aero_ref_length_m", "the body's reference length, m: the Reynolds num
     id="aero.reference",
     basis="model-only",
     title="The run is the stated flow: the inlet at the stated speed along +x, the body a still wall",
-    claims=[DRAG_TAG, "flow-reference"],
+    claims=[GUARD_TAGS["aero.reference"]],
     tier=Tier.INSTANT,
     settles="aero flow reference",
     needs=["aero.case_readable"],
@@ -955,9 +1010,10 @@ def reference(ctx: GateContext) -> Verdict:
     of exactly (U 0 0) with U = ``aero_u_inf_m_s``: the speed every
     coefficient is made dimensionless by, and the pack's drag direction +x.
     The body group ``aero_body_group`` is named on the body's patches, each of
-    them a wall, and every boundary condition 0/U states for the body is
-    ``noSlip`` or a zero ``fixedValue``: a body moving with the air reads no
-    drag. A mismatch is a fail, naming it."""
+    them a wall, every body patch is reached in 0/U by a literal entry naming
+    one of its groups (never by a regular expression), and every boundary
+    condition 0/U states for the body is ``noSlip`` or a zero ``fixedValue``: a
+    body moving with the air reads no drag. A mismatch is a fail, naming it."""
     gid = "aero.reference"
     path = _case(ctx)
     if path is None:
@@ -997,6 +1053,35 @@ def reference(ctx: GateContext) -> Verdict:
         problems.append(f"a body patch in {group} is a {', '.join(sorted(set(groups[group])))}, "
                         f"not a wall")
     domain = set(case.patches)
+    # Which entry OpenFOAM applies to a body patch (GeometricBoundaryField::
+    # readField, v2606): its name, else the last literal entry naming one of its
+    # groups, and only then the last regular expression that matches its name.
+    # The pack reads the first two and never resolves the third: every body
+    # patch must be reached by a literal entry naming one of its groups, so no
+    # regular expression ever sets a body patch. What slipped through P3-P5
+    # (review, 2026-10-23, on v2606): the loop below skipped every quoted key
+    # that matched a domain patch, so ``"sph.*" {noSlip}`` then
+    # ``"(upperWall|frontAndBack|spheroid)" {slip}`` passed as "sph.* still"
+    # while OpenFOAM ran the spheroid as slip, at 68% less drag. Rejected:
+    # resolving the expressions against the body's patch names (a surface
+    # file's regions name its patches, and the pack does not read the file).
+    literal = {e.key for e in case.u_boundary.entries
+               if not e.directive and not e.quoted and e.is_dict}
+    groups_of_body = set()
+    for surface, sets in case.body_patch_sets().items():
+        for k, names in enumerate(sets):
+            where = f"the body surface {surface}" + (f" (region {k})" if k else "")
+            if names is None:
+                if k == 0:
+                    problems.append(f"{where} states no patchInfo: the pack reads a body's "
+                                    f"boundary conditions by its groups")
+                continue
+            groups_of_body |= names
+            if not names & literal:
+                problems.append(f"0/U names no group of {where} "
+                                f"({', '.join(sorted(names)) or 'none'}) as a literal entry: "
+                                f"OpenFOAM would set its patches from a regular expression, "
+                                f"which this pack does not resolve")
     body_entries = []
     for e in case.u_boundary.entries:
         if e.directive or not e.is_dict:
@@ -1007,7 +1092,7 @@ def reference(ctx: GateContext) -> Verdict:
                     continue
             except re.error:
                 pass
-        elif e.key in domain:
+        elif e.key in domain and e.key not in groups_of_body:
             continue
         body_entries.append(e)
     if not body_entries:
@@ -1032,8 +1117,8 @@ def reference(ctx: GateContext) -> Verdict:
     id="aero.regime",
     basis="sourced",
     title="The flow is turbulent at the wall and incompressible: Reynolds and Mach numbers",
-    claims=[DRAG_TAG, "flow-regime"],
-    tier=Tier.INSTANT,
+    claims=[GUARD_TAGS["aero.regime"]],
+    tier=Tier.BUILD,
     settles="aero flow regime",
     needs=["aero.case_readable"],
     negative_control=NegativeControl(
@@ -1046,9 +1131,23 @@ def regime(ctx: GateContext) -> Verdict:
     """Re = U L / nu at least 5e5 (``RE_MIN``: k-omega SST without a transition
     model assumes turbulent wall layers) and Ma = U / c below 0.3, with nu read
     from the case and U (``aero_u_inf_m_s``), L (``aero_ref_length_m``) and c
-    (``aero_sound_speed_m_s``) as the project states them. The value is the
-    Reynolds number (``Re``), or the Mach number (``Mach``) when it alone
-    fails."""
+    (``aero_sound_speed_m_s``) as the project states them, L no longer than
+    the body along the flow (`LENGTH_UNITS`): the dictionary's box for a sphere
+    or a box, OpenFOAM's ``surfaceCheck`` for a surface file. The value is the
+    reference length when it is longer than the body, else the Reynolds number
+    (``Re``), or the Mach number (``Mach``) when it alone fails.
+
+    Tier 1, not 0: a surface file's length is surfaceCheck's (as in
+    aero.domain), so this gate runs a tool for such a body and is then opaque.
+    What slipped through P3-P5 (review, 2026-10-23): the stated length was
+    held to nothing. On the 1 m spheroid with nu 1.5e-4, Re is 1.33e5, a
+    laminar body; ``aero_ref_length_m`` 10 read Re 1.33e6 and passed, while
+    aero.reference holds U to the inlet. Rejected: the body's largest extent
+    (a body's height is no distance the air runs along its wall); bounding L
+    in aero.domain only (a flow-regime claim would read Checked on a Reynolds
+    number of a body that does not exist); reading the surface file's vertices
+    here (arithmetic on geometry no OpenFOAM tool reports, in a second
+    reader of every surface format)."""
     gid = "aero.regime"
     path = _case(ctx)
     if path is None:
@@ -1067,7 +1166,28 @@ def regime(ctx: GateContext) -> Verdict:
         return _error(gid, f"the case does not read: {exc}")
     u, length, c = vals["aero_u_inf_m_s"], vals["aero_ref_length_m"], vals["aero_sound_speed_m_s"]
     re_, ma = u * length / case.nu, u / c
+    body = case.body_box()
+    logs: list = []
+    if body is None:
+        s = _run_settings(ctx, gid, ("timeout",))
+        if isinstance(s, Verdict):
+            return s
+        opened = _open(ctx, gid)
+        if isinstance(opened, Verdict):
+            return opened
+        try:
+            body, logs = _body_bounds(opened[1], ctx, gid, s, s["timeout"])
+        except P.Timeout as exc:
+            return _skip(gid, str(exc))
+        except T.RunError as exc:
+            return _error(gid, str(exc), exc.evidence)
+    run = body[1][0] - body[0][0]
     problems = []
+    too_long = not length <= run * (1 + LENGTH_SLACK)
+    if too_long:
+        problems.append(f"aero_ref_length_m {length:g} m is longer than the body along the "
+                        f"flow ({run:.6g} m): no wall layer runs that far, so the Reynolds "
+                        f"number on it is of another body")
     if not re_ >= RE_MIN:
         problems.append(f"Re {re_:.4g} is below {RE_MIN:g}: k-omega SST without a transition "
                         f"model makes laminar wall layers turbulent")
@@ -1081,16 +1201,22 @@ def regime(ctx: GateContext) -> Verdict:
     # 177 m/s made Mach 0.113 the nearer, and the walk read 0.113 against 0.3 as
     # a Reynolds number 62% under its floor on a pass. Rejected: two values (one
     # per verdict); the nearer one (above).
-    if ma >= MACH_MAX and re_ >= RE_MIN:
+    if too_long:
+        top = run * (1 + LENGTH_SLACK)
+        measured, limit, comp, units, holds = (length, run, "<=", LENGTH_UNITS,
+                                               (lambda x: x <= top))
+    elif ma >= MACH_MAX and re_ >= RE_MIN:
         measured, limit, comp, units, holds = ma, MACH_MAX, "<", MACH_UNITS, (lambda x: x < MACH_MAX)
     else:
         measured, limit, comp, units, holds = re_, RE_MIN, ">=", RE_UNITS, (lambda x: x >= RE_MIN)
-    said = (f"Re {re_:.4g} = U L / nu: U {u:g} m/s, L {length:g} m, nu {case.nu:g} m^2/s from "
-            f"the case; limit {RE_MIN:g}, flat-plate transition. Mach {ma:.3g} = U / c, c "
-            f"{c:g} m/s; limit {MACH_MAX:g}")
+    said = (f"Re {re_:.4g} = U L / nu: U {u:g} m/s, L {length:g} m (the body runs "
+            f"{run:.6g} m along the flow), nu {case.nu:g} m^2/s from the case; limit "
+            f"{RE_MIN:g}, flat-plate transition. Mach {ma:.3g} = U / c, c {c:g} m/s; limit "
+            f"{MACH_MAX:g}")
     return Verdict(gate=gid, passed=not problems,
                    measured=_shown(measured, holds, not problems), limit=limit, comparator=comp,
-                   units=units, detail="; ".join(problems) + f" ({said})" if problems else said)
+                   units=units, detail="; ".join(problems) + f" ({said})" if problems else said,
+                   evidence=list(logs))
 
 
 # --------------------------------------------------------------------------- #
@@ -1100,7 +1226,7 @@ def _open(ctx: GateContext, gid: str):
     """``(install, environment)`` or a skip/error Verdict."""
     try:
         inst = T.locate()
-        env = T.environment(inst, T.home(ctx.out_dir, inst.api))
+        env = T.environment(inst, T.home(ctx.out_dir, inst.api, PACK))
     except T.Unavailable as exc:
         return _skip(gid, str(exc))
     except T.Timeout as exc:
@@ -1366,7 +1492,7 @@ def _holds(value, limit, comp) -> bool:
     id="aero.domain",
     basis="sourced",
     title="The domain is large enough around the body: distances and blockage (Franke et al. 2007)",
-    claims=[DRAG_TAG, "domain-size"],
+    claims=[GUARD_TAGS["aero.domain"]],
     tier=Tier.BUILD,
     settles="aero domain size",
     requires_tools=list(T.WRAPPERS),
@@ -1523,7 +1649,7 @@ def _mesh(env, stage: str, s: dict, timeout: float) -> Mesh:
     id="aero.mesh_quality",
     basis="established",
     title="snappyHexMesh builds a mesh with no face in error against the pack's quality limits",
-    claims=[DRAG_TAG, "mesh-quality"],
+    claims=[GUARD_TAGS["aero.mesh_quality"]],
     tier=Tier.BUILD,
     settles="aero mesh quality",
     requires_tools=list(T.WRAPPERS),
@@ -1743,7 +1869,7 @@ def _history(ctx: GateContext, gid: str, co) -> str:
     id="aero.converged",
     basis="established",
     title="simpleFoam settled on the base mesh: the drag area's iterative uncertainty is inside its ceiling",
-    claims=[DRAG_TAG, "convergence"],
+    claims=[GUARD_TAGS["aero.converged"]],
     tier=Tier.SOLVE,
     settles="aero solver convergence",
     requires_tools=list(T.WRAPPERS),

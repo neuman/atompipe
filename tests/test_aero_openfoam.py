@@ -109,6 +109,27 @@ def _append(case: str, rel: str, text: str) -> None:
         fh.write(text)
 
 
+def _replace(case: str, rel: str, old: str, new: str) -> None:
+    """``old`` replaced by ``new`` in the case's ``rel``, which must hold it once."""
+    path = os.path.join(case, *rel.split("/"))
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert text.count(old) == 1, f"{rel} holds {old!r} {text.count(old)} times"
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text.replace(old, new))
+
+
+def _bc(key: str, kind: str) -> str:
+    """One 0/ boundaryField entry: ``key { type kind; }``."""
+    return f"{key}\n    {{\n        type {kind};\n    }}"
+
+
+#: The baseline's 0/U entries for the domain's slip walls and for the body, as
+#: written: the reference tests rewrite them.
+SLIP_WALLS = '"(upperWall|frontAndBack)"\n    {\n        type            slip;\n    }'
+BODY_GROUP = "bodyGroup\n    {\n        type            noSlip;\n    }"
+
+
 # --------------------------------------------------------------------------- #
 # the copies
 # --------------------------------------------------------------------------- #
@@ -168,6 +189,24 @@ class TheCaseReaderRefusesWhatOpenFOAMWouldEvaluate(_env.EnvCase):
         v = self.gate(SPHEROID)
         self.assertEqual(v.outcome, "pass", v.render())
         self.assertIn("spheroid (sphere)", v.detail)
+
+    def test_a_dictionary_written_twice_is_refused(self):
+        """Review of P3-P5: OpenFOAM merges a second ``geometry`` into the
+        first and the reader kept the last, so a wall box the width of the
+        domain was meshed while aero.domain judged the spheroid alone."""
+        def twice(case):
+            _replace(case, "system/snappyHexMeshDict", "geometry\n{",
+                     "geometry\n{\n    bigBox { type searchableBox; min (0 -3 0); "
+                     "max (1 3 3); }")
+            _append(case, "system/snappyHexMeshDict",
+                    "\ngeometry\n{\n    spheroid { type searchableSphere; origin (0.5 0 0.4); "
+                    "radius (0.5 0.125 0.125); }\n}\n")
+        v = self.refused(twice, "geometry: written twice in one dictionary")
+        self.assertIn("OpenFOAM merges the two", v.detail)
+
+    def test_a_value_written_twice_is_refused(self):
+        self.refused(lambda c: _append(c, "constant/transportProperties", "\nnu 1.5e-05;\n"),
+                     "nu: written twice")
 
     def test_an_include_is_refused(self):
         self.refused(lambda c: _append(c, "system/fvSchemes", '\n#include "more"\n'),
@@ -355,6 +394,49 @@ class TheReferenceIsTheStatedFlow(_env.EnvCase):
         v = _run(self.registry, "aero.reference", self.tmp(), params, tier=0)
         self.assertEqual(v.outcome, "skipped", v.render())
 
+    def test_a_regular_expression_that_sets_the_body_fails(self):
+        """Review of P3-P5, run on the real v2606: with no literal entry for the
+        body's group, OpenFOAM takes the LAST expression that matches a body
+        patch. ``"sph.*" noSlip`` then ``"(upperWall|frontAndBack|spheroid)"
+        slip`` ran the spheroid as slip (68% less drag), and the gate passed
+        it as "sph.* still"."""
+        def regex(case):
+            _replace(case, "0/U", BODY_GROUP, _bc('"sph.*"', "noSlip"))
+            _replace(case, "0/U", SLIP_WALLS, _bc('"(upperWall|frontAndBack|spheroid)"', "slip"))
+        v = self.gate(regex)
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("0/U names no group of the body surface spheroid (bodyGroup, wall) as a "
+                      "literal entry", v.detail)
+
+    def test_a_still_expression_alone_is_not_read_either(self):
+        v = self.gate(lambda c: _replace(c, "0/U", BODY_GROUP, _bc('"sph.*"', "noSlip")))
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("which this pack does not resolve", v.detail)
+
+    def test_the_literal_group_wins_over_a_later_expression(self):
+        """OpenFOAM sets a patch from its group's literal entry before it tries
+        any expression, so a later slip expression that names the body moves
+        nothing: the gate passes it, as OpenFOAM runs it."""
+        v = self.gate(lambda c: _replace(
+            c, "0/U", SLIP_WALLS, _bc('"(upperWall|frontAndBack|spheroid)"', "slip")))
+        self.assertEqual(v.outcome, "pass", v.render())
+
+    def test_the_wall_group_reaches_the_body(self):
+        """A wall patch is in the group ``wall`` (wallPolyPatch): a literal
+        ``wall`` entry reaches the body, and is held to a still wall too."""
+        v = self.gate(lambda c: _replace(c, "0/U", BODY_GROUP, _bc("wall", "noSlip")))
+        self.assertEqual(v.outcome, "pass", v.render())
+        v = self.gate(lambda c: _replace(c, "0/U", BODY_GROUP, _bc("wall", "slip")))
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("0/U's wall is slip", v.detail)
+
+    def test_a_body_with_no_patch_info_fails(self):
+        v = self.gate(lambda c: _edit(c, "system/snappyHexMeshDict",
+                                      "castellatedMeshControls/refinementSurfaces/spheroid",
+                                      "level (4 4);"))
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("the body surface spheroid states no patchInfo", v.detail)
+
 
 class TheRegimeReportsItsNearestLimit(_env.EnvCase):
     """``aero.regime``'s value is the number nearer its own limit, in its own
@@ -369,12 +451,68 @@ class TheRegimeReportsItsNearestLimit(_env.EnvCase):
         self.assertEqual((v.units, v.comparator, v.limit), ("Re", ">=", 5e5))
         self.assertAlmostEqual(v.measured, 20 * 1.0 / 1.5e-5, places=1)
 
+    def test_a_length_longer_than_the_body_fails_on_the_length(self):
+        """Review of P3-P5: the 1 m spheroid in air ten times thicker has Re
+        1.33e5, a laminar body; a stated length of 10 m read Re 1.33e6 and
+        passed. The length is now held to the body along the flow."""
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "constant/transportProperties", "nu", "1.5e-04")
+        v = _run(self.registry, "aero.regime", self.tmp(),
+                 dict(_baseline(), aero_case=case, aero_ref_length_m=10.0), tier=1)
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertEqual((v.measured, v.limit, v.comparator, v.units), (10.0, 1.0, "<=", "m"))
+        self.assertIn("longer than the body along the flow (1 m)", v.detail)
+        v = _run(self.registry, "aero.regime", self.tmp(),
+                 dict(_baseline(), aero_case=case), tier=1)
+        self.assertEqual((v.outcome, v.units), ("fail", "Re"), v.render())
+        self.assertAlmostEqual(v.measured, 20 * 1.0 / 1.5e-4, places=3)
+
+    def test_the_bodys_own_length_passes(self):
+        v = _run(self.registry, "aero.regime", self.tmp(),
+                 dict(_baseline(), aero_ref_length_m=1.0), tier=1)
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertIn("the body runs 1 m along the flow", v.detail)
+
     def test_a_fast_stream_fails_on_mach(self):
         v = _run(self.registry, "aero.regime", self.tmp(),
                  dict(_baseline(), aero_sound_speed_m_s=60.0), tier=0)
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertEqual((v.units, v.comparator), ("Mach", "<"))
         self.assertGreaterEqual(v.measured, 0.3)
+
+
+class NoGuardSpeaksForTheDragArea(unittest.TestCase):
+    """Invariant 4: a drag-area claim is never Checked on guards that judge
+    other quantities. What slipped through P3-P5 (review, 2026-10-23): every
+    guard covered ``drag-area`` before aero.drag_area existed, so with all six
+    passing, the baseline's B1 (``<= 0.0042 m^2``) composed Checked, while the
+    one drag area measured, 0.00443 m^2, is past its limit and no evaluator
+    read it. Composed here with the registry's own coverage and passing
+    verdicts in each guard's own units."""
+
+    def setUp(self):
+        self.registry = _registry()
+        (self.claim,) = [c for c in _claims() if c.id == "B1"]
+
+    def test_every_guard_passing_leaves_the_drag_area_unchecked(self):
+        from nopekit import claims as claims_mod
+        from nopekit.models import Verdict
+        specs = self.registry.for_claim(self.claim.id, self.claim.tags)
+        self.claim.gates = [s.id for s in specs]
+        verdicts = [Verdict(gate=s.id, passed=True, claims=list(s.claims), measured=1e6,
+                            limit=5e5, comparator=">=", units="Re") for s in specs]
+        composed = claims_mod.compose(self.claim, verdicts)
+        self.assertNotEqual(composed.status, "pass",
+                            f"{self.claim.id} reads Checked on {[s.id for s in specs]}")
+
+    def test_no_gate_but_the_drag_area_gate_covers_its_tag(self):
+        tag = _module(self.registry)["DRAG_TAG"]
+        self.assertIn(tag, self.claim.tags)
+        for gid in self.registry.ids():
+            spec = self.registry.get(gid)[0]
+            if spec.pack == "aero-openfoam" and gid != "aero.drag_area":
+                with self.subTest(gid):
+                    self.assertNotIn(tag, spec.claims)
 
 
 # --------------------------------------------------------------------------- #
@@ -597,6 +735,48 @@ class AMeshIsJudgedByThePacksLimits(_StandinCase):
                          2e7)
 
 
+@unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
+class OneSetOfInputsIsOneEntry(_env.EnvCase):
+    """Two check runs of the same project, nothing changed between them, file
+    one cache entry per gate. What slipped through P3-P5 (the motorbike demo's
+    two check runs, 2026-10-23): aero.domain and aero.mesh_quality each wrote
+    a second entry for the same inputs. The first run wrote the private
+    HOME's controlDict and later runs read it (``_tool.home``), and a later
+    run's removal of the last run's staged copy (``shutil.rmtree`` opens each
+    folder by a name relative to its parent's descriptor) was read as files of
+    the project. A cache committed after one run would then never hit on a
+    fresh clone."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+        import _projects
+        cls.dir = tempfile.mkdtemp(prefix="nopekit-test-")
+        _root, bin_ = install_standin(os.path.join(cls.dir, "tool"))
+        env = {"PATH": bin_ + os.pathsep + "/usr/bin:/bin"}
+        cls.root = _projects.wrap_pack_baseline("aero-openfoam", os.path.join(cls.dir, "proj"))
+        cls.runs = [_env.nopekit(["check", "--tier", "2"], cwd=cls.root, env=env, timeout=900)
+                    for _ in range(2)]
+
+    @classmethod
+    def tearDownClass(cls):
+        _env._rmtree(cls.dir)
+
+    def test_each_gate_has_one_entry(self):
+        for run in self.runs:
+            self.assertIn("aero.mesh_quality", run.stdout, run.stdout[-3000:] + run.stderr[-3000:])
+        cache = os.path.join(self.root, ".nopekit", "verdicts")
+        gates = sorted(os.listdir(cache))
+        self.assertIn("aero.domain", gates)
+        self.assertIn("aero.mesh_quality", gates)
+        self.assertIn("aero.converged", gates)
+        for gid in gates:
+            with self.subTest(gid):
+                entries = [n for n in os.listdir(os.path.join(cache, gid))
+                           if not n.startswith("control-")]
+                self.assertEqual(len(entries), 1, entries)
+
+
 class TheParallelBannerIsChecked(_StandinCase):
     """Every parallel run's banner says the ranks the pack asked for, trapping
     on and system operations off; and every rank is asked for its HOME and its
@@ -619,6 +799,17 @@ class TheParallelBannerIsChecked(_StandinCase):
         v = self.gate("aero.mesh_quality")
         self.assertEqual(v.outcome, "error", v.render())
         self.assertIn("system operations allowed", v.error)
+
+    def test_the_home_is_the_packs_own(self):
+        """Review of P3-P5: the copied ``_tool.home`` named cfd-openfoam's
+        HOME, so an aero gate ran in ``<out>/cfd-openfoam/home``."""
+        v = self.gate("aero.mesh_quality")
+        self.assertEqual(v.outcome, "pass", v.render())
+        out = os.path.join(self.out, "out", "aero_mesh_quality")
+        with open(os.path.join(out, "aero-openfoam", "home", ".OpenFOAM", "2606",
+                               "controlDict"), encoding="utf-8") as fh:
+            self.assertIn("allowSystemOperations 0", fh.read())
+        self.assertFalse(os.path.exists(os.path.join(out, "cfd-openfoam")))
 
     def test_a_rank_with_another_home_is_an_error_before_any_parallel_tool(self):
         """P0's Probe B: a rank with another HOME left the master's banner
@@ -693,6 +884,25 @@ class TheBodysBoundsAreOpenFOAMs(_StandinCase):
                                       "aero_geometry_sha256": sha})
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("below the ground", v.detail)
+
+    def test_the_regime_holds_the_length_to_surfacechecks_body(self):
+        """Review of P3-P5: for a surface file, aero.regime reads the body's
+        length along the flow from surfaceCheck, as aero.domain does."""
+        stl = os.path.join(self.dir, "body.stl")
+        with open(stl, "w") as fh:
+            fh.write("solid body\nendsolid body\n")
+        import hashlib
+        with open(stl, "rb") as fh:
+            sha = hashlib.sha256(fh.read()).hexdigest()
+        case = _surface_case(self)
+        self.mode({"surfaceCheck": {"box": [[0.2, -0.1, 0.3], [1.0, 0.1, 0.5]]}})
+        params = {"aero_case": case, "aero_geometry": stl, "aero_geometry_sha256": sha}
+        v = self.gate("aero.regime", dict(params, aero_ref_length_m=0.8))
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertIn("surfaceCheck", self.calls())
+        self.assertIn("the body runs 0.8 m along the flow", v.detail)
+        v = self.gate("aero.regime", dict(params, aero_ref_length_m=1.0))
+        self.assertEqual((v.outcome, v.units, v.limit), ("fail", "m", 0.8), v.render())
 
 
 # --------------------------------------------------------------------------- #
@@ -889,7 +1099,7 @@ def expanded_motorbike(inst, dst: str) -> str:
             text = fh.read().replace(inc, "")
         with open(path, "w") as fh:
             fh.write(text)
-    env = T.environment(inst, T.home(dst, inst.api))
+    env = T.environment(inst, T.home(dst, inst.api, "aero-openfoam"))
     case = os.path.join(dst, "case")
     for rel in ("0/U", "0/p", "0/k", "0/omega", "0/nut", "system/controlDict",
                 "system/fvSchemes", "system/fvSolution", "system/blockMeshDict",
@@ -929,8 +1139,12 @@ class TheRealAeroGates(_env.EnvCase):
 
     def test_the_expanded_tutorial_reads_and_its_domain_fails_four_distances(self):
         for gid in ("aero.case_readable", "aero.reference", "aero.regime"):
-            v = _run(self.registry, gid, self.tmp(), self.params, tier=0)
+            v = _run(self.registry, gid, self.tmp(), self.params, tier=1)
             self.assertEqual(v.outcome, "pass", f"{gid}: {v.render()}")
+        self.assertIn("the body runs 2.04282 m along the flow", v.detail)
+        v = _run(self.registry, "aero.regime", self.tmp(),
+                 dict(self.params, aero_ref_length_m=2.1), tier=1)
+        self.assertEqual((v.outcome, v.units), ("fail", "m"), v.render())
         v = _run(self.registry, "aero.domain", self.tmp(), self.params, tier=1)
         self.assertEqual(v.outcome, "fail", v.render())
         for said in ("upstream 3.48 H", "downstream 9.8 H", "side 2.7 H", "top 4.92 H"):

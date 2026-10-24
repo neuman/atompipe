@@ -1022,7 +1022,7 @@ def _open(ctx: GateContext, gid: str):
     """``(install, environment)`` or a skip/error Verdict."""
     try:
         inst = T.locate()
-        env = T.environment(inst, T.home(ctx.out_dir, inst.api))
+        env = T.environment(inst, T.home(ctx.out_dir, inst.api, PACK))
     except T.Unavailable as exc:
         return _skip(gid, str(exc))
     except T.Timeout as exc:

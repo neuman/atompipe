@@ -35,6 +35,6 @@
     "aero_max_global_cells": "the cell cap snappyHexMesh may refine to (pack default 2e7, ten times the motorBike tutorial's). A mesh that reaches it fails aero.mesh_quality.",
     "aero_iter_unc_max_pct": "the largest iterative uncertainty U_I = (max - min) / 2 of the drag area over the last window, in percent of its mean (pack default 1, the author's choice D3).",
     "aero_timeout_s": "seconds each OpenFOAM tool may run before it is killed with every rank and the gate skips (pack default 3600).",
-    "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area, which every gate of this pack covers. aero.drag_area (P6) reads its limit."
+    "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area. No guard covers it (each judges its own quantity), so it reads Gap until aero.drag_area (P6), which reads its limit."
   }
 }

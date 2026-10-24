@@ -103,7 +103,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
         "test_mechanism.AMechanismNeverMovesAStatus",
         # Architecture phase 2: an evaluator's declared basis moves no status.
-        "test_basis.ABasisNeverChangesAStatus"],
+        "test_basis.ABasisNeverChangesAStatus",
+        # Review of the motorBike design's P3-P5: guards that judge other
+        # quantities covered the drag-area tag, and a drag-area claim read
+        # Checked with its limit read by no evaluator.
+        "test_aero_openfoam.NoGuardSpeaksForTheDragArea"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.

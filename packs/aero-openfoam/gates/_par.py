@@ -5,10 +5,12 @@ snappyHexMesh, checkMesh and the solver wrote. Standard library only.
 The pack's additions to the helpers it copies from cfd-openfoam (``_tool.py``,
 ``_foam.py``, ``_gci.py``, ``_iter.py``, held byte-identical by
 ``tests/test_aero_openfoam.TheSharedHelpersHaveNotDrifted``) live here, so the
-copies stay copies. Two consequences of the copy, kept on purpose: the gate's
-private HOME is ``<out>/cfd-openfoam/home`` (``_tool.home`` names its own
-pack), and a serial tool's timeout message names ``cfd_timeout_s``, so
-``aero.py`` re-words it.
+copies stay copies. One consequence of the copy, kept on purpose: a serial
+tool's timeout message names ``cfd_timeout_s``, so ``aero.py`` re-words it.
+The private HOME is this pack's own, ``<out>/aero-openfoam/home``: the caller
+names the pack (``_tool.home(out, api, PACK)``). What slipped through P3-P5
+(review, 2026-10-23): the copy named cfd-openfoam's HOME, so the two packs'
+gates wrote one directory.
 
 Every rule here was measured on ESI OpenFOAM v2606 with Open MPI 4.1.6 (P0,
 2026-10-23):

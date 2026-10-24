@@ -19,15 +19,17 @@ right equations or the right body. `lenses.md` lists what to attack.
 | Gate | Tier | Basis | Settles |
 |---|---|---|---|
 | `aero.case_readable` | 0 | model-only | the case parses, runs simpleFoam with RAS k-omega SST and a Newtonian nu, meshes with blockMesh and snappyHexMesh, compiles no code and carries no function object of its own; a surface file is the one its sha256 pins (the guard) |
-| `aero.reference` | 0 | model-only | the inlet is a `fixedValue` of exactly (U 0 0), U = `aero_u_inf_m_s`; the body group exists, every body patch is a wall, and the body is still (`noSlip`) |
-| `aero.regime` | 0 | sourced | Re on `aero_ref_length_m` at least 5e5; Mach below 0.3 |
+| `aero.reference` | 0 | model-only | the inlet is a `fixedValue` of exactly (U 0 0), U = `aero_u_inf_m_s`; the body group exists, every body patch is a wall, 0/U reaches each body patch by a literal entry that names one of its groups (never by a regular expression), and the body is still (`noSlip`) |
+| `aero.regime` | 1 | sourced | `aero_ref_length_m` is no longer than the body along the flow (surfaceCheck's box for a surface file); Re on it at least 5e5; Mach below 0.3 |
 | `aero.domain` | 1 | sourced | inlet 5 H, outlet 15 H, sides and top 5 H from the body; blockage at most 3%, each directional blockage at most 17% (Franke et al. 2007, Blocken 2015) |
 | `aero.mesh_quality` | 1 | established | snappyHexMesh finished without errors and reached no cell cap; `checkMesh -meshQuality` counts no face in error against the pack's limits |
 | `aero.converged` | 2 | established | on the base mesh, `simpleFoam` ran to its end on every rank, no residual climbed in the last window, and the drag area's iterative uncertainty U_I = (max - min) / 2 over the last 100 iterations is at most `aero_iter_unc_max_pct` of its mean (ITTC 7.5-03-01-01) |
 
 `aero.reference`, `aero.regime`, `aero.domain` and `aero.mesh_quality` each
-need `aero.case_readable`; `aero.converged` needs all four. Each gate covers the tag `drag-area`, so a drag-area
-claim never reads Checked past a guard that did not pass.
+need `aero.case_readable`; `aero.converged` needs all four. Each gate covers
+its own tag only. No gate here covers `drag-area` yet: a guard judges its own
+quantity, not a drag area, so a drag-area claim reads Gap until
+`aero.drag_area`, the gate that judges its limit, is in the pack.
 
 Known-bad controls (`selftest/bad_cases.py`, one edit each to the baseline
 spheroid, each 15% past its limit): `coded_inlet` (a `codedFixedValue` inlet),
@@ -38,8 +40,10 @@ it finished without errors), `cut_short` (endTime 110: U_I 11.1%).
 
 The tier-0 gates read the case with the pack's own dictionary reader
 (`gates/_foam.py`, cfd-openfoam's, standard library only): they run without
-OpenFOAM. The reader accepts a strict subset of what OpenFOAM accepts. A
-directive, a macro outside blockMeshDict, a coded condition or a file it does
+OpenFOAM. So does `aero.regime` for a body the dictionary states (a sphere or
+a box); for a surface file it runs surfaceCheck. The reader accepts a strict
+subset of what OpenFOAM accepts. A directive, a macro outside blockMeshDict, a
+coded condition, a keyword written twice in one dictionary or a file it does
 not read is a fail. The tier-1 gates copy the case under the gate's out
 directory and run OpenFOAM there. On that copy the pack writes its own
 dictionaries (`gates/_fo.py`): the mesh-quality limits for snappyHexMesh and
@@ -83,7 +87,8 @@ with the cause *unseen inputs*.
 
 | Tag | Bound by |
 |---|---|
-| `drag-area` | every gate here |
+| `drag-area` | no gate yet (`aero.drag_area` comes with the mesh ladder): a claim with this tag reads Gap |
+| `case-readable` | `aero.case_readable` |
 | `flow-reference` | `aero.reference` |
 | `flow-regime` | `aero.regime` |
 | `domain-size` | `aero.domain` |

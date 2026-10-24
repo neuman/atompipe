@@ -943,6 +943,10 @@ FAST: list[str] = [
     "test_basis.ABasisNeverChangesAStatus",
     "test_basis.ABasisIsNeverAKey",
     "test_basis.ABasisNeverQualifies",
+    # Review of the motorBike design's P3-P5 (invariant 4): no aero guard covers
+    # the drag-area tag, so a drag-area claim is never Checked on guards alone.
+    # The registry and one composition, in process (~0.05 s).
+    "test_aero_openfoam.NoGuardSpeaksForTheDragArea",
     "test_proposers.AProposerIsNeverAnEvaluator",
     "test_proposers.ProposeWritesOnlyItsInputs.test_in_process_a_refusal_writes_nothing",
     "test_records.PreferencesAreRecords",

@@ -156,9 +156,11 @@ def locate() -> Install:
 _USER_CONTROLDICT = ("FoamFile { version 2.0; format ascii; class dictionary; "
                      "object controlDict; }\nInfoSwitches { allowSystemOperations 0; }\n")
 
-def home(out_dir: str, api: int) -> str:
-    """A HOME of the gate's own under its out directory, holding only the user
-    controlDict above. The person's own ``~/.OpenFOAM`` never reaches a run.
+def home(out_dir: str, api: int, pack: str) -> str:
+    """A HOME of the pack's own, ``<out_dir>/<pack>/home``, holding only the
+    user controlDict above. The person's own ``~/.OpenFOAM`` never reaches a
+    run. ``pack`` is the caller's, so a copy of this file in another pack
+    (aero-openfoam's) runs in a HOME of its own pack, never in cfd-openfoam's.
 
     Anything else found under it is removed first: OpenFOAM looks up every
     ``#includeEtc`` and etc file in ``$HOME/.OpenFOAM/<api>/`` and then
@@ -170,18 +172,21 @@ def home(out_dir: str, api: int) -> str:
     directory per run (one more sourcing of etc/bashrc per gate, and a
     directory left behind each time); refusing the run (the HOME is the gate's
     own, so the gate puts it back)."""
-    root = os.path.join(out_dir, "cfd-openfoam", "home")
+    root = os.path.join(out_dir, pack, "home")
     cfg = os.path.join(root, ".OpenFOAM", str(api), "controlDict")
     _only(root, (".OpenFOAM", str(api), "controlDict"))
     os.makedirs(os.path.dirname(cfg), exist_ok=True)
-    try:
-        with open(cfg, encoding="utf-8") as fh:
-            same = fh.read() == _USER_CONTROLDICT
-    except OSError:
-        same = False
-    if not same:
-        with open(cfg, "w", encoding="utf-8") as fh:
-            fh.write(_USER_CONTROLDICT)
+    # Written each time and never read first. What slipped through aero-openfoam's
+    # P3-P5 review (2026-10-23): this function read the file to skip an equal
+    # write, so the first run of a fresh project wrote it, and every later run
+    # (or another gate after it) read a file that run had not written, which
+    # the verdict trace keys as an opaque read ("out:... not written by this
+    # gate"): one gate, the same inputs, two cache entries; and aero-openfoam's
+    # copy put its HOME under cfd-openfoam's name. Rejected: a HOME per gate
+    # (its own later runs read it the same way); a default ``pack`` (a copy
+    # that forgets it runs in the other pack's HOME, silently).
+    with open(cfg, "w", encoding="utf-8") as fh:
+        fh.write(_USER_CONTROLDICT)
     return root
 
 
@@ -486,9 +491,23 @@ def stage(src: str, dst: str, files: list[str]) -> list[str]:
     """Copy ``files`` (paths relative to the case at ``src``, the ones the
     guard read) into the empty directory ``dst``. The copy is a Python read, so
     every file the run will read is keyed, though the tools' own reads are not
-    seen; and a run reads nothing the guard did not."""
-    if os.path.isdir(dst):
-        shutil.rmtree(dst)
+    seen; and a run reads nothing the guard did not.
+
+    The last run's copy is removed by ``rm -rf``, run every time, whether or
+    not there is one. What slipped through aero-openfoam's P3-P5 review
+    (2026-10-23): ``shutil.rmtree`` opens each folder of the old copy by its
+    name relative to its parent's descriptor, which the verdict trace reads as
+    a file of the project's own root ("processor0", "constant", ...), so the
+    second run of a gate keyed other inputs than the first: one gate, the same
+    inputs, two cache entries. A subprocess is opaque by its name alone, and
+    this gate runs tools anyway. Rejected: ``rmtree`` only when the copy exists
+    (the second run still differs from the first); a fresh folder per run (the
+    old ones fill the disk, a mesh at a time)."""
+    removed = subprocess.run(["rm", "-rf", "--", dst], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if removed.returncode != 0 or os.path.lexists(dst):
+        raise RunError(f"rm could not remove the last run's copy at {dst}: "
+                       f"{removed.stderr.decode(errors='replace').strip()}")
     os.makedirs(dst)
     for rel in files:
         os.makedirs(os.path.join(dst, os.path.dirname(rel)), exist_ok=True)
