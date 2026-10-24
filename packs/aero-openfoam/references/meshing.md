@@ -107,3 +107,40 @@ L1 64.8%, L2 71.5% (tutorial dict).
 | motorBike L0, 12 ranks (tutorial dict) | 354 182 | 89.5 s |
 | motorBike L0, 2 ranks (etc dict) | 346 181 | 339 s |
 | motorBike L1 / L2, 12 ranks | 909 730 / 2 618 934 | 199 s / 529 s |
+
+## The mesh ladder (aero.mesh_independence, aero.drag_area)
+
+Three meshes of one case: the case's own (L0) and two refinements.
+
+- **The background block** is multiplied by `aero_ladder_ratio` (default 1.5)
+  per level along every direction, rounded half up and at least one cell more
+  than the level below: the spheroid's (28 12 8), (42 18 12), (63 27 18); the
+  demo's (32 16 12), (48 24 18), (72 36 27). snappyHexMesh refines by levels of
+  the background cell, so every cell of the mesh scales with it.
+- **A `distance` refinement region's distances** are divided by r^k, so the
+  band of finest cells around the body holds the same number of cells at every
+  level (the spheroid's 0.03 m becomes 0.02 and 0.0133333 m). They are written
+  to six significant digits, the precision `foamDictionary -expand` prints:
+  the first run wrote 0.019999999999999997, OpenFOAM read 0.02, and every
+  refined level was refused as another case. An `inside` region is a place and
+  is kept as written. Rejected: distances kept in metres (the band would grow
+  from about 2 to 4.3 cells across the spheroid's ladder: three meshes not
+  refined alike).
+- **Layers in metres are refused** (`relativeSizes false`): they would not
+  scale with the cells.
+- Each level is meshed as `aero.mesh_quality` meshes (the pack's quality limits,
+  the cell cap) and must pass its rule. Then, **before any solve**, the cells
+  must increase and each effective ratio, (N_fine / N_coarse)^(1/3), must be at
+  least 1.3 (Celik et al. 2008, Step 2). A ladder that fails here costs three
+  meshes and no solve.
+
+Measured (P6, the spheroid, 4 ranks, `hierarchical`):
+
+| Ratio | Cells (L0, L1, L2) | Effective ratios |
+|---|---|---|
+| 1.5 | 41 574, 132 094, 386 302 | 1.470, 1.430 |
+| 1.3 (`narrow_ladder`) | 41 574, 78 726, 176 196 | 1.237, 1.308: fails before any solve |
+| 1.5, radii x1.125 (`bigger_body`) | 44 626, 141 285, 408 434 | 1.469, 1.443 |
+
+P0's box at ratio 1.3 gave 1.249 and 1.293; the motorBike's tutorial ladder at
+1.5, 1.42 and 1.37.

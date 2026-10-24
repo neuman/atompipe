@@ -330,3 +330,146 @@ def coefficients(path: str) -> Coefficients:
         raise ValueError(f"{path}: an iteration written twice or out of order")
     return Coefficients([int(round(t)) for t in its], [float(row[ic]) for row in s.rows],
                         dict(s.header))
+
+
+# --------------------------------------------------------------------------- #
+# reading the wall's y+ (aero.wall_treatment, the ladder's levels)
+# --------------------------------------------------------------------------- #
+#: The VTK XML data types an OpenFOAM surface writer uses, as ``struct`` codes.
+_VTK_TYPES = {"Float32": "f", "Float64": "d", "Int32": "i", "Int64": "q", "UInt8": "B",
+              "UInt32": "I", "UInt64": "Q"}
+
+
+def _vtk_array(el, header: str) -> list:
+    """One ``DataArray`` as a flat list: ``ascii``, or ``binary`` (base64, one
+    block, its byte count first in ``header``'s width). ValueError on anything
+    else: an appended or compressed array is a file this reader was not written
+    for, and is refused, never guessed."""
+    typ, fmt = el.get("type"), el.get("format")
+    code = _VTK_TYPES.get(typ or "")
+    if code is None:
+        raise ValueError(f"a DataArray of type {typ!r}")
+    text = el.text or ""
+    if fmt == "ascii":
+        return [float(x) if code in "fd" else int(x) for x in text.split()]
+    if fmt != "binary":
+        raise ValueError(f"a DataArray in the {fmt!r} format (the pack reads ascii and inline "
+                         f"binary)")
+    import base64
+    import struct
+    raw = base64.b64decode("".join(text.split()), validate=True)
+    width = 8 if header == "UInt64" else 4
+    if len(raw) < width:
+        raise ValueError("a binary DataArray shorter than its header")
+    (n,) = struct.unpack("<" + ("Q" if width == 8 else "I"), raw[:width])
+    size = struct.calcsize(code)
+    if n % size or len(raw) < width + n:
+        raise ValueError("a binary DataArray whose byte count is not its data's")
+    return list(struct.unpack(f"<{n // size}{code}", raw[width:width + n]))
+
+
+@dataclass
+class WallSurface:
+    """A body's wall surface as OpenFOAM's ``surfaces`` object wrote it: each
+    face's vector area (m^2) and its value of one cell field."""
+    areas: list
+    values: list
+
+    @property
+    def area(self) -> float:
+        return math.fsum(self.areas)
+
+    def mean(self) -> float:
+        """The area-weighted mean of the values."""
+        return math.fsum(a * v for a, v in zip(self.areas, self.values)) / self.area
+
+    def share(self, lo: float, hi: float) -> float:
+        """The percentage of the area whose value is in ``(lo, hi]`` (``lo``
+        None: at most ``hi``)."""
+        part = math.fsum(a for a, v in zip(self.areas, self.values)
+                         if (lo is None or v > lo) and v <= hi)
+        return 100.0 * part / self.area
+
+
+def wall_surface(path: str, field_name: str) -> WallSurface:
+    """The faces of a VTK XML PolyData file (``.vtp``) and the cell field
+    ``field_name`` on them. Each face's area is its vector area, half the norm
+    of the sum of its edges' cross products (Newell's method): the area
+    OpenFOAM's own ``magSf`` gives a face, planar or not. What slipped through
+    P0: ParaView's ``CellSize`` sums the face's triangles, which for the
+    motorBike's non-planar faces is 0.8% more area than OpenFOAM's. ValueError
+    on a file that is not one piece of polygons with that field on its cells."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        raise ValueError(f"{path} is not XML: {exc}")
+    if root.tag != "VTKFile" or root.get("type") != "PolyData":
+        raise ValueError(f"{path} is not a VTK PolyData file")
+    if root.get("compressor"):
+        raise ValueError(f"{path} is compressed ({root.get('compressor')}): the pack writes "
+                         f"its surfaces uncompressed")
+    header = root.get("header_type") or "UInt32"
+    pieces = root.findall("PolyData/Piece")
+    if len(pieces) != 1:
+        raise ValueError(f"{path} holds {len(pieces)} pieces, not one")
+    piece = pieces[0]
+
+    def one(where: str):
+        found = piece.findall(where)
+        if len(found) != 1:
+            raise ValueError(f"{path}: {len(found)} arrays at {where}, not one")
+        return _vtk_array(found[0], header)
+    pts = one("Points/DataArray")
+    conn = one("Polys/DataArray[@Name='connectivity']")
+    offs = one("Polys/DataArray[@Name='offsets']")
+    values = one(f"CellData/DataArray[@Name='{field_name}']")
+    n_polys = int(piece.get("NumberOfPolys") or -1)
+    n_pts = int(piece.get("NumberOfPoints") or -1)
+    if len(pts) != 3 * n_pts or len(offs) != n_polys or len(values) != n_polys:
+        raise ValueError(f"{path}: {len(pts) // 3} points, {len(offs)} faces and "
+                         f"{len(values)} values for {n_pts} points and {n_polys} faces")
+    if any(not math.isfinite(v) for v in values) or any(not math.isfinite(x) for x in pts):
+        raise ValueError(f"{path} holds a value that is not finite")
+    areas, start = [], 0
+    for end in offs:
+        ids = conn[start:end]
+        if end <= start or len(ids) < 3 or any(not 0 <= i < n_pts for i in ids):
+            raise ValueError(f"{path}: a face that is not three or more of its points")
+        start = end
+        sx = sy = sz = 0.0
+        for a, b in zip(ids, ids[1:] + ids[:1]):
+            x1, y1, z1 = pts[3 * a:3 * a + 3]
+            x2, y2, z2 = pts[3 * b:3 * b + 3]
+            sx += y1 * z2 - z1 * y2
+            sy += z1 * x2 - x1 * z2
+            sz += x1 * y2 - y1 * x2
+        areas.append(0.5 * math.sqrt(sx * sx + sy * sy + sz * sz))
+    if start != len(conn):
+        raise ValueError(f"{path}: the connectivity holds points no face uses")
+    if not math.fsum(areas) > 0:
+        raise ValueError(f"{path} has no area")
+    return WallSurface(areas, [float(v) for v in values])
+
+
+@dataclass
+class FieldValue:
+    """What ``surfaceFieldValue`` wrote: its region's faces and area (its
+    header) and the last row's value of each column."""
+    faces: int
+    area: float
+    last: dict
+
+
+def field_value(path: str) -> FieldValue:
+    """A ``surfaceFieldValue.dat``: ``# Faces``, ``# Area`` and the last row.
+    ValueError on a file without them."""
+    s = T.read_dat(path)
+    try:
+        faces = int(float(s.header["Faces"]))
+        area = float(s.header["Area"])
+    except (KeyError, ValueError):
+        raise ValueError(f"{path}: no Faces and Area in its header")
+    if not s.rows:
+        raise ValueError(f"{path}: no row")
+    return FieldValue(faces, area, dict(zip(s.columns, s.rows[-1])))

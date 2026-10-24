@@ -47,6 +47,15 @@ equations or the right body.
   that was reached. A cap not reached can still be the reason a level stops
   refining in a region.
 
+- Do three meshes agree because the mesh is fine, or by chance?
+  `aero.mesh_independence` needs monotone convergence and an observed order of at
+  least 0.95; above the formal order it takes the band at the formal order with
+  a safety factor of 3. Three meshes are the least the procedure works on: a
+  fourth mesh, finer still, is the test of the band.
+- Is the wall the same on every level? The ladder reports each level's y+ share
+  and layer coverage; a level whose layers collapsed is another kind of mesh,
+  and its drag area belongs to another ladder.
+
 ## Convergence that is a limit cycle
 
 - Does the drag area settle, or does it swing about a mean? A steady solver on a

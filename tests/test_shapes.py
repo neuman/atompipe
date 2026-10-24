@@ -954,7 +954,12 @@ class _CloneTranscript:
         steps["porcelain-after-edit"] = porcelain()
         empty = os.path.join(cls.base, "empty")
         os.makedirs(empty)
-        steps["pack-selftest"] = _env.nopekit(["gate", "selftest"], cwd=empty, home=home)
+        # Pack mode demonstrates every bundled pack with this machine's tools:
+        # where OpenFOAM v2606 is installed, aero-openfoam's mesh ladders take
+        # about 20 min (packs/aero-openfoam/references/selftest.md), and the
+        # default 180 s killed it mid-ladder in the motorBike design's P6.
+        steps["pack-selftest"] = _env.nopekit(["gate", "selftest"], cwd=empty, home=home,
+                                              timeout=3600.0)
         steps["check-junit"] = run("check", "--junit")
         cls.steps = steps
         return steps

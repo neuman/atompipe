@@ -1,7 +1,7 @@
 {
   "name": "aero-openfoam",
   "version": "0.1.0",
-  "description": "The drag area of a body in an open stream, by ESI OpenFOAM v2606 (snappyHexMesh, simpleFoam, k-omega SST) behind guards: case, flow, regime, domain, mesh, convergence.",
+  "description": "The drag area of a body in an open stream, by ESI OpenFOAM v2606 (snappyHexMesh, simpleFoam, k-omega SST) on a three-mesh ladder, behind guards: case, flow, domain, mesh, convergence, y+.",
   "settles": [
     "drag area",
     "drag area from cfd",
@@ -15,6 +15,10 @@
     "snappyhexmesh mesh quality",
     "aero solver convergence",
     "iterative uncertainty",
+    "aero wall treatment",
+    "y+ on the body",
+    "aero mesh independence",
+    "grid convergence index",
     "aero domain size",
     "blockage ratio",
     "aero flow regime",
@@ -30,7 +34,9 @@
     "computational-fluid-dynamics",
     "mesh-quality",
     "convergence",
-    "domain-size"
+    "domain-size",
+    "wall-treatment",
+    "mesh-independence"
   ],
   "provides_gates": [
     "aero.case_readable",
@@ -38,7 +44,10 @@
     "aero.regime",
     "aero.domain",
     "aero.mesh_quality",
-    "aero.converged"
+    "aero.converged",
+    "aero.wall_treatment",
+    "aero.mesh_independence",
+    "aero.drag_area"
   ],
   "provides_views": [
     "aero.hero",

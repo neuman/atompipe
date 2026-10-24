@@ -947,6 +947,15 @@ FAST: list[str] = [
     # the drag-area tag, so a drag-area claim is never Checked on guards alone.
     # The registry and one composition, in process (~0.05 s).
     "test_aero_openfoam.NoGuardSpeaksForTheDragArea",
+    # The motorBike design's P6 (invariants 4, 9 and 12), through the stand-in
+    # OpenFOAM: the drag area at the top of its band on the baseline's replayed
+    # ladder (~1.3 s), its claim in cm^2 or as a lower limit refused before any
+    # mesh (~0.2 s), its four goalpost moves (~1.7 s), and a record of other
+    # inputs never read (~2.5 s). The rest of each class is the gate's.
+    "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_the_baseline_passes_at_the_top_of_its_band",
+    "test_aero_openfoam.TheDragGateStatesItsOwnUnits",
+    "test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse",
+    "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_another_input_byte_is_another_record",
     "test_proposers.AProposerIsNeverAnEvaluator",
     "test_proposers.ProposeWritesOnlyItsInputs.test_in_process_a_refusal_writes_nothing",
     "test_records.PreferencesAreRecords",
@@ -1115,6 +1124,16 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # The motorBike design's P6: the rest of the drag gate's classes, each one to
+    # three ladders through the stand-in (~1.3-3 s each, ~9 s in all): a bigger
+    # body past its margin, a ladder that gives no band, the same solves behind
+    # aero.mesh_independence, and a record of another process or with a moved
+    # byte. An iteration touching `_ladder`, `_Record` or `_judge_ladder` in
+    # aero-openfoam runs test_aero_openfoam whole.
+    "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_a_bigger_body_lands_past_its_margin",
+    "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_a_ladder_that_gives_no_band_here_is_an_error",
+    "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_behind_mesh_independence_it_judges_the_same_solves",
+    "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_a_record_of_another_process_or_another_byte_is_never_read",
     # Issue #15, P1.1: the rest of the evidence binding, each a figure project
     # driven through two to nine cold CLI processes (~1-4 s each, ~12 s in all).
     # The A, B, A row in FAST runs the same plan through the same build, with

@@ -182,6 +182,25 @@ def cuts(box) -> list:
     return [x1 + f * (x1 - x0) for f in CUT_AT]
 
 
+def _force(group: str, u_inf: float, l_ref: float, cofr) -> str:
+    """The ``forceCoeffs`` entry: the drag-area history, every iteration."""
+    return (f"    {FORCE}\n    {{\n        type forceCoeffs;\n        libs (forces);\n"
+            f"        writeControl timeStep;\n        writeInterval 1;\n"
+            f"        writePrecision {WRITE_PRECISION};\n        log false;\n"
+            f"        patches ({group});\n        rho rhoInf;\n        rhoInf 1;\n"
+            f"        liftDir (0 0 1);\n        dragDir (1 0 0);\n        CofR {_v(cofr)};\n"
+            f"        pitchAxis (0 1 0);\n        magUInf {float(u_inf)!r};\n"
+            f"        lRef {float(l_ref)!r};\n        Aref 1;\n    }}\n")
+
+
+def _residuals() -> str:
+    """The ``solverInfo`` entry: the residuals, every iteration."""
+    return (f"    {RESIDUALS}\n    {{\n        type solverInfo;\n"
+            f"        libs (utilityFunctionObjects);\n"
+            f"        fields (U p k omega);\n        writeResidualFields no;\n"
+            f"        writeControl timeStep;\n        writeInterval 1;\n    }}\n")
+
+
 def functions(*, group: str, u_inf: float, l_ref: float, cofr, box) -> str:
     """The ``functions`` entry aero.converged writes into the staged controlDict.
 
@@ -192,16 +211,7 @@ def functions(*, group: str, u_inf: float, l_ref: float, cofr, box) -> str:
     incompressible p is kinematic, so with a density of 1 the coefficients are
     the ones the real density gives. Every picture object runs once, at the
     last iteration (``onEnd``)."""
-    s = [f"    {FORCE}\n    {{\n        type forceCoeffs;\n        libs (forces);\n"
-         f"        writeControl timeStep;\n        writeInterval 1;\n"
-         f"        writePrecision {WRITE_PRECISION};\n        log false;\n"
-         f"        patches ({group});\n        rho rhoInf;\n        rhoInf 1;\n"
-         f"        liftDir (0 0 1);\n        dragDir (1 0 0);\n        CofR {_v(cofr)};\n"
-         f"        pitchAxis (0 1 0);\n        magUInf {float(u_inf)!r};\n"
-         f"        lRef {float(l_ref)!r};\n        Aref 1;\n    }}\n",
-         f"    {RESIDUALS}\n    {{\n        type solverInfo;\n        libs (utilityFunctionObjects);\n"
-         f"        fields (U p k omega);\n        writeResidualFields no;\n"
-         f"        writeControl timeStep;\n        writeInterval 1;\n    }}\n",
+    s = [_force(group, u_inf, l_ref, cofr), _residuals(),
          f"    {MAG}\n    {{\n        type mag;\n        libs (fieldFunctionObjects);\n"
          f"        field U;\n        executeControl onEnd;\n        writeControl onEnd;\n    }}\n"]
     for name, mode in ((CP, "staticCoeff"), (CPT, "totalCoeff")):
@@ -250,3 +260,75 @@ def picture_files(time: str) -> list[str]:
     return ([f"{base}/{BODY}.vtp", f"{base}/{WAKE_ISO}.vtp"]
             + [f"{base}/{c}.vtp" for c in CUTS]
             + [f"postProcessing/sets/{t}/{time}/track0.vtp" for t in TRACKS])
+
+
+# --------------------------------------------------------------------------- #
+# the wall: y+ (aero.wall_treatment, and each level of the mesh ladder)
+# --------------------------------------------------------------------------- #
+#: The function objects of a wall run: ``yPlus`` (OpenFOAM's y+ on every wall
+#: face), the body's y+ surface (``surfaces1``/``bodyYPlus``) and OpenFOAM's
+#: own area and area mean of y+ over the body group (``surfaceFieldValue``).
+YPLUS, YPLUS_AVG = "yPlus1", "yPlusArea"
+BODY_YPLUS = "bodyYPlus"
+YPLUS_FIELD = "yPlus"
+
+
+def wall_functions(*, group: str, u_inf: float) -> str:
+    """The ``functions`` entry of a wall run: the drag-area history and the
+    residuals (as in :func:`functions`), and at the last iteration OpenFOAM's
+    ``yPlus``, the body's y+ surface and the body group's area and area mean of
+    y+. Order matters: OpenFOAM runs the objects in this order at the end, so
+    yPlus has written the field the two after it read.
+
+    The surface is sampled with ``interpolate false``: each face keeps its own
+    wall value (the patch value), never a value spread over its points. P0
+    (2026-10-23, the motorBike's L0) measured this route against OpenFOAM's own
+    ``surfaceFieldValue`` on the same patches: the vtp's faces 44 120 against
+    44 120, its vector area 11.2488272 m^2 against 11.248827215, its area mean
+    of y+ 87.2338338 against 87.2338341. The surface is written in binary
+    (``format binary``, OpenFOAM's default, stated): the gate's reader reads
+    inline base64 and nothing compressed.
+
+    Rejected: the ``expressions`` route, ``(yPlus <= 300) ? 1 : 0`` averaged
+    over the patch (P0: it read 1.0 on every case: the new field's wall faces
+    are set to the cell values beside them, and yPlus's cell values are 0, so
+    the wall value never reaches it); ParaView's ``CellSize`` (it sums the
+    triangles of a non-planar face, 0.8% more area than OpenFOAM's faces on the
+    motorBike); the picture objects of :func:`functions` in this run (the
+    streamlines cost a third of the motorBike's run, and nothing here reads
+    them)."""
+    return ("// Written by nopekit's aero-openfoam pack: the case's own function objects\n"
+            "// are refused, so every number below is the pack's.\nfunctions\n{\n"
+            + _force(group, u_inf, L_REF_WALL, (0.0, 0.0, 0.0)) + _residuals()
+            + f"    {YPLUS}\n    {{\n        type yPlus;\n        libs (fieldFunctionObjects);\n"
+              f"        executeControl onEnd;\n        writeControl onEnd;\n    }}\n"
+            + f"    {SURFACES}\n    {{\n        type surfaces;\n        libs (sampling);\n"
+              f"        executeControl onEnd;\n        writeControl onEnd;\n"
+              f"        surfaceFormat vtk;\n"
+              f"        formatOptions\n        {{\n            vtk\n            {{\n"
+              f"                format binary;\n            }}\n        }}\n"
+              f"        fields ({YPLUS_FIELD});\n"
+              f"        surfaces\n        {{\n"
+              f"            {BODY_YPLUS}\n            {{\n                type patch;\n"
+              f"                patches ({group});\n                interpolate false;\n"
+              f"            }}\n        }}\n    }}\n"
+            + f"    {YPLUS_AVG}\n    {{\n        type surfaceFieldValue;\n"
+              f"        libs (fieldFunctionObjects);\n        regionType patch;\n"
+              f"        names ({group});\n        operation areaAverage;\n"
+              f"        fields ({YPLUS_FIELD});\n        writeFields false;\n"
+              f"        writePrecision {WRITE_PRECISION};\n"
+              f"        executeControl onEnd;\n        writeControl onEnd;\n    }}\n"
+            + "}\n")
+
+
+#: forceCoeffs' reference length in a wall run: 1 m, as aero.converged's
+#: (``aero.L_REF``: it scales only the moments, which no gate reads).
+L_REF_WALL = 1.0
+
+
+def wall_files(time: str) -> dict:
+    """``{role: path relative to the case}`` of what a wall run writes: the
+    body's y+ surface at ``time`` and OpenFOAM's area mean (its file is under
+    the start time, ``0``)."""
+    return {"yplus": f"postProcessing/{SURFACES}/{time}/{BODY_YPLUS}.vtp",
+            "average": f"postProcessing/{YPLUS_AVG}/0/surfaceFieldValue.dat"}

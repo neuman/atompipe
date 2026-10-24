@@ -484,7 +484,9 @@ class Walked(NamedTuple):
     """One read leaf, as the restated walk classifies it: ``"lands"`` (with the
     first landing factor and the factor before it in that direction),
     ``"inconclusive"`` (no landing, a skip or error seen: ``error_after`` the
-    first value that did) or ``"untouched"`` (it never lands)."""
+    first value that did), ``"untouched"`` (it never lands) or, only when the
+    caller named the leaves to walk, ``"not walked"`` (read and orderable, and
+    left out by name: never a fourth way to land)."""
     key: tuple
     kind: str
     first: float = 0.0
@@ -493,11 +495,15 @@ class Walked(NamedTuple):
 
 
 def oracle_walk(spec: GateSpec, fn: Callable, good_ctx: Any, *, rungs: tuple,
-                margin: float) -> tuple[tuple | None, list[Walked]]:
+                margin: float, leaves: frozenset | None = None
+                ) -> tuple[tuple | None, list[Walked]]:
     """``(the known-good run, [Walked per read orderable leaf])`` — the ladder
     walked by direct oracle calls, ×f then ÷f per rung, nearest first; ``None``
     and no leaves when the known-good run does not pass a finite value against
-    a finite limit it is not exactly at (no boundary)."""
+    a finite limit it is not exactly at (no boundary). With ``leaves``, only
+    the read leaves it names are walked, and every other read orderable leaf
+    comes back ``"not walked"``, so a caller says by name what it left out
+    (`SLOW_WALK`)."""
     snapshot = copy.deepcopy(good_ctx.params)
     v0 = oracle_run(spec, fn, good_ctx, snapshot)
     _o, log = oracle(spec, fn, good_ctx, snapshot)
@@ -508,6 +514,9 @@ def oracle_walk(spec: GateSpec, fn: Callable, good_ctx: Any, *, rungs: tuple,
     for leaf in sorted((lf for lf in _leaves(snapshot) if lf in log), key=repr):
         x0 = _get(snapshot, leaf)
         if not _orderable(x0):
+            continue
+        if leaves is not None and leaf not in leaves:
+            out.append(Walked(leaf, "not walked"))
             continue
         tried: set = set()
         found = None
@@ -2320,11 +2329,82 @@ class MutationIsSealed(_env.EnvCase):
             self.assertTrue(any(p.startswith("M1 hook") for p in problems), (key, problems))
             self.assertTrue(any(p.startswith("M1 tree") for p in problems), (key, problems))
 
+class SlowWalk(NamedTuple):
+    """One entry of `SLOW_WALK`: the leaves walked, each with the kind the
+    walk measured for it, and the read orderable leaves left out, by name."""
+    walked: dict
+    not_walked: frozenset
+
+
+#: The leaves the bundled-pack walk takes on aero-openfoam's SOLVE-tier
+#: gates, and only these: every other leaf they read is named, asserted and
+#: printed as not walked. The bundled-pack walk is a detector (R-4), not
+#: admission: a bundled pack qualifies on its controls (invariant 9: its
+#: known-good passes, its known-bad fails, `gate selftest`), and the
+#: mutation clause binds only an evaluator not from a bundled pack. So the
+#: walk here may choose its inputs, and it chooses those that touch what each
+#: gate judges and land within a few rungs where any can.
+#:
+#: Why (P6, 2026-10-24): the whole walk took 9.4 h on the 7-core machine,
+#: 8.7 h of it aero.mesh_independence and aero.drag_area, each rung a full
+#: ladder (three meshes, three solves, about 3 min on 4 ranks): a ladder
+#: record serves only the runs of one out directory and the oracle gives
+#: each run its own. Every leaf that cannot land walks all 18 rungs.
+#:
+#: Rejected for every gate: ``aero_ranks`` (it moves the run time and the
+#: rank count, never the result: x1000 is 4000 ranks, past `RANKS_MAX` 64,
+#: an error, and /1000 one rank, the slowest run of all); ``aero_timeout_s``
+#: and ``aero_max_global_cells`` (bounds the baseline sits far inside: down
+#: the ladder they stop or cap a run, a skip or an error, and they never move
+#: the value; 18 full runs each). Rejected for the ladder gates:
+#: ``aero_rho_kg_m3`` (aero.drag_area only reports the force with it: it can
+#: never land, 18 ladders, about 54 min) and ``aero_iter_unc_max_pct`` (the
+#: ceiling each level's run is held to: lowered under the finest level's U_I
+#: the ladder gives no band, an error; raised it moves nothing; 18 ladders).
+#: Rejected: a cap on rungs or runs per gate (it would walk a leaf part way
+#: and say nothing of where it stopped); the stand-in tools (the walk is of
+#: the real gates on the real tools, or it is not this detector).
+SLOW_WALK = {
+    # U_I against the ceiling it reads: lowered, the ceiling lands at /100
+    # (U_I 0.0148% against 0.01), its aimed value 0.0129 fails. Not walked:
+    # aero_u_inf_m_s, which only scales the coefficients U_I is a ratio of
+    # (P4's walk: inconclusive in 18 solves).
+    "aero.converged": SlowWalk(
+        {("aero_iter_unc_max_pct",): "lands"},
+        frozenset({("aero_max_global_cells",), ("aero_ranks",), ("aero_timeout_s",),
+                   ("aero_u_inf_m_s",)})),
+    # The y+ share moves with the body's surface and the mesh only, which no
+    # leaf of the baseline states: no leaf can land. Walked: the rule the run
+    # is held to before its y+ is read (lowered past the run's U_I, an
+    # error). 18 base-mesh solves, about 10 s each.
+    "aero.wall_treatment": SlowWalk(
+        {("aero_iter_unc_max_pct",): "inconclusive"},
+        frozenset({("aero_max_global_cells",), ("aero_ranks",), ("aero_timeout_s",)})),
+    # The GCI against the limit it reads: lowered, aero_gci_max_pct lands at
+    # /1.5 (15.67% against 13.33), four ladders, then the aimed value's
+    # bisection. And the ladder ratio, which moves the GCI itself: x1.15 is
+    # one finer ladder, /1.15 (1.30) fails before any solve, every rung past
+    # them is outside [1.1, 2.0], an error before any mesh.
+    "aero.mesh_independence": SlowWalk(
+        {("aero_gci_max_pct",): "lands", ("aero_ladder_ratio",): "inconclusive"},
+        frozenset({("aero_iter_unc_max_pct",), ("aero_max_global_cells",), ("aero_ranks",),
+                   ("aero_timeout_s",)})),
+    # The top of the band against the claim's limit (``ctx.acceptance``): no
+    # leaf states that limit, so none can land (the goalpost's own walk is
+    # admission's, test_goalposts). Walked: the ladder ratio, the one leaf
+    # that moves the top, at the cost aero.mesh_independence's walk of it has.
+    "aero.drag_area": SlowWalk(
+        {("aero_ladder_ratio",): "inconclusive"},
+        frozenset({("aero_iter_unc_max_pct",), ("aero_max_global_cells",), ("aero_ranks",),
+                   ("aero_rho_kg_m3",), ("aero_timeout_s",)})),
+}
+
+
 class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     """(C12, R-4's detector for the mutation clause) The restated aimed walk
     over every bundled pack gate on its own baseline: no conclusive mutation
-    passes an honest bundled gate — measured 44 gates with a conclusive
-    mutation, 5 walked with none, 27 with no boundary (a value exactly at its
+    passes an honest bundled gate — measured 45 gates with a conclusive
+    mutation, 7 walked with none, 27 with no boundary (a value exactly at its
     limit, mostly a defect count 0 against 0, or no value: aero-openfoam's two
     tier-0 checks) where trimesh, numpy, omc, kicad-cli, ngspice, cadquery and
     OpenFOAM v2606 are present — and the planted drifted-limit gate is one hit.
@@ -2335,8 +2415,18 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
     aero-openfoam's add about 6 min for aero.mesh_quality, each rung a
     snappyHexMesh run on up to 40 ranks, and about 31 min for aero.converged,
     each rung a solve, both measured alone in P3-P4 before P4 dropped two keys
-    it read: aero_max_local_cells and aero_ref_length_m): the refusal it
-    licenses is held in the fast tier by V2.
+    it read: aero_max_local_cells and aero_ref_length_m). The motorBike
+    design's P6 added aero-openfoam's three ladder gates, and the walk of
+    every leaf took 9.4 h on the 7-core machine P6 ran on (2026-10-24), 8.7 h
+    of it aero.mesh_independence and aero.drag_area, each rung a full ladder.
+    So on aero-openfoam's four SOLVE-tier gates it walks only the leaves
+    `SLOW_WALK` names, and asserts and prints every leaf it leaves out: with
+    every tool present the whole class took 1 h 48 min (6467 s, 2026-10-24),
+    the walk of each leaf of every other gate as before. Measured so:
+    aero.converged and aero.mesh_independence have a conclusive mutation
+    (``aero_iter_unc_max_pct``, ``aero_gci_max_pct``), aero.wall_treatment
+    and aero.drag_area walked with none (no leaf states what they judge
+    against). The refusal it licenses is held in the fast tier by V2.
 
     What slipped through P3 here: aero.regime reported whichever of Re (a
     floor) and Mach (a ceiling) was nearer its limit, and a sound speed walked
@@ -2347,6 +2437,8 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
         kinds = collections.Counter()
         passes = []
         unavailable = 0
+        trimmed: dict = {}
+        registered: set = set()
         for name in sorted(os.listdir(_projects.PACKS)):
             pack_dir = os.path.join(_projects.PACKS, name)
             if not os.path.isfile(os.path.join(pack_dir, "pack.json")):
@@ -2355,11 +2447,24 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
             packs_mod.load_gates(name, registry, root=_env.REPO, include_env=False,
                                  include_user=False)
             for spec, fn in registry.pairs():
+                registered.add(spec.id)
                 if not gates_mod.availability(spec)[0]:
                     unavailable += 1
                     continue
                 good = packs_mod.baseline_context(pack_dir, out_dir=self.tmp())
-                v0, walked = oracle_walk(spec, fn, good, rungs=RUNGS, margin=MARGIN)
+                slow = SLOW_WALK.get(spec.id)
+                v0, walked = oracle_walk(spec, fn, good, rungs=RUNGS, margin=MARGIN,
+                                         leaves=None if slow is None else frozenset(slow.walked))
+                if slow is not None:
+                    trimmed[spec.id] = (
+                        {w.key: w.kind for w in walked if w.kind != "not walked"},
+                        frozenset(w.key for w in walked if w.kind == "not walked"))
+                    print(f"\n{spec.id}: walked "
+                          + ", ".join(f"{k[-1]} ({kind})"
+                                      for k, kind in sorted(trimmed[spec.id][0].items()))
+                          + "; not walked (SLOW_WALK) "
+                          + ", ".join(sorted(k[-1] for k in trimmed[spec.id][1])),
+                          file=sys.stderr, flush=True)
                 if v0 is None:
                     kinds["no-boundary"] += 1
                     continue
@@ -2370,9 +2475,15 @@ class TheWalkFindsNoConclusivePassOnBundledGates(_env.EnvCase):
                     if run[0] == "pass":
                         passes.append(f"{spec.id}: {w.key} -> {after!r}")
         self.assertEqual(passes, [])
-        self.assertEqual(sum(kinds.values()) + unavailable, 76, kinds)
+        # A gate renamed away from its entry would walk every leaf again.
+        self.assertEqual(sorted(set(SLOW_WALK) - registered), [])
+        for gid, (walked, left) in trimmed.items():
+            with self.subTest(gate=gid):
+                self.assertEqual((walked, left),
+                                 (SLOW_WALK[gid].walked, SLOW_WALK[gid].not_walked))
+        self.assertEqual(sum(kinds.values()) + unavailable, 79, kinds)
         if not unavailable:
-            self.assertEqual(dict(kinds), {"conclusive": 44, "none-conclusive": 5,
+            self.assertEqual(dict(kinds), {"conclusive": 45, "none-conclusive": 7,
                                            "no-boundary": 27})
 
     def test_the_planted_drifted_limit_is_one_hit(self):

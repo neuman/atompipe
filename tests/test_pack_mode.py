@@ -142,9 +142,9 @@ class PackModeSelftest(_env.EnvCase):
         self.cwd = self.tmp()
         self.home = self.tmp()
 
-    def _run(self, *args: str, cwd: str | None = None):
+    def _run(self, *args: str, cwd: str | None = None, timeout: float = _env.DEFAULT_TIMEOUT_S):
         return _env.nopekit(["gate", "selftest", *args], cwd=cwd or self.cwd,
-                             home=self.home)
+                             home=self.home, timeout=timeout)
 
     # -- zero controls is not a pass --------------------------------------- #
     def test_an_empty_pack_dir_exits_1_unless_allowed(self):
@@ -244,7 +244,11 @@ class PackModeSelftest(_env.EnvCase):
         demonstrated, and `packs/` is byte- and mtime-identical afterwards —
         openmodelica's generated models included (Q1.8)."""
         before = _snapshot(PACKS_DIR)
-        proc = self._run(cwd=_env.REPO)
+        # Every bundled pack with this machine's tools: where OpenFOAM v2606 is
+        # installed, aero-openfoam's mesh ladders alone take about 20 min
+        # (packs/aero-openfoam/references/selftest.md); the default 180 s
+        # killed the run mid-ladder in the motorBike design's P6.
+        proc = self._run(cwd=_env.REPO, timeout=3600.0)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         match = SUMMARY.match(proc.stdout.splitlines()[-1])
         self.assertIsNotNone(match, proc.stdout)

@@ -107,7 +107,11 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # Review of the motorBike design's P3-P5: guards that judge other
         # quantities covered the drag-area tag, and a drag-area claim read
         # Checked with its limit read by no evaluator.
-        "test_aero_openfoam.NoGuardSpeaksForTheDragArea"],
+        "test_aero_openfoam.NoGuardSpeaksForTheDragArea",
+        # The motorBike design's P6: the drag area is judged at the top of its
+        # band, in the gate's own units, against the one claim it reads.
+        "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand",
+        "test_aero_openfoam.TheDragGateStatesItsOwnUnits"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.
@@ -172,7 +176,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_context.AMutationPassingOutsideStillCounts",
         "test_goalposts.AGoalpostIsNeverAKey",
         # Architecture phase 2: a declared basis is never a qualification route.
-        "test_basis.ABasisNeverQualifies"],
+        "test_basis.ABasisNeverQualifies",
+        # The motorBike design's P6: the drag gate's goalpost moves move
+        # nothing but its outcome.
+        "test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse"],
     # 10 (P2.2): the rule in the run loop, the resolver and the composition; a
     # cached pass behind a failed guard, end to end in process; and the graph
     # the rule walks — a cycle or an inversion refused at registration.
@@ -227,7 +234,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_derivation.AmberChangesNoStatus",
          # Issue #15, D1: a claim Stale only for inputs nopekit cannot see has
          # its own cause, which moves no status, readiness or blocking.
-         "test_unseen.UnseenMovesNoStatus"],
+         "test_unseen.UnseenMovesNoStatus",
+         # The motorBike design's P6: a ladder is judged twice but solved once
+         # a process, so the boundary still solves it.
+         "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and

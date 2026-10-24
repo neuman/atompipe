@@ -182,3 +182,65 @@ def cut_short(ctx):
     The run exits 0 and prints End: only the history can refuse it. The case
     reads, meshes and is the stated flow, so every guard before it passes."""
     return _variant(ctx, "cut_short", {"system/controlDict": [("endTime", "110")]})
+
+
+def no_layers(ctx):
+    """aero.wall_treatment — ``addLayers false``: the spheroid meshed without
+    its two layers, so the first cell off the body is a snapped surface cell.
+
+    Measured (P0, 8 ranks): y+ at most 300 on 35.6% of the body's area, against
+    the baseline's 100% and the limit's 90% (15% past it is 78.3%). The mesh
+    passes aero.mesh_quality and the run settles (aero.converged): the wall is
+    the one thing wrong."""
+    return _variant(ctx, "no_layers", {"system/snappyHexMeshDict": [("addLayers", "false")]})
+
+
+#: The ladder ratio ``narrow_ladder`` states: 1.3, Celik's floor for the
+#: effective ratio, which the meshes then miss: snappyHexMesh refines the
+#: background cells by whole levels, so the surface and wake cells of two
+#: levels 1.3 apart in the block are less than 1.3 apart in count^(1/3). P0
+#: measured 1.249 and 1.293 on its box; the spheroid's are in
+#: references/selftest.md. Rejected: P0's ``coarse`` (a halved block): it is
+#: a ladder the gate would solve, three solves for a control.
+NARROW_RATIO = 1.3
+
+
+def narrow_ladder(ctx):
+    """aero.mesh_independence — ``aero_ladder_ratio`` 1.3 (``NARROW_RATIO``):
+    three meshes whose effective refinement ratios, from their cells, fall
+    under Celik's 1.3. The gate judges them after meshing and before any
+    solve, so the control costs three meshes and no solve. A parameter, not a
+    case edit: the ladder is the pack's."""
+    def edit(params):
+        params["aero_ladder_ratio"] = NARROW_RATIO
+    return _variant(ctx, "narrow_ladder", params_edit=edit)
+
+
+#: How much larger ``bigger_body`` makes the spheroid: every radius 1.125
+#: times (exact in binary), its centre where it was. Measured (P6, 4 ranks, the
+#: whole ladder): the top of its band 0.00529625 m^2 against the baseline's
+#: 0.00421412, 1.257 times; B1's limit 0.0044 sits 4.4% over the baseline's
+#: top, and the control lands 1.204 times past it. Rejected: 1.15 (the
+#: design's, after P0's L0 alone: on the finest mesh the drag area cycles with
+#: U_I 0.53%, past a tenth of the change between the two finest meshes, so
+#: aero.mesh_independence fails it and the control never reaches this gate;
+#: thickening only the cross-section by 1.15 cycled at 1.18%); 1.1 (P0's: the
+#: top 1.182 times the baseline's, a window of 2.8% between the baseline's top
+#: and 15% under the control's); a smaller ``aero_u_inf_m_s`` (forceCoeffs
+#: would make the same flow dimensionless by another speed: aero.reference's
+#: control, not a larger drag).
+BODY_SCALE = 1.125
+
+
+def bigger_body(ctx):
+    """aero.drag_area — the spheroid's three radii times 1.125
+    (``BODY_SCALE``), its centre where it was: the same shape with 27% more
+    frontal area. Its drag area at the top of its band lands 20% past the
+    baseline's limit (B1), measured; every guard before it passes (it is
+    1.125 m long, still longer than ``aero_ref_length_m``; its domain still
+    meets Franke et al. 2007; its y+ and its ladder pass, references/selftest.md)."""
+    radii = A.Case(_baseline()["aero_case"]).geometry["spheroid"][1]
+    lo, hi = radii
+    r = tuple(0.5 * (hi[k] - lo[k]) * BODY_SCALE for k in range(3))
+    return _variant(ctx, "bigger_body", {"system/snappyHexMeshDict": [
+        ("geometry/spheroid/radius", f"({r[0]!r} {r[1]!r} {r[2]!r})")]})

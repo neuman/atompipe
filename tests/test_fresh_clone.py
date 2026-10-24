@@ -199,6 +199,11 @@ def _tail(text: str, n: int = 30) -> str:
     return "\n".join(lines[-n:]) if lines else "(empty)"
 
 
+#: How long pack mode's `gate selftest` may run: an hour, three times
+#: aero-openfoam's 20 min on the real tools.
+PACK_MODE_TIMEOUT_S = 3600.0
+
+
 class _Replay:
     """Executes `_transcript.STEPS` against one copy, in order, through `_env`."""
 
@@ -230,7 +235,15 @@ class _Replay:
     def act(self, action: _transcript.Action) -> Result | None:
         if isinstance(action, _transcript.Nopekit):
             cwd = self.project if action.where == "project" else self.case.tmp()
-            proc = _env.nopekit(list(action.argv), cwd=cwd, home=self.home)
+            # Pack mode demonstrates every bundled pack with the tools this
+            # machine has: where OpenFOAM v2606 is installed, aero-openfoam's
+            # three mesh ladders alone take about 20 min
+            # (packs/aero-openfoam/references/selftest.md). What slipped
+            # through the motorBike design's P6: the default 180 s killed the
+            # step mid-ladder. Rejected: skipping the step where the tools are
+            # (its line is the thing it checks, every pack counted).
+            timeout = PACK_MODE_TIMEOUT_S if action.where == "empty" else _env.DEFAULT_TIMEOUT_S
+            proc = _env.nopekit(list(action.argv), cwd=cwd, home=self.home, timeout=timeout)
             self.last = Result(str(action), proc.returncode, proc.stdout, proc.stderr, cwd)
             return self.last
         if isinstance(action, _transcript.Git):

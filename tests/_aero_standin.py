@@ -183,6 +183,45 @@ if TOOL == "decomposePar":
         os.makedirs(f"processor{k}/constant", exist_ok=True)
     end(f"Decomposing mesh\nNumber of processors: {n}\n")
 
+#: The cells the real snappyHexMesh meshed the selftest's cases to (P6, 4
+#: ranks, ``hierarchical``): ``{(background cells, radii, layers): cells}``,
+#: the base mesh's the count of ``snappy_baseline.log`` (41 546, the P3 run
+#: the log was cut from; P6 measured 41 574 on 4 ranks),
+#: the baseline spheroid's ladder at ratio 1.5, its ladder at 1.3
+#: (``narrow_ladder``), the 1.125 times larger body's ladder (``bigger_body``)
+#: and the mesh without layers (``no_layers``). A mesh the table does not hold
+#: scales the baseline's by its background cells.
+SNAPPED = {(2688, (0.5, 0.125, 0.125), True): 41546,
+           (9072, (0.5, 0.125, 0.125), True): 132094,
+           (30618, (0.5, 0.125, 0.125), True): 386302,
+           (5760, (0.5, 0.125, 0.125), True): 78726,
+           (13160, (0.5, 0.125, 0.125), True): 176196,
+           (2688, (0.5625, 0.140625, 0.140625), True): 44626,
+           (9072, (0.5625, 0.140625, 0.140625), True): 141285,
+           (30618, (0.5625, 0.140625, 0.140625), True): 408434,
+           (2688, (0.5, 0.125, 0.125), False): 36782}
+#: The drag-area history the real simpleFoam wrote on each of those meshes
+#: (``tests/aero_fixtures/``; the base mesh's is the full file, the others
+#: hold the Time and Cd columns only). A mesh with no history of its own
+#: replays the base mesh's.
+HISTORIES = {41546: "spheroid_coefficient.dat", 132094: "ladder/spheroid_L1.dat",
+             386302: "ladder/spheroid_L2.dat", 44626: "ladder/bigger_L0.dat",
+             141285: "ladder/bigger_L1.dat", 408434: "ladder/bigger_L2.dat"}
+
+
+def snapped_cells() -> int:
+    """The cells the real snappyHexMesh gave the staged case, by
+    ``SNAPPED``."""
+    bm, _lo, _hi = block_mesh()
+    text = open(os.path.join("system", "snappyHexMeshDict")).read()
+    radius = re.search(r"radius\s*\(([^)]*)\)", text)
+    radii = tuple(float(x) for x in radius.group(1).split()) if radius else ()
+    layers = re.search(r"^addLayers\s+(\w+);", text, re.M)
+    on = layers is None or layers.group(1) in ("true", "on", "yes")
+    base = SNAPPED[(2688, (0.5, 0.125, 0.125), True)]
+    return SNAPPED.get((bm, radii, on), int(round(base * bm / 2688)))
+
+
 if TOOL == "snappyHexMesh":
     m = MODE.get("snappyHexMesh", {})
     # The capped log when the mode asks for it, or when the staged cap is below
@@ -195,6 +234,8 @@ if TOOL == "snappyHexMesh":
                     open(os.path.join("system", "snappyHexMeshDict")).read(), re.M)
     capped = m.get("log") == "capped" or (cap is not None and int(cap.group(1)) < cells)
     text = fixture("snappy_capped.log") if capped else base
+    if not capped:
+        text = text.replace(f"cells:{cells}", f"cells:{snapped_cells()}")
     for old, new in m.get("replace", []):
         text = text.replace(old, new)
     print(text, end="")
@@ -225,7 +266,14 @@ if TOOL == "simpleFoam":
     m = MODE.get("simpleFoam", {})
     control = open(os.path.join("system", "controlDict")).read()
     budget = int(float(re.search(r"^endTime\s+(\S+);", control, re.M).group(1)))
-    text = fixture("spheroid_coefficient.dat")
+    try:
+        meshed = int(re.findall(r"^Layer mesh : cells:(\d+)", open("log.snappyHexMesh").read(),
+                                re.M)[-1])
+    except (OSError, IndexError):
+        meshed = 0
+    name = m.get("by_cells", {}).get(str(meshed)) or HISTORIES.get(meshed,
+                                                                   "spheroid_coefficient.dat")
+    text = fixture(name)
     head = [ln for ln in text.splitlines() if ln.startswith("#")]
     rows = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
     if budget > len(rows):
@@ -248,6 +296,26 @@ if TOOL == "simpleFoam":
             os.makedirs(os.path.dirname(name), exist_ok=True)
             with open(name, "w") as fh:
                 fh.write(f"<!-- stand-in {name}, {budget} iterations -->\n")
+    if "yPlusArea" in control and not m.get("no_wall"):
+        # The body's y+ surface and OpenFOAM's own area mean of it, as the real
+        # run wrote them on the base mesh, with layers or without (the
+        # snappyHexMeshDict's addLayers): every level of a ladder replays the
+        # base mesh's, which the gates report and never judge there.
+        snappy = open(os.path.join("system", "snappyHexMeshDict")).read()
+        layers = re.search(r"^addLayers\s+(\w+);", snappy, re.M)
+        which = "no_layers" if layers and layers.group(1) == "false" else "baseline"
+        vtp = f"postProcessing/surfaces1/{budget}/bodyYPlus.vtp"
+        dat = "postProcessing/yPlusArea/0/surfaceFieldValue.dat"
+        for name, src in ((vtp, f"ladder/yplus_{which}.vtp"), (dat, f"ladder/yplus_{which}.dat")):
+            os.makedirs(os.path.dirname(name), exist_ok=True)
+            with open(os.path.join(FIXTURES, *src.split("/")), "rb") as fh:
+                data = fh.read()
+            if name == dat:
+                data = data.replace(b"\n300 ", f"\n{budget} ".encode())
+                for old_text, new_text in m.get("wall_replace", []):
+                    data = data.replace(old_text.encode(), new_text.encode())
+            with open(name, "wb") as fh:
+                fh.write(data)
     log = ["SIMPLE: no convergence criteria found. Calculations will run for "
            f"{budget} steps.\n"]
     for it in range(1, budget + 1):

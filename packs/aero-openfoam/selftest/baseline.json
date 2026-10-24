@@ -1,5 +1,5 @@
 {
-  "_description": "A prolate spheroid, 1 m long and 0.25 m across (selftest/assets/spheroid: OpenFOAM v2606's searchableSphere with three radii), its centre 0.4 m over a ground that moves with the air, in a 20 m/s stream of air at nu 1.5e-5 m^2/s: Re 1.33e6 on its length. simpleFoam with k-omega SST and Spalding's wall function, 300 iterations. Measured in P0 (2026-10-23, 8 ranks): 41 574 cells after snappyHexMesh, 0 faces in error against ESI's meshQualityDict, layers on 100% of the body, the drag area settled to 2e-5 of itself by iteration 134 (CdA 0.00443 m^2 on this mesh), y+ at most 300 on all of the body. The domain meets Franke et al. 2007 with the sides the nearest (5.48 H against 5 H). Chosen over P0's ground-mounted cube, which is unsteady in steady RANS on the finer meshes.",
+  "_description": "A prolate spheroid, 1 m long and 0.25 m across (selftest/assets/spheroid: OpenFOAM v2606's searchableSphere with three radii), its centre 0.4 m over a ground that moves with the air, in a 20 m/s stream of air at nu 1.5e-5 m^2/s: Re 1.33e6 on its length. simpleFoam with k-omega SST and Spalding's wall function, 300 iterations. Measured in P0 (2026-10-23, 8 ranks): 41 574 cells after snappyHexMesh, 0 faces in error against ESI's meshQualityDict, layers on 100% of the body, the drag area settled to 2e-5 of itself by iteration 134 (CdA 0.00443 m^2 on this mesh), y+ at most 300 on all of the body. Its ladder (P6, ratio 1.5) converges monotonically to 0.00364 m^2 on the finest of three meshes, GCI 15.7%. The domain meets Franke et al. 2007 with the sides the nearest (5.48 H against 5 H). Chosen over P0's ground-mounted cube, which is unsteady in steady RANS on the finer meshes.",
 
   "aero_case": "selftest/assets/spheroid",
   "aero_body_group": "bodyGroup",
@@ -13,11 +13,15 @@
   "aero_iter_unc_max_pct": 1.0,
   "aero_timeout_s": 900.0,
 
+  "aero_ladder_ratio": 1.5,
+  "aero_gci_max_pct": 20.0,
+  "aero_rho_kg_m3": 1.225,
+
   "_claims": [
     {"id": "B1",
-     "statement": "The spheroid's drag area at 20 m/s is at most 0.0042 m^2",
+     "statement": "The spheroid's drag area at 20 m/s is at most 0.0044 m^2",
      "kind": "measurable",
-     "acceptance": {"quantity": "drag area", "comparator": "<=", "limit": 0.0042, "units": "m^2"},
+     "acceptance": {"quantity": "drag area", "comparator": "<=", "limit": 0.0044, "units": "m^2"},
      "tags": ["drag-area"]}
   ],
 
@@ -35,6 +39,9 @@
     "aero_max_global_cells": "the cell cap snappyHexMesh may refine to (pack default 2e7, ten times the motorBike tutorial's). A mesh that reaches it fails aero.mesh_quality.",
     "aero_iter_unc_max_pct": "the largest iterative uncertainty U_I = (max - min) / 2 of the drag area over the last window, in percent of its mean (pack default 1, the author's choice D3).",
     "aero_timeout_s": "seconds each OpenFOAM tool may run before it is killed with every rank and the gate skips (pack default 3600).",
-    "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area. No guard covers it (each judges its own quantity), so it reads Gap until aero.drag_area (P6), which reads its limit."
+    "aero_ladder_ratio": "the mesh ladder's ratio per level on every block direction (pack default 1.5): blocks (28 12 8), (42 18 12), (63 27 18); measured 41 574, 132 094 and 386 302 cells on 4 ranks, effective ratios 1.470 and 1.430.",
+    "aero_gci_max_pct": "the largest GCI of the finest mesh aero.mesh_independence accepts, in percent: 20 for this spheroid, whose observed order 2.71 is past the formal 2 + 0.05, so its band is taken at p = 2 with Fs 3: 15.67%, and the 1.125 times larger body of bigger_body (which this guard must pass for that control to reach aero.drag_area) 18.28%. The motorBike demo states 5 (D3). Rejected: 5 (both ladders fail it, and no control could reach aero.drag_area); 25 (a band that wide on the baseline is a margin nothing measured asks for).",
+    "aero_rho_kg_m3": "ISA sea-level air, for the drag force aero.drag_area reports beside the drag area (not judged).",
+    "_claims": "the claim the baseline is calibrated against: the drag area, tagged drag-area, which aero.drag_area alone covers and reads the limit of. 0.0044 m^2: measured (P6), the top of the baseline's band is 0.00421412 m^2 (4.4% under it) and bigger_body's 0.00529625 m^2 (1.204 times it). Rejected: P3's placeholder 0.0042 (under the baseline's own top: the known-good control would fail)."
   }
 }

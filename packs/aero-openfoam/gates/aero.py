@@ -7,6 +7,10 @@ ESI OpenFOAM (openfoam.com) with snappyHexMesh, simpleFoam and k-omega SST.
     aero.regime         tier 1  turbulent wall layers and incompressible: Reynolds and Mach numbers
     aero.domain         tier 1  the domain is large enough: Franke et al. 2007, Blocken 2015
     aero.mesh_quality   tier 1  snappyHexMesh, then checkMesh -meshQuality against the pack's limits
+    aero.converged      tier 2  the base mesh solved: the drag area's iterative uncertainty (ITTC)
+    aero.wall_treatment tier 2  y+ at most 300 on at least 90% of the body's area
+    aero.mesh_independence tier 2  three meshes: Celik's GCI, the pack's order rule
+    aero.drag_area      tier 2  the top of the finest mesh's band against the claim's limit
 
 **The guards come first.** A drag number from a domain that squeezes the
 flow, a mesh with folded faces or an air speed nobody stated is the standard
@@ -15,9 +19,9 @@ never ``drag-area``: a guard judges its own quantity (Re, H, faces, %), not a
 drag area, so a pass of every guard says nothing about a drag-area limit. What
 slipped through P3-P5 (review, 2026-10-23): every guard covered ``drag-area``
 before ``aero.drag_area`` existed, so the baseline's B1 (``<= 0.0042 m^2``)
-read Checked at a measured 0.00443 m^2, its limit read by no evaluator. A
-drag-area claim reads Gap until the gate that judges its limit is in the pack;
-the guards reach it then as that gate's prerequisites (``needs``).
+read Checked at a measured 0.00443 m^2, its limit read by no evaluator. Only
+``aero.drag_area`` covers ``drag-area`` and reads its limit; the guards reach a
+drag-area claim as its prerequisites (``needs``).
 
 **Where each verdict comes from.** The tier-0 gates read the case with the
 pack's own dictionary reader (``_foam.py``), so they run where OpenFOAM is not
@@ -62,6 +66,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 
 from nopekit.gates import gate, GateContext
 from nopekit.modelio import load_path as _load_path
@@ -72,6 +77,7 @@ F = _load_path(os.path.join(_HERE, "_foam.py"))
 T = _load_path(os.path.join(_HERE, "_tool.py"))
 P = _load_path(os.path.join(_HERE, "_par.py"))
 FO = _load_path(os.path.join(_HERE, "_fo.py"))
+G = _load_path(os.path.join(_HERE, "_gci.py"))
 
 PACK = "aero-openfoam"
 
@@ -90,7 +96,9 @@ DRAG_TAG = "drag-area"
 #: too, so no gate here covers nothing.
 GUARD_TAGS = {"aero.case_readable": "case-readable", "aero.reference": "flow-reference",
               "aero.regime": "flow-regime", "aero.domain": "domain-size",
-              "aero.mesh_quality": "mesh-quality", "aero.converged": "convergence"}
+              "aero.mesh_quality": "mesh-quality", "aero.converged": "convergence",
+              "aero.wall_treatment": "wall-treatment",
+              "aero.mesh_independence": "mesh-independence"}
 
 #: The solver this pack runs: steady, incompressible, isothermal. Rejected for
 #: now: pimpleFoam (a transient run's mean drag needs a sampling window and a
@@ -628,6 +636,9 @@ class Case:
         if e is None or e.is_dict or len(e.value) != 1 or not isinstance(e.value[0], F.FoamList):
             raise CaseProblem("system/blockMeshDict has no blocks list")
         items, out, i = list(e.value[0]), [], 0
+        #: Where each block's ``(nx ny nz)`` stands in the blockMeshDict's text,
+        #: for the mesh ladder's levels (``block_mesh_at``).
+        self.count_spans = spans = []
         while i < len(items):
             it = items[i]
             if not (isinstance(it, F.Tok) and it.text == "hex"):
@@ -641,6 +652,7 @@ class Case:
                 j += 1
             if j >= len(items) or not isinstance(items[j], F.FoamList) or len(items[j]) != 3:
                 raise CaseProblem("system/blockMeshDict: a hex block with no (nx ny nz) cell counts")
+            spans.append((items[j].start, items[j].end))
             counts = []
             for t in items[j]:
                 v = _resolve(t, bmd, "cell count")
@@ -690,6 +702,14 @@ class Case:
 
     def cells(self) -> int:
         return sum(a * b * c for a, b, c in self.counts)
+
+    def block_mesh_at(self, counts: list) -> str:
+        """The blockMeshDict's text with each block's ``(nx ny nz)`` replaced
+        by ``counts``, every other byte kept (a macro elsewhere stays one)."""
+        text = self.block_mesh_text
+        for (a, b), (nx, ny, nz) in sorted(zip(self.count_spans, counts), reverse=True):
+            text = text[:a] + f"({nx} {ny} {nz})" + text[b:]
+        return text
 
     def side(self, axis: int, high: bool) -> list[str]:
         """The patches with a face on the box's ``axis`` side (low or high)."""
@@ -1399,8 +1419,10 @@ def _as_read(env, stage: str, s: dict, timeout: float) -> list[str]:
     return logs
 
 
-def _block_mesh(env, stage: str, case: Case, timeout: float):
-    """blockMesh, held to the reader's cells and box."""
+def _block_mesh(env, stage: str, case: Case, timeout: float, cells: int | None = None):
+    """blockMesh, held to the reader's cells (``cells``: a ladder level's) and
+    box."""
+    want = case.cells() if cells is None else cells
     run = _serial(env, stage, ["blockMesh"], timeout)
     try:
         cells = T.block_mesh_cells(run.stdout)
@@ -1414,10 +1436,10 @@ def _block_mesh(env, stage: str, case: Case, timeout: float):
                    tuple(float(x) for x in m.group(2).split()))
         except ValueError:
             box = None
-    if cells != case.cells() or box is None or any(
+    if cells != want or box is None or any(
             abs(a - b) > 1e-9 * (1 + abs(b)) for p, q in zip(box, case.box) for a, b in zip(p, q)):
         raise T.RunError(f"blockMesh built {cells} cells in {box}; the reader read "
-                         f"{case.cells()} in {case.box}", [run.log])
+                         f"{want} in {case.box}", [run.log])
     return run
 
 
@@ -1614,7 +1636,7 @@ class Mesh:
         return "no layers" if lay is None else f"layers on {lay[2]:.3g}% of the body's faces"
 
 
-def _mesh(env, stage: str, s: dict, timeout: float) -> Mesh:
+def _mesh(env, stage: str, s: dict, timeout: float, cells: int | None = None) -> Mesh:
     """blockMesh, surfaceFeatureExtract (for a surface file), decomposePar, the
     rank probe, snappyHexMesh and checkMesh -meshQuality on the staged copy:
     a Mesh, or T.RunError / P.Timeout. snappyHexMesh reads the pack's quality
@@ -1622,7 +1644,7 @@ def _mesh(env, stage: str, s: dict, timeout: float) -> Mesh:
     failing the pack's on 1 095 faces."""
     case, n = s["case"], s["ranks"]
     logs = list(_as_read(env, stage, s, timeout))
-    logs.append(_block_mesh(env, stage, case, timeout).log)
+    logs.append(_block_mesh(env, stage, case, timeout, cells).log)
     if s["geometry"]:
         logs.append(_serial(env, stage, ["surfaceFeatureExtract"], timeout).log)
     logs.append(_serial(env, stage, ["decomposePar", "-force"], timeout).log)
@@ -1631,18 +1653,26 @@ def _mesh(env, stage: str, s: dict, timeout: float) -> Mesh:
     logs.append(sn.log)
     check = P.run_parallel(env, stage, ["checkMesh", "-meshQuality", "-constant"], n, timeout)
     logs.append(check.log)
-    rows = P.faces_in_error(check.stdout)
+    return _read_mesh(sn.stdout, check.stdout, logs, stage, check.log)
+
+
+def _read_mesh(snappy_text: str, check_text: str, logs: list, stage: str, check_log: str) -> Mesh:
+    """A Mesh from what snappyHexMesh and checkMesh -meshQuality printed: the
+    one reading of the two logs, whether the tools ran in this gate or a ladder
+    record holds their logs (``_Record``). T.RunError when checkMesh judged
+    against other limits than the pack's or printed no block or cell count."""
+    rows = P.faces_in_error(check_text)
     if rows is None:
         raise T.RunError("checkMesh -meshQuality printed no 'Checking faces in error' block",
-                         [check.log])
+                         [check_log])
     if P.thresholds(rows) != FO.CHECKED:
         raise T.RunError(f"checkMesh judged against limits {P.thresholds(rows)}, not the "
-                         f"pack's {FO.CHECKED}", [check.log])
+                         f"pack's {FO.CHECKED}", [check_log])
     try:
-        cells = P.mesh_cells(check.stdout)
+        cells = P.mesh_cells(check_text)
     except ValueError as exc:
-        raise T.RunError(str(exc), [check.log])
-    return Mesh(P.snappy(sn.stdout), rows, cells, logs, stage)
+        raise T.RunError(str(exc), [check_log])
+    return Mesh(P.snappy(snappy_text), rows, cells, logs, stage)
 
 
 @gate(
@@ -1826,7 +1856,12 @@ def _coefficients(stage: str, u: float) -> "P.Coefficients":
     """forceCoeffs' history, held to the reference values the pack wrote:
     T.RunError on a file that is missing or reports another speed, length,
     area or drag direction."""
-    path = os.path.join(stage, "postProcessing", FO.FORCE, "0", "coefficient.dat")
+    return _coefficients_at(os.path.join(stage, "postProcessing", FO.FORCE, "0",
+                                         "coefficient.dat"), u)
+
+
+def _coefficients_at(path: str, u: float) -> "P.Coefficients":
+    """``_coefficients`` of the file at ``path``."""
     if not os.path.isfile(path):
         raise T.RunError("simpleFoam wrote no forceCoeffs history: the body group may name "
                          "no patch", [])
@@ -2000,3 +2035,973 @@ def converged(ctx: GateContext) -> Verdict:
     return Verdict(gate=gid, passed=passed,
                    measured=_shown(pct, lambda x: x <= ceiling, passed, 6), limit=ceiling,
                    comparator="<=", units=PCT, detail=detail, evidence=[ev, hist, *logs])
+
+
+# --------------------------------------------------------------------------- #
+# what a solve leaves, read once
+# --------------------------------------------------------------------------- #
+def _inlet_speed(case: Case) -> float:
+    """The speed the case runs at: its inlet's ``fixedValue`` along +x. The
+    gates that solve a ladder or the wall make the drag area dimensionless by
+    it. aero.reference, before them, holds it to ``aero_u_inf_m_s``.
+    T.RunError when the inlet is not one uniform velocity along +x (aero.reference
+    passed it, or these gates would not run: the two disagreeing).
+
+    Rejected: ``aero_u_inf_m_s`` itself (aero.converged's: here it is one more
+    key, each a rung of test_mutation's walk and a whole ladder a rung, for a
+    number aero.reference already holds equal to this one)."""
+    e = case.u_boundary.entry(case.inlet)
+    vec = None
+    if e is not None and e.is_dict and F.word(e.value, "type") == "fixedValue":
+        vec = _uniform_vector(e.value)
+    if vec is None or vec[1] != 0.0 or vec[2] != 0.0 or not vec[0] > 0:
+        raise T.RunError(f"the inlet {case.inlet} is not one uniform velocity along +x, which "
+                         f"aero.reference passed")
+    return float(vec[0])
+
+
+def _solve(env, stage: str, n: int, timeout: float, u: float):
+    """potentialFoam and simpleFoam on the meshed stage: ``(Coefficients,
+    iteration blocks, [logs])``, or T.RunError / P.Timeout."""
+    _restore_zero(stage)
+    pot = P.run_parallel(env, stage, ["potentialFoam", "-writephi"], n, timeout)
+    sol = P.run_parallel(env, stage, ["simpleFoam"], n, timeout)
+    co = _coefficients(stage, u)
+    blocks = P.iterations(sol.stdout)
+    _same_run(co, blocks, [pot.log, sol.log])
+    return co, blocks, [pot.log, sol.log]
+
+
+def _same_run(co, blocks, logs) -> None:
+    if len(blocks) != len(co.cda) or co.iterations != list(range(1, len(co.cda) + 1)):
+        raise T.RunError(f"simpleFoam's log has {len(blocks)} iterations and forceCoeffs "
+                         f"{len(co.cda)} rows: the history is not the run's", logs)
+
+
+def _settling(co, blocks, ceiling: float) -> dict:
+    """aero.converged's rule on one run, as numbers and reasons: ``{u_i_m2,
+    u_i_pct, mean_m2, why}``, ``why`` empty when the window filled, no residual
+    climbed past ``RESIDUAL_RISE_MAX`` times its window's least and U_I is at
+    most ``ceiling`` % of the mean. T.RunError on a mean that is not positive."""
+    hr = P.half_range(co.cda, WINDOW)
+    if hr is None:
+        return {"u_i_m2": None, "u_i_pct": None, "mean_m2": None,
+                "why": [f"the window never filled: {len(co.cda)} iterations, fewer than the "
+                        f"{WINDOW} the iterative uncertainty is taken over"]}
+    u_i, _lo, _hi, mean = hr
+    if not mean > 0:
+        raise T.RunError(f"the drag area's mean over the window is {mean:.6g} m^2: a body in "
+                         f"a stream has a positive drag")
+    pct = 100.0 * u_i / mean
+    why = []
+    for name, series in sorted(P.initial_residuals(blocks).items()):
+        w = series[-WINDOW:]
+        least = min(w)
+        if least > 0 and w[-1] > RESIDUAL_RISE_MAX * least:
+            why.append(f"{name}'s residual climbs to {w[-1] / least:.3g} times its window's "
+                       f"least at the last iteration")
+    if not pct <= ceiling:
+        why.append(f"U_I {pct:.3g}% of the drag area, past {ceiling:g}%")
+    return {"u_i_m2": u_i, "u_i_pct": pct, "mean_m2": mean, "why": why}
+
+
+# --------------------------------------------------------------------------- #
+# the wall
+# --------------------------------------------------------------------------- #
+#: The top of the band in which the pack's wall function stands for the
+#: boundary layer: y+ 300. Spalding's single formula (J. Appl. Mech. 28:455,
+#: 1961), the pack's ``nutUSpaldingWallFunction``, holds from the wall through
+#: the log layer, and the log layer ends at about y/delta 0.3, y+ a few hundred
+#: at these Reynolds numbers (Pope, Turbulent Flows, 2000, sec. 7.1.4 and
+#: Table 7.1: the log-law region y+ > 30, y/delta < 0.3). Above it the first
+#: cell's centre is in the outer layer the function does not describe.
+#: Rejected: 500 (the top some guides give at high Reynolds numbers; the
+#: motorBike's 1.9e6 is not one); 30 as a floor too (Spalding's formula holds
+#: in the viscous and buffer layers, so a low y+ is no fault of this model;
+#: ``nutkWallFunction`` would need it, and the pack accepts that one only as
+#: the tutorial's).
+YP_HI = 300.0
+
+#: The least share of the body's area that must have y+ at most `YP_HI`: 90%.
+#: A body has stagnation points, separation lines and sharp edges where y+
+#: falls or climbs whatever the mesh, so the rule is about the area the drag
+#: comes from, not every face. Measured (P0, 2026-10-23): motorBike 96.4% at
+#: L0 (the tutorial's 2-layer mesh), 99.4% at L1; the spheroid 100%; without
+#: layers the spheroid 35.6%. Rejected: 100% (every snapped corner of the
+#: motorBike past 300 would fail a mesh whose drag the wall function does
+#: describe); 50% (half the body could sit outside the boundary layer the
+#: drag depends on); weighting by face count (small faces at the edges would
+#: count as much as the tank's).
+YP_IN_MIN = 90.0
+
+#: The bands the detail reports the area in: the viscous sublayer (y+ < 5),
+#: the buffer layer (5-30), the log layer (30-300) and above (Pope, Table 7.1).
+#: Reported, not judged; the picture's bands are the same (``_scales.YPLUS_BANDS``).
+YPLUS_BANDS = (5.0, 30.0, 300.0)
+
+#: How far the gate's own area and area-mean y+ of the body's surface may be
+#: from OpenFOAM's ``surfaceFieldValue`` over the same patches: 1e-4 of each.
+#: Measured (P0's motorBike L0, the vector area of each face): 2.9e-9 and
+#: 3.5e-9 apart, with the face counts equal; the file holds 32-bit floats.
+#: The two must agree or the surface the gate summed is not the body
+#: OpenFOAM integrated: an error, naming both. Rejected: 1% (P0's first
+#: route, ParaView's CellSize, was 0.8% off; a tolerance that wide passes a
+#: surface that lost a part of the body); exact equality (32-bit points).
+WALL_AGREE = 1e-4
+
+YPLUS_UNITS = "%"
+
+
+def _wall_stats(yplus_path: str, average_path: str) -> dict:
+    """The body's y+ by area, from the surface OpenFOAM's ``surfaces``
+    object wrote, held to OpenFOAM's own ``surfaceFieldValue`` of the same
+    patches: ``{faces, area_m2, yplus_mean, yplus_mean_openfoam, in_pct,
+    bands_pct}``, or T.RunError when they disagree."""
+    try:
+        wall = P.wall_surface(yplus_path, FO.YPLUS_FIELD)
+        fv = P.field_value(average_path)
+    except (ValueError, OSError) as exc:
+        raise T.RunError(f"the body's y+ does not read: {exc}", [average_path])
+    col = f"areaAverage({FO.YPLUS_FIELD})"
+    theirs = fv.last.get(col)
+    if not isinstance(theirs, float) or not math.isfinite(theirs):
+        raise T.RunError(f"surfaceFieldValue wrote no {col}", [average_path])
+    mine_area, mine_mean = wall.area, wall.mean()
+    if len(wall.areas) != fv.faces or not (
+            abs(mine_area - fv.area) <= WALL_AGREE * fv.area
+            and abs(mine_mean - theirs) <= WALL_AGREE * abs(theirs)):
+        raise T.RunError(
+            f"the body's y+ surface is not the body OpenFOAM integrated: {len(wall.areas)} "
+            f"faces, {mine_area:.9g} m^2, area-mean y+ {mine_mean:.9g} against OpenFOAM's "
+            f"{fv.faces} faces, {fv.area:.9g} m^2, {theirs:.9g} (more than {WALL_AGREE:g} "
+            f"apart)", [average_path])
+    edges = (None,) + YPLUS_BANDS + (math.inf,)
+    bands = [wall.share(lo, hi) for lo, hi in zip(edges, edges[1:])]
+    return {"faces": len(wall.areas), "area_m2": mine_area, "yplus_mean": mine_mean,
+            "yplus_mean_openfoam": theirs, "in_pct": wall.share(None, YP_HI),
+            "bands_pct": bands}
+
+
+def _bands_said(w: dict) -> str:
+    b = w["bands_pct"]
+    return (f"y+ < 5 on {b[0]:.3g}%, 5-30 on {b[1]:.3g}%, 30-300 on {b[2]:.3g}%, above 300 on "
+            f"{b[3]:.3g}% of {w['area_m2']:.6g} m^2; area-mean y+ {w['yplus_mean']:.4g} "
+            f"(OpenFOAM's {w['yplus_mean_openfoam']:.4g})")
+
+
+@gate(
+    id="aero.wall_treatment",
+    basis="sourced",
+    title="The wall function applies on the body: y+ at most 300 on at least 90% of its area",
+    claims=[GUARD_TAGS["aero.wall_treatment"]],
+    tier=Tier.SOLVE,
+    settles="aero wall treatment",
+    requires_tools=list(T.WRAPPERS),
+    # A guard of the drag area, behind the run it measures: y+ of a run that
+    # did not settle is the y+ of no flow.
+    needs=["aero.converged"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_cases.py:no_layers",
+        note="the baseline spheroid meshed without its layers: the first cells stand off the "
+             "body, and y+ is past 300 on most of its area",
+    ),
+)
+def wall_treatment(ctx: GateContext) -> Verdict:
+    """The base mesh solved again, with OpenFOAM's ``yPlus`` and the body's
+    y+ surface (``_fo.wall_functions``): the share of the body group's area
+    whose y+ is at most `YP_HI` must be at least `YP_IN_MIN` %. Each face's
+    area is its vector area on the surface OpenFOAM wrote (``interpolate
+    false``: the face's own wall value), and the area and the area-mean y+ are
+    held to OpenFOAM's ``surfaceFieldValue`` of the same patches
+    (`WALL_AGREE`). The value is the share in %.
+
+    The run is held to aero.converged's rule too (the window, the residuals,
+    U_I): this gate solves its own copy, and a run that did not settle where
+    aero.converged's did is the two disagreeing, an error. Reported, not
+    judged: the bands of y+ and the layer coverage. The same run writes the
+    body's y+ surface, named with its sha256 in summary.json for the
+    picture (``aero.wall``)."""
+    gid = "aero.wall_treatment"
+    s = _run_settings(ctx, gid)
+    if isinstance(s, Verdict):
+        return s
+    group = ctx.param("aero_body_group")
+    if not group:
+        return _skip(gid, "no aero_body_group: the patch group of the body's surfaces, y+ is "
+                          "summed over")
+    got = _positive(ctx, gid, "aero_iter_unc_max_pct", DEFAULT_ITER_UNC_MAX_PCT)
+    if isinstance(got, Verdict):
+        return got
+    ceiling, default = got
+    marks = list(s["marks"]) + (["aero_iter_unc_max_pct"] if default else [])
+    opened = _open(ctx, gid)
+    if isinstance(opened, Verdict):
+        return opened
+    _inst, env = opened
+    stage = _stage_dir(ctx, gid, "case")
+    n, timeout = s["ranks"], s["timeout"]
+    try:
+        u = _inlet_speed(s["case"])
+        _prepare(stage, s, FO.wall_functions(group=str(group), u_inf=u))
+        mesh = _mesh(env, stage, s, timeout)
+        bad = mesh.problems(s["global"])
+        if bad:
+            raise T.RunError("the mesh this run built fails the rule aero.mesh_quality passed: "
+                             + "; ".join(bad), mesh.logs)
+        co, blocks, run_logs = _solve(env, stage, n, timeout, u)
+        settle = _settling(co, blocks, ceiling)
+        if settle["why"]:
+            raise T.RunError("the run this gate solved fails the rule aero.converged passed: "
+                             + "; ".join(settle["why"]), run_logs)
+        time = _last_dir(os.path.join(stage, "postProcessing", FO.SURFACES))
+        if time is None:
+            raise T.RunError("simpleFoam wrote no y+ surface of the body", run_logs)
+        files = FO.wall_files(time)
+        wall = _wall_stats(F.case_file(stage, files["yplus"]), F.case_file(stage, files["average"]))
+    except P.Timeout as exc:
+        return _skip(gid, str(exc))
+    except (T.RunError, ValueError, KeyError, OSError) as exc:
+        return _error(gid, str(exc), getattr(exc, "evidence", []))
+    logs = [*mesh.logs, *run_logs]
+    rel = os.path.relpath(stage, ctx.out_path()).replace(os.sep, "/")
+    payload = {"mesh_level": "base", "u_inf_m_s": u, "cells": mesh.cells, "ranks": n,
+               "iterations": len(co.cda), "u_i_pct": settle["u_i_pct"],
+               "layer_coverage_pct": (mesh.snappy.layers or (0, 0, None))[2],
+               "yplus_top": YP_HI, "yplus_in_pct": wall["in_pct"],
+               "yplus_bands_pct": dict(zip(("below_5", "5_to_30", "30_to_300", "above_300"),
+                                           wall["bands_pct"])),
+               "faces": wall["faces"], "area_m2": wall["area_m2"],
+               "yplus_mean": wall["yplus_mean"], "yplus_mean_openfoam": wall["yplus_mean_openfoam"],
+               "fields": {"stage": f"<out>/{rel}", "time": time,
+                          "sha256": {files["yplus"]: _sha256(F.case_file(stage, files["yplus"]))}},
+               "pack_default": marks}
+    ev = _evidence(ctx, gid, payload)
+    share = wall["in_pct"]
+    passed = share >= YP_IN_MIN
+    mark = f" [pack default: {', '.join(marks)}]" if marks else ""
+    detail = (f"y+ at most {YP_HI:g} on {share:.4g}% of the body's area "
+              f"({'at least' if passed else 'under'} {YP_IN_MIN:g}%); {_bands_said(wall)}; "
+              f"{mesh.cells} cells (base mesh), {mesh.layers()} (reported, not judged){mark}")
+    return Verdict(gate=gid, passed=passed,
+                   measured=_shown(share, lambda x: x >= YP_IN_MIN, passed, 6), limit=YP_IN_MIN,
+                   comparator=">=", units=YPLUS_UNITS, detail=detail, evidence=[ev, *logs])
+
+
+# --------------------------------------------------------------------------- #
+# the mesh ladder
+# --------------------------------------------------------------------------- #
+#: The ladder's refinement ratio when the project states none: 1.5 on every
+#: block direction, so the background cells are 1, 1/1.5 and 1/2.25 of the
+#: case's (the design's (20 8 8), (30 12 12), (45 18 18) on the tutorial's
+#: block). snappyHexMesh refines by levels of its background cell, so every
+#: cell of the mesh scales with it. Measured (P0): the motorBike's effective
+#: ratios from cells 1.42 and 1.37, the spheroid's 1.43 and 1.47, past Celik's
+#: 1.3. Marked ``[pack default]``. Rejected: 2 (Celik's example; the finest of
+#: the motorBike would hold about 22 million cells, past the cap); 1.3 (the
+#: effective ratio of P0's box ladder came out 1.25 and 1.29, under Celik's
+#: 1.3, because the surface cells round to whole levels).
+DEFAULT_LADDER_RATIO = 1.5
+#: The ratios a project may state: 1.1 (the NASA NPARC floor quoted in
+#: ``_gci.py``; below it rounding makes two levels one mesh) to 2.0 (the
+#: finest mesh costs r^6 times the base mesh's cells, 64 at 2).
+LADDER_RATIO_MIN, LADDER_RATIO_MAX = 1.1, 2.0
+
+#: The least effective ratio between two levels, from their cell counts
+#: ((N1/N2)^(1/3), Celik et al. 2008 Eq. 1-2): Celik's Step 2, "desirable that
+#: the grid refinement factor ... be greater than 1.3". Judged after meshing,
+#: before any solve: a ladder whose meshes are too alike fails without the hours
+#: of solving it would cost. P0: ratio 1.3 on the box gave 1.25 and 1.29.
+R_EFF_MIN = G.R_MIN_RECOMMENDED
+
+#: The observed order the ladder must show, cfd-openfoam's ``P_MIN`` and
+#: ``P_SLACK``: at least 0.95, and up to the scheme's formal order + 0.05 for
+#: Celik's band at the observed order with Fs 1.25. Below 0.95 the meshes are
+#: not in the asymptotic range, and a fail.
+P_MIN, P_SLACK = 0.95, 0.05
+
+#: The order rule above formal + `P_SLACK`. Eca & Hoekstra 2014 (J. Comput.
+#: Phys. 262:104-130, sec. 2.4.1 and the summary of sec. 4): "A value of p
+#: greater than the formal order of grid convergence (i.e. p > 2) is likely to
+#: cause too small error estimates. In that case, delta_RE is dropped and
+#: replaced by delta_1 or delta_2" (the error fitted at a fixed order, 1 or 2),
+#: and "If 0.5 <= p < 2.1 and sigma < Delta_phi, Fs = 1.25. Otherwise, Fs =
+#: 3." With three meshes the pack takes the formal order itself on the two
+#: finest, Roache's two-grid GCI with an assumed order (Roache 1998,
+#: Verification and Validation in Computational Science and Engineering, ch. 5;
+#: ``_gci.gci_two_grid``, Fs = 3): GCI = 3 |eps21 / phi1| / (r21^p_formal - 1).
+#: Measured: the spheroid's observed order is 2.72, where Celik's band at that
+#: order is 4.1% and at the formal 2 with Fs 3 it is 15.6%. Rejected: refusing
+#: the ladder (the design's first rule: every honest ladder of the baseline
+#: was refused); the observed order with Fs 1.25 (Eca & Hoekstra: too small);
+#: Eca & Hoekstra's least-squares choice between delta_1 and delta_2 (their
+#: procedure "relies on the availability of at least four data points"; with
+#: three, each fit has one degree of freedom, and the first-order fit of a
+#: second-order scheme is the smaller error estimate of the two).
+FS_FORMAL = G.FS_TWO_GRID
+
+#: How far under the change between the two finest meshes the finest's
+#: iterative uncertainty must be: a tenth (Celik et al. 2008, App. A, as
+#: cfd-openfoam's ``ITERATIVE_FRACTION``). P0's motorBike: 0.75, a fail.
+NOISE_FRACTION = 0.1
+
+#: The share of their cell size a ``distance`` refinement region's distances
+#: keep at each level: they are scaled with the background cell (1/r per
+#: level), so the band of the finest cells around the body holds the same
+#: number of cells on every mesh. P0's spheroid ladder did this and converged
+#: monotonically. Rejected: distances kept in metres (the band of level-5
+#: cells around the spheroid would grow from 2 to 4.3 cells across the
+#: ladder: three meshes refined unlike one another, which Celik's procedure
+#: assumes away). An ``inside`` region is a place, kept as written.
+
+#: The format of a ladder record (``_Record``): its version, in its key.
+RECORD_VERSION = 1
+
+#: The files of the pack's code a record is keyed on: a record of another
+#: version of the pack is never read.
+_CODE = ("aero.py", "_par.py", "_fo.py", "_foam.py", "_tool.py", "_gci.py")
+
+#: This process's mark on the ladder records it writes: a record is read only
+#: by the process whose mark its manifest holds (``_Record``). Set once, at
+#: import, and never written again. *Rejected:* a module dict of the records
+#: this process wrote, shared across out directories (P6's second draft): a
+#: memo the spine cannot empty (``nopekit doctor``'s ``memos`` row), where the
+#: spine empties each memo it can before a gate runs, so that every cross-gate
+#: channel is a file a trace sees.
+_PROCESS = hashlib.sha256(os.urandom(32)).hexdigest()
+
+GCI_UNITS = "%"
+DRAG_UNITS = "m^2"
+#: The comparators aero.drag_area judges: an upper limit. Its value is the top
+#: of the band (the mesh's and the iterations' error on the side that fails),
+#: the failing side only of an upper limit. cfd-openfoam's ``DP_COMPARATORS``,
+#: for its reason. Rejected: the band's bottom for ">=" (no claim of this
+#: pack has needed a lower limit on a drag area).
+DRAG_COMPARATORS = ("<=", "<")
+
+
+def _formal_order(case: Case) -> int:
+    """1 when the momentum convection scheme (``div(phi,U)``, else
+    ``default``) is first-order upwind, else 2: cfd-openfoam's rule for its
+    reason (a first-order k or omega scheme does not set the drag's order)."""
+    div = case.trees["system/fvSchemes"].sub("divSchemes")
+    entry = None if div is None else div.entry("div(phi,U)") or div.entry("default")
+    return 1 if entry is not None and "upwind" in F.words(entry) else 2
+
+
+def _level_counts(case: Case, r: float, k: int) -> list:
+    """Every block's cell counts at level ``k``: each direction times r^k,
+    rounded half up, and at least one more cell than the level below
+    (cfd-openfoam's ``counts``, for its reason: round-half-even left a
+    direction at 2 -> 3 -> 3)."""
+    out = []
+    for old in case.counts:
+        new = []
+        for n in old:
+            v = n
+            for j in range(1, k + 1):
+                v = max(v + 1, math.floor(n * r ** j + 0.5))
+            new.append(v)
+        out.append(tuple(new))
+    return out
+
+
+def _ladder_problems(case: Case) -> list[str]:
+    """Why this case cannot be refined alike at every level, or []."""
+    snappy = case.trees["system/snappyHexMeshDict"]
+    layers = snappy.sub("addLayersControls")
+    if case.add_layers and layers is not None and \
+            (F.word(layers, "relativeSizes") or "true").lower() not in ON_WORDS:
+        return ["addLayersControls has relativeSizes off: its layers are in metres, so the "
+                "ladder's meshes would not be refined alike"]
+    return []
+
+
+def _scaled_regions(text: str, case: Case, f: float) -> str:
+    """snappyHexMeshDict's text with each ``distance`` refinement region's
+    distances divided by ``f`` (the level's r^k)."""
+    regions = case.trees["system/snappyHexMeshDict"].sub("castellatedMeshControls/"
+                                                          "refinementRegions")
+    for e in (regions.entries if regions is not None else ()):
+        if not e.is_dict or (F.word(e.value, "mode") or "") != "distance":
+            continue
+        lv = e.value.entry("levels")
+        if lv is None or lv.is_dict or len(lv.value) != 1 or \
+                not isinstance(lv.value[0], F.FoamList):
+            raise T.RunError(f"refinement region {e.key}: no levels ((distance level) ...)")
+        pairs = []
+        for pair in lv.value[0]:
+            v = F.vector(pair) if isinstance(pair, F.FoamList) else None
+            if v is None or len(v) != 2:
+                raise T.RunError(f"refinement region {e.key}: a level that is not (distance "
+                                 f"level)")
+            # Six significant digits, the precision foamDictionary -expand
+            # prints at: OpenFOAM's reading and the reader's are then one
+            # number (``_as_read``). What slipped through the first ladder
+            # run: 0.03 / 1.5 written as 0.019999999999999997 read back as
+            # 0.02, and every refined level was refused as another case.
+            pairs.append(f"({v[0] / f:.6g} {int(v[1])})")
+        text = F.set_entry(text, f"castellatedMeshControls/refinementRegions/{e.key}/levels",
+                           "(" + " ".join(pairs) + ")")
+    return text
+
+
+#: What a ladder record holds of each level: the logs the meshes and the run
+#: are judged from, and the files of the drag area and the wall.
+RECORD_FILES = ("log.snappyHexMesh", "log.checkMesh", "log.simpleFoam", "coefficient.dat",
+                "bodyYPlus.vtp", "surfaceFieldValue.dat")
+
+
+def _digest_tree(path: str) -> list:
+    out = []
+    for dirpath, dirs, files in os.walk(path):
+        dirs.sort()
+        for name in sorted(files):
+            full = os.path.join(dirpath, name)
+            out.append([os.path.relpath(full, path).replace(os.sep, "/"), _sha256(full)])
+    return out
+
+
+def _stdout_of(text: str) -> str:
+    """A log's tool output without the stderr ``_par.run_parallel`` appends."""
+    cut = text.rfind("\n--- stderr ---\n")
+    return text if cut < 0 else text[:cut]
+
+
+class Level:
+    """One mesh of the ladder, read from its record: what the gates judge."""
+
+    def __init__(self, k: int, counts: list, mesh: "Mesh", co, blocks, wall: dict, files: dict):
+        self.k, self.counts, self.mesh, self.co, self.blocks = k, counts, mesh, co, blocks
+        self.wall, self.files = wall, files
+
+    @property
+    def cells(self) -> int:
+        return self.mesh.cells
+
+
+class _Record:
+    """A ladder solved: each level's logs, histories and wall files, copied
+    under ``<out>/aero-openfoam/ladder/<key>/`` with a manifest of their
+    sha256, keyed on every byte the tools read (``key``).
+
+    **Why a record, and why only in the process that wrote it.**
+    aero.drag_area judges the same three solves aero.mesh_independence just
+    made, in the same check run (its prerequisite runs first, ``needs``), and
+    solving them again would double the longest run of the pack (the
+    motorBike's ladder is about 2.4 h, P0). So each gate that solves a ladder
+    writes its record, and each gate judges only a record, whether it solved
+    it now or found it: the hit and the miss read the same files through the
+    same code. A record is read only by the process that wrote it
+    (``_PROCESS``, in its manifest): every ``check``, ``export`` and ``gate
+    selftest`` solves each ladder at least once, so the boundary that spends
+    re-executes the solve, and no file under ``.nopekit/out`` from before the
+    command can stand in for one (a planted record names no process that is
+    running). A record lives in the out directory of the run that wrote it, so
+    within one process it serves the runs that share that directory: the
+    known-good control's four goalpost runs (the first solves, the next three
+    read its record), and aero.drag_area's check run behind
+    aero.mesh_independence's. So the path a check run takes is the one the
+    qualification's goalpost runs take. What it rests on: P3 measured the
+    pack's runs bit for bit the same on the same inputs (``hierarchical``;
+    P0's scotch was not), so a record keyed on the inputs is the run they
+    would give.
+
+    *Rejected:* a record any later process may read (a run store: it needs
+    ``export`` and ``--force`` to bypass it, a spine change, the design's P9);
+    module memory (S-27's channel, which no trace sees); solving twice (twice
+    the cost of the slowest gate, for the same numbers)."""
+
+    def __init__(self, ctx: GateContext, key: str):
+        self.key = key
+        self.dir = os.path.join(os.path.dirname(ctx.out_path(PACK, "ladder", ".records")),
+                                key[:32])
+
+    def read(self):
+        """``{levels: [{k, counts, files: {name: path}}]}`` when the record
+        is whole, unchanged, this key's and this process's, else None."""
+        where = self.dir
+        try:
+            with open(os.path.join(where, "manifest.json"), encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or data.get("version") != RECORD_VERSION \
+                or data.get("key") != self.key or data.get("process") != _PROCESS:
+            return None
+        out = []
+        try:
+            for k, lv in enumerate(data.get("levels") or ()):
+                files = {}
+                for name, sha in (lv.get("files") or {}).items():
+                    path = os.path.join(where, f"level{k}", name)
+                    if not os.path.isfile(path) or _sha256(path) != sha:
+                        return None
+                    files[name] = path
+                if lv.get("k") != k or sorted(files) != sorted(RECORD_FILES):
+                    return None
+                out.append({"k": k, "counts": [tuple(int(n) for n in c) for c in lv["counts"]],
+                            "files": files})
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
+        return {"levels": out} if len(out) == 3 else None
+
+    def write(self, levels: list) -> None:
+        """``levels``: ``[(k, counts, {name: source path})]``. Written whole
+        beside the record and moved into place, so a record is never half one."""
+        tmp = self.dir + ".writing"
+        _rm(tmp)
+        manifest = {"version": RECORD_VERSION, "key": self.key, "process": _PROCESS,
+                    "levels": []}
+        for k, counts, sources in levels:
+            dst = os.path.join(tmp, f"level{k}")
+            os.makedirs(dst)
+            files = {}
+            for name in RECORD_FILES:
+                shutil.copyfile(sources[name], os.path.join(dst, name))
+                files[name] = _sha256(os.path.join(dst, name))
+            manifest["levels"].append({"k": k, "counts": [list(c) for c in counts],
+                                       "files": files})
+        with open(os.path.join(tmp, "manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2, sort_keys=True)
+        _rm(self.dir)
+        os.replace(tmp, self.dir)
+
+
+def _rm(path: str) -> None:
+    """``path`` removed by ``rm -rf``, whether or not it is there: never a
+    look at what an earlier run left (``_tool.stage``'s rule, for its reason:
+    ``shutil.rmtree`` reads the old folders as inputs of this run)."""
+    done = subprocess.run(["rm", "-rf", "--", path], stdin=subprocess.DEVNULL,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    if done.returncode != 0:
+        raise T.RunError(f"rm could not remove {path}: "
+                         f"{done.stderr.decode(errors='replace').strip()}")
+
+
+def _read_level(lv: dict, u: float) -> Level:
+    """A Level from a record's files: the one reading of a solved level."""
+    f = lv["files"]
+    with open(f["log.snappyHexMesh"], encoding="utf-8", errors="replace") as fh:
+        snappy_text = _stdout_of(fh.read())
+    with open(f["log.checkMesh"], encoding="utf-8", errors="replace") as fh:
+        check_text = _stdout_of(fh.read())
+    with open(f["log.simpleFoam"], encoding="utf-8", errors="replace") as fh:
+        solver_text = _stdout_of(fh.read())
+    logs = [f["log.snappyHexMesh"], f["log.checkMesh"], f["log.simpleFoam"]]
+    mesh = _read_mesh(snappy_text, check_text, logs, os.path.dirname(f["log.checkMesh"]),
+                      f["log.checkMesh"])
+    co = _coefficients_at(f["coefficient.dat"], u)
+    blocks = P.iterations(solver_text)
+    _same_run(co, blocks, logs)
+    wall = _wall_stats(f["bodyYPlus.vtp"], f["surfaceFieldValue.dat"])
+    return Level(lv["k"], lv["counts"], mesh, co, blocks, wall, f)
+
+
+def _ladder(ctx: GateContext, gid: str):
+    """The case's mesh and two refinements of it, each meshed with the
+    pack's dictionaries and held to aero.mesh_quality's rule, then (only when
+    every mesh passes, the cells increase and each effective ratio is at least
+    `R_EFF_MIN`) each solved with the wall's function objects: ``(settings,
+    ratio, marks, u, [Level coarse..fine], record key)``; ``(problems,
+    evidence)`` when the meshes refuse the ladder before any solve; or a
+    Verdict (a skip, an error)."""
+    s = _run_settings(ctx, gid)
+    if isinstance(s, Verdict):
+        return s
+    group = ctx.param("aero_body_group")
+    if not group:
+        return _skip(gid, "no aero_body_group: the patch group of the body's surfaces, the "
+                          "drag is summed over")
+    got = _positive(ctx, gid, "aero_ladder_ratio", DEFAULT_LADDER_RATIO)
+    if isinstance(got, Verdict):
+        return got
+    r, r_default = got
+    if not LADDER_RATIO_MIN <= r <= LADDER_RATIO_MAX:
+        return _error(gid, f"aero_ladder_ratio {r:g} is outside [{LADDER_RATIO_MIN:g}, "
+                           f"{LADDER_RATIO_MAX:g}]: below, rounding makes two levels one mesh; "
+                           f"above, the finest mesh costs r^6 times the base mesh's cells")
+    marks = list(s["marks"]) + (["aero_ladder_ratio"] if r_default else [])
+    case = s["case"]
+    why = _ladder_problems(case)
+    if why:
+        return why, []
+    opened = _open(ctx, gid)
+    if isinstance(opened, Verdict):
+        return opened
+    inst, env = opened
+    n, timeout = s["ranks"], s["timeout"]
+    try:
+        u = _inlet_speed(case)
+        stages, counts_of = [], []
+        functions = FO.wall_functions(group=str(group), u_inf=u)
+        for k in range(3):
+            stage = _stage_dir(ctx, gid, f"level{k}")
+            counts = _level_counts(case, r, k)
+            _prepare(stage, s, functions)
+            if k:
+                _write(stage, "system/blockMeshDict", case.block_mesh_at(counts))
+                _edit(stage, "system/snappyHexMeshDict",
+                      lambda text, f=r ** k: _scaled_regions(text, case, f))
+            stages.append(stage)
+            counts_of.append(counts)
+        h = hashlib.sha256()
+        code = [[name, _sha256(os.path.join(_HERE, name))] for name in _CODE]
+        h.update(json.dumps({"version": RECORD_VERSION, "install": [inst.root, inst.build],
+                             "ranks": n, "code": code,
+                             "levels": [_digest_tree(st) for st in stages]},
+                            sort_keys=True).encode())
+        key = h.hexdigest()
+        record = _Record(ctx, key)
+        found = record.read()
+        if found is None:
+            got = _solve_ladder(env, case, s, stages, counts_of, u, timeout)
+            if isinstance(got, tuple):
+                return got
+            record.write(got)
+            found = record.read()
+            if found is None:
+                raise T.RunError("the ladder's record did not read back as it was written")
+        levels = [_read_level(lv, u) for lv in found["levels"]]
+    except P.Timeout as exc:
+        return _skip(gid, str(exc))
+    except (T.RunError, ValueError, KeyError, OSError) as exc:
+        return _error(gid, str(exc), getattr(exc, "evidence", []))
+    return s, r, marks, u, levels, key
+
+
+def _solve_ladder(env, case: Case, s: dict, stages: list, counts_of: list, u: float,
+                  timeout: float):
+    """Mesh every level, judge the meshes, then solve every level:
+    ``[(k, counts, {record file: path})]``, or ``(problems, logs)`` when the
+    meshes refuse the ladder before any solve."""
+    n = s["ranks"]
+    meshes = [_mesh(env, stage, s, timeout, cells=_cells_of(counts_of[k]))
+              for k, stage in enumerate(stages)]
+    why = []
+    for k, mesh in enumerate(meshes):
+        bad = mesh.problems(s["global"])
+        if bad:
+            why.append(f"level {k} ({mesh.cells} cells) fails aero.mesh_quality's rule: "
+                       + "; ".join(bad))
+    cells = [m.cells for m in meshes]
+    logs = [p for m in meshes for p in m.logs]
+    if not why and not cells[0] < cells[1] < cells[2]:
+        why.append(f"the refined meshes do not have more cells ({cells[0]}, {cells[1]}, "
+                   f"{cells[2]})")
+    if not why:
+        r10, r21 = (cells[1] / cells[0]) ** (1 / 3), (cells[2] / cells[1]) ** (1 / 3)
+        if r10 < R_EFF_MIN or r21 < R_EFF_MIN:
+            why.append(f"effective refinement ratios {r10:.4g} and {r21:.4g} from the cells "
+                       f"({cells[0]}, {cells[1]}, {cells[2]}): under {R_EFF_MIN:g} (Celik et "
+                       f"al. 2008, Step 2), judged before any solve")
+    if why:
+        return why, logs
+    out = []
+    for k, (stage, mesh) in enumerate(zip(stages, meshes)):
+        _co, _blocks, _logs = _solve(env, stage, n, timeout, u)
+        time = _last_dir(os.path.join(stage, "postProcessing", FO.SURFACES))
+        if time is None:
+            raise T.RunError(f"level {k}: simpleFoam wrote no y+ surface of the body", _logs)
+        files = FO.wall_files(time)
+        out.append((k, counts_of[k], {
+            "log.snappyHexMesh": os.path.join(stage, "log.snappyHexMesh"),
+            "log.checkMesh": os.path.join(stage, "log.checkMesh"),
+            "log.simpleFoam": os.path.join(stage, "log.simpleFoam"),
+            "coefficient.dat": os.path.join(stage, "postProcessing", FO.FORCE, "0",
+                                            "coefficient.dat"),
+            "bodyYPlus.vtp": F.case_file(stage, files["yplus"]),
+            "surfaceFieldValue.dat": F.case_file(stage, files["average"])}))
+    return out
+
+
+def _cells_of(counts: list) -> int:
+    return sum(a * b * c for a, b, c in counts)
+
+
+def _judge_ladder(case: Case, levels: list, ceiling: float, cap: int) -> dict:
+    """Celik et al. 2008 on the three drag areas (each level's window mean),
+    with the pack's order rule: ``{why, res, gci_pct, rule, p_used, fs,
+    phi_ext, noise, settle}``. ``why`` lists every reason the band is not
+    believed: a level that fails aero.mesh_quality's or aero.converged's rule,
+    cells that do not increase, an effective ratio under `R_EFF_MIN`, a
+    convergence that is not monotone, an order under `P_MIN`, the finest
+    level's U_I not a tenth of the change between the two finest."""
+    why = []
+    settle = []
+    for lv in levels:
+        st = _settling(lv.co, lv.blocks, ceiling)
+        settle.append(st)
+        if st["why"]:
+            why.append(f"level {lv.k} ({lv.cells} cells) is not converged: {st['why'][0]}")
+        bad = lv.mesh.problems(cap)
+        if bad:
+            why.append(f"level {lv.k} ({lv.cells} cells) fails aero.mesh_quality's rule: "
+                       + "; ".join(bad))
+    out = {"why": why, "res": None, "gci_pct": None, "rule": None, "p_used": None,
+           "fs": None, "phi_ext": None, "noise": None, "settle": settle}
+    if why:
+        return out
+    fine = list(reversed(levels))
+    cells = [lv.cells for lv in fine]
+    phi = [st["mean_m2"] for st in reversed(settle)]
+    noise = max(st["u_i_m2"] for st in settle)
+    out["noise"] = noise
+    if not cells[0] > cells[1] > cells[2]:
+        why.append(f"the refined meshes do not have more cells ({cells[2]}, {cells[1]}, "
+                   f"{cells[0]})")
+        return out
+    res = G.gci(phi, cells=cells, dim=3, noise=noise)
+    out["res"] = res
+    said = (f"drag areas {phi[2]:.6g}, {phi[1]:.6g}, {phi[0]:.6g} m^2 coarse to fine on "
+            f"{cells[2]}, {cells[1]}, {cells[0]} cells")
+    if res.r21 < R_EFF_MIN or res.r32 < R_EFF_MIN:
+        why.append(f"effective refinement ratios {res.r32:.4g} and {res.r21:.4g}: under "
+                   f"{R_EFF_MIN:g} (Celik Step 2)")
+    if res.convergence != G.MONOTONE_CONVERGENCE:
+        why.append(f"{res.convergence} ({said}): Richardson extrapolation needs monotone "
+                   f"convergence")
+        return out
+    if not res.p_converged or res.p is None:
+        why.append(f"no unique observed order solves Celik's Eq. (3) ({said})")
+        return out
+    formal = _formal_order(case)
+    if res.p < P_MIN:
+        why.append(f"observed order {res.p:.3g} is under {P_MIN:g} ({said}): the meshes are "
+                   f"not in the asymptotic range")
+    u_fine = settle[-1]["u_i_m2"]
+    if not u_fine <= NOISE_FRACTION * abs(res.eps21):
+        why.append(f"the finest mesh's iterative uncertainty {u_fine:.3g} m^2 is not a tenth "
+                   f"of the change between the two finest meshes {abs(res.eps21):.3g} m^2 "
+                   f"(Celik App. A)")
+    if why:
+        return out
+    if res.p > formal + P_SLACK:
+        gci = G.gci_two_grid(phi[0], phi[1], res.r21, formal, fs=FS_FORMAL)
+        a = res.r21 ** formal
+        out.update(rule="formal", p_used=float(formal), fs=FS_FORMAL,
+                   phi_ext=(a * phi[0] - phi[1]) / (a - 1.0))
+    else:
+        if res.gci_fine21 is None:
+            why.append("the GCI could not be computed: " + "; ".join(res.warnings))
+            return out
+        gci = res.gci_fine21
+        out.update(rule="observed", p_used=res.p, fs=res.fs, phi_ext=res.phi_ext21)
+    out["gci_pct"] = 100.0 * gci
+    return out
+
+
+def _ladder_evidence(ctx, gid, case, levels, j, r, key, extra) -> list[str]:
+    """summary.json (what the ladder picture draws: each level's cells,
+    relative cell size and drag area, the extrapolation and the band's top),
+    a history CSV per level, and each level's logs from the record."""
+    finest = levels[-1].cells if levels else None
+    rows = []
+    for lv, st in zip(levels, j["settle"] if j else [{}] * len(levels)):
+        rows.append({"k": lv.k, "cells": lv.cells, "counts": [list(c) for c in lv.counts],
+                     "h_rel": (finest / lv.cells) ** (1.0 / 3.0),
+                     "cda_m2": st.get("mean_m2"), "u_i_m2": st.get("u_i_m2"),
+                     "u_i_pct": st.get("u_i_pct"), "iterations": len(lv.co.cda),
+                     "yplus_in_pct": lv.wall["in_pct"],
+                     "layer_coverage_pct": (lv.mesh.snappy.layers or (0, 0, None))[2]})
+    payload = {"ladder_ratio": r, "record": key, "levels": rows,
+               "formal_order": _formal_order(case), "window": WINDOW}
+    if j and j.get("res") is not None:
+        res = j["res"]
+        payload["gci"] = {k: v for k, v in vars(res).items()}
+    if j and j.get("gci_pct") is not None:
+        payload.update(order_rule=j["rule"], order_used=j["p_used"], safety_factor=j["fs"],
+                       gci_fine_pct=j["gci_pct"], cda_ext_m2=j["phi_ext"], h_rel_ext=0.0,
+                       band_top_m2=rows[-1]["cda_m2"] * (1.0 + j["gci_pct"] / 100.0))
+    payload.update(extra)
+    hists = []
+    for lv in levels:
+        path = ctx.out_path(PACK, gid.replace(".", "_"), f"history_level{lv.k}.csv")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write("iteration,cda_m2\n")
+            for it, v in zip(lv.co.iterations, lv.co.cda):
+                fh.write(f"{it},{v!r}\n")
+        hists.append(path)
+    logs = [p for lv in levels for p in lv.mesh.logs]
+    return [_evidence(ctx, gid, payload), *hists, *logs]
+
+
+@gate(
+    id="aero.mesh_independence",
+    basis="sourced",
+    title="Three meshes agree: the drag area converges, and its grid convergence index is inside its limit",
+    claims=[GUARD_TAGS["aero.mesh_independence"]],
+    tier=Tier.SOLVE,
+    settles="aero mesh independence",
+    requires_tools=list(T.WRAPPERS),
+    # A guard of the drag area, behind the base mesh's run: a ladder whose
+    # first mesh does not settle shows nothing about the mesh.
+    needs=["aero.converged"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_cases.py:narrow_ladder",
+        note="the baseline spheroid with a ladder ratio of 1.3: the surface cells round to "
+             "whole levels, the effective ratios fall under Celik's 1.3, and the gate fails "
+             "before it solves",
+    ),
+)
+def mesh_independence(ctx: GateContext) -> Verdict:
+    """The case's mesh and two refinements of it, each block direction times
+    ``aero_ladder_ratio`` per level and each ``distance`` refinement region
+    scaled with it, meshed with the pack's dictionaries and held to
+    aero.mesh_quality's rule. Then, before any solve: the cells increase and
+    each effective ratio from the cells is at least `R_EFF_MIN`. Then each
+    level is solved and held to aero.converged's rule, and Celik et al.
+    2008's GCI is taken on the three drag areas (``_gci.gci``, dim 3, the
+    noise the largest U_I): the convergence must be monotone, the observed
+    order at least `P_MIN`, the finest level's U_I at most a tenth of the
+    change between the two finest; above the formal order + `P_SLACK` the band
+    is taken at the formal order with Fs 3 (`FS_FORMAL`). The fine-grid GCI
+    must be at most ``aero_gci_max_pct``. The value is the GCI in %.
+
+    Reported, not judged: each level's y+ share, layer coverage and U_I. The
+    asymptotic-range ratio is reported in the summary and never used (with the
+    order observed on the same three meshes it is phi1/phi2,
+    ``_gci.asymptotic_ratio``)."""
+    gid = "aero.mesh_independence"
+    lim = _number(ctx, "aero_gci_max_pct")
+    if lim is None:
+        return _skip(gid, "no aero_gci_max_pct: the largest mesh error band the claim "
+                          "tolerates, in percent of the drag area (no source sets one for "
+                          "every body)")
+    if isinstance(lim, str):
+        return _error(gid, lim)
+    if not lim > 0:
+        return _error(gid, f"aero_gci_max_pct is {lim:g}; it must be positive")
+    got = _positive(ctx, gid, "aero_iter_unc_max_pct", DEFAULT_ITER_UNC_MAX_PCT)
+    if isinstance(got, Verdict):
+        return got
+    ceiling, default = got
+    got = _ladder(ctx, gid)
+    if isinstance(got, Verdict):
+        return got
+    if len(got) == 2:
+        why, logs = got
+        return Verdict(gate=gid, passed=False, detail="; ".join(why)[:600], evidence=list(logs))
+    s, r, marks, _u, levels, key = got
+    marks = marks + (["aero_iter_unc_max_pct"] if default else [])
+    case = s["case"]
+    j = _judge_ladder(case, levels, ceiling, s["global"])
+    ev = _ladder_evidence(ctx, gid, case, levels, j, r, key, {"pack_default": marks})
+    cells = "/".join(str(lv.cells) for lv in levels)
+    mark = f" [pack default: {', '.join(marks)}]" if marks else ""
+    ys = ", ".join(f"{lv.wall['in_pct']:.4g}%" for lv in levels)
+    tail = (f"{cells} cells (ratio {r:g}){mark}; y+ at most {YP_HI:g} on {ys} of the body "
+            f"(reported, not judged)")
+    if j["why"] or j["gci_pct"] is None:
+        return Verdict(gate=gid, passed=False, detail="; ".join(j["why"])[:600] + f" ({tail})",
+                       evidence=ev)
+    res, gci = j["res"], j["gci_pct"]
+    passed = gci <= lim
+    rule = (f"observed order {res.p:.3g} above the formal {_formal_order(case)} + {P_SLACK:g}: "
+            f"the band at the formal order with Fs {FS_FORMAL:g} (Eca and Hoekstra 2014)"
+            if j["rule"] == "formal" else
+            f"observed order {res.p:.3g}, Fs {j['fs']:g} (Celik et al. 2008)")
+    return Verdict(gate=gid, passed=passed,
+                   measured=_shown(gci, lambda x: x <= lim, passed, 6), limit=lim,
+                   comparator="<=", units=GCI_UNITS,
+                   detail=f"GCI {gci:.3g}% of the finest drag area "
+                          f"{'within' if passed else 'past'} {lim:g}%: monotone, {rule}; drag "
+                          f"area {res.phi[0]:.6g} m^2 on the finest mesh, {j['phi_ext']:.6g} at "
+                          f"zero cell size; {tail}",
+                   evidence=ev)
+
+
+# --------------------------------------------------------------------------- #
+# the drag area
+# --------------------------------------------------------------------------- #
+@gate(
+    id="aero.drag_area",
+    basis="established",
+    title="The drag area of the finest mesh, with its mesh and iteration error bands, is under the limit",
+    claims=[DRAG_TAG],
+    tier=Tier.SOLVE,
+    settles="drag area from cfd",
+    requires_tools=list(T.WRAPPERS),
+    # Its guards: the meshes agree, and the wall function applies. Each guard
+    # passes this gate's own known-bad control (a bigger body): its edge is
+    # isolated.
+    needs=["aero.mesh_independence", "aero.wall_treatment"],
+    negative_control=NegativeControl(
+        fixture="selftest/bad_cases.py:bigger_body",
+        note="the baseline spheroid with every radius 15% larger: the drag area grows by "
+             "about a third, past the baseline's limit",
+    ),
+)
+def drag_area(ctx: GateContext) -> Verdict:
+    """The drag area CdA (m^2, forceCoeffs with Aref 1) of the finest mesh of
+    aero.mesh_independence's ladder, judged at the top of its band against the
+    limit of the claim tagged ``drag-area`` (``ctx.acceptance``, the only gate
+    of the pack that reads one): top = CdA_fine x (1 + GCI_fine) + U_I,fine, the
+    mesh's band and the iterations' half-range added, never root-summed (the
+    two are not independent errors of known distribution; a sum is the bound
+    that holds whatever they are). The claim's units must be ``m^2`` and its
+    comparator ``<=`` or ``<``, or the gate errors before it meshes anything.
+    The value is the top, in m^2, the gate's own units.
+
+    The ladder is the one aero.mesh_independence solved in this same run when
+    it is there (``_Record``: the same inputs, read through the same code),
+    else this gate solves it. A ladder that gives no band here, where
+    aero.mesh_independence passed, is the two disagreeing: an error. Reported,
+    not judged: the drag force F_D = 0.5 rho U^2 CdA in N, with
+    ``aero_rho_kg_m3`` where the project states it."""
+    gid = "aero.drag_area"
+    acc = ctx.acceptance(DRAG_TAG)
+    comparator = acc.comparator.value
+    if str(acc.units or "").strip() != DRAG_UNITS:
+        return _error(gid, f"the claim tagged {DRAG_TAG} states its limit in "
+                           f"{str(acc.units or '')!r}; this gate computes the drag area in "
+                           f"{DRAG_UNITS} (forceCoeffs with Aref 1): state the limit in "
+                           f"{DRAG_UNITS}")
+    if comparator not in DRAG_COMPARATORS:
+        return _error(gid, f"the claim tagged {DRAG_TAG} states {comparator} {acc.limit:g} "
+                           f"{DRAG_UNITS}; this gate judges only an upper limit "
+                           f"({' or '.join(DRAG_COMPARATORS)}): the top of the band is the "
+                           f"failing side only there")
+    rho = _number(ctx, "aero_rho_kg_m3")
+    if isinstance(rho, str):
+        return _error(gid, rho)
+    if rho is not None and not rho > 0:
+        return _error(gid, f"aero_rho_kg_m3 is {rho:g}; it must be positive")
+    got = _positive(ctx, gid, "aero_iter_unc_max_pct", DEFAULT_ITER_UNC_MAX_PCT)
+    if isinstance(got, Verdict):
+        return got
+    ceiling, _default = got
+    got = _ladder(ctx, gid)
+    if isinstance(got, Verdict):
+        return got
+    if len(got) == 2:
+        why, logs = got
+        return _error(gid, "the meshes refuse the ladder aero.mesh_independence passed: "
+                      + "; ".join(why)[:400], logs)
+    s, r, marks, u, levels, key = got
+    j = _judge_ladder(s["case"], levels, ceiling, s["global"])
+    if j["why"] or j["gci_pct"] is None:
+        return _error(gid, "the ladder gives no band here, where aero.mesh_independence passed: "
+                      + "; ".join(j["why"])[:400],
+                      _ladder_evidence(ctx, gid, s["case"], levels, j, r, key, {}))
+    cda = j["res"].phi[0]
+    if not cda > 0:
+        return _error(gid, f"the finest mesh's drag area is {cda:.6g} m^2: a body in a stream "
+                           f"has a positive drag")
+    u_i = j["settle"][-1]["u_i_m2"]
+    gci = j["gci_pct"]
+    top = cda * (1.0 + gci / 100.0) + u_i
+    force = None if rho is None else 0.5 * rho * u * u * cda
+    ev = _ladder_evidence(ctx, gid, s["case"], levels, j, r, key,
+                          {"cda_fine_m2": cda, "u_i_fine_m2": u_i, "top_m2": top,
+                           "u_inf_m_s": u, "rho_kg_m3": rho, "force_n": force})
+    passed = acc.holds(top)
+    said_force = ("" if force is None else
+                  f"; drag force {force:.4g} N at {u:g} m/s in air of {rho:g} kg/m^3 "
+                  f"(reported, not judged)")
+    return Verdict(gate=gid, passed=passed, measured=_shown(top, acc.holds, passed),
+                   limit=acc.limit, comparator=comparator, units=DRAG_UNITS,
+                   detail=f"drag area {cda:.6g} m^2 on the finest mesh ({levels[-1].cells} "
+                          f"cells) + GCI {gci:.3g}% + U_I {u_i:.3g} m^2 = {top:.6g} m^2, "
+                          f"{'within' if passed else 'past'} {acc.limit:g} m^2 "
+                          f"({j['rule']} order {j['p_used']:.3g}, Fs {j['fs']:g}){said_force}",
+                   evidence=ev)

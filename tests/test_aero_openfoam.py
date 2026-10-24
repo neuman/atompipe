@@ -499,8 +499,12 @@ class NoGuardSpeaksForTheDragArea(unittest.TestCase):
         from nopekit.models import Verdict
         specs = self.registry.for_claim(self.claim.id, self.claim.tags)
         self.claim.gates = [s.id for s in specs]
+        # Every gate of the pack passes but aero.drag_area, which has not run:
+        # the guards, each in its own units.
         verdicts = [Verdict(gate=s.id, passed=True, claims=list(s.claims), measured=1e6,
-                            limit=5e5, comparator=">=", units="Re") for s in specs]
+                            limit=5e5, comparator=">=", units="Re")
+                    for s in (self.registry.get(g)[0] for g in self.registry.ids())
+                    if s.pack == "aero-openfoam" and s.id != "aero.drag_area"]
         composed = claims_mod.compose(self.claim, verdicts)
         self.assertNotEqual(composed.status, "pass",
                             f"{self.claim.id} reads Checked on {[s.id for s in specs]}")
@@ -592,8 +596,11 @@ def install_standin(directory: str) -> tuple[str, str]:
     return root, bin_dir
 
 
-@unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
-class _StandinCase(_env.EnvCase):
+class _StandinBase(_env.EnvCase):
+    """The stand-in's set-up. Undecorated, for the invariant classes, which may
+    not skip (``test_meta.InvariantClassesNeverSkip``): they run where CI runs,
+    on POSIX, and nowhere else is the pack's OpenFOAM supported."""
+
     def setUp(self):
         self.dir = self.tmp()
         self.root, self.bin = install_standin(self.dir)
@@ -629,6 +636,11 @@ class _StandinCase(_env.EnvCase):
                             gid.replace(".", "_"), "case", *rel.split("/"))
         with open(path, encoding="utf-8") as fh:
             return fh.read()
+
+
+@unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
+class _StandinCase(_StandinBase):
+    pass
 
 
 class AMeshIsJudgedByThePacksLimits(_StandinCase):
@@ -1071,6 +1083,377 @@ class ACutShortRunFails(_StandinCase):
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("the window never filled: 60 iterations", v.detail)
         self.assertIsNone(v.measured)
+
+
+# --------------------------------------------------------------------------- #
+# the wall
+# --------------------------------------------------------------------------- #
+def _ascii_vtp(path: str, points, polys, values) -> None:
+    """A VTK PolyData file in OpenFOAM's layout, ascii, with ``yPlus`` on its
+    cells."""
+    conn, offs = [], []
+    for poly in polys:
+        conn += poly
+        offs.append(len(conn))
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("<?xml version='1.0'?>\n<VTKFile type='PolyData' version='0.1' "
+                 "byte_order='LittleEndian' header_type='UInt64'>\n  <PolyData>\n"
+                 f"    <Piece NumberOfPoints='{len(points)}' NumberOfPolys='{len(polys)}'>\n"
+                 "      <Points>\n        <DataArray type='Float32' Name='Points' "
+                 "NumberOfComponents='3' format='ascii'>\n"
+                 + " ".join(f"{c:g}" for p in points for c in p) +
+                 "\n        </DataArray>\n      </Points>\n      <Polys>\n"
+                 "        <DataArray type='Int32' Name='connectivity' format='ascii'>\n"
+                 + " ".join(map(str, conn)) +
+                 "\n        </DataArray>\n        <DataArray type='Int32' Name='offsets' "
+                 "format='ascii'>\n" + " ".join(map(str, offs)) +
+                 "\n        </DataArray>\n      </Polys>\n      <CellData>\n"
+                 "        <DataArray type='Float32' Name='yPlus' format='ascii'>\n"
+                 + " ".join(f"{v:g}" for v in values) +
+                 "\n        </DataArray>\n      </CellData>\n    </Piece>\n  </PolyData>\n"
+                 "</VTKFile>\n")
+
+
+class TheYPlusFractionIsOpenFOAMs(_StandinCase):
+    """``aero.wall_treatment``: the share of the body's area with y+ at most
+    300, summed over the surface OpenFOAM wrote and held to OpenFOAM's own
+    area and area mean of the same patches. P0 found the ``expressions`` route
+    reading 1.0 on every case, and ParaView's ``CellSize`` 0.8% more area than
+    OpenFOAM's faces: neither is the route."""
+
+    def test_the_vector_area_is_openfoams_and_a_unit_cube_is_six(self):
+        cube = [(x, y, z) for z in (0, 1) for y in (0, 1) for x in (0, 1)]
+        faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2],
+                 [1, 3, 7, 5]]
+        path = os.path.join(self.tmp(), "cube.vtp")
+        _ascii_vtp(path, cube, faces, [1, 2, 3, 400, 500, 600])
+        w = P.wall_surface(path, "yPlus")
+        self.assertAlmostEqual(w.area, 6.0, places=12)
+        self.assertAlmostEqual(w.share(None, 300.0), 50.0, places=12)
+        self.assertAlmostEqual(w.mean(), 251.0, places=9)
+        # A face folded out of its plane: its vector area, as OpenFOAM's magSf,
+        # is less than the sum of its two triangles' (ParaView's CellSize).
+        bent = [(0, 0, 0), (1, 0, 0), (1, 1, 0.5), (0, 1, 0)]
+        path = os.path.join(self.tmp(), "bent.vtp")
+        _ascii_vtp(path, bent, [[0, 1, 2, 3]], [10])
+        tri = 0.5 * math.sqrt(1.25) + 0.5 * math.sqrt(1.25)
+        self.assertLess(P.wall_surface(path, "yPlus").area, tri)
+
+    def test_a_compressed_or_appended_surface_is_refused(self):
+        with open(os.path.join(REPO, "tests", "aero_fixtures", "views", "yplus.vtp"), "rb") as fh:
+            data = fh.read()
+        path = os.path.join(self.tmp(), "z.vtp")
+        with open(path, "wb") as fh:
+            fh.write(data)
+        with self.assertRaises(ValueError):
+            P.wall_surface(path, "yPlus")
+
+    def test_the_baseline_passes_and_names_its_picture(self):
+        v = self.gate("aero.wall_treatment")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.measured, v.limit, v.comparator, v.units), (100.0, 90.0, ">=", "%"))
+        with open(next(p for p in v.evidence if p.endswith("summary.json"))) as fh:
+            data = json.load(fh)
+        self.assertEqual(sorted(data["fields"]["sha256"]),
+                         ["postProcessing/surfaces1/300/bodyYPlus.vtp"])
+        self.assertAlmostEqual(data["yplus_mean"], data["yplus_mean_openfoam"], places=4)
+        self.assertEqual(data["faces"], 2396)
+        self.assertFalse([k for k in data if "limit" in k or "max" in k])
+        self.assertIn("(OpenFOAM's 121.2)", v.detail)
+
+    def test_no_layers_fails_past_its_margin(self):
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/snappyHexMeshDict", "addLayers", "false")
+        v = self.gate("aero.wall_treatment", {"aero_case": case})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertLessEqual(v.measured * 1.15, v.limit)
+
+    def test_a_surface_that_is_not_the_body_openfoam_integrated_is_an_error(self):
+        for old, new in (("# Area              : 6.313818964463e-01",
+                          "# Area              : 6.413818964463e-01"),
+                         ("# Faces             : 2396", "# Faces             : 2395"),
+                         ("1.211536800544e+02", "1.221536800544e+02")):
+            with self.subTest(old):
+                self.mode({"simpleFoam": {"wall_replace": [[old, new]]}})
+                v = self.gate("aero.wall_treatment")
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn("not the body OpenFOAM integrated", v.error)
+
+    def test_a_run_that_did_not_settle_here_is_an_error(self):
+        self.mode({"simpleFoam": {"residual_climb": 40}})
+        v = self.gate("aero.wall_treatment")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("fails the rule aero.converged passed", v.error)
+
+
+# --------------------------------------------------------------------------- #
+# the ladder and the drag area
+# --------------------------------------------------------------------------- #
+class _LadderCase(_StandinBase):
+    def gates(self, *gids, params=None, out=None):
+        """Each of ``gids`` in order, in one out directory (a check run's)."""
+        out = out or self.tmp()
+        env = {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}
+        found = []
+        with mock.patch.dict(os.environ, env):
+            for gid in gids:
+                calls = os.path.join(self.root, "calls")
+                if os.path.exists(calls):
+                    os.remove(calls)
+                ctx = gates_mod.GateContext(
+                    root=out, ledger=Ledger(meta=ProjectMeta(name="aero"), claims=self.claims()),
+                    params=dict(self.params, **(params or {})), out_dir=os.path.join(out, "out"),
+                    tier=2, log=lambda _m: None, extra={})
+                found.append((gates_mod.run_gate(*self.registry.get(gid), ctx), self.calls()))
+        return found
+
+    def claims(self):
+        return _claims()
+
+    def summary(self, v) -> dict:
+        with open(next(p for p in v.evidence if p.endswith("summary.json"))) as fh:
+            return json.load(fh)
+
+
+class EveryLadderLevelPassesTheGuards(_LadderCase):
+    """``aero.mesh_independence`` through the stand-in, which replays the real
+    ladder of the baseline (P6: 41 574, 132 094 and 386 302 cells): each level
+    meshed and held to aero.mesh_quality's rule, the effective ratios judged
+    before any solve, each level held to aero.converged's rule, then Celik's
+    GCI with the pack's order rule."""
+
+    def test_the_baseline_passes_on_the_formal_order(self):
+        ((v, calls),) = self.gates("aero.mesh_independence")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.comparator, v.limit), ("%", "<=", 20.0))
+        self.assertAlmostEqual(v.measured, 15.6741, places=3)
+        self.assertIn("the band at the formal order with Fs 3", v.detail)
+        self.assertEqual(calls.count("simpleFoam"), 3)
+        data = self.summary(v)
+        self.assertEqual([lv["cells"] for lv in data["levels"]], [41546, 132094, 386302])
+        self.assertEqual([lv["counts"] for lv in data["levels"]],
+                         [[[28, 12, 8]], [[42, 18, 12]], [[63, 27, 18]]])
+        self.assertEqual((data["order_rule"], data["order_used"], data["safety_factor"]),
+                         ("formal", 2.0, 3.0))
+        # 2.712 on the real ladder; the stand-in's base mesh is P3's 41 546 cells.
+        self.assertAlmostEqual(data["gci"]["p"], 2.71, delta=0.005)
+        fine = data["levels"][-1]
+        self.assertEqual(fine["h_rel"], 1.0)
+        self.assertEqual(data["band_top_m2"], fine["cda_m2"] * (1 + data["gci_fine_pct"] / 100))
+        self.assertEqual(v.measured, float(f"{data['gci_fine_pct']:.6g}"))
+        self.assertLess(data["cda_ext_m2"], fine["cda_m2"])
+        self.assertFalse([k for k in data if "limit" in k or "max" in k])
+
+    def test_the_refined_levels_are_the_packs(self):
+        """Each block direction times r^k; each distance region's distance over
+        r^k, at the precision OpenFOAM reads it back."""
+        self.gates("aero.mesh_independence")
+        out = self.tmp()
+        self.gates("aero.mesh_independence", out=out)
+        stage = os.path.join(out, "out", "aero-openfoam", "aero_mesh_independence", "level2")
+        snappy = F.read(os.path.join(stage, "system", "snappyHexMeshDict"))
+        levels = snappy.lookup("castellatedMeshControls/refinementRegions/spheroid/levels")
+        self.assertEqual(F.vector(levels.value[0][0]), (0.0133333, 5.0))
+        with open(os.path.join(stage, "system", "blockMeshDict")) as fh:
+            self.assertIn("(63 27 18)", fh.read())
+
+    def test_a_narrow_ladder_fails_before_any_solve(self):
+        ((v, calls),) = self.gates("aero.mesh_independence", params={"aero_ladder_ratio": 1.3})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("effective refinement ratios 1.237 and 1.308", v.detail)
+        self.assertIn("judged before any solve", v.detail)
+        self.assertNotIn("simpleFoam", calls)
+        self.assertEqual(calls.count("snappyHexMesh"), 3)
+
+    def test_a_capped_level_fails_before_any_solve(self):
+        self.mode({"snappyHexMesh": {"log": "capped"}})
+        ((v, calls),) = self.gates("aero.mesh_independence")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("fails aero.mesh_quality's rule", v.detail)
+        self.assertNotIn("simpleFoam", calls)
+
+    def test_an_oscillating_ladder_fails_with_its_reason(self):
+        """The demo's way to Failing (D6): the motorBike's drag areas went
+        0.3075, 0.2964, 0.3007 m^2 (P0). Here the two finer histories swap."""
+        self.mode({"simpleFoam": {"by_cells": {"132094": "ladder/spheroid_L2.dat",
+                                               "386302": "ladder/spheroid_L1.dat"}}})
+        ((v, _calls),) = self.gates("aero.mesh_independence")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("oscillatory convergence", v.detail)
+        self.assertIsNone(v.measured)
+        self.assertNotIn("band_top_m2", self.summary(v))
+
+    def test_a_level_that_did_not_settle_fails(self):
+        self.mode({"simpleFoam": {"residual_climb": 40}})
+        ((v, _calls),) = self.gates("aero.mesh_independence")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("level 0 (41546 cells) is not converged", v.detail)
+
+    def test_a_ladder_ratio_out_of_range_is_an_error(self):
+        for r in (1.05, 2.5):
+            with self.subTest(r):
+                ((v, calls),) = self.gates("aero.mesh_independence",
+                                           params={"aero_ladder_ratio": r})
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertNotIn("snappyHexMesh", calls)
+
+    def test_layers_in_metres_fail(self):
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/snappyHexMeshDict", "addLayersControls/relativeSizes", "false")
+        ((v, calls),) = self.gates("aero.mesh_independence", params={"aero_case": case})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIn("relativeSizes off", v.detail)
+        self.assertFalse(calls)
+
+
+class TheDragAreaIsJudgedAtTheTopOfItsBand(_LadderCase):
+    """``aero.drag_area`` through the stand-in (invariant 4): the finest mesh's
+    drag area plus its GCI band plus its iterative uncertainty, judged against
+    the claim's limit, in m^2, the gate's own units."""
+
+    def test_the_baseline_passes_at_the_top_of_its_band(self):
+        ((v, calls),) = self.gates("aero.drag_area")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.comparator, v.limit), ("m^2", "<=", 0.0044))
+        data = self.summary(v)
+        top = data["cda_fine_m2"] * (1 + data["gci_fine_pct"] / 100) + data["u_i_fine_m2"]
+        self.assertEqual(data["top_m2"], top)
+        self.assertEqual(v.measured, float(f"{top:.9g}"))
+        self.assertAlmostEqual(v.measured, 0.00421411818, places=11)
+        self.assertAlmostEqual(data["force_n"], 0.5 * 1.225 * 20.0 ** 2 * data["cda_fine_m2"])
+        self.assertEqual(calls.count("simpleFoam"), 3, "alone, it solves its own ladder")
+
+    def test_a_bigger_body_lands_past_its_margin(self):
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/snappyHexMeshDict", "geometry/spheroid/radius",
+              "(0.5625 0.140625 0.140625)")
+        ((v, _calls),) = self.gates("aero.drag_area", params={"aero_case": case})
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertGreaterEqual(v.measured, 1.15 * v.limit)
+
+    def test_a_ladder_that_gives_no_band_here_is_an_error(self):
+        self.mode({"simpleFoam": {"by_cells": {"132094": "ladder/spheroid_L2.dat",
+                                               "386302": "ladder/spheroid_L1.dat"}}})
+        ((v, _calls),) = self.gates("aero.drag_area")
+        self.assertEqual(v.outcome, "error", v.render())
+        self.assertIn("where aero.mesh_independence passed", v.error)
+
+
+class ALadderRecordIsReadOnlyByItsProcess(_LadderCase):
+    """Invariant 12's boundary re-executes the solve: aero.drag_area judges the
+    ladder aero.mesh_independence solved in the same process (``_Record``),
+    and never a record another process left, one whose bytes moved, or one of
+    other inputs. Every check, export and selftest is a new process, so each
+    solves its ladder at least once."""
+
+    def test_behind_mesh_independence_it_judges_the_same_solves(self):
+        (mi, _c1), (da, calls) = self.gates("aero.mesh_independence", "aero.drag_area")
+        self.assertEqual((mi.outcome, da.outcome), ("pass", "pass"), da.render())
+        self.assertNotIn("simpleFoam", calls)
+        self.assertNotIn("snappyHexMesh", calls)
+        self.assertEqual(self.summary(mi)["record"], self.summary(da)["record"])
+        alone = self.gates("aero.drag_area")[0][0]
+        self.assertEqual((alone.measured, alone.detail), (da.measured, da.detail))
+
+    def test_a_record_of_another_process_or_another_byte_is_never_read(self):
+        out = self.tmp()
+        self.gates("aero.mesh_independence", out=out)
+        ladder = os.path.join(out, "out", "aero-openfoam", "ladder")
+        (record,) = os.listdir(ladder)
+        manifest = os.path.join(ladder, record, "manifest.json")
+        with open(manifest) as fh:
+            data = json.load(fh)
+        data["process"] = "0" * 64
+        with open(manifest, "w") as fh:
+            json.dump(data, fh)
+        ((v, calls),) = self.gates("aero.drag_area", out=out)
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual(calls.count("simpleFoam"), 3, "a planted record names no running process")
+        coeff = os.path.join(ladder, record, "level2", "coefficient.dat")
+        with open(coeff, "a") as fh:
+            fh.write("\n")
+        ((v, calls),) = self.gates("aero.drag_area", out=out)
+        self.assertEqual(calls.count("simpleFoam"), 3, "a record whose bytes moved is not read")
+
+
+    def test_another_input_byte_is_another_record(self):
+        out = self.tmp()
+        self.gates("aero.mesh_independence", out=out)
+        ((v, calls),) = self.gates("aero.drag_area", params={"aero_ranks": 2}, out=out)
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual(calls.count("simpleFoam"), 3)
+
+
+class TheDragGateStatesItsOwnUnits(_LadderCase):
+    """Invariant 4: the claim restated in other units or as a lower limit is
+    refused before any tool runs, never compared; the gate reports in m^2."""
+
+    def setUp(self):
+        super().setUp()
+        self.edit = {}
+
+    def claims(self):
+        out = []
+        for c in _claims():
+            if c.id == "B1":
+                for k, v in self.edit.items():
+                    setattr(c.acceptance, k, v)
+            out.append(c)
+        return out
+
+    def test_cm2_is_refused_before_any_mesh(self):
+        from nopekit.models import Comparator
+        for edit, said in (({"units": "cm^2", "limit": 44.0}, "states its limit in 'cm^2'"),
+                           ({"comparator": Comparator(">=")}, "judges only an upper limit")):
+            with self.subTest(edit):
+                self.edit = edit
+                ((v, calls),) = self.gates("aero.drag_area")
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                self.assertEqual(calls, [])
+
+
+class OnlyDragAreaReadsTheAcceptance(unittest.TestCase):
+    """The design's rule since the review of P3-P5: one gate of the pack reads
+    a claim's acceptance condition, the one that covers ``drag-area``."""
+
+    def test_one_function_reads_it(self):
+        import ast
+        with open(os.path.join(PACK, "gates", "aero.py"), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        readers = sorted({fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+                          for node in ast.walk(fn) if isinstance(node, ast.Attribute)
+                          and node.attr in ("acceptance", "ledger")})
+        self.assertEqual(readers, ["drag_area"])
+
+
+class TheDragAreasGoalpostMovesNothingElse(_LadderCase):
+    """Invariant 9's goalpost clause on aero.drag_area: its known-good control
+    run again with B1's limit at x0.1, x0.5, x2 and x10 (``gates.goalpost_runs``,
+    the qualification's own runs) reports the same value in the same units, and
+    fails exactly where the moved limit is under it."""
+
+    def test_the_four_moves(self):
+        out = self.tmp()
+        env = {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}
+        spec, fn = self.registry.get("aero.drag_area")
+        from nopekit import verdicts as verdicts_mod
+        with mock.patch.dict(os.environ, env):
+            ctx = gates_mod.GateContext(
+                root=out, ledger=Ledger(meta=ProjectMeta(name="aero"), claims=_claims()),
+                params=dict(self.params), out_dir=os.path.join(out, "out"), tier=2,
+                log=lambda _m: None, extra={})
+            trace = verdicts_mod.GateTrace(kind="control")
+            good = gates_mod.run_gate(spec, fn, ctx, trace=trace)
+            self.assertEqual(good.outcome, "pass", good.render())
+            gates_mod.note_goalpost_sites(trace, trace, ctx.params, good)
+            (runs,) = gates_mod.goalpost_runs(spec, fn, ctx, good, trace=trace)
+        self.assertEqual((runs.measured, runs.units), (good.measured, "m^2"))
+        got = {r.limit: (r.outcome, r.measured, r.units) for r in runs.runs}
+        self.assertEqual(sorted(got), sorted(0.0044 * f for f in (0.1, 0.5, 2.0, 10.0)))
+        for limit, (outcome, measured, units) in got.items():
+            self.assertEqual((measured, units), (good.measured, "m^2"))
+            self.assertEqual(outcome, "pass" if limit > good.measured else "fail", limit)
 
 
 # --------------------------------------------------------------------------- #

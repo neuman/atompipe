@@ -990,7 +990,11 @@ EDGES: dict[str, list[tuple[str, str]]] = {
                       ("aero.converged", "aero.mesh_quality"),
                       ("aero.converged", "aero.regime"),
                       ("aero.converged", "aero.reference"),
-                      ("aero.converged", "aero.domain")],
+                      ("aero.converged", "aero.domain"),
+                      ("aero.wall_treatment", "aero.converged"),
+                      ("aero.mesh_independence", "aero.converged"),
+                      ("aero.drag_area", "aero.mesh_independence"),
+                      ("aero.drag_area", "aero.wall_treatment")],
 }
 BRACKET_EDGES = [("bracket.deflection", "bracket.model_validity"),
                  ("bracket.bending_stress", "bracket.model_validity")]
@@ -1409,7 +1413,7 @@ class ControlsAreIsolated(unittest.TestCase):
             if edges:
                 declared[name] = sorted(edges)
         self.assertEqual(declared, {name: sorted(e) for name, e in EDGES.items()})
-        self.assertEqual(sum(len(e) for e in declared.values()), 39)
+        self.assertEqual(sum(len(e) for e in declared.values()), 43)
         registry = gates_mod.Registry()
         gates_mod.load_project_gates(os.path.join(REPO, "examples", "bracket"), registry)
         self.assertEqual(sorted(_declared_edges(registry)), sorted(BRACKET_EDGES))
