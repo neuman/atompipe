@@ -1072,6 +1072,167 @@ def edited_gltf(path: str, edit) -> bytes:
     return json.dumps(doc).encode("utf-8")
 
 
+#: The key's two scales under the hero, typed here as the page states them:
+#: Cp on [-1.5, 1.05], with grey under it; |U| on [0, 2 U_inf], with magenta
+#: over it. `test_the_key_is_the_packs` holds them to the pack's.
+CP_KEY, SPEED_KEY = (-1.5, 1.05), (0.0, 2.0 * U_INF)
+#: How far, in bytes, a vertex colour may sit from the key's colour of the
+#: fixture's own value there. Measured on the committed fixture: 0.5 at most
+#: on the body and on 99.6% of the track vertices (ParaView rounds to bytes).
+#: 3 is `RAMP_TOLERANCE` plus a byte. *Rejected:* 1 (half a byte of headroom
+#: over ParaView's rounding).
+VALUE_TOLERANCE = 3.0
+#: The share of track vertices that may miss it: a tube's vertex sits a
+#: radius from its line, and at a cap or a bend the nearest line point can be
+#: another track's (measured: 0.4% past 3 bytes). The body's vertices are its
+#: own points, so none may miss.
+TRACK_MISS_MAX = 0.02
+
+
+def vtp_arrays(path: str) -> dict:
+    """The arrays of a VTK XML PolyData file as ``make_fixtures.py`` writes it
+    (appended raw, zlib, a UInt64 header), read with numpy and zlib alone."""
+    import re
+    import zlib
+    import numpy
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    head, _, data = raw.partition(b'<AppendedData encoding="raw">')
+    data = data[data.index(b"_") + 1:]
+    out = {}
+    for m in re.finditer(rb'<DataArray type="(\w+)" Name="([^"]+)"(?: NumberOfComponents='
+                         rb'"(\d+)")? format="appended"[^>]*offset="(\d+)"', head):
+        kind, name = m.group(1).decode(), m.group(2).decode()
+        width, at = int(m.group(3) or 1), int(m.group(4))
+        blocks = int(numpy.frombuffer(data[at:at + 8], dtype="<u8")[0])
+        sizes = numpy.frombuffer(data[at + 24:at + 24 + 8 * blocks], dtype="<u8")
+        start, body = at + 24 + 8 * blocks, b""
+        for size in sizes:
+            body += zlib.decompress(data[start:start + int(size)])
+            start += int(size)
+        dtype = {"Float32": "<f4", "Float64": "<f8", "Int64": "<i8"}[kind]
+        values = numpy.frombuffer(body, dtype=dtype)
+        out[name] = values.reshape(-1, width) if width > 1 else values
+    return out
+
+
+def gltf_meshes(doc: dict) -> list:
+    """Each primitive of ``doc`` as ``(POSITION floats, COLOR_0 RGB bytes)``."""
+    import base64
+    import numpy
+
+    def read(index):
+        acc = doc["accessors"][index]
+        view = doc["bufferViews"][acc["bufferView"]]
+        raw = base64.b64decode(doc["buffers"][view["buffer"]]["uri"].split(",", 1)[1])
+        width = {"VEC3": 3, "VEC4": 4}[acc["type"]]
+        dtype = {5126: numpy.float32, 5121: numpy.uint8}[acc["componentType"]]
+        size = numpy.dtype(dtype).itemsize
+        stride = view.get("byteStride", width * size)
+        start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+        rows = numpy.frombuffer(raw[start:start + stride * acc["count"]], dtype=numpy.uint8)
+        rows = rows.reshape(acc["count"], stride)[:, :width * size].copy()
+        return rows.view(dtype).reshape(acc["count"], width)
+
+    return [(read(p["attributes"]["POSITION"]).astype(float),
+             read(p["attributes"]["COLOR_0"])[:, :3].astype(float))
+            for mesh in doc["meshes"] for p in mesh["primitives"]]
+
+
+def _nearest(points, query):
+    """For each row of ``query``, the index of the nearest row of ``points``
+    and its distance."""
+    import numpy
+    index, dist = [], []
+    for i in range(0, len(query), 2000):
+        d = ((query[i:i + 2000, None, :] - points[None, :, :]) ** 2).sum(-1)
+        k = d.argmin(1)
+        index.append(k)
+        dist.append(numpy.sqrt(d[numpy.arange(len(k)), k]))
+    return numpy.concatenate(index), numpy.concatenate(dist)
+
+
+def key_colours(values, key: tuple, *, under: bool):
+    """The key's colour of each value: Turbo at its place on ``key``, grey
+    under it where the key has an under colour, magenta over it."""
+    import numpy
+    rows = numpy.array(_turbo_rows())
+    t = (numpy.asarray(values, dtype=float) - key[0]) / (key[1] - key[0])
+    out = numpy.stack([numpy.interp(numpy.clip(t, 0, 1), rows[:, 0], rows[:, c]) * 255.0
+                       for c in (1, 2, 3)], 1)
+    out[t > 1] = OVER
+    if under:
+        out[t < 0] = UNDER
+    return out
+
+
+def fixture_values() -> dict:
+    """The fixtures the hero was drawn from: ``{"body": (points, Cp),
+    "tracks": (points, |U|)}``."""
+    import numpy
+    body = vtp_arrays(os.path.join(FIXTURES, "body.vtp"))
+    tracks = [vtp_arrays(os.path.join(FIXTURES, n + ".vtp")) for n in ("tracksCentre", "tracksFar")]
+    return {"body": (body["Points"].astype(float), body["static(p)_coeff"]),
+            "tracks": (numpy.concatenate([t["Points"] for t in tracks]).astype(float),
+                       numpy.concatenate([t["mag(U)"] for t in tracks]))}
+
+
+def value_problems(path: str) -> list[str]:
+    """What keeps the colours of ``path``, a hero glTF drawn from the
+    committed fixtures, from being the key's colours of the values there: each
+    body vertex's colour against the key's Cp colour of the fixture's Cp at
+    that point, each track vertex's against the key's speed colour of the
+    nearest track point's |U|. A primitive is the body's when its vertices are
+    the body's points (the decimation keeps a subset of them), else the
+    tracks'."""
+    import numpy
+    name = os.path.basename(path)
+    source = fixture_values()
+    problems = []
+    for positions, colours in gltf_meshes(_gltf_doc(path)):
+        k, dist = _nearest(source["body"][0], positions)
+        if float(numpy.median(dist)) < 1e-6:
+            role, values, key, under, allowed = "body", source["body"][1][k], CP_KEY, True, 0.0
+        else:
+            k, _dist = _nearest(source["tracks"][0], positions)
+            role, values, key, under, allowed = ("tracks", source["tracks"][1][k], SPEED_KEY,
+                                                 False, TRACK_MISS_MAX)
+        off = numpy.abs(colours - key_colours(values, key, under=under)).max(1)
+        missed = float((off > VALUE_TOLERANCE).mean())
+        if missed > allowed:
+            problems.append(f"{name}: {missed:.1%} of the {role}'s vertex colours are not the "
+                            f"key's colour of their value (the farthest {float(off.max()):.0f} "
+                            f"bytes)")
+    return problems
+
+
+def recoloured(path: str, role_colours) -> bytes:
+    """``path``'s glTF with each primitive's colours replaced by
+    ``role_colours(positions, colours)`` (RGB, or None to keep them)."""
+    import base64
+    import numpy
+    doc = _gltf_doc(path)
+    buffers = [bytearray(base64.b64decode(b["uri"].split(",", 1)[1])) for b in doc["buffers"]]
+    for prim, (positions, colours) in zip([p for m in doc["meshes"] for p in m["primitives"]],
+                                         gltf_meshes(doc)):
+        new = role_colours(positions, colours)
+        if new is None:
+            continue
+        acc = doc["accessors"][prim["attributes"]["COLOR_0"]]
+        view = doc["bufferViews"][acc["bufferView"]]
+        width = 4 if acc["type"] == "VEC4" else 3
+        stride = view.get("byteStride", width)
+        start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+        k = view["buffer"]
+        rows = numpy.frombuffer(bytes(buffers[k][start:start + stride * acc["count"]]),
+                                dtype=numpy.uint8).reshape(acc["count"], stride).copy()
+        rows[:, :3] = numpy.clip(numpy.round(new), 0, 255).astype(numpy.uint8)
+        buffers[k][start:start + stride * acc["count"]] = rows.tobytes()
+    for b, raw in zip(doc["buffers"], buffers):
+        b["uri"] = "data:application/octet-stream;base64," + base64.b64encode(bytes(raw)).decode()
+    return json.dumps(doc).encode("utf-8")
+
+
 def _numpy_missing() -> str:
     try:
         __import__("numpy")
@@ -1087,12 +1248,21 @@ class TheHerosThreeDFile(_env.EnvCase):
     the full base mesh). Each passes the Khronos glTF validator with no error
     and no warning, carries ``COLOR_0`` and no ``TEXCOORD_0``, fits the cap,
     and holds every vertex colour within 2 of the Turbo ramp or at a colour
-    past either end: the colours an unlit twin draws, so the "Flat colours"
-    toggle shows the key's colours. Controls: a file whose colours were
-    shaded fails the ramp, and one whose colour accessor is not normalized
-    fails the validator. ``TheRealPictures`` holds the file ParaView writes
-    today; ``test_field_browser.TheBrowserDrawsTheHero`` and
-    ``BothSidesOfTheHeroAreLit`` how the browser draws it."""
+    past either end: the colours an unlit twin draws. The fixture's colours
+    are also the key's colours OF THEIR VALUES: each body vertex the key's
+    colour of the Cp the fixture holds there, each track vertex that of its
+    speed, so the "Flat colours" toggle shows what the key under it says (the
+    demo's own file is held to the ramp only: the base mesh's fields it was
+    drawn from are in the ignored .nopekit/out/). Controls: a file whose
+    colours were shaded fails the ramp; one whose colour accessor is not
+    normalized fails the validator; and one drawn on another range, or with a
+    field on the other field's key, passes the ramp and fails the values.
+    ``TheRealPictures`` holds the file ParaView writes today;
+    ``test_field_browser.TheBrowserDrawsTheHero`` and
+    ``BothSidesOfTheHeroAreLit`` how the browser draws it. What slipped
+    through (review of P7): the ramp alone was checked, so a Cp mapped over
+    [-3, 2], or tracks on the body's key, passed every test that named the
+    key's colours."""
 
     def setUp(self):
         super().setUp()
@@ -1120,6 +1290,46 @@ class TheHerosThreeDFile(_env.EnvCase):
                 # speed each span most of the ramp, not one colour.
                 self.assertGreater(len({tuple(c) for c in gltf_colours(_gltf_doc(path), "")}),
                                    200)
+
+    def test_the_key_is_the_packs(self):
+        sc = _scales()
+        self.assertEqual((sc.cp()["lo"], sc.cp()["hi"]), CP_KEY)
+        speed = sc.speed({"u_inf_m_s": U_INF})
+        self.assertEqual((speed["lo"], speed["hi"]), SPEED_KEY)
+        self.assertTrue(sc.cp()["under"])
+        self.assertFalse(speed["under"])
+
+    def test_each_colour_is_the_keys_colour_of_its_value(self):
+        self.assertEqual(value_problems(HERO_GLTF), [])
+
+    def test_another_range_or_key_passes_the_ramp_and_fails_the_values(self):
+        import numpy
+        source = fixture_values()
+
+        def drawn(body_key=None, tracks_key=None):
+            def recolour(positions, _colours):
+                k, dist = _nearest(source["body"][0], positions)
+                if float(numpy.median(dist)) < 1e-6:
+                    return (None if body_key is None
+                            else key_colours(source["body"][1][k], body_key, under=True))
+                k, _d = _nearest(source["tracks"][0], positions)
+                return (None if tracks_key is None
+                        else key_colours(source["tracks"][1][k], tracks_key, under=False))
+            return recolour
+
+        plants = {"cp_wide": (drawn(body_key=(-3.0, 2.0)), "body"),
+                  "speed_short": (drawn(tracks_key=(0.0, 1.3 * U_INF)), "tracks"),
+                  "body_on_speed": (drawn(body_key=SPEED_KEY), "body"),
+                  "tracks_on_cp": (drawn(tracks_key=CP_KEY), "tracks")}
+        for name, (recolour, role) in plants.items():
+            with self.subTest(name):
+                target = os.path.join(self.tmp(), name + ".gltf")
+                with open(target, "wb") as fh:
+                    fh.write(recoloured(HERO_GLTF, recolour))
+                self.assertEqual(solid_problems(target), [], "on the ramp: the old check passes it")
+                problems = value_problems(target)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"of the {role}'s vertex colours are not the key's", problems[0])
 
     def test_the_demo_is_walked_where_it_is_built(self):
         demo, why = demo_hero_gltf()

@@ -2405,11 +2405,17 @@ def settle(claim: Any, composed: Any, *, milestone: str | None = None,
         return {"text": _site_words()["cause"][cause],
                 "commands": [f"nopekit check{values['tier_flag']}"]}
     if key == "prerequisite":
-        if str(getattr(verdict, "blocked_kind", "") or "") != "failed":
-            # Skipped, unqualified or not registered: it did not pass, and the
-            # root's own claim says what settles it.
+        kind = str(getattr(verdict, "blocked_kind", "") or "")
+        if kind == "not-registered":
+            # No registry holds the root: `gate show` refuses it, `doctor`
+            # names it (review of P8).
+            key, commands = "prerequisite_unregistered", ("nopekit doctor",
+                                                          "nopekit check{tier_flag}")
+        elif kind != "failed":
+            # Skipped or unqualified: it did not pass, and the root's own
+            # claim says what settles it.
             key = "prerequisite_open"
-        if not root_claims:
+        if not root_claims and key != "prerequisite_unregistered":
             # The root covers no other claim: `why` takes a claim, the root's
             # own record is `gate show`'s.
             commands = ("nopekit gate show {root}", "nopekit check{tier_flag}")

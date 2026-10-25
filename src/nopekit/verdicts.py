@@ -6546,11 +6546,29 @@ def _judge(spec: Any, code: CodeRef, entries: list[Entry], now: _Now,
                      default=None)
         return _by_tier(_fresh_or_conflict(spec, code, thorough, known, order),
                         groups, rhos, now, order, served=served)
-    latest = max(entries, key=order)
+    # An entry that read through an unseen channel is never Fresh, but one
+    # whose SEEN reads are the current ones (its rho is the rho now) is the
+    # answer to these inputs, and is served before any other: "unseen" is
+    # said of it alone, and an opaque entry whose seen reads moved is Stale,
+    # by what moved. What slipped through (review of the motorbike's first
+    # round): the latest entry was served whatever its seen reads, and the
+    # latest is the ignored obs/'s, else the commit time's, else the name's.
+    # In a fresh clone, aero.regime's four entries came in one commit, so the
+    # name chose one recorded at aero_timeout_s 3600 (now 10800). Every reader
+    # called it "unseen inputs; only a check run can show", and the round
+    # record read behind the one the author's machine wrote from the same
+    # commit. *Rejected:* committing only the entries a round serves (a design
+    # that goes A, B, A then serves B's answer for A again, on every machine);
+    # "unseen" for an entry whose seen reads moved (invariant 12: unseen is the
+    # cause only of a claim that is stale for nothing else).
+    seen_now = [e for sig, group in groups.items() if judged[sig][0]
+                and (group[0].reads or {}).get("opaque")
+                for e in group if e.rho == judged[sig][0]]
+    latest = max(_most_thorough(seen_now) if seen_now else entries, key=order)
     rho_now, why, reads_now = judged[_signature(latest)]
     if why:
         state: Stale | Unknown = Unknown(latest, why, "", known)
-    elif (latest.reads or {}).get("opaque"):
+    elif (latest.reads or {}).get("opaque") and latest.rho == rho_now:
         opaque = list((latest.reads or {}).get("opaque") or ())
         state = Unknown(latest, "opaque inputs: " + ", ".join(opaque), rho_now, known)
     else:

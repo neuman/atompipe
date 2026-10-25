@@ -400,6 +400,14 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
                              "{first} first. Then run the check again.",
         "prerequisite_crash": "{root} stopped with an error, so {gate} did not run. Repair "
                               "{root}, then run the check again.",
+        # A root nothing registers (a pack left out of `packs`, a misspelled
+        # `needs`): `gate show <root>` refuses it, and `doctor` names it.
+        # What slipped through (review of P8): the page gave `nopekit gate show
+        # x.gone`, which exits 2 with "no gate 'x.gone'".
+        "prerequisite_unregistered": "{gate} did not run, because the evaluator it needs "
+                                     "first, {root}, is not registered here. Add the pack "
+                                     "that has it, or correct the name. Then run the check "
+                                     "again.",
         "run": "Run the check. It runs the evaluators and shows that each one can fail.",
         # Review of D1: "Run the check." promised what a check run cannot do —
         # the page reads the same after it. With a milestone that requires the

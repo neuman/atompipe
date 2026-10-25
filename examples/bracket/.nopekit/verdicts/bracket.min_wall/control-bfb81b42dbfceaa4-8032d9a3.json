@@ -2,10 +2,10 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.min_wall",
-  "rho": "60f8abf161370eabbe980a7029e61b108eb66b368f5263bd5dbba9313eefc123",
-  "static": "4beabd48fecd4c159c089478b0451e0a645d1742e7c59e7ff488145e4c13e257",
+  "rho": "bfb81b42dbfceaa4ddc34691c8770e2e395f3c7388f98216e4306ac9eb8cffb8",
+  "static": "6bb303eceedf40024f93754bf3d5d8862cd7347fdb4dbcc7456ac05b78c91eed",
   "static_parts": {
-    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "spine": "b9c5046a0430346c084cc073ce23a13dab1788c34c118bdc75b3a3aabc9cee29",
     "code": {
       "digest": "f026870eea78b411e6e8384e712ba89e3cb023f76dfc6aca31b62a135e7c0893",
       "files": [
@@ -153,5 +153,5 @@
   "measured": 3.0,
   "limit": 3.6,
   "units": "mm",
-  "digest": "6d116f6e5ec3a4e017196e1b8c675d1811cb62eb1b9619ad5009c7c3bbef8f27"
+  "digest": "5dc65deaadd99c9204abe2ef5f0e373b40d7c1f6b451b5405ae3e3777a8fb3b7"
 }

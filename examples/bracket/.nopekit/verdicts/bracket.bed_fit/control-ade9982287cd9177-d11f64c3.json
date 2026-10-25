@@ -2,10 +2,10 @@
   "schema": 1,
   "kind": "control",
   "gate": "bracket.bed_fit",
-  "rho": "2d77a467194acb277f1b317f2f60cd0a2129be49f4492d01e3cd7c95a313a760",
-  "static": "db7b8a796b3dacdc0ec7f66b61c27207dd40a8b9235804546f9839f3a26ffae6",
+  "rho": "ade9982287cd9177ca118dd19370a39ca73aff7842d03699345fbed7977bf978",
+  "static": "d860f8b60aa8ec2aadab69e3a35016c7a33d51638e8de77bbefa1936053780a3",
   "static_parts": {
-    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "spine": "b9c5046a0430346c084cc073ce23a13dab1788c34c118bdc75b3a3aabc9cee29",
     "code": {
       "digest": "9fdf57d7941a26cf0a8a9f07382ac77dc910b1614e5dfda32faf1ddb5cf56850",
       "files": [
@@ -191,5 +191,5 @@
   "measured": 413.5,
   "limit": 204.0,
   "units": "mm",
-  "digest": "fcaa607d1a7b550af3ce1a2f20c034f1342d8dfb0c70bbb7142685aba439ac94"
+  "digest": "468234d6c782ba11955804b8e2b29c3dc9eb423d4cdc6e18ecd9ce84915741e2"
 }

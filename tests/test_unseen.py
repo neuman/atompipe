@@ -187,6 +187,83 @@ class TheResolverSaysWhichAreUnseen(_env.EnvCase):
                          frozenset({"g.opaque", "g.dep", "g.dep2"}))
 
 
+#: A solver's gate: it reads one param the tracer sees and runs a subprocess it
+#: does not, as the aero guards do.
+_SOLVER = '''\
+import subprocess
+import sys
+from nopekit.gates import gate
+from nopekit.models import NegativeControl, Verdict
+
+
+@gate(id="t.solver", title="t", claims=["solver"],
+      negative_control=NegativeControl(fixture="selftest/solver_bad.py:heavy"))
+def solver(ctx):
+    load = float(ctx.params["config"]["load_n"])
+    subprocess.run([sys.executable, "-c", "pass"], check=True)
+    return Verdict(gate="t.solver", passed=load < 100.0, measured=load, limit=100.0)
+'''
+_SOLVER_BAD = '''\
+import dataclasses
+
+
+def heavy(ctx):
+    config = dict(ctx.params["config"], load_n=500.0)
+    return dataclasses.replace(ctx, params=dict(ctx.params, config=config))
+'''
+
+
+class AnUnseenEntryIsTheOneItsSeenReadsMatch(_env.EnvCase):
+    """Of a solver gate's entries, the resolver serves the one whose seen reads
+    are the current ones, and says "unseen" of that one alone. What slipped
+    through (review of the motorbike's first round): the latest entry was
+    served whatever it had read, and "latest" came from the ignored obs/, so a
+    fresh clone, whose entries all came in one commit, served by name one
+    recorded at another aero_timeout_s, said "unseen inputs" of it, and read
+    its committed round record as behind."""
+
+    def project(self) -> "TF._Project":
+        p = TF._Project(self)
+        TF._write(p.root, "gates/solver.py", _SOLVER)
+        TF._write(p.root, "selftest/solver_bad.py", _SOLVER_BAD)
+        p.registry = TF.gates.Registry()
+        TF.gates.load_project_gates(p.root, p.registry)
+        p.anchors = TF.verdicts.anchors_for(p.root, p.registry,
+                                            out_dir=TF.store.out_dir(p.root))
+        return p
+
+    def test_each_design_is_served_its_own_entry(self):
+        """Two designs' entries in one cache, with no run to order them: each
+        design reads its own. Before the fix, both read the one entry whose
+        name sorts last."""
+        p = self.project()
+        designs = (TF._projection(load_n=15.0), TF._projection(load_n=20.0))
+        wrote = [p.record("t.solver", proj)[1] for proj in designs]
+        self.assertTrue(all(w is not None and w.status == "written" for w in wrote), wrote)
+        with open(wrote[0].path, encoding="utf-8") as fh:
+            self.assertTrue(json.load(fh)["reads"]["opaque"], "the subprocess is unseen")
+        for proj, entry in zip(designs, wrote):
+            state = p.freshness(proj)["t.solver"]
+            self.assertIsInstance(state, TF.verdicts.Unknown)
+            self.assertTrue(state.reason.startswith(claims_mod.OPAQUE_REASON), state.reason)
+            self.assertEqual(state.entry.name, entry.name)
+
+    def test_a_moved_seen_read_is_stale_and_never_unseen(self):
+        """A design no entry was recorded on: what moved is seen, so the gate
+        is Stale by it, and no reader says unseen."""
+        p = self.project()
+        p.record("t.solver", TF._projection(load_n=15.0))
+        p.demonstrate("t.solver")
+        moved = TF._projection(load_n=30.0)
+        state = p.freshness(moved)["t.solver"]
+        self.assertIsInstance(state, TF.verdicts.Stale)
+        self.assertEqual(state.reasons, ("config.load_n 15.0 -> 30.0",))
+        resolution = p.resolve(moved)
+        self.assertEqual(resolution.rows["t.solver"].state, "stale")
+        self.assertIn("t.solver", resolution.stale_gates)
+        self.assertNotIn("t.solver", claims_mod.unseen_gates(resolution))
+
+
 # --------------------------------------------------------------------------- #
 class TheWordsAreTheirOwn(unittest.TestCase):
     """Every reader's words for an unseen Stale: the new ones, never the old."""

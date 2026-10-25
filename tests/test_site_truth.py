@@ -1460,10 +1460,37 @@ class ASkipSaysItsRoot(unittest.TestCase):
         self.assertEqual(found["commands"], ["nopekit gate show g.ladder", "nopekit check"])
 
     def test_a_root_no_claim_holds_is_named_by_its_gate(self):
-        baked = self._bake("not-registered", root_claim=False)
+        baked = self._bake("skipped", root_claim=False)
         found = baked.page_doc["claims"]["C1"]["settle"]
         self.assertIn("Settle g.ladder first", found["text"])
         self.assertEqual(found["commands"], ["nopekit gate show g.ladder", "nopekit check"])
+
+    def test_a_root_no_registry_holds_is_doctors(self):
+        """`gate show` refuses a gate nothing registers ("error: no gate"), and
+        `doctor` names the need. What slipped through (review of P8): the page
+        gave `nopekit gate show g.ladder` for a root that is not registered."""
+        for root_claim in (False, True):
+            with self.subTest(root_claim=root_claim):
+                baked = self._bake("not-registered", root_claim=root_claim)
+                found = baked.page_doc["claims"]["C1"]["settle"]
+                self.assertEqual(found["text"], report.HUMAN["site"]["settle"][
+                    "prerequisite_unregistered"].format(root="g.ladder", gate="g.drag"))
+                self.assertEqual(found["commands"], ["nopekit doctor", "nopekit check"])
+
+    def test_gate_show_is_given_only_for_a_registered_root(self):
+        """The command a reader copies runs: `gate show` on an unregistered id
+        exits 2, so the page never offers it for one."""
+        import sys
+        found = page.settle(mock.Mock(id="C1", authority=""), mock.Mock(
+            cause=claims_mod.ClaimCause("prerequisite"), cites=[],
+            verdict=mock.Mock(gate="x.dep", blocked_by=["x.gone"],
+                              blocked_kind="not-registered")), cover=["x.dep"])
+        self.assertNotIn("nopekit gate show x.gone", found["commands"])
+        bracket = os.path.join(_env.REPO, "examples", "bracket")
+        shown = _env.run([sys.executable, "-m", "nopekit", "gate", "show", "x.gone"],
+                         cwd=bracket)
+        self.assertEqual(shown.returncode, 2, "gate show refuses an unregistered id")
+        self.assertIn("no gate 'x.gone'", shown.stderr)
 
     def test_a_card_says_why_it_does_not_pass(self):
         baked = self._bake()
