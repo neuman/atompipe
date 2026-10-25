@@ -94,7 +94,17 @@ addLayersControls
     }
     expansionRatio  1;
     finalLayerThickness 0.3;
-    minThickness    0.1;
+    // nopekit's motorBike demo: 0.2, the tutorial's 0.1 doubled. At 0.1 the
+    // ladder's finest level (block (72 36 27), 2 648 247 cells) ran all 50 layer
+    // iterations and kept 5 faces in error against the pack's limits (1
+    // non-orthogonality > 65, 4 interpolation weights < 0.05); the snapped mesh
+    // had none (2026-10-24). At 0.2 it meshes to 2 674 337 cells with none, in
+    // 15 iterations, and levels 0 and 1 pass too (358 654 and 926 215 cells;
+    // layers on 56%, 65% and 72% of the body's faces, were 42%, 53% and 60%).
+    // Rejected (each on level 2): nGrow 1 (no error, but layers on 8% of the
+    // body), nLayerIter 100 (1 face still in error), nRelaxIter 5,
+    // nSmoothSurfaceNormals 3 and featureAngle 30 (5 to 7 faces in error).
+    minThickness    0.2;
     nGrow           0;
     featureAngle    60;
     slipFeatureAngle 30;
