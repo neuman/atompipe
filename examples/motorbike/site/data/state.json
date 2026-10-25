@@ -1,0 +1,3927 @@
+{
+  "amber": {},
+  "claims": [
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "mesh",
+      "cause": "failed",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_mesh_independence/history_level0.csv",
+        "<out>/aero-openfoam/aero_mesh_independence/history_level1.csv",
+        "<out>/aero-openfoam/aero_mesh_independence/history_level2.csv",
+        "<out>/aero-openfoam/aero_mesh_independence/summary.json",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.simpleFoam",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.snappyHexMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.simpleFoam",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.snappyHexMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.simpleFoam",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.snappyHexMesh"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.mesh_independence"
+      ],
+      "grounded_by": [],
+      "id": "C7",
+      "key": "failing",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.mesh_independence"
+        ],
+        "how": "aero.mesh_independence: three meshes, each block 1.5 times finer, each meshed, guarded and solved; Celik et al. 2008's GCI on the drag area, at the formal order with a safety factor of 3 where the observed order is above it (Eca and Hoekstra 2014). Measured on the tutorial's own ladder (2026-10-23): 0.3075, 0.2964 and 0.3007 m^2, a drag area that does not converge in one direction"
+      },
+      "not_compared": [],
+      "note": "aero.mesh_independence: three meshes, each block 1.5 times finer, each meshed, guarded and solved; Celik et al. 2008's GCI on the drag area, at the formal order with a safety factor of 3 where the observed order is above it (Eca and Hoekstra 2014). Measured on the tutorial's own ladder (2026-10-23): 0.3075, 0.2964 and 0.3007 m^2, a drag area that does not converge in one direction",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "aero.mesh_independence : level 2 (2674337 cells) is not converged: U_I 1.98% of the drag area, past 1% (358654/926215/2674337 cells (ratio 1.5) [pack default: aero_max_global_cells]; y+ at most 300 on 96.32%, 99.28%, 99.94% of the body (reported, not judged)) (from the last check run: nopekit cannot see all of its inputs, and a fail counts until a check run passes it)",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The drag area does not depend on the mesh: three meshes converge, and the mesh error band (GCI) of the finest is at most 5%",
+      "status": "fail",
+      "superseded": [],
+      "tags": [
+        "mesh-independence"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [
+        {
+          "gate": "aero.mesh_independence",
+          "why": "fail: level 2 (2674337 cells) is not converged: U_I 1.98% of the drag area, past 1% (358654/926215/2674337 cells (ratio 1.5) [pack default: aero_max_global_cells]; y+ at most 300 on 96.32%, 99.28%, 99.94% of the body (reported, not judged))"
+        }
+      ],
+      "verdicts": [
+        "aero.mesh_independence"
+      ],
+      "word": "failing"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": 0.35,
+        "limit_hi": null,
+        "quantity": "drag area",
+        "units": "m^2"
+      },
+      "acceptance_render": "drag area <= 0.35 m^2",
+      "article": "",
+      "authority": "",
+      "board": "drag",
+      "cause": "prerequisite",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.drag_area"
+      ],
+      "grounded_by": [],
+      "id": "C1",
+      "key": "skipped",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "0.35 m^2",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.drag_area"
+        ],
+        "how": "simpleFoam with k-omega SST on three meshes of the same case, each guarded; aero.drag_area judges the drag area of the finest mesh plus its mesh error band (GCI) and its iterative uncertainty against 0.35 m^2. The guards reach this claim through aero.drag_area's prerequisites: when the mesh ladder fails, aero.drag_area does not run, and the claim reads Skipped with the name of the gate that failed"
+      },
+      "not_compared": [],
+      "note": "simpleFoam with k-omega SST on three meshes of the same case, each guarded; aero.drag_area judges the drag area of the finest mesh plus its mesh error band (GCI) and its iterative uncertainty against 0.35 m^2. The guards reach this claim through aero.drag_area's prerequisites: when the mesh ladder fails, aero.drag_area does not run, and the claim reads Skipped with the name of the gate that failed",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "R1's number, fixed before any mesh ladder ran: 0.35 m^2 is about 86 N of drag at 20 m/s in air of 1.225 kg/m^3. The tutorial's base mesh reads 0.31 m^2, which is not the drag area until the mesh ladder says how far it is from the answer at zero cell size",
+      "reason": "skipped: aero.drag_area : prerequisite failed: aero.mesh_independence",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The drag area of the bike and rider is at most 0.35 m^2 at 72 km/h in still sea-level air",
+      "status": "blocked",
+      "superseded": [],
+      "tags": [
+        "drag-area"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [
+        {
+          "gate": "aero.drag_area",
+          "why": "skipped: prerequisite failed: aero.mesh_independence"
+        }
+      ],
+      "verdicts": [
+        "aero.drag_area"
+      ],
+      "word": "skipped"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "drag",
+      "cause": "owner-unattributed",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [],
+      "grounded_by": [],
+      "id": "A1",
+      "key": "gap",
+      "kind": "assumption",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "",
+        "evaluators": [],
+        "how": "A run with a rotating-wall condition on each wheel (the case's ground already moves with the air), compared with this one; or a coast-down test of the real bike"
+      },
+      "not_compared": [],
+      "note": "A run with a rotating-wall condition on each wheel (the case's ground already moves with the air), compared with this one; or a coast-down test of the real bike",
+      "owner": "Eric Neuman",
+      "physical_result": null,
+      "rationale": "in the tutorial's case the wheels are still walls: the ground moves with the air at 20 m/s, as the road does under the bike, but the wheels do not turn. A turning wheel changes the flow under the bike and the drag",
+      "reason": "owner Eric Neuman is named in claims/A1.json and has not recorded it — Eric Neuman records it in their own shell: nopekit claim physical A1 assume",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The wheels do not turn in the model, and the drag of turning wheels is not part of the drag area",
+      "status": "unclaimed",
+      "superseded": [],
+      "tags": [],
+      "terminal": "",
+      "terminal_word": "assumption",
+      "unproven": [],
+      "verdicts": [],
+      "word": "gap"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "Eric Neuman",
+      "board": "drag",
+      "cause": "authority-unattributed",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [],
+      "grounded_by": [],
+      "id": "A2",
+      "key": "gap",
+      "kind": "assumption",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "human",
+        "evaluators": [],
+        "how": "An engineer with CFD experience reads the drag history of each mesh and the wake pictures, and judges whether the steady mean is a fair stand-in for the time-mean drag at this accuracy"
+      },
+      "not_compared": [],
+      "note": "An engineer with CFD experience reads the drag history of each mesh and the wake pictures, and judges whether the steady mean is a fair stand-in for the time-mean drag at this accuracy",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "simpleFoam finds a steady state; the wake behind a bike and rider sheds eddies. On the finer meshes of the tutorial's ladder the drag area does not settle but cycles (1.0 to 1.7% of its mean at the finest, measured on 2026-10-23), which says the flow is not steady",
+      "reason": "awaits Eric Neuman: named in claims/A2.json, not recorded by them — Eric Neuman records it in their own shell: nopekit claim physical A2 assume --authority \"Eric Neuman\"",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The mean of a steady RANS solution stands for the time-mean drag of the real, unsteady wake",
+      "status": "unclaimed",
+      "superseded": [],
+      "tags": [],
+      "terminal": "human",
+      "terminal_word": "expert judgment: Eric Neuman",
+      "unproven": [],
+      "verdicts": [],
+      "word": "gap"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "setup",
+      "cause": "unseen",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_regime/surfaceCheck/log.surfaceCheck"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.reference",
+        "aero.regime"
+      ],
+      "grounded_by": [],
+      "id": "C2",
+      "key": "stale",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.reference",
+          "aero.regime"
+        ],
+        "how": "aero.reference reads the case's inlet against aero_u_inf_m_s and finds the body group; aero.regime computes Re and Mach from the case's viscosity and the model's speed, length and speed of sound"
+      },
+      "not_compared": [],
+      "note": "aero.reference reads the case's inlet against aero_u_inf_m_s and finds the body group; aero.regime computes Re and Mach from the case's viscosity and the model's speed, length and speed of sound",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "unseen inputs: aero.regime; only a check run can show that the result is current",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The run is the stated flow: air at 20 m/s along +x past the body group, with a Reynolds number in the turbulent range and a Mach number far below 0.3",
+      "status": "stale",
+      "superseded": [],
+      "tags": [
+        "flow-reference",
+        "flow-regime"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [],
+      "verdicts": [
+        "aero.reference",
+        "aero.regime"
+      ],
+      "word": "stale"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "setup",
+      "cause": "unseen",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_domain/summary.json",
+        "<out>/aero-openfoam/aero_domain/surfaceCheck/log.surfaceCheck"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.domain"
+      ],
+      "grounded_by": [],
+      "id": "C3",
+      "key": "stale",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.domain"
+        ],
+        "how": "aero.domain measures the body with OpenFOAM's surfaceCheck and the box with the blockMeshDict, against COST 732 (Franke et al. 2007) in heights of the body: inlet, sides and top at least 5 H, outlet at least 15 H, blockage at most 3%"
+      },
+      "not_compared": [],
+      "note": "aero.domain measures the body with OpenFOAM's surfaceCheck and the box with the blockMeshDict, against COST 732 (Franke et al. 2007) in heights of the body: inlet, sides and top at least 5 H, outlet at least 15 H, blockage at most 3%",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "unseen inputs: aero.domain; only a check run can show that the result is current",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The box around the bike is large enough for the flow and the wake",
+      "status": "stale",
+      "superseded": [],
+      "tags": [
+        "domain-size"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [],
+      "verdicts": [
+        "aero.domain"
+      ],
+      "word": "stale"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "mesh",
+      "cause": "unseen",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.checkMesh",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_mesh_quality/summary.json"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.mesh_quality"
+      ],
+      "grounded_by": [],
+      "id": "C4",
+      "key": "stale",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.mesh_quality"
+        ],
+        "how": "aero.mesh_quality meshes the case with snappyHexMesh under the pack's quality limits (OpenFOAM's own caseDicts/meshQualityDict) and reads checkMesh -meshQuality's faces in error, snappy's last check and its cell cap"
+      },
+      "not_compared": [],
+      "note": "aero.mesh_quality meshes the case with snappyHexMesh under the pack's quality limits (OpenFOAM's own caseDicts/meshQualityDict) and reads checkMesh -meshQuality's faces in error, snappy's last check and its cell cap",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "unseen inputs: aero.mesh_quality; only a check run can show that the result is current",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The base mesh is the one asked for: no face past the pack's quality limits, and no cell cap reached",
+      "status": "stale",
+      "superseded": [],
+      "tags": [
+        "mesh-quality"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [],
+      "verdicts": [
+        "aero.mesh_quality"
+      ],
+      "word": "stale"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "settle",
+      "cause": "unseen",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_converged/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.checkMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_converged/case/log.potentialFoam",
+        "<out>/aero-openfoam/aero_converged/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_converged/case/log.simpleFoam",
+        "<out>/aero-openfoam/aero_converged/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_converged/history.csv",
+        "<out>/aero-openfoam/aero_converged/summary.json",
+        "<out>/aero-openfoam/aero_converged/surfaceCheck/log.surfaceCheck"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.converged"
+      ],
+      "grounded_by": [],
+      "id": "C5",
+      "key": "stale",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.converged"
+        ],
+        "how": "aero.converged solves the base mesh with simpleFoam and reads the drag area's history from forceCoeffs: U_I = (max - min) / 2 over the last window (ITTC 7.5-03-01-01). The same run writes the fields the pictures draw"
+      },
+      "not_compared": [],
+      "note": "aero.converged solves the base mesh with simpleFoam and reads the drag area's history from forceCoeffs: U_I = (max - min) / 2 over the last window (ITTC 7.5-03-01-01). The same run writes the fields the pictures draw",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "unseen inputs: aero.converged; only a check run can show that the result is current",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The drag area settles on the base mesh: its iterative uncertainty over the last 100 iterations is at most 1% of its mean",
+      "status": "stale",
+      "superseded": [],
+      "tags": [
+        "convergence"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [],
+      "verdicts": [
+        "aero.converged"
+      ],
+      "word": "stale"
+    },
+    {
+      "acceptance": {
+        "comparator": "<=",
+        "limit": null,
+        "limit_hi": null,
+        "quantity": "",
+        "units": ""
+      },
+      "acceptance_render": "",
+      "article": "",
+      "authority": "",
+      "board": "mesh",
+      "cause": "unseen",
+      "compared": [],
+      "contradicts": [],
+      "critical": true,
+      "disagree": false,
+      "errored": false,
+      "evidence": [
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.checkMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.potentialFoam",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.simpleFoam",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_wall_treatment/summary.json"
+      ],
+      "expected_latency": {},
+      "fallback": "",
+      "gates": [
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "id": "C6",
+      "key": "stale",
+      "kind": "measurable",
+      "latency": {
+        "article": "",
+        "seconds": null,
+        "source": "none"
+      },
+      "limit_text": "",
+      "mechanism": {
+        "by": "solver",
+        "evaluators": [
+          "aero.wall_treatment"
+        ],
+        "how": "aero.wall_treatment solves the base mesh again with OpenFOAM's yPlus and sums the body's area with y+ at most 300, face by face, held to OpenFOAM's own area and area mean of y+ on the same patches"
+      },
+      "not_compared": [],
+      "note": "aero.wall_treatment solves the base mesh again with OpenFOAM's yPlus and sums the body's area with y+ at most 300, face by face, held to OpenFOAM's own area and area mean of y+ on the same patches",
+      "owner": "",
+      "physical_result": null,
+      "rationale": "",
+      "reason": "unseen inputs: aero.wall_treatment; only a check run can show that the result is current",
+      "requirements": [
+        "R1"
+      ],
+      "resolves": [],
+      "source": "",
+      "standing": "",
+      "statement": "The wall model applies on the body: y+ is at most 300 on at least 90% of its area",
+      "status": "stale",
+      "superseded": [],
+      "tags": [
+        "wall-treatment"
+      ],
+      "terminal": "solver",
+      "terminal_word": "automated",
+      "unproven": [],
+      "verdicts": [
+        "aero.wall_treatment"
+      ],
+      "word": "stale"
+    }
+  ],
+  "decisions": [],
+  "gaps": [],
+  "inputs": [],
+  "locator_problems": [],
+  "meta": {
+    "created": "2026-10-23T18:40:22Z",
+    "generated": "nopekit site build — an output of the ledger and its verdict cache, not a source. If a number here is wrong, the ledger is wrong.",
+    "model_entry": "model/bike.py",
+    "name": "motorbike",
+    "packs": [
+      "aero-openfoam"
+    ],
+    "records_digest": "f56c8e6a29e0ee6ed2eac8d54a18f622469c49736cf522ba503f63d772160b92",
+    "resolution_digest": "c7b2079ce0ec17e0e84d19c8fb32616651530de2597acb910d6ed2b564631fb3",
+    "revision": "v0.1",
+    "spine_version": "0.1.0",
+    "stale": true,
+    "stale_check": "nopekit check --tier 2",
+    "stale_reason": "aero.regime, +5 read inputs that nopekit cannot see (54 in all, for example subprocess:surfaceCheck), so only a check run can show that their results are current",
+    "stale_unseen": true,
+    "summary": "The OpenFOAM motorBike in still air at 72 km/h: its drag area, and the flow around it"
+  },
+  "outcome_words": {
+    "errored": "errored",
+    "fail": "fail",
+    "outside-context": "outside operating context",
+    "pass": "pass",
+    "skipped": "skipped",
+    "unqualified": "unqualified"
+  },
+  "params": [
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.reference",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_case",
+      "model_error": "",
+      "name": "aero_case",
+      "rationale": "The OpenFOAM case, against the project root. Each gate copies it into its own scratch and runs there; nothing is written into case/.",
+      "read_by": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.reference",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": "case"
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_geometry",
+      "model_error": "",
+      "name": "aero_geometry",
+      "rationale": "The body's surface file, in the OpenFOAM install. It is part of the OpenFOAM tutorials (GPL-3.0-or-later, its origin before OpenFOAM not stated), so it is never copied into this Apache-2.0 repository: the gates copy it into their scratch only. A copy under the project was the rejected alternative.",
+      "read_by": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "a copy under the project",
+          "why": "GPL-3.0-or-later with its origin not stated; this repository is Apache-2.0"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": "$FOAM_TUTORIALS/resources/geometry/motorBike.obj.gz"
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_geometry_sha256",
+      "model_error": "",
+      "name": "aero_geometry_sha256",
+      "rationale": "The sha256 of motorBike.obj.gz in ESI OpenFOAM v2606 (measured on 2026-10-23). Another file at the same path is an error naming both digests: the drag area is of this body, by content.",
+      "read_by": [
+        "aero.case_readable",
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": "8ee223c3c3256cd71da52b80eae6569ccf3167eec6f7c3542f83296a0a777aad"
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.reference",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_body_group",
+      "model_error": "",
+      "name": "aero_body_group",
+      "rationale": "The patch group snappyHexMesh puts the body's 67 regions in (the tutorial's `inGroups`): the drag is summed over it, and the pictures draw it.",
+      "read_by": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.reference",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": "motorBikeGroup"
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.converged",
+        "aero.reference",
+        "aero.regime"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_u_inf_m_s",
+      "model_error": "",
+      "name": "aero_u_inf_m_s",
+      "rationale": "m/s: R1's 72 km/h. The air comes to the bike at this speed in the model; on the road the bike moves through still air at it, the same flow seen from the bike. The case's inlet says (20 0 0), and aero.reference holds the two equal.",
+      "read_by": [
+        "aero.converged",
+        "aero.reference",
+        "aero.regime"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 20.0
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.regime"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_ref_length_m",
+      "model_error": "",
+      "name": "aero_ref_length_m",
+      "rationale": "m: the tutorial's own reference length (its forceCoeffs `lRef`, the wheelbase), used for the Reynolds number only: Re = 20 x 1.42 / 1.5e-5 = 1.9e6, past the 5e5 aero.regime asks for turbulent wall layers. The drag area needs no length. What lost is in PARAMS.",
+      "read_by": [
+        "aero.regime"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "2.04 m",
+          "why": "the body's length in x, nose to the rear tyre; the wheelbase is the tutorial's and is what a reader of OpenFOAM's case compares with"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "m",
+      "value": 1.42
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.regime"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_sound_speed_m_s",
+      "model_error": "",
+      "name": "aero_sound_speed_m_s",
+      "rationale": "m/s: the ISA sea-level speed of sound (15 degC), for the Mach number: 20 / 340.3 = 0.059, far below the 0.3 past which the incompressible solver would not hold. The air's viscosity is the tutorial's, nu 1.5e-5 m^2/s in case/constant/transportProperties (ISA sea level: 1.46e-5).",
+      "read_by": [
+        "aero.regime"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 340.3
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_ranks",
+      "model_error": "",
+      "name": "aero_ranks",
+      "rationale": "MPI ranks for each parallel run. The machine the demo was measured on has 7 physical cores, and other work shares it: 6 leaves one. The pack's default is 8 (with --oversubscribe). The ranks move the time, and the mesh and the drag area a little (about 1e-6 of it, the pack's DEFAULT_RANKS note): the pack decomposes with `hierarchical`, so one mesh on one rank count gives one history.",
+      "read_by": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "12",
+          "why": "the tutorial's count; on 7 physical cores it needs --oversubscribe, and with other work on the machine each rank waits for a core"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 6
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_iter_unc_max_pct",
+      "model_error": "",
+      "name": "aero_iter_unc_max_pct",
+      "rationale": "% of the mean drag area: the largest iterative uncertainty U_I = (max - min) / 2 over the last 100 iterations that aero.converged accepts (the author's choice, design decision D3: common practice for RANS verification). Measured on the tutorial's base mesh: 0.24% at iteration 1500 (2026-10-23). On this project's meshes at iteration 500 (2026-10-25): 0.603% on the base mesh (358654 cells), and 1.98% on the ladder's finest (2674337 cells), which fails C7 before any GCI is computed.",
+      "read_by": [
+        "aero.converged",
+        "aero.mesh_independence",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 1.0
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_rho_kg_m3",
+      "model_error": "",
+      "name": "aero_rho_kg_m3",
+      "rationale": "kg/m^3: ISA sea-level air (15 degC, 101 325 Pa), R1's \"still sea-level air\". aero.drag_area reports the drag force with it, F_D = 0.5 rho U^2 CdA (0.35 m^2 is about 86 N at 20 m/s); no gate judges a force, and the drag area itself needs no density (the solver's pressure is kinematic).",
+      "read_by": [],
+      "record": "",
+      "rejected": [],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 1.225
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.mesh_independence"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_ladder_ratio",
+      "model_error": "",
+      "name": "aero_ladder_ratio",
+      "rationale": "The mesh ladder's ratio: each level's background block is 1.5 times finer in every direction, (32 16 12), (48 24 18), (72 36 27), and snappyHexMesh refines every cell with it. The tutorial's own ladder at 1.5 gave effective ratios 1.42 and 1.37 from its cells (2026-10-23), past the 1.3 Celik et al. 2008 ask. What lost is in PARAMS.",
+      "read_by": [
+        "aero.mesh_independence"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "2",
+          "why": "Celik's example ratio; the finest mesh of the motorBike would hold about 22 million cells, past the pack's cap of 20 million"
+        },
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "1.3",
+          "why": "the effective ratio from the cells comes out under 1.3 (P0's box: 1.25 and 1.29), and the ladder fails before it solves"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "",
+      "value": 1.5
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.mesh_independence"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_gci_max_pct",
+      "model_error": "",
+      "name": "aero_gci_max_pct",
+      "rationale": "% of the finest mesh's drag area: the largest mesh error band (GCI) aero.mesh_independence accepts (the author's choice, design decision D3: common practice for RANS verification). This project's ladder ran on 2026-10-25 (500 iterations a level, 6 ranks): 0.29925, 0.29625 and 0.30206 m^2 on 358654, 926215 and 2674337 cells, which does not converge in one direction, and its finest mesh did not settle under 1% (U_I 1.98%). So no GCI is computed, and C7 reads Failing whatever this number is, first for the level that did not settle. P0's ladder of the tutorial's own case (its box, block (20 8 8) and 1500 iterations a level, 2026-10-23) did the same (0.3075, 0.2964, 0.3007 m^2; U_I 1.09% on its finest).",
+      "read_by": [
+        "aero.mesh_independence"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "20",
+          "why": "the pack's selftest baseline states it for its spheroid, whose band at the formal order is 15.7%; a drag area known to 20% does not answer R1's 0.35 m^2"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "%",
+      "value": 5.0
+    },
+    {
+      "changed_in": "",
+      "defended": true,
+      "derived": false,
+      "derived_from": [],
+      "gates": [
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "grounded_by": [],
+      "home": "model/bike.py Config.aero_timeout_s",
+      "model_error": "",
+      "name": "aero_timeout_s",
+      "rationale": "s each OpenFOAM tool may run before it is stopped with every rank, and the gate skips. The longest single run is the ladder's finest solve. P0's finest tutorial mesh (2.6 million cells) took 5613 s for 1500 iterations on 8 ranks, and this base mesh's 500 iterations took about 6 min on 6 ranks (2026-10-23): about an hour for the finest level's 500 on 6 ranks. This project's finest level (2674337 cells) took 1587 s for its 500 on 6 ranks (2026-10-25), and the whole ladder 3256 s. Three hours leaves room for a machine shared with other work, so only a hung rank reaches it. What lost is in PARAMS.",
+      "read_by": [
+        "aero.converged",
+        "aero.domain",
+        "aero.mesh_independence",
+        "aero.mesh_quality",
+        "aero.regime",
+        "aero.wall_treatment"
+      ],
+      "record": "",
+      "rejected": [
+        {
+          "evidence": "",
+          "origin": "model/bike.py PARAMS",
+          "value": "3600",
+          "why": "measured on the base mesh only; the finest level's solve is estimated at about an hour on 6 ranks, so an hour would stop a healthy run and the ladder would read Skipped, not judged"
+        }
+      ],
+      "source": "",
+      "sourced_from": [],
+      "tags": [],
+      "units": "s",
+      "value": 10800.0
+    }
+  ],
+  "phrases": {
+    "chart_empty": "This chart has no series. There is nothing to draw.",
+    "chart_table": "The chart did not load. This table shows its numbers.",
+    "disagree": "the resolver and the verdicts disagree — a defect to report",
+    "invalidated": "invalidated",
+    "judgment_blurb": "Each stays with the person or institution it names, who settles it in their own shell — no evaluator here does. Each row says whether its authority has recorded it.",
+    "judgment_title": "Expert judgments",
+    "need": {
+      "abandoned": "abandoned",
+      "deferred": "deferred",
+      "installing": "installing",
+      "open": "identified",
+      "proposed": "proposed",
+      "satisfied": "satisfied"
+    },
+    "outcome_hint": {
+      "errored": "the evaluator crashed — nothing was evaluated, and the evaluator itself is broken",
+      "fail": "the evaluator ran and failed",
+      "outside-context": "the evaluator passed on inputs outside the range it was qualified on — the pass does not count; a fail there would",
+      "pass": "the evaluator ran and passed",
+      "skipped": "nothing was evaluated: its tool is missing here, it skipped itself on its input, or a prerequisite is not established"
+    },
+    "result_counts": "it counts",
+    "result_not_counted": "it does not count",
+    "result_recorded": "A physical result was recorded:",
+    "unseen": "unseen inputs"
+  },
+  "readiness": {
+    "all_required_checked": false,
+    "blocking": [
+      "A1",
+      "A2",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7"
+    ],
+    "by_key": {
+      "assumed": 0,
+      "checked": 0,
+      "failing": 1,
+      "gap": 2,
+      "open": 0,
+      "pending_build": 0,
+      "skipped": 1,
+      "stale": 5
+    },
+    "counts": {
+      "asserted": 0,
+      "blocked": 1,
+      "fail": 1,
+      "pass": 0,
+      "pending": 0,
+      "refuted": 0,
+      "stale": 5,
+      "unclaimed": 2,
+      "unverified": 0,
+      "verified": 0
+    },
+    "errored": 0,
+    "kinds": {
+      "assumption": 2,
+      "measurable": 7,
+      "physical": 0
+    },
+    "milestones": {
+      "wind-tunnel": {
+        "exports": 0,
+        "last_export": null,
+        "missing": [],
+        "ready": false,
+        "required": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6",
+          "C7",
+          "A1",
+          "A2"
+        ],
+        "unresolved": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6",
+          "C7",
+          "A1",
+          "A2"
+        ]
+      }
+    },
+    "n_claims": 9,
+    "n_critical": 9,
+    "n_gaps": 0,
+    "n_gates": 9,
+    "ready": false,
+    "tally": [
+      {
+        "errored": 0,
+        "key": "failing",
+        "label": "1 failing",
+        "n": 1,
+        "status": "fail"
+      },
+      {
+        "errored": 0,
+        "key": "skipped",
+        "label": "1 skipped",
+        "n": 1,
+        "status": "blocked"
+      },
+      {
+        "errored": 0,
+        "key": "gap",
+        "label": "2 gaps",
+        "n": 2,
+        "status": "unclaimed"
+      },
+      {
+        "errored": 0,
+        "key": "stale",
+        "label": "5 stale",
+        "n": 5,
+        "status": "stale"
+      }
+    ],
+    "unresolved": [
+      "A1",
+      "A2",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7"
+    ],
+    "verdict": "v0.1 is NOT ready: 9 of 9 required claims are unresolved — 1 failing (C7); 1 skipped (C1); 2 gaps (A1, A2); 5 stale (C2, C3, C4, C5, +1 more). 0 of 9 claims are checked against the current inputs. No claim is checked on any article."
+  },
+  "rebuild": [],
+  "rejections": [],
+  "requirements": [
+    {
+      "claims": [
+        "A1",
+        "A2",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "disagree": [],
+      "errored": false,
+      "id": "R1",
+      "key": "failing",
+      "source": "the author, design decision D1, 2026-10-23",
+      "statement": "The bike and rider must push through still air at 72 km/h with a drag area of at most 0.35 m^2.",
+      "status": "fail",
+      "word": "failing",
+      "worst": [
+        "C7"
+      ]
+    }
+  ],
+  "trace": {
+    "key": "3056a945c411",
+    "round": null,
+    "state": "traced"
+  },
+  "verdicts": [
+    {
+      "basis": "model-only",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "case-readable"
+      ],
+      "comparator": "",
+      "cpu_s": 0.0,
+      "detail": "simpleFoam, RAS kOmegaSST, nu 1.5e-05 m^2/s, 6144 background cells, body surface file motorBike.obj.gz (sha256 8ee223c3c325...), layers on, budget 500 iterations; nothing compiled, no function object of the case's",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [],
+      "evidence_assets": [],
+      "fresh": true,
+      "gate": "aero.case_readable",
+      "limit": null,
+      "locators": [],
+      "margin": null,
+      "margin_why": "no-value",
+      "measured": null,
+      "ok": true,
+      "order": 2,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "9b794311069c6289418303559fae82ed3c88dc36232d15e0fbfe9e3582688912",
+      "settles": "aero case readability",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "",
+      "status": "pass",
+      "tier": 0,
+      "units": "",
+      "unqualified": "",
+      "unseen": false,
+      "views": []
+    },
+    {
+      "basis": "model-only",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "flow-reference"
+      ],
+      "comparator": "",
+      "cpu_s": 0.0,
+      "detail": "inlet patch inlet at 20 m/s along +x, aero_u_inf_m_s 20; body group motorBikeGroup, 1 wall patch(es), motorBikeGroup still",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [],
+      "evidence_assets": [],
+      "fresh": true,
+      "gate": "aero.reference",
+      "limit": null,
+      "locators": [],
+      "margin": null,
+      "margin_why": "no-value",
+      "measured": null,
+      "ok": true,
+      "order": 6,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "b9736ae17ee937dfe0336cb40183c1142c592a6f9f1dd3bde03ba258965020d8",
+      "settles": "aero flow reference",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "",
+      "status": "pass",
+      "tier": 0,
+      "units": "",
+      "unqualified": "",
+      "unseen": false,
+      "views": []
+    },
+    {
+      "basis": "sourced",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "flow-regime"
+      ],
+      "comparator": ">=",
+      "cpu_s": 0.0,
+      "detail": "Re 1.893e+06 = U L / nu: U 20 m/s, L 1.42 m (the body runs 2.04282 m along the flow), nu 1.5e-05 m^2/s from the case; limit 500000, flat-plate transition. Mach 0.0588 = U / c, c 340.3 m/s; limit 0.3",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_regime/surfaceCheck/log.surfaceCheck"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.regime/3dffd339ca66947e-985882ca/log.surfaceCheck"
+      ],
+      "fresh": false,
+      "gate": "aero.regime",
+      "limit": 500000.0,
+      "locators": [],
+      "margin": 2.78667,
+      "margin_why": "",
+      "measured": 1893333.33,
+      "ok": true,
+      "order": 7,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "3dffd339ca66947e297a7329ed104883d1a965471a7a99386e08425fc56080c9",
+      "settles": "aero flow regime",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.regime reads inputs that nopekit cannot see (2 in all, for example subprocess:surfaceCheck), so only a check run can show that its result is current",
+      "status": "pass",
+      "tier": 1,
+      "units": "Re",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "sourced",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "domain-size"
+      ],
+      "comparator": ">=",
+      "cpu_s": 0.0,
+      "detail": "H 1.352 m (the body's top over the ground); upstream 5.7 H (>= 5); downstream 16.5 H (>= 15); side 5.66 H (>= 5); top 7.88 H (>= 5); blockage 0.48 % (<= 3); lateral blockage 4.27 % (<= 17); vertical blockage 11.3 % (<= 17)",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_domain/summary.json",
+        "<out>/aero-openfoam/aero_domain/surfaceCheck/log.surfaceCheck"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.domain/44d27b3c9ab6735f-e1d237b7/summary.json",
+        "assets/evidence/aero.domain/44d27b3c9ab6735f-e1d237b7/log.surfaceCheck"
+      ],
+      "fresh": false,
+      "gate": "aero.domain",
+      "limit": 15.0,
+      "locators": [],
+      "margin": 0.097473,
+      "margin_why": "",
+      "measured": 16.4620945,
+      "ok": true,
+      "order": 4,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "44d27b3c9ab6735f777db34314a70c177dc29d77c186501f039fa14f2d5fbe67",
+      "settles": "aero domain size",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.domain reads inputs that nopekit cannot see (2 in all, for example subprocess:surfaceCheck), so only a check run can show that its result is current",
+      "status": "pass",
+      "tier": 1,
+      "units": "H",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "established",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "mesh-quality"
+      ],
+      "comparator": "<",
+      "cpu_s": 0.0,
+      "detail": "snappyHexMesh finished without errors, checkMesh -meshQuality: 0 faces in error against the pack's limits; 358654 cells on 6 ranks, cap 20000000; layers on 56.2% of the body's faces (reported, not judged) [pack default: aero_max_global_cells]",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_mesh_quality/summary.json",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_mesh_quality/case/log.checkMesh"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/summary.json",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.controlDict",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.fvSchemes",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.fvSolution",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.snappyHexMeshDict",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.transportProperties",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.turbulenceProperties",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.surfaceFeatureExtractDict",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.meshQualityDict",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.foamDictionary.decomposeParDict",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.blockMesh",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.surfaceFeatureExtract",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.decomposePar",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.rankProbe",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.snappyHexMesh",
+        "assets/evidence/aero.mesh_quality/d08fbc6319efc892-a8a12986/log.checkMesh"
+      ],
+      "fresh": false,
+      "gate": "aero.mesh_quality",
+      "limit": 20000000.0,
+      "locators": [],
+      "margin": 0.982067,
+      "margin_why": "",
+      "measured": 358654.0,
+      "ok": true,
+      "order": 5,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "d08fbc6319efc892a0b04aa9231043594df193ee7bc0209850caec3fa02baada",
+      "settles": "aero mesh quality",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.mesh_quality reads inputs that nopekit cannot see (9 in all, for example subprocess:blockMesh), so only a check run can show that its result is current",
+      "status": "pass",
+      "tier": 1,
+      "units": "cells",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "established",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "convergence"
+      ],
+      "comparator": "<=",
+      "cpu_s": 0.0,
+      "detail": "U_I 0.603% of the drag area 0.29925 m^2 over iterations 401-500 (within 1%) [pack default: aero_max_global_cells]; drift -0.131% from the window before (reported, not judged); 358654 cells (base mesh), layers on 56.2% of the body's faces; k bounded in 1 iterations, omega bounded in 1 iterations (reported, not judged)",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_converged/summary.json",
+        "<out>/aero-openfoam/aero_converged/history.csv",
+        "<out>/aero-openfoam/aero_converged/surfaceCheck/log.surfaceCheck",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_converged/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_converged/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_converged/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_converged/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.checkMesh",
+        "<out>/aero-openfoam/aero_converged/case/log.potentialFoam",
+        "<out>/aero-openfoam/aero_converged/case/log.simpleFoam"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/summary.json",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/history.csv",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.surfaceCheck",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.controlDict",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.fvSchemes",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.fvSolution",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.snappyHexMeshDict",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.transportProperties",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.turbulenceProperties",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.surfaceFeatureExtractDict",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.meshQualityDict",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.foamDictionary.decomposeParDict",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.blockMesh",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.surfaceFeatureExtract",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.decomposePar",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.rankProbe",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.snappyHexMesh",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.checkMesh",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.potentialFoam",
+        "assets/evidence/aero.converged/e15d0f2822bcefcc-27e0c212/log.simpleFoam"
+      ],
+      "fresh": false,
+      "gate": "aero.converged",
+      "limit": 1.0,
+      "locators": [],
+      "margin": 0.39676,
+      "margin_why": "",
+      "measured": 0.60324,
+      "ok": true,
+      "order": 3,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "e15d0f2822bcefccc3339bb46900d360a36fd51d268d3b1b0555cc0b591b4121",
+      "settles": "aero solver convergence",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.converged reads inputs that nopekit cannot see (19 in all, for example subprocess:blockMesh), so only a check run can show that its result is current",
+      "status": "pass",
+      "tier": 2,
+      "units": "%",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "sourced",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "wall-treatment"
+      ],
+      "comparator": ">=",
+      "cpu_s": 0.0,
+      "detail": "y+ at most 300 on 96.32% of the body's area (at least 90%); y+ < 5 on 0.291%, 5-30 on 23.8%, 30-300 on 72.3%, above 300 on 3.68% of 11.2435 m^2; area-mean y+ 90.47 (OpenFOAM's 90.47); 358654 cells (base mesh), layers on 56.2% of the body's faces (reported, not judged) [pack default: aero_max_global_cells]",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_wall_treatment/summary.json",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.controlDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSchemes",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSolution",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.snappyHexMeshDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.transportProperties",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.turbulenceProperties",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.surfaceFeatureExtractDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.meshQualityDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.decomposeParDict",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.blockMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.surfaceFeatureExtract",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.decomposePar",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.rankProbe",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.snappyHexMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.checkMesh",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.potentialFoam",
+        "<out>/aero-openfoam/aero_wall_treatment/case/log.simpleFoam"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/summary.json",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.controlDict",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.fvSchemes",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.fvSolution",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.snappyHexMeshDict",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.transportProperties",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.turbulenceProperties",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.surfaceFeatureExtractDict",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.meshQualityDict",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.foamDictionary.decomposeParDict",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.blockMesh",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.surfaceFeatureExtract",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.decomposePar",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.rankProbe",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.snappyHexMesh",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.checkMesh",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.potentialFoam",
+        "assets/evidence/aero.wall_treatment/548c45a22be7d975-179e6d68/log.simpleFoam"
+      ],
+      "fresh": false,
+      "gate": "aero.wall_treatment",
+      "limit": 90.0,
+      "locators": [],
+      "margin": 0.0702711,
+      "margin_why": "",
+      "measured": 96.3244,
+      "ok": true,
+      "order": 8,
+      "pack": "aero-openfoam",
+      "passed": true,
+      "rho": "548c45a22be7d97561c8cb09e7208f29515e0d7c92749e291828c572a5e0fb4f",
+      "settles": "aero wall treatment",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.wall_treatment reads inputs that nopekit cannot see (13 in all, for example subprocess:blockMesh), so only a check run can show that its result is current",
+      "status": "pass",
+      "tier": 2,
+      "units": "%",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "sourced",
+      "blocked_by": [],
+      "blocked_kind": "",
+      "cached": true,
+      "claims": [
+        "mesh-independence"
+      ],
+      "comparator": "",
+      "cpu_s": 0.0,
+      "detail": "level 2 (2674337 cells) is not converged: U_I 1.98% of the drag area, past 1% (358654/926215/2674337 cells (ratio 1.5) [pack default: aero_max_global_cells]; y+ at most 300 on 96.32%, 99.28%, 99.94% of the body (reported, not judged))",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [
+        "<out>/aero-openfoam/aero_mesh_independence/summary.json",
+        "<out>/aero-openfoam/aero_mesh_independence/history_level0.csv",
+        "<out>/aero-openfoam/aero_mesh_independence/history_level1.csv",
+        "<out>/aero-openfoam/aero_mesh_independence/history_level2.csv",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.snappyHexMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level0/log.simpleFoam",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.snappyHexMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level1/log.simpleFoam",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.snappyHexMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.checkMesh",
+        "<out>/aero-openfoam/ladder/5e40f1cedccefc7fc4d3598af59b123f/level2/log.simpleFoam"
+      ],
+      "evidence_assets": [
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/summary.json",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/history_level0.csv",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/history_level1.csv",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/history_level2.csv",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log.snappyHexMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log.checkMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log.simpleFoam",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-2.snappyHexMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-2.checkMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-2.simpleFoam",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-3.snappyHexMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-3.checkMesh",
+        "assets/evidence/aero.mesh_independence/e575b46e8cea8442-edef0a17/log-3.simpleFoam"
+      ],
+      "fresh": false,
+      "gate": "aero.mesh_independence",
+      "limit": null,
+      "locators": [],
+      "margin": null,
+      "margin_why": "no-value",
+      "measured": null,
+      "ok": false,
+      "order": 0,
+      "pack": "aero-openfoam",
+      "passed": false,
+      "rho": "e575b46e8cea84425a32d06f4dc4cc8dc6a38f4bdc371cc4315b79a75844c8ec",
+      "settles": "aero mesh independence",
+      "skip_reason": "",
+      "skipped": false,
+      "stale_reason": "aero.mesh_independence reads inputs that nopekit cannot see (40 in all, for example subprocess:blockMesh), so only a check run can show that its result is current",
+      "status": "fail",
+      "tier": 2,
+      "unanchored": true,
+      "units": "",
+      "unqualified": "",
+      "unseen": true,
+      "views": []
+    },
+    {
+      "basis": "established",
+      "blocked_by": [
+        "aero.mesh_independence"
+      ],
+      "blocked_kind": "failed",
+      "cached": false,
+      "claims": [
+        "drag-area"
+      ],
+      "comparator": "",
+      "cpu_s": 0.0,
+      "detail": "",
+      "duration_s": 0.0,
+      "error": "",
+      "evidence": [],
+      "evidence_assets": [],
+      "fresh": false,
+      "gate": "aero.drag_area",
+      "limit": null,
+      "locators": [],
+      "margin": null,
+      "margin_why": "no-verdict",
+      "measured": null,
+      "ok": false,
+      "order": 1,
+      "pack": "aero-openfoam",
+      "passed": false,
+      "rho": "",
+      "settles": "drag area from cfd",
+      "skip_reason": "prerequisite failed: aero.mesh_independence",
+      "skipped": true,
+      "stale_reason": "",
+      "status": "skipped",
+      "tier": 2,
+      "unanchored": true,
+      "units": "",
+      "unqualified": "",
+      "unseen": false,
+      "views": []
+    }
+  ],
+  "views": [
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e15d0f2822bcefcc-27e0c212",
+        "gate": "aero.converged"
+      },
+      "data": {},
+      "description": "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them.",
+      "gates": [
+        "aero.converged"
+      ],
+      "id": "aero.hero",
+      "kind": "image",
+      "meta": {
+        "alt": "A motorcycle with a rider, seen from the front and the left. Coloured lines show the paths of the air around them.",
+        "caption": "The air comes from the front of the bike. This picture shows the base mesh. The colour on the bike and the rider shows the pressure of the air on the surface. The colour on the lines shows the speed of the air. Light and shade make some colours darker or lighter than the colours in the key.",
+        "light": "scene",
+        "scales": [
+          {
+            "hi": 1.05,
+            "lo": -1.5,
+            "on": "surface",
+            "over": "#ff00ff",
+            "over_word": "more than 1.05",
+            "quantity": "pressure coefficient Cp",
+            "source": [],
+            "source_text": "At Cp = 1, the air stops on the surface. The scale is the same for each design.",
+            "stops": [
+              {
+                "at": 0.0,
+                "colour": "#30123b"
+              },
+              {
+                "at": 0.015686,
+                "colour": "#351e58"
+              },
+              {
+                "at": 0.031373,
+                "colour": "#392a73"
+              },
+              {
+                "at": 0.047059,
+                "colour": "#3d358b"
+              },
+              {
+                "at": 0.062745,
+                "colour": "#4040a2"
+              },
+              {
+                "at": 0.078431,
+                "colour": "#424bb5"
+              },
+              {
+                "at": 0.094118,
+                "colour": "#4456c7"
+              },
+              {
+                "at": 0.1098,
+                "colour": "#4661d6"
+              },
+              {
+                "at": 0.12549,
+                "colour": "#466be3"
+              },
+              {
+                "at": 0.14118,
+                "colour": "#4776ee"
+              },
+              {
+                "at": 0.15686,
+                "colour": "#4680f6"
+              },
+              {
+                "at": 0.17255,
+                "colour": "#458afc"
+              },
+              {
+                "at": 0.18824,
+                "colour": "#4294ff"
+              },
+              {
+                "at": 0.20392,
+                "colour": "#3d9efe"
+              },
+              {
+                "at": 0.21961,
+                "colour": "#37a8fa"
+              },
+              {
+                "at": 0.23529,
+                "colour": "#2fb2f4"
+              },
+              {
+                "at": 0.25098,
+                "colour": "#28bceb"
+              },
+              {
+                "at": 0.26667,
+                "colour": "#22c5e2"
+              },
+              {
+                "at": 0.28235,
+                "colour": "#1ccdd8"
+              },
+              {
+                "at": 0.29804,
+                "colour": "#19d5cd"
+              },
+              {
+                "at": 0.31373,
+                "colour": "#18ddc2"
+              },
+              {
+                "at": 0.32941,
+                "colour": "#19e3b9"
+              },
+              {
+                "at": 0.3451,
+                "colour": "#1fe9af"
+              },
+              {
+                "at": 0.36078,
+                "colour": "#27eea4"
+              },
+              {
+                "at": 0.37647,
+                "colour": "#32f298"
+              },
+              {
+                "at": 0.39216,
+                "colour": "#3ff68a"
+              },
+              {
+                "at": 0.40784,
+                "colour": "#4ef97d"
+              },
+              {
+                "at": 0.42353,
+                "colour": "#5dfc6f"
+              },
+              {
+                "at": 0.43922,
+                "colour": "#6dfe62"
+              },
+              {
+                "at": 0.4549,
+                "colour": "#7dff56"
+              },
+              {
+                "at": 0.47059,
+                "colour": "#8bff4b"
+              },
+              {
+                "at": 0.48627,
+                "colour": "#99fe42"
+              },
+              {
+                "at": 0.50196,
+                "colour": "#a4fc3c"
+              },
+              {
+                "at": 0.51765,
+                "colour": "#affa37"
+              },
+              {
+                "at": 0.53333,
+                "colour": "#b9f635"
+              },
+              {
+                "at": 0.54902,
+                "colour": "#c3f134"
+              },
+              {
+                "at": 0.56471,
+                "colour": "#cdec34"
+              },
+              {
+                "at": 0.58039,
+                "colour": "#d7e535"
+              },
+              {
+                "at": 0.59608,
+                "colour": "#dfdf37"
+              },
+              {
+                "at": 0.61176,
+                "colour": "#e7d739"
+              },
+              {
+                "at": 0.62745,
+                "colour": "#eecf3a"
+              },
+              {
+                "at": 0.64314,
+                "colour": "#f4c73a"
+              },
+              {
+                "at": 0.65882,
+                "colour": "#f8be39"
+              },
+              {
+                "at": 0.67451,
+                "colour": "#fbb637"
+              },
+              {
+                "at": 0.6902,
+                "colour": "#fdac34"
+              },
+              {
+                "at": 0.70588,
+                "colour": "#fea130"
+              },
+              {
+                "at": 0.72157,
+                "colour": "#fe962b"
+              },
+              {
+                "at": 0.73725,
+                "colour": "#fd8a26"
+              },
+              {
+                "at": 0.75294,
+                "colour": "#fb7e21"
+              },
+              {
+                "at": 0.76863,
+                "colour": "#f8721c"
+              },
+              {
+                "at": 0.78431,
+                "colour": "#f46617"
+              },
+              {
+                "at": 0.8,
+                "colour": "#f05b12"
+              },
+              {
+                "at": 0.81569,
+                "colour": "#eb500e"
+              },
+              {
+                "at": 0.83137,
+                "colour": "#e5470b"
+              },
+              {
+                "at": 0.84706,
+                "colour": "#df3f08"
+              },
+              {
+                "at": 0.86275,
+                "colour": "#d83706"
+              },
+              {
+                "at": 0.87843,
+                "colour": "#d02f05"
+              },
+              {
+                "at": 0.89412,
+                "colour": "#c82803"
+              },
+              {
+                "at": 0.9098,
+                "colour": "#be2102"
+              },
+              {
+                "at": 0.92549,
+                "colour": "#b41b01"
+              },
+              {
+                "at": 0.94118,
+                "colour": "#a91601"
+              },
+              {
+                "at": 0.95686,
+                "colour": "#9e1001"
+              },
+              {
+                "at": 0.97255,
+                "colour": "#920b01"
+              },
+              {
+                "at": 0.98824,
+                "colour": "#850702"
+              },
+              {
+                "at": 1.0,
+                "colour": "#7a0403"
+              }
+            ],
+            "ticks": [
+              {
+                "at": 0.0,
+                "text": "−1.5",
+                "value": -1.5
+              },
+              {
+                "at": 0.19607843137254904,
+                "text": "−1.0",
+                "value": -1.0
+              },
+              {
+                "at": 0.3921568627450981,
+                "text": "−0.5",
+                "value": -0.5
+              },
+              {
+                "at": 0.5882352941176471,
+                "text": "0.0",
+                "value": 0.0
+              },
+              {
+                "at": 0.7843137254901962,
+                "text": "0.5",
+                "value": 0.5
+              },
+              {
+                "at": 0.9803921568627452,
+                "text": "1.0",
+                "value": 1.0
+              }
+            ],
+            "under": "#808080",
+            "under_word": "less than -1.5",
+            "units": ""
+          },
+          {
+            "hi": 40.0,
+            "lo": 0.0,
+            "on": "lines",
+            "over": "#ff00ff",
+            "over_word": "faster than 40 m/s",
+            "quantity": "air speed",
+            "source": [
+              {
+                "hi": 2.0,
+                "key": "u_inf_m_s",
+                "lo": 0.0
+              }
+            ],
+            "source_text": "The scale is from 0 to two times the speed of the air far from the bike.",
+            "stops": [
+              {
+                "at": 0.0,
+                "colour": "#30123b"
+              },
+              {
+                "at": 0.015686,
+                "colour": "#351e58"
+              },
+              {
+                "at": 0.031373,
+                "colour": "#392a73"
+              },
+              {
+                "at": 0.047059,
+                "colour": "#3d358b"
+              },
+              {
+                "at": 0.062745,
+                "colour": "#4040a2"
+              },
+              {
+                "at": 0.078431,
+                "colour": "#424bb5"
+              },
+              {
+                "at": 0.094118,
+                "colour": "#4456c7"
+              },
+              {
+                "at": 0.1098,
+                "colour": "#4661d6"
+              },
+              {
+                "at": 0.12549,
+                "colour": "#466be3"
+              },
+              {
+                "at": 0.14118,
+                "colour": "#4776ee"
+              },
+              {
+                "at": 0.15686,
+                "colour": "#4680f6"
+              },
+              {
+                "at": 0.17255,
+                "colour": "#458afc"
+              },
+              {
+                "at": 0.18824,
+                "colour": "#4294ff"
+              },
+              {
+                "at": 0.20392,
+                "colour": "#3d9efe"
+              },
+              {
+                "at": 0.21961,
+                "colour": "#37a8fa"
+              },
+              {
+                "at": 0.23529,
+                "colour": "#2fb2f4"
+              },
+              {
+                "at": 0.25098,
+                "colour": "#28bceb"
+              },
+              {
+                "at": 0.26667,
+                "colour": "#22c5e2"
+              },
+              {
+                "at": 0.28235,
+                "colour": "#1ccdd8"
+              },
+              {
+                "at": 0.29804,
+                "colour": "#19d5cd"
+              },
+              {
+                "at": 0.31373,
+                "colour": "#18ddc2"
+              },
+              {
+                "at": 0.32941,
+                "colour": "#19e3b9"
+              },
+              {
+                "at": 0.3451,
+                "colour": "#1fe9af"
+              },
+              {
+                "at": 0.36078,
+                "colour": "#27eea4"
+              },
+              {
+                "at": 0.37647,
+                "colour": "#32f298"
+              },
+              {
+                "at": 0.39216,
+                "colour": "#3ff68a"
+              },
+              {
+                "at": 0.40784,
+                "colour": "#4ef97d"
+              },
+              {
+                "at": 0.42353,
+                "colour": "#5dfc6f"
+              },
+              {
+                "at": 0.43922,
+                "colour": "#6dfe62"
+              },
+              {
+                "at": 0.4549,
+                "colour": "#7dff56"
+              },
+              {
+                "at": 0.47059,
+                "colour": "#8bff4b"
+              },
+              {
+                "at": 0.48627,
+                "colour": "#99fe42"
+              },
+              {
+                "at": 0.50196,
+                "colour": "#a4fc3c"
+              },
+              {
+                "at": 0.51765,
+                "colour": "#affa37"
+              },
+              {
+                "at": 0.53333,
+                "colour": "#b9f635"
+              },
+              {
+                "at": 0.54902,
+                "colour": "#c3f134"
+              },
+              {
+                "at": 0.56471,
+                "colour": "#cdec34"
+              },
+              {
+                "at": 0.58039,
+                "colour": "#d7e535"
+              },
+              {
+                "at": 0.59608,
+                "colour": "#dfdf37"
+              },
+              {
+                "at": 0.61176,
+                "colour": "#e7d739"
+              },
+              {
+                "at": 0.62745,
+                "colour": "#eecf3a"
+              },
+              {
+                "at": 0.64314,
+                "colour": "#f4c73a"
+              },
+              {
+                "at": 0.65882,
+                "colour": "#f8be39"
+              },
+              {
+                "at": 0.67451,
+                "colour": "#fbb637"
+              },
+              {
+                "at": 0.6902,
+                "colour": "#fdac34"
+              },
+              {
+                "at": 0.70588,
+                "colour": "#fea130"
+              },
+              {
+                "at": 0.72157,
+                "colour": "#fe962b"
+              },
+              {
+                "at": 0.73725,
+                "colour": "#fd8a26"
+              },
+              {
+                "at": 0.75294,
+                "colour": "#fb7e21"
+              },
+              {
+                "at": 0.76863,
+                "colour": "#f8721c"
+              },
+              {
+                "at": 0.78431,
+                "colour": "#f46617"
+              },
+              {
+                "at": 0.8,
+                "colour": "#f05b12"
+              },
+              {
+                "at": 0.81569,
+                "colour": "#eb500e"
+              },
+              {
+                "at": 0.83137,
+                "colour": "#e5470b"
+              },
+              {
+                "at": 0.84706,
+                "colour": "#df3f08"
+              },
+              {
+                "at": 0.86275,
+                "colour": "#d83706"
+              },
+              {
+                "at": 0.87843,
+                "colour": "#d02f05"
+              },
+              {
+                "at": 0.89412,
+                "colour": "#c82803"
+              },
+              {
+                "at": 0.9098,
+                "colour": "#be2102"
+              },
+              {
+                "at": 0.92549,
+                "colour": "#b41b01"
+              },
+              {
+                "at": 0.94118,
+                "colour": "#a91601"
+              },
+              {
+                "at": 0.95686,
+                "colour": "#9e1001"
+              },
+              {
+                "at": 0.97255,
+                "colour": "#920b01"
+              },
+              {
+                "at": 0.98824,
+                "colour": "#850702"
+              },
+              {
+                "at": 1.0,
+                "colour": "#7a0403"
+              }
+            ],
+            "ticks": [
+              {
+                "at": 0.0,
+                "text": "0",
+                "value": 0.0
+              },
+              {
+                "at": 0.25,
+                "text": "10",
+                "value": 10.0
+              },
+              {
+                "at": 0.5,
+                "text": "20",
+                "value": 20.0
+              },
+              {
+                "at": 0.75,
+                "text": "30",
+                "value": 30.0
+              },
+              {
+                "at": 1.0,
+                "text": "40",
+                "value": 40.0
+              }
+            ],
+            "under": "",
+            "under_word": "",
+            "units": "m/s"
+          }
+        ]
+      },
+      "order": 10,
+      "pack": "aero-openfoam",
+      "src": "assets/figures/aero.converged/e15d0f2822bcefcc-27e0c212/aero.hero.2a9d1b44ebf4.png",
+      "title": "The air around the bike"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e15d0f2822bcefcc-27e0c212",
+        "gate": "aero.converged"
+      },
+      "data": {},
+      "description": "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them.",
+      "gates": [
+        "aero.converged"
+      ],
+      "id": "aero.surface_cp",
+      "kind": "image",
+      "meta": {
+        "alt": "A motorcycle with a rider, coloured by the pressure of the air on the surface.",
+        "caption": "The colour shows the pressure of the air on the surface of the bike and the rider, on the base mesh. The colours have no light or shade, so each colour is the same as in the key.",
+        "light": "none",
+        "scale": {
+          "hi": 1.05,
+          "lo": -1.5,
+          "over": "#ff00ff",
+          "over_word": "more than 1.05",
+          "quantity": "pressure coefficient Cp",
+          "source": [],
+          "source_text": "At Cp = 1, the air stops on the surface. The scale is the same for each design.",
+          "stops": [
+            {
+              "at": 0.0,
+              "colour": "#30123b"
+            },
+            {
+              "at": 0.015686,
+              "colour": "#351e58"
+            },
+            {
+              "at": 0.031373,
+              "colour": "#392a73"
+            },
+            {
+              "at": 0.047059,
+              "colour": "#3d358b"
+            },
+            {
+              "at": 0.062745,
+              "colour": "#4040a2"
+            },
+            {
+              "at": 0.078431,
+              "colour": "#424bb5"
+            },
+            {
+              "at": 0.094118,
+              "colour": "#4456c7"
+            },
+            {
+              "at": 0.1098,
+              "colour": "#4661d6"
+            },
+            {
+              "at": 0.12549,
+              "colour": "#466be3"
+            },
+            {
+              "at": 0.14118,
+              "colour": "#4776ee"
+            },
+            {
+              "at": 0.15686,
+              "colour": "#4680f6"
+            },
+            {
+              "at": 0.17255,
+              "colour": "#458afc"
+            },
+            {
+              "at": 0.18824,
+              "colour": "#4294ff"
+            },
+            {
+              "at": 0.20392,
+              "colour": "#3d9efe"
+            },
+            {
+              "at": 0.21961,
+              "colour": "#37a8fa"
+            },
+            {
+              "at": 0.23529,
+              "colour": "#2fb2f4"
+            },
+            {
+              "at": 0.25098,
+              "colour": "#28bceb"
+            },
+            {
+              "at": 0.26667,
+              "colour": "#22c5e2"
+            },
+            {
+              "at": 0.28235,
+              "colour": "#1ccdd8"
+            },
+            {
+              "at": 0.29804,
+              "colour": "#19d5cd"
+            },
+            {
+              "at": 0.31373,
+              "colour": "#18ddc2"
+            },
+            {
+              "at": 0.32941,
+              "colour": "#19e3b9"
+            },
+            {
+              "at": 0.3451,
+              "colour": "#1fe9af"
+            },
+            {
+              "at": 0.36078,
+              "colour": "#27eea4"
+            },
+            {
+              "at": 0.37647,
+              "colour": "#32f298"
+            },
+            {
+              "at": 0.39216,
+              "colour": "#3ff68a"
+            },
+            {
+              "at": 0.40784,
+              "colour": "#4ef97d"
+            },
+            {
+              "at": 0.42353,
+              "colour": "#5dfc6f"
+            },
+            {
+              "at": 0.43922,
+              "colour": "#6dfe62"
+            },
+            {
+              "at": 0.4549,
+              "colour": "#7dff56"
+            },
+            {
+              "at": 0.47059,
+              "colour": "#8bff4b"
+            },
+            {
+              "at": 0.48627,
+              "colour": "#99fe42"
+            },
+            {
+              "at": 0.50196,
+              "colour": "#a4fc3c"
+            },
+            {
+              "at": 0.51765,
+              "colour": "#affa37"
+            },
+            {
+              "at": 0.53333,
+              "colour": "#b9f635"
+            },
+            {
+              "at": 0.54902,
+              "colour": "#c3f134"
+            },
+            {
+              "at": 0.56471,
+              "colour": "#cdec34"
+            },
+            {
+              "at": 0.58039,
+              "colour": "#d7e535"
+            },
+            {
+              "at": 0.59608,
+              "colour": "#dfdf37"
+            },
+            {
+              "at": 0.61176,
+              "colour": "#e7d739"
+            },
+            {
+              "at": 0.62745,
+              "colour": "#eecf3a"
+            },
+            {
+              "at": 0.64314,
+              "colour": "#f4c73a"
+            },
+            {
+              "at": 0.65882,
+              "colour": "#f8be39"
+            },
+            {
+              "at": 0.67451,
+              "colour": "#fbb637"
+            },
+            {
+              "at": 0.6902,
+              "colour": "#fdac34"
+            },
+            {
+              "at": 0.70588,
+              "colour": "#fea130"
+            },
+            {
+              "at": 0.72157,
+              "colour": "#fe962b"
+            },
+            {
+              "at": 0.73725,
+              "colour": "#fd8a26"
+            },
+            {
+              "at": 0.75294,
+              "colour": "#fb7e21"
+            },
+            {
+              "at": 0.76863,
+              "colour": "#f8721c"
+            },
+            {
+              "at": 0.78431,
+              "colour": "#f46617"
+            },
+            {
+              "at": 0.8,
+              "colour": "#f05b12"
+            },
+            {
+              "at": 0.81569,
+              "colour": "#eb500e"
+            },
+            {
+              "at": 0.83137,
+              "colour": "#e5470b"
+            },
+            {
+              "at": 0.84706,
+              "colour": "#df3f08"
+            },
+            {
+              "at": 0.86275,
+              "colour": "#d83706"
+            },
+            {
+              "at": 0.87843,
+              "colour": "#d02f05"
+            },
+            {
+              "at": 0.89412,
+              "colour": "#c82803"
+            },
+            {
+              "at": 0.9098,
+              "colour": "#be2102"
+            },
+            {
+              "at": 0.92549,
+              "colour": "#b41b01"
+            },
+            {
+              "at": 0.94118,
+              "colour": "#a91601"
+            },
+            {
+              "at": 0.95686,
+              "colour": "#9e1001"
+            },
+            {
+              "at": 0.97255,
+              "colour": "#920b01"
+            },
+            {
+              "at": 0.98824,
+              "colour": "#850702"
+            },
+            {
+              "at": 1.0,
+              "colour": "#7a0403"
+            }
+          ],
+          "ticks": [
+            {
+              "at": 0.0,
+              "text": "−1.5",
+              "value": -1.5
+            },
+            {
+              "at": 0.19607843137254904,
+              "text": "−1.0",
+              "value": -1.0
+            },
+            {
+              "at": 0.3921568627450981,
+              "text": "−0.5",
+              "value": -0.5
+            },
+            {
+              "at": 0.5882352941176471,
+              "text": "0.0",
+              "value": 0.0
+            },
+            {
+              "at": 0.7843137254901962,
+              "text": "0.5",
+              "value": 0.5
+            },
+            {
+              "at": 0.9803921568627452,
+              "text": "1.0",
+              "value": 1.0
+            }
+          ],
+          "under": "#808080",
+          "under_word": "less than -1.5",
+          "units": ""
+        }
+      },
+      "order": 20,
+      "pack": "aero-openfoam",
+      "src": "assets/figures/aero.converged/e15d0f2822bcefcc-27e0c212/aero.surface_cp.72b3772c9fe1.png",
+      "title": "The pressure on the surface"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e15d0f2822bcefcc-27e0c212",
+        "gate": "aero.converged"
+      },
+      "chart": {},
+      "chart_url": "data/views/aero.history~chart.json",
+      "data": {},
+      "data_url": "assets/figures/aero.converged/e15d0f2822bcefcc-27e0c212/aero.history.ac850f319ad1.chart.json",
+      "description": "OpenFOAM solved the flow. The chart shows the numbers of that run.",
+      "gates": [
+        "aero.converged"
+      ],
+      "id": "aero.history",
+      "kind": "chart",
+      "meta": {
+        "caption": "The drag area on the base mesh after each iteration, for the last part of the run. The second colour shows the window that the result uses. The two dotted lines are the highest and the lowest value in that window. The iterative uncertainty is half of the distance between them."
+      },
+      "order": 30,
+      "pack": "aero-openfoam",
+      "src": "",
+      "title": "How the drag area settled on the base mesh"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e15d0f2822bcefcc-27e0c212",
+        "gate": "aero.converged"
+      },
+      "data": {},
+      "description": "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them.",
+      "gates": [
+        "aero.converged"
+      ],
+      "id": "aero.wake",
+      "kind": "image",
+      "meta": {
+        "alt": "A coloured surface that starts on the bike and the rider and goes back behind them, seen from behind and from the left.",
+        "caption": "The surface shows the edge of the wake on the base mesh. In the wake, the air has less energy than the air that flows past. The colour shows the speed of the air on the surface. Light and shade make some colours darker or lighter than the colours in the key.",
+        "light": "scene",
+        "scales": [
+          {
+            "hi": 20.0,
+            "lo": 0.0,
+            "on": "surface",
+            "over": "#ff00ff",
+            "over_word": "faster than 20 m/s",
+            "quantity": "air speed",
+            "source": [
+              {
+                "hi": 1.0,
+                "key": "u_inf_m_s",
+                "lo": 0.0
+              }
+            ],
+            "source_text": "The scale is from 0 to the speed of the air far from the bike.",
+            "stops": [
+              {
+                "at": 0.0,
+                "colour": "#30123b"
+              },
+              {
+                "at": 0.015686,
+                "colour": "#351e58"
+              },
+              {
+                "at": 0.031373,
+                "colour": "#392a73"
+              },
+              {
+                "at": 0.047059,
+                "colour": "#3d358b"
+              },
+              {
+                "at": 0.062745,
+                "colour": "#4040a2"
+              },
+              {
+                "at": 0.078431,
+                "colour": "#424bb5"
+              },
+              {
+                "at": 0.094118,
+                "colour": "#4456c7"
+              },
+              {
+                "at": 0.1098,
+                "colour": "#4661d6"
+              },
+              {
+                "at": 0.12549,
+                "colour": "#466be3"
+              },
+              {
+                "at": 0.14118,
+                "colour": "#4776ee"
+              },
+              {
+                "at": 0.15686,
+                "colour": "#4680f6"
+              },
+              {
+                "at": 0.17255,
+                "colour": "#458afc"
+              },
+              {
+                "at": 0.18824,
+                "colour": "#4294ff"
+              },
+              {
+                "at": 0.20392,
+                "colour": "#3d9efe"
+              },
+              {
+                "at": 0.21961,
+                "colour": "#37a8fa"
+              },
+              {
+                "at": 0.23529,
+                "colour": "#2fb2f4"
+              },
+              {
+                "at": 0.25098,
+                "colour": "#28bceb"
+              },
+              {
+                "at": 0.26667,
+                "colour": "#22c5e2"
+              },
+              {
+                "at": 0.28235,
+                "colour": "#1ccdd8"
+              },
+              {
+                "at": 0.29804,
+                "colour": "#19d5cd"
+              },
+              {
+                "at": 0.31373,
+                "colour": "#18ddc2"
+              },
+              {
+                "at": 0.32941,
+                "colour": "#19e3b9"
+              },
+              {
+                "at": 0.3451,
+                "colour": "#1fe9af"
+              },
+              {
+                "at": 0.36078,
+                "colour": "#27eea4"
+              },
+              {
+                "at": 0.37647,
+                "colour": "#32f298"
+              },
+              {
+                "at": 0.39216,
+                "colour": "#3ff68a"
+              },
+              {
+                "at": 0.40784,
+                "colour": "#4ef97d"
+              },
+              {
+                "at": 0.42353,
+                "colour": "#5dfc6f"
+              },
+              {
+                "at": 0.43922,
+                "colour": "#6dfe62"
+              },
+              {
+                "at": 0.4549,
+                "colour": "#7dff56"
+              },
+              {
+                "at": 0.47059,
+                "colour": "#8bff4b"
+              },
+              {
+                "at": 0.48627,
+                "colour": "#99fe42"
+              },
+              {
+                "at": 0.50196,
+                "colour": "#a4fc3c"
+              },
+              {
+                "at": 0.51765,
+                "colour": "#affa37"
+              },
+              {
+                "at": 0.53333,
+                "colour": "#b9f635"
+              },
+              {
+                "at": 0.54902,
+                "colour": "#c3f134"
+              },
+              {
+                "at": 0.56471,
+                "colour": "#cdec34"
+              },
+              {
+                "at": 0.58039,
+                "colour": "#d7e535"
+              },
+              {
+                "at": 0.59608,
+                "colour": "#dfdf37"
+              },
+              {
+                "at": 0.61176,
+                "colour": "#e7d739"
+              },
+              {
+                "at": 0.62745,
+                "colour": "#eecf3a"
+              },
+              {
+                "at": 0.64314,
+                "colour": "#f4c73a"
+              },
+              {
+                "at": 0.65882,
+                "colour": "#f8be39"
+              },
+              {
+                "at": 0.67451,
+                "colour": "#fbb637"
+              },
+              {
+                "at": 0.6902,
+                "colour": "#fdac34"
+              },
+              {
+                "at": 0.70588,
+                "colour": "#fea130"
+              },
+              {
+                "at": 0.72157,
+                "colour": "#fe962b"
+              },
+              {
+                "at": 0.73725,
+                "colour": "#fd8a26"
+              },
+              {
+                "at": 0.75294,
+                "colour": "#fb7e21"
+              },
+              {
+                "at": 0.76863,
+                "colour": "#f8721c"
+              },
+              {
+                "at": 0.78431,
+                "colour": "#f46617"
+              },
+              {
+                "at": 0.8,
+                "colour": "#f05b12"
+              },
+              {
+                "at": 0.81569,
+                "colour": "#eb500e"
+              },
+              {
+                "at": 0.83137,
+                "colour": "#e5470b"
+              },
+              {
+                "at": 0.84706,
+                "colour": "#df3f08"
+              },
+              {
+                "at": 0.86275,
+                "colour": "#d83706"
+              },
+              {
+                "at": 0.87843,
+                "colour": "#d02f05"
+              },
+              {
+                "at": 0.89412,
+                "colour": "#c82803"
+              },
+              {
+                "at": 0.9098,
+                "colour": "#be2102"
+              },
+              {
+                "at": 0.92549,
+                "colour": "#b41b01"
+              },
+              {
+                "at": 0.94118,
+                "colour": "#a91601"
+              },
+              {
+                "at": 0.95686,
+                "colour": "#9e1001"
+              },
+              {
+                "at": 0.97255,
+                "colour": "#920b01"
+              },
+              {
+                "at": 0.98824,
+                "colour": "#850702"
+              },
+              {
+                "at": 1.0,
+                "colour": "#7a0403"
+              }
+            ],
+            "ticks": [
+              {
+                "at": 0.0,
+                "text": "0",
+                "value": 0.0
+              },
+              {
+                "at": 0.25,
+                "text": "5",
+                "value": 5.0
+              },
+              {
+                "at": 0.5,
+                "text": "10",
+                "value": 10.0
+              },
+              {
+                "at": 0.75,
+                "text": "15",
+                "value": 15.0
+              },
+              {
+                "at": 1.0,
+                "text": "20",
+                "value": 20.0
+              }
+            ],
+            "under": "",
+            "under_word": "",
+            "units": "m/s"
+          }
+        ]
+      },
+      "order": 40,
+      "pack": "aero-openfoam",
+      "src": "assets/figures/aero.converged/e15d0f2822bcefcc-27e0c212/aero.wake.6e03716c0d70.png",
+      "title": "The wake"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e15d0f2822bcefcc-27e0c212",
+        "gate": "aero.converged"
+      },
+      "data": {},
+      "description": "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them.",
+      "gates": [
+        "aero.converged"
+      ],
+      "id": "aero.wake_cuts",
+      "kind": "image",
+      "meta": {
+        "alt": "A grey motorcycle with a rider, and three coloured planes across the air behind it.",
+        "caption": "Each cut is a plane across the flow behind the bike, on the base mesh. The colour shows the energy that is left in the air. The picture does not show the air that has all of its energy.",
+        "light": "none",
+        "scale": {
+          "hi": 1.05,
+          "lo": -0.2,
+          "over": "#ff00ff",
+          "over_word": "more than 1.05",
+          "quantity": "total pressure coefficient CpT",
+          "source": [],
+          "source_text": "At CpT = 1, the air has all of its energy. The scale is the same for each design.",
+          "stops": [
+            {
+              "at": 0.0,
+              "colour": "#30123b"
+            },
+            {
+              "at": 0.015686,
+              "colour": "#351e58"
+            },
+            {
+              "at": 0.031373,
+              "colour": "#392a73"
+            },
+            {
+              "at": 0.047059,
+              "colour": "#3d358b"
+            },
+            {
+              "at": 0.062745,
+              "colour": "#4040a2"
+            },
+            {
+              "at": 0.078431,
+              "colour": "#424bb5"
+            },
+            {
+              "at": 0.094118,
+              "colour": "#4456c7"
+            },
+            {
+              "at": 0.1098,
+              "colour": "#4661d6"
+            },
+            {
+              "at": 0.12549,
+              "colour": "#466be3"
+            },
+            {
+              "at": 0.14118,
+              "colour": "#4776ee"
+            },
+            {
+              "at": 0.15686,
+              "colour": "#4680f6"
+            },
+            {
+              "at": 0.17255,
+              "colour": "#458afc"
+            },
+            {
+              "at": 0.18824,
+              "colour": "#4294ff"
+            },
+            {
+              "at": 0.20392,
+              "colour": "#3d9efe"
+            },
+            {
+              "at": 0.21961,
+              "colour": "#37a8fa"
+            },
+            {
+              "at": 0.23529,
+              "colour": "#2fb2f4"
+            },
+            {
+              "at": 0.25098,
+              "colour": "#28bceb"
+            },
+            {
+              "at": 0.26667,
+              "colour": "#22c5e2"
+            },
+            {
+              "at": 0.28235,
+              "colour": "#1ccdd8"
+            },
+            {
+              "at": 0.29804,
+              "colour": "#19d5cd"
+            },
+            {
+              "at": 0.31373,
+              "colour": "#18ddc2"
+            },
+            {
+              "at": 0.32941,
+              "colour": "#19e3b9"
+            },
+            {
+              "at": 0.3451,
+              "colour": "#1fe9af"
+            },
+            {
+              "at": 0.36078,
+              "colour": "#27eea4"
+            },
+            {
+              "at": 0.37647,
+              "colour": "#32f298"
+            },
+            {
+              "at": 0.39216,
+              "colour": "#3ff68a"
+            },
+            {
+              "at": 0.40784,
+              "colour": "#4ef97d"
+            },
+            {
+              "at": 0.42353,
+              "colour": "#5dfc6f"
+            },
+            {
+              "at": 0.43922,
+              "colour": "#6dfe62"
+            },
+            {
+              "at": 0.4549,
+              "colour": "#7dff56"
+            },
+            {
+              "at": 0.47059,
+              "colour": "#8bff4b"
+            },
+            {
+              "at": 0.48627,
+              "colour": "#99fe42"
+            },
+            {
+              "at": 0.50196,
+              "colour": "#a4fc3c"
+            },
+            {
+              "at": 0.51765,
+              "colour": "#affa37"
+            },
+            {
+              "at": 0.53333,
+              "colour": "#b9f635"
+            },
+            {
+              "at": 0.54902,
+              "colour": "#c3f134"
+            },
+            {
+              "at": 0.56471,
+              "colour": "#cdec34"
+            },
+            {
+              "at": 0.58039,
+              "colour": "#d7e535"
+            },
+            {
+              "at": 0.59608,
+              "colour": "#dfdf37"
+            },
+            {
+              "at": 0.61176,
+              "colour": "#e7d739"
+            },
+            {
+              "at": 0.62745,
+              "colour": "#eecf3a"
+            },
+            {
+              "at": 0.64314,
+              "colour": "#f4c73a"
+            },
+            {
+              "at": 0.65882,
+              "colour": "#f8be39"
+            },
+            {
+              "at": 0.67451,
+              "colour": "#fbb637"
+            },
+            {
+              "at": 0.6902,
+              "colour": "#fdac34"
+            },
+            {
+              "at": 0.70588,
+              "colour": "#fea130"
+            },
+            {
+              "at": 0.72157,
+              "colour": "#fe962b"
+            },
+            {
+              "at": 0.73725,
+              "colour": "#fd8a26"
+            },
+            {
+              "at": 0.75294,
+              "colour": "#fb7e21"
+            },
+            {
+              "at": 0.76863,
+              "colour": "#f8721c"
+            },
+            {
+              "at": 0.78431,
+              "colour": "#f46617"
+            },
+            {
+              "at": 0.8,
+              "colour": "#f05b12"
+            },
+            {
+              "at": 0.81569,
+              "colour": "#eb500e"
+            },
+            {
+              "at": 0.83137,
+              "colour": "#e5470b"
+            },
+            {
+              "at": 0.84706,
+              "colour": "#df3f08"
+            },
+            {
+              "at": 0.86275,
+              "colour": "#d83706"
+            },
+            {
+              "at": 0.87843,
+              "colour": "#d02f05"
+            },
+            {
+              "at": 0.89412,
+              "colour": "#c82803"
+            },
+            {
+              "at": 0.9098,
+              "colour": "#be2102"
+            },
+            {
+              "at": 0.92549,
+              "colour": "#b41b01"
+            },
+            {
+              "at": 0.94118,
+              "colour": "#a91601"
+            },
+            {
+              "at": 0.95686,
+              "colour": "#9e1001"
+            },
+            {
+              "at": 0.97255,
+              "colour": "#920b01"
+            },
+            {
+              "at": 0.98824,
+              "colour": "#850702"
+            },
+            {
+              "at": 1.0,
+              "colour": "#7a0403"
+            }
+          ],
+          "ticks": [
+            {
+              "at": 0.16,
+              "text": "0.00",
+              "value": 0.0
+            },
+            {
+              "at": 0.36,
+              "text": "0.25",
+              "value": 0.25
+            },
+            {
+              "at": 0.5599999999999999,
+              "text": "0.50",
+              "value": 0.5
+            },
+            {
+              "at": 0.76,
+              "text": "0.75",
+              "value": 0.75
+            },
+            {
+              "at": 0.96,
+              "text": "1.00",
+              "value": 1.0
+            }
+          ],
+          "under": "#808080",
+          "under_word": "less than -0.2",
+          "units": ""
+        }
+      },
+      "order": 50,
+      "pack": "aero-openfoam",
+      "src": "assets/figures/aero.converged/e15d0f2822bcefcc-27e0c212/aero.wake_cuts.51dfd37f2e49.png",
+      "title": "Cuts across the wake"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "548c45a22be7d975-179e6d68",
+        "gate": "aero.wall_treatment"
+      },
+      "data": {},
+      "description": "OpenFOAM calculated the fields, the surfaces and the paths. ParaView drew them.",
+      "gates": [
+        "aero.wall_treatment"
+      ],
+      "id": "aero.wall",
+      "kind": "image",
+      "meta": {
+        "alt": "The body, coloured in four bands of the wall value y+.",
+        "caption": "The colour shows the wall value y+ on the surface of the body, on the base mesh. Each cell shows its own band. The wall model applies in the bands below the top band.",
+        "light": "none",
+        "scale": {
+          "over": "",
+          "over_word": "",
+          "quantity": "wall value y+",
+          "source": [],
+          "source_text": "Each colour is one band of y+. The wall model of the solver is made for the bands below 300.",
+          "stops": [
+            {
+              "at": 0.0,
+              "colour": "#466be3"
+            },
+            {
+              "at": 0.25,
+              "colour": "#466be3"
+            },
+            {
+              "at": 0.25,
+              "colour": "#31f299"
+            },
+            {
+              "at": 0.5,
+              "colour": "#31f299"
+            },
+            {
+              "at": 0.5,
+              "colour": "#edd03a"
+            },
+            {
+              "at": 0.75,
+              "colour": "#edd03a"
+            },
+            {
+              "at": 0.75,
+              "colour": "#d23105"
+            },
+            {
+              "at": 1.0,
+              "colour": "#d23105"
+            }
+          ],
+          "ticks": [
+            {
+              "at": 0.25,
+              "text": "5",
+              "value": 5.0
+            },
+            {
+              "at": 0.5,
+              "text": "30",
+              "value": 30.0
+            },
+            {
+              "at": 0.75,
+              "text": "300",
+              "value": 300.0
+            }
+          ],
+          "under": "",
+          "under_word": "",
+          "units": ""
+        }
+      },
+      "order": 60,
+      "pack": "aero-openfoam",
+      "src": "assets/figures/aero.wall_treatment/548c45a22be7d975-179e6d68/aero.wall.3970b362cb70.png",
+      "title": "The wall value y+"
+    },
+    {
+      "binding": {
+        "currency": "unseen",
+        "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
+        "entry": "e575b46e8cea8442-edef0a17",
+        "gate": "aero.mesh_independence"
+      },
+      "chart": {
+        "current": null,
+        "limit": null,
+        "spec": {
+          "data": {
+            "values": [
+              {
+                "label": "each mesh",
+                "series": "meshes",
+                "text": "358654 cells",
+                "x": 1.9536502534736022,
+                "y": 0.29924988022349497
+              },
+              {
+                "label": "each mesh",
+                "series": "meshes",
+                "text": "926215 cells",
+                "x": 1.4239719712337393,
+                "y": 0.29624534190569596
+              },
+              {
+                "label": "each mesh",
+                "series": "meshes",
+                "text": "2674337 cells",
+                "x": 1.0,
+                "y": 0.302057448025212
+              }
+            ]
+          },
+          "height": 260,
+          "layer": [
+            {
+              "encoding": {
+                "color": {
+                  "field": "label",
+                  "legend": null,
+                  "title": "",
+                  "type": "nominal"
+                },
+                "detail": {
+                  "field": "series",
+                  "type": "nominal"
+                },
+                "x": {
+                  "field": "x",
+                  "scale": {
+                    "nice": false,
+                    "padding": 14,
+                    "zero": false
+                  },
+                  "title": "relative cell size",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "field": "y",
+                  "scale": {
+                    "padding": 14,
+                    "zero": false
+                  },
+                  "title": "drag area (m^2)",
+                  "type": "quantitative"
+                }
+              },
+              "mark": {
+                "style": "nk-series",
+                "type": "line"
+              }
+            },
+            {
+              "data": {
+                "values": [
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "358654 cells",
+                    "x": 1.9536502534736022,
+                    "y": 0.29924988022349497
+                  },
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "926215 cells",
+                    "x": 1.4239719712337393,
+                    "y": 0.29624534190569596
+                  },
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "2674337 cells",
+                    "x": 1.0,
+                    "y": 0.302057448025212
+                  }
+                ]
+              },
+              "encoding": {
+                "color": {
+                  "field": "label",
+                  "legend": null,
+                  "title": "",
+                  "type": "nominal"
+                },
+                "tooltip": [
+                  {
+                    "field": "label",
+                    "title": "",
+                    "type": "nominal"
+                  },
+                  {
+                    "field": "x",
+                    "title": "relative cell size",
+                    "type": "quantitative"
+                  },
+                  {
+                    "field": "y",
+                    "title": "drag area (m^2)",
+                    "type": "quantitative"
+                  }
+                ],
+                "x": {
+                  "field": "x",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "field": "y",
+                  "type": "quantitative"
+                }
+              },
+              "mark": {
+                "filled": true,
+                "style": "nk-point",
+                "type": "point"
+              }
+            },
+            {
+              "data": {
+                "values": [
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "2674337 cells",
+                    "x": 1.0,
+                    "y": 0.302057448025212
+                  }
+                ]
+              },
+              "encoding": {
+                "text": {
+                  "field": "text"
+                },
+                "x": {
+                  "field": "x",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "field": "y",
+                  "type": "quantitative"
+                }
+              },
+              "mark": {
+                "align": "left",
+                "angle": 35,
+                "baseline": "top",
+                "dx": 4,
+                "dy": 6,
+                "style": "nk-point-label",
+                "type": "text"
+              }
+            },
+            {
+              "data": {
+                "values": [
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "926215 cells",
+                    "x": 1.4239719712337393,
+                    "y": 0.29624534190569596
+                  }
+                ]
+              },
+              "encoding": {
+                "text": {
+                  "field": "text"
+                },
+                "x": {
+                  "field": "x",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "field": "y",
+                  "type": "quantitative"
+                }
+              },
+              "mark": {
+                "align": "left",
+                "angle": 325,
+                "baseline": "bottom",
+                "dx": 10,
+                "dy": -2,
+                "style": "nk-point-label",
+                "type": "text"
+              }
+            },
+            {
+              "data": {
+                "values": [
+                  {
+                    "label": "each mesh",
+                    "series": "meshes",
+                    "text": "358654 cells",
+                    "x": 1.9536502534736022,
+                    "y": 0.29924988022349497
+                  }
+                ]
+              },
+              "encoding": {
+                "text": {
+                  "field": "text"
+                },
+                "x": {
+                  "field": "x",
+                  "type": "quantitative"
+                },
+                "y": {
+                  "field": "y",
+                  "type": "quantitative"
+                }
+              },
+              "mark": {
+                "align": "right",
+                "angle": 325,
+                "baseline": "top",
+                "dx": -4,
+                "dy": 6,
+                "style": "nk-point-label",
+                "type": "text"
+              }
+            }
+          ],
+          "width": "container"
+        },
+        "table": {
+          "head": [
+            "",
+            "relative cell size",
+            "drag area (m^2)"
+          ],
+          "rows": [
+            [
+              "each mesh (358654 cells)",
+              "1.954",
+              "0.2992"
+            ],
+            [
+              "each mesh (926215 cells)",
+              "1.424",
+              "0.2962"
+            ],
+            [
+              "each mesh (2674337 cells)",
+              "1",
+              "0.3021"
+            ]
+          ]
+        }
+      },
+      "data": {},
+      "data_url": "assets/figures/aero.mesh_independence/e575b46e8cea8442-edef0a17/aero.ladder.57dc588822d2.chart.json",
+      "description": "OpenFOAM solved the flow. The chart shows the numbers of that run.",
+      "gates": [
+        "aero.mesh_independence"
+      ],
+      "id": "aero.ladder",
+      "kind": "chart",
+      "meta": {
+        "caption": "The drag area on each mesh of the ladder, against the cell size relative to the finest mesh. If the gate gets a value at zero cell size from the two finest meshes, a circle with no fill shows it. A line at the finest mesh then shows the mesh error band (GCI) on the two sides of its value. A short bar shows each end of the band."
+      },
+      "order": 70,
+      "pack": "aero-openfoam",
+      "src": "",
+      "title": "The drag area on each mesh"
+    }
+  ],
+  "words": {
+    "asserted": {
+      "hint": "accepted provisionally, with a reason and an owner — an assumption, or a claim carried outside an evaluator's operating context — unresolved",
+      "key": "assumed",
+      "plural": "assumed",
+      "term": "Assumed",
+      "word": "assumed"
+    },
+    "blocked": {
+      "hint": "an evaluator skipped — its tool is missing here, it skipped itself on its input, or a prerequisite is not established — and none failed: no usable verdict",
+      "key": "skipped",
+      "plural": "skipped",
+      "term": "Skipped",
+      "word": "skipped"
+    },
+    "errored": {
+      "hint": "an evaluator errored: it crashed, so nothing was evaluated, and the evaluator itself is broken",
+      "key": "skipped",
+      "plural": "skipped",
+      "term": "Skipped",
+      "word": "skipped"
+    },
+    "fail": {
+      "hint": "an evaluator failed the current design, a physical result failed, or an evaluator's value does not meet the claim's acceptance condition",
+      "key": "failing",
+      "plural": "failing",
+      "term": "Failing",
+      "word": "failing"
+    },
+    "pass": {
+      "hint": "every evaluator is qualified and passed on the current inputs, inside its operating context, and every value compared with the acceptance condition meets it — checked does not mean true",
+      "key": "checked",
+      "plural": "checked",
+      "term": "Checked",
+      "word": "checked"
+    },
+    "pending": {
+      "hint": "an evaluator of the claim is unrun on the current inputs",
+      "key": "open",
+      "plural": "open",
+      "term": "Open",
+      "word": "open"
+    },
+    "refuted": {
+      "hint": "an evaluator failed the current design, a physical result failed, or an evaluator's value does not meet the claim's acceptance condition",
+      "key": "failing",
+      "plural": "failing",
+      "term": "Failing",
+      "word": "failing"
+    },
+    "stale": {
+      "hint": "a pass whose read set has changed since, or whose prerequisite is invalidated or unrun: nothing is checked now",
+      "key": "stale",
+      "plural": "stale",
+      "term": "Stale",
+      "word": "stale"
+    },
+    "unclaimed": {
+      "hint": "no evaluator, none qualified, one unqualified, or one outside its operating context; or an assumption nobody owns",
+      "key": "gap",
+      "plural": "gaps",
+      "term": "Gap",
+      "word": "gap"
+    },
+    "unverified": {
+      "hint": "waits on an article: no physical result yet, or a pass no article binds to the current inputs",
+      "key": "pending_build",
+      "plural": "pending build",
+      "term": "Pending build",
+      "word": "pending build"
+    },
+    "verified": {
+      "hint": "every evaluator is qualified and passed on the current inputs, inside its operating context, and every value compared with the acceptance condition meets it — checked does not mean true",
+      "key": "checked",
+      "plural": "checked",
+      "term": "Checked",
+      "word": "checked"
+    }
+  }
+}

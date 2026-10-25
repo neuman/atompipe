@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.domain",
+  "rho": "07a40dd227f3c2c0f1a3eaed3f704e7301104865f15ecf31df63af92c45bdc9d",
+  "static": "9ee2d54f2f615d1107365e936619d9f9d57711f17a92775fa1cb7d319f7541c1",
+  "static_parts": {
+    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "code": {
+      "digest": "ed8972391ae62ad42cf251a52eaed44aa7ea13d8133682fdb9387333d3694e1d",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_gci.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "248e7b2db2af03fc80023cf48ce78b880f188b80c5b18eefc12f4af15eb53d1e",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8",
+        "selftest/baseline.json": "ca30b6597cef7e72197ba79e9e8b75ebc3759c240aa858bc480e784453a4916a"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:short_wake",
+      "expect": "fail",
+      "note": "the baseline spheroid with its outlet moved upstream until the wake behind the body is 15% shorter than 15 H",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "6017ca1ce2b826d9d8e8aa59b4b4347991e0eed09b9751174683dc9f51bb89c3",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+      "<pack:aero-openfoam>/gates/_par.py": "1ffc51cc44227370b05fab77ea97219948cffb575d2961ddfd5ecf3e68eb3a3b",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "d3b339294c95f3b2abdd52eb1c1c7ec86c8748dc858db48f2f67baa4033500f9",
+        "<out:controls>/aero.domain/aero-openfoam/known-bad/short_wake/case"
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": []
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ]
+      ],
+      "files": {},
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": []
+    },
+    "extra": [],
+    "measured": 5.47619048,
+    "limit": 5.0,
+    "units": "H",
+    "detail": "H 0.525 m (the body's top over the ground); upstream 7.62 H (>= 5); downstream 17.1 H (>= 15); side 5.48 H (>= 5); top 6.62 H (>= 5); blockage 0.26 % (<= 3); lateral blockage 4.17 % (<= 17); vertical blockage 13.1 % (<= 17)",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:short_wake (the baseline spheroid with its outlet moved upstream until the wake behind the body is 15% shorter than 15 H): downstream 13 H against >= 15 (Franke et al. 2007, Blocken 2015). H 0.525 m (the body's top over the ground); upstream 7.62 H (>= 5); downstream 13 H (>= 15); side 5.48 H (>= 5); top 6.62 H (>= 5); blockage 0.26 % (<= 3); lateral blockage 4.17 % (<= 17); vertical blockage 13.1 % (<= 17)",
+  "measured": 13.0434783,
+  "limit": 15.0,
+  "units": "H",
+  "digest": "026755779904d52c2eb036c57c823a08b53caa3c273ef8e15bcae23616e4ad38"
+}

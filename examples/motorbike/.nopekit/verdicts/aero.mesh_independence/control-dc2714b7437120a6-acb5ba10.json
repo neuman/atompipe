@@ -1,0 +1,494 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.mesh_independence",
+  "rho": "dc2714b7437120a60376d3833b96e575491e9f4bd358e6047ee8ec6da201b16d",
+  "static": "b10b7d249286cf5e5b337e797295fec4693fee8f8ade25776ac0c0d2c0e543e1",
+  "static_parts": {
+    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "code": {
+      "digest": "ca003ee26c7f62fd119a549d0ded33a3fef5dad0bc08eb9366a73e8523b6358d",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_gci.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "248e7b2db2af03fc80023cf48ce78b880f188b80c5b18eefc12f4af15eb53d1e",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8",
+        "selftest/baseline.json": "ca30b6597cef7e72197ba79e9e8b75ebc3759c240aa858bc480e784453a4916a"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:narrow_ladder",
+      "expect": "fail",
+      "note": "the baseline spheroid with a ladder ratio of 1.3: the surface cells round to whole levels, the effective ratios fall under Celik's 1.3, and the gate fails before it solves",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "6017ca1ce2b826d9d8e8aa59b4b4347991e0eed09b9751174683dc9f51bb89c3",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+      "<pack:aero-openfoam>/gates/_par.py": "1ffc51cc44227370b05fab77ea97219948cffb575d2961ddfd5ecf3e68eb3a3b",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_gci_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ladder_ratio"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_gci_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ladder_ratio"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_body_group"
+        ],
+        "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+        "bodyGroup"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "4d988ed234f558cfb2eac14b9506122e45ef7623211d66efe51d4ad7602fbd07",
+        "<out:controls>/aero.mesh_independence/aero-openfoam/known-bad/narrow_ladder/case"
+      ],
+      [
+        [
+          "aero_gci_max_pct"
+        ],
+        "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+        20.0
+      ],
+      [
+        [
+          "aero_iter_unc_max_pct"
+        ],
+        "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+        1.0
+      ],
+      [
+        [
+          "aero_ladder_ratio"
+        ],
+        "93a0a35e427f101bfa6d83dbf58fe4b1925db259d266fe138b67611104564b44",
+        1.3
+      ],
+      [
+        [
+          "aero_max_global_cells"
+        ],
+        "1e22a0800e5be1298b30683a9575cbea3858424aef0bf17202588aeee566537f",
+        20000000
+      ],
+      [
+        [
+          "aero_ranks"
+        ],
+        "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+        4
+      ],
+      [
+        [
+          "aero_timeout_s"
+        ],
+        "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+        900.0
+      ]
+    ],
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+      "<pack:aero-openfoam>/gates/_par.py": "1ffc51cc44227370b05fab77ea97219948cffb575d2961ddfd5ecf3e68eb3a3b",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190"
+    },
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": [
+      "file-outside-project:/bin/sh",
+      "out:controls/aero.mesh_independence/aero-openfoam/aero_mesh_independence/level0/system/surfaceFeatureExtractDict (not written by this gate)",
+      "out:controls/aero.mesh_independence/aero-openfoam/aero_mesh_independence/level1/system/surfaceFeatureExtractDict (not written by this gate)",
+      "out:controls/aero.mesh_independence/aero-openfoam/aero_mesh_independence/level2/system/surfaceFeatureExtractDict (not written by this gate)",
+      "out:controls/aero.mesh_independence/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+      "out:controls/aero.mesh_independence/aero-openfoam/ladder/bb801249a8622bf27899d9abfcc6e2fe/manifest.json (not written by this gate)",
+      "subprocess:bash",
+      "subprocess:blockMesh",
+      "subprocess:decomposePar",
+      "subprocess:foamDictionary",
+      "subprocess:mpirun",
+      "subprocess:rm"
+    ]
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_gci_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_iter_unc_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_ladder_ratio"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_gci_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_iter_unc_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_ladder_ratio"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_body_group"
+          ],
+          "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+          "bodyGroup"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ],
+        [
+          [
+            "aero_gci_max_pct"
+          ],
+          "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+          20.0
+        ],
+        [
+          [
+            "aero_iter_unc_max_pct"
+          ],
+          "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+          1.0
+        ],
+        [
+          [
+            "aero_ladder_ratio"
+          ],
+          "72ce0b9c73a6d14804293c8827888463e41e1e21b15f361636a0523390288163",
+          1.5
+        ],
+        [
+          [
+            "aero_max_global_cells"
+          ],
+          "1e22a0800e5be1298b30683a9575cbea3858424aef0bf17202588aeee566537f",
+          20000000
+        ],
+        [
+          [
+            "aero_ranks"
+          ],
+          "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+          4
+        ],
+        [
+          [
+            "aero_timeout_s"
+          ],
+          "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+          900.0
+        ]
+      ],
+      "files": {
+        "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+        "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+        "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+        "<pack:aero-openfoam>/gates/_par.py": "1ffc51cc44227370b05fab77ea97219948cffb575d2961ddfd5ecf3e68eb3a3b",
+        "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+        "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190"
+      },
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": [
+        "file-outside-project:/bin/sh",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level0/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level0/postProcessing/surfaces1 (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level0/postProcessing/surfaces1/300/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level0/postProcessing/yPlusArea/0/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level0/system/surfaceFeatureExtractDict (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level1/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level1/postProcessing/surfaces1 (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level1/postProcessing/surfaces1/300/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level1/postProcessing/yPlusArea/0/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level1/system/surfaceFeatureExtractDict (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level2/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level2/postProcessing/surfaces1 (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level2/postProcessing/surfaces1/300/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level2/postProcessing/yPlusArea/0/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/aero_mesh_independence/level2/system/surfaceFeatureExtractDict (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/log.checkMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/log.simpleFoam (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/log.snappyHexMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level0/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/log.checkMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/log.simpleFoam (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/log.snappyHexMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level1/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/bodyYPlus.vtp (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/coefficient.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/log.checkMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/log.simpleFoam (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/log.snappyHexMesh (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/level2/surfaceFieldValue.dat (not written by this gate)",
+        "out:controls/aero.mesh_independence.good/aero-openfoam/ladder/15062c12b33ed0faa3709f2228a0af4c/manifest.json (not written by this gate)",
+        "subprocess:bash",
+        "subprocess:blockMesh",
+        "subprocess:decomposePar",
+        "subprocess:foamDictionary",
+        "subprocess:mpirun",
+        "subprocess:rm"
+      ]
+    },
+    "extra": [],
+    "measured": 15.6741,
+    "limit": 20.0,
+    "units": "%",
+    "detail": "GCI 15.7% of the finest drag area within 20%: monotone, observed order 2.712 above the formal 2: the band at the formal order with Fs 3 (Eca and Hoekstra 2014); drag area 0.00364309 m^2 on the finest mesh, 0.00345275 at zero cell size; 41574/132094/386302 cells (ratio 1.5); y+ at most 300 on 100%, 100%, 100% of the body (reported, not judged)",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:narrow_ladder (the baseline spheroid with a ladder ratio of 1.3: the surface cells round to whole levels, the effective ratios fall under Celik's 1.3, and the gate fails before it solves): effective refinement ratios 1.237 and 1.308 from the cells (41574, 78726, 176196): under 1.3 (Celik et al. 2008, Step 2), judged before any solve",
+  "measured": null,
+  "limit": null,
+  "units": "",
+  "digest": "792dbbf48e2dd30e99b8935da24b54aad0b0d15d422c6d715e4d52198e1a1453"
+}

@@ -1,0 +1,290 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.mesh_quality",
+  "rho": "c38cf317ede6aea9577775726cfbeea50d69379982cfdbcddfab44cabd4923a3",
+  "static": "0383595463df1ee2e97fcfcade9ad777834da60aa22daf055500abb53c4fe9e2",
+  "static_parts": {
+    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "code": {
+      "digest": "9f6e4db48a4c02764dbc4d90a8f371cf007a1e5de2f14b9c63df1fe1d5f55151",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "0588cdb41e94bc2af3d020ba6197a29a810156c1ec0d79e697c05a6466bbba1f",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "f3acd6a4c879b5f73eaf77f600c9cd7d34680161c633cde9a03336a5fca552db",
+        "selftest/baseline.json": "5495f596c06b5380ea5dca7d344b74ef315ba7dedf7da6c122529b4df322cff2"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:cell_cap",
+      "expect": "fail",
+      "note": "the baseline spheroid with aero_max_global_cells at 20 000, half its mesh: snappyHexMesh stops refining at the cap and still says it finished without errors",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "f13c1aa7cec5df693a810496930ee94be2e778664cd4eaf8169a7d06d1b95ed6",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "40d0aa2ffac7a5048d2b8010a9a1c0b2392145d17a436782522d9f4c7c32b048",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_par.py": "600633dcfd300713dae6a3fef09080543c7f0e8ac8ca73d6909b8c6cc47c8415",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c02e6ff36eae4a2b5ceabf05423cf69e7c009a52e2a40f630cc84a2d5489077d",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "f3acd6a4c879b5f73eaf77f600c9cd7d34680161c633cde9a03336a5fca552db"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "31dc2410339e4888e3d8a6642b0b72c295ab34ed30f447288431077ae66e6994",
+        "<out:controls>/aero.mesh_quality/aero-openfoam/known-bad/cell_cap/case"
+      ],
+      [
+        [
+          "aero_max_global_cells"
+        ],
+        "68c48348a2e26fe29c21648731ab2b260af7d45959fb1ae836287ffc56d8e10c",
+        20000
+      ],
+      [
+        [
+          "aero_ranks"
+        ],
+        "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+        4
+      ],
+      [
+        [
+          "aero_timeout_s"
+        ],
+        "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+        900.0
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": [
+      "file-outside-project:/bin/sh",
+      "out:controls/aero.mesh_quality/aero-openfoam/aero_mesh_quality/case/system/surfaceFeatureExtractDict (not written by this gate)",
+      "out:controls/aero.mesh_quality/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+      "subprocess:bash",
+      "subprocess:blockMesh",
+      "subprocess:decomposePar",
+      "subprocess:foamDictionary",
+      "subprocess:mpirun",
+      "subprocess:rm"
+    ]
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ],
+        [
+          [
+            "aero_max_global_cells"
+          ],
+          "1e22a0800e5be1298b30683a9575cbea3858424aef0bf17202588aeee566537f",
+          20000000
+        ],
+        [
+          [
+            "aero_ranks"
+          ],
+          "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+          4
+        ],
+        [
+          [
+            "aero_timeout_s"
+          ],
+          "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+          900.0
+        ]
+      ],
+      "files": {},
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": [
+        "file-outside-project:/bin/sh",
+        "out:controls/aero.mesh_quality.good/aero-openfoam/aero_mesh_quality/case/system/surfaceFeatureExtractDict (not written by this gate)",
+        "out:controls/aero.mesh_quality.good/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+        "subprocess:bash",
+        "subprocess:blockMesh",
+        "subprocess:decomposePar",
+        "subprocess:foamDictionary",
+        "subprocess:mpirun",
+        "subprocess:rm"
+      ]
+    },
+    "extra": [],
+    "measured": 41574.0,
+    "limit": 20000000.0,
+    "units": "cells",
+    "detail": "snappyHexMesh finished without errors, checkMesh -meshQuality: 0 faces in error against the pack's limits; 41574 cells on 4 ranks, cap 20000000; layers on 100% of the body's faces (reported, not judged)",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:cell_cap (the baseline spheroid with aero_max_global_cells at 20 000, half its mesh: snappyHexMesh stops refining at the cap and still says it finished without errors): snappyHexMesh stopped refining at its cell cap 20000 (aero_max_global_cells 20000): the mesh is not the one its dictionary asks for (27332 cells on 4 ranks, cap 20000; layers on 0% of the body's faces (reported, not judged))",
+  "measured": 27332.0,
+  "limit": 20000.0,
+  "units": "cells",
+  "digest": "a4583af773231860b79735c745d96568f503830bcb047f67832895c20b50fec6"
+}

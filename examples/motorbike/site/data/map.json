@@ -1,0 +1,1836 @@
+{
+  "columns": {
+    "requirements": 0
+  },
+  "edges": {
+    "contradicts": {},
+    "needs": {
+      "evaluator:aero.converged": [
+        "evaluator:aero.domain",
+        "evaluator:aero.mesh_quality",
+        "evaluator:aero.reference",
+        "evaluator:aero.regime"
+      ],
+      "evaluator:aero.domain": [
+        "evaluator:aero.case_readable"
+      ],
+      "evaluator:aero.drag_area": [
+        "evaluator:aero.mesh_independence",
+        "evaluator:aero.wall_treatment"
+      ],
+      "evaluator:aero.mesh_independence": [
+        "evaluator:aero.converged"
+      ],
+      "evaluator:aero.mesh_quality": [
+        "evaluator:aero.case_readable"
+      ],
+      "evaluator:aero.reference": [
+        "evaluator:aero.case_readable"
+      ],
+      "evaluator:aero.regime": [
+        "evaluator:aero.case_readable"
+      ],
+      "evaluator:aero.wall_treatment": [
+        "evaluator:aero.converged"
+      ]
+    },
+    "reads": {
+      "evaluator:aero.case_readable": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256"
+      ],
+      "evaluator:aero.converged": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_body_group",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_iter_unc_max_pct",
+        "value:aero-openfoam.aero_max_global_cells",
+        "value:aero-openfoam.aero_ranks",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero-openfoam.aero_u_inf_m_s",
+        "value:aero.aero_body_group",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_iter_unc_max_pct",
+        "value:aero.aero_max_global_cells",
+        "value:aero.aero_ranks",
+        "value:aero.aero_timeout_s",
+        "value:aero.aero_u_inf_m_s",
+        "value:aero_body_group",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_iter_unc_max_pct",
+        "value:aero_max_global_cells",
+        "value:aero_ranks",
+        "value:aero_timeout_s",
+        "value:aero_u_inf_m_s"
+      ],
+      "evaluator:aero.domain": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_timeout_s",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_timeout_s"
+      ],
+      "evaluator:aero.mesh_independence": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_body_group",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_gci_max_pct",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_iter_unc_max_pct",
+        "value:aero-openfoam.aero_ladder_ratio",
+        "value:aero-openfoam.aero_max_global_cells",
+        "value:aero-openfoam.aero_ranks",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero.aero_body_group",
+        "value:aero.aero_case",
+        "value:aero.aero_gci_max_pct",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_iter_unc_max_pct",
+        "value:aero.aero_ladder_ratio",
+        "value:aero.aero_max_global_cells",
+        "value:aero.aero_ranks",
+        "value:aero.aero_timeout_s",
+        "value:aero_body_group",
+        "value:aero_case",
+        "value:aero_gci_max_pct",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_iter_unc_max_pct",
+        "value:aero_ladder_ratio",
+        "value:aero_max_global_cells",
+        "value:aero_ranks",
+        "value:aero_timeout_s"
+      ],
+      "evaluator:aero.mesh_quality": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_max_global_cells",
+        "value:aero-openfoam.aero_ranks",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_max_global_cells",
+        "value:aero.aero_ranks",
+        "value:aero.aero_timeout_s",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_max_global_cells",
+        "value:aero_ranks",
+        "value:aero_timeout_s"
+      ],
+      "evaluator:aero.reference": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_body_group",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_u_inf_m_s",
+        "value:aero.aero_body_group",
+        "value:aero.aero_case",
+        "value:aero.aero_u_inf_m_s",
+        "value:aero_body_group",
+        "value:aero_case",
+        "value:aero_u_inf_m_s"
+      ],
+      "evaluator:aero.regime": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_ref_length_m",
+        "value:aero-openfoam.aero_sound_speed_m_s",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero-openfoam.aero_u_inf_m_s",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_ref_length_m",
+        "value:aero.aero_sound_speed_m_s",
+        "value:aero.aero_timeout_s",
+        "value:aero.aero_u_inf_m_s",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_ref_length_m",
+        "value:aero_sound_speed_m_s",
+        "value:aero_timeout_s",
+        "value:aero_u_inf_m_s"
+      ],
+      "evaluator:aero.wall_treatment": [
+        "value:aero",
+        "value:aero-openfoam",
+        "value:aero-openfoam.aero_body_group",
+        "value:aero-openfoam.aero_case",
+        "value:aero-openfoam.aero_geometry",
+        "value:aero-openfoam.aero_geometry_sha256",
+        "value:aero-openfoam.aero_iter_unc_max_pct",
+        "value:aero-openfoam.aero_max_global_cells",
+        "value:aero-openfoam.aero_ranks",
+        "value:aero-openfoam.aero_timeout_s",
+        "value:aero.aero_body_group",
+        "value:aero.aero_case",
+        "value:aero.aero_geometry",
+        "value:aero.aero_geometry_sha256",
+        "value:aero.aero_iter_unc_max_pct",
+        "value:aero.aero_max_global_cells",
+        "value:aero.aero_ranks",
+        "value:aero.aero_timeout_s",
+        "value:aero_body_group",
+        "value:aero_case",
+        "value:aero_geometry",
+        "value:aero_geometry_sha256",
+        "value:aero_iter_unc_max_pct",
+        "value:aero_max_global_cells",
+        "value:aero_ranks",
+        "value:aero_timeout_s"
+      ]
+    },
+    "resolves": {},
+    "rests_on": {},
+    "serves": {
+      "claim:A1": [
+        "requirement:R1"
+      ],
+      "claim:A2": [
+        "requirement:R1"
+      ],
+      "claim:C1": [
+        "requirement:R1"
+      ],
+      "claim:C2": [
+        "requirement:R1"
+      ],
+      "claim:C3": [
+        "requirement:R1"
+      ],
+      "claim:C4": [
+        "requirement:R1"
+      ],
+      "claim:C5": [
+        "requirement:R1"
+      ],
+      "claim:C6": [
+        "requirement:R1"
+      ],
+      "claim:C7": [
+        "requirement:R1"
+      ]
+    },
+    "settles": {
+      "evaluator:aero.converged": [
+        "claim:C5"
+      ],
+      "evaluator:aero.domain": [
+        "claim:C3"
+      ],
+      "evaluator:aero.drag_area": [
+        "claim:C1"
+      ],
+      "evaluator:aero.mesh_independence": [
+        "claim:C7"
+      ],
+      "evaluator:aero.mesh_quality": [
+        "claim:C4"
+      ],
+      "evaluator:aero.reference": [
+        "claim:C2"
+      ],
+      "evaluator:aero.regime": [
+        "claim:C2"
+      ],
+      "evaluator:aero.wall_treatment": [
+        "claim:C6"
+      ]
+    },
+    "sources": {}
+  },
+  "evaluators": {
+    "aero.case_readable": {
+      "basis": "model-only",
+      "claims": [],
+      "current": true,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 0
+    },
+    "aero.converged": {
+      "basis": "established",
+      "claims": [
+        "C5"
+      ],
+      "current": false,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 2
+    },
+    "aero.domain": {
+      "basis": "sourced",
+      "claims": [
+        "C3"
+      ],
+      "current": false,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 1
+    },
+    "aero.drag_area": {
+      "basis": "established",
+      "claims": [
+        "C1"
+      ],
+      "current": false,
+      "outcome": "skipped",
+      "outcome_word": "skipped",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 2
+    },
+    "aero.mesh_independence": {
+      "basis": "sourced",
+      "claims": [
+        "C7"
+      ],
+      "current": false,
+      "outcome": "fail",
+      "outcome_word": "fail",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 2
+    },
+    "aero.mesh_quality": {
+      "basis": "established",
+      "claims": [
+        "C4"
+      ],
+      "current": false,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 1
+    },
+    "aero.reference": {
+      "basis": "model-only",
+      "claims": [
+        "C2"
+      ],
+      "current": true,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 0
+    },
+    "aero.regime": {
+      "basis": "sourced",
+      "claims": [
+        "C2"
+      ],
+      "current": false,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 1
+    },
+    "aero.wall_treatment": {
+      "basis": "sourced",
+      "claims": [
+        "C6"
+      ],
+      "current": false,
+      "outcome": "pass",
+      "outcome_word": "pass",
+      "pack": "aero-openfoam",
+      "registered": true,
+      "tier": 2
+    }
+  },
+  "feeds": [],
+  "generated": "nopekit site build wrote this file from the records, the results in .nopekit/verdicts/ and site/content/. It is not a source. Change those, then build again.",
+  "lanes": [
+    "requirements",
+    "zones",
+    "boards"
+  ],
+  "layers": [],
+  "legend": [
+    {
+      "n": 1,
+      "token": "failing"
+    },
+    {
+      "n": 1,
+      "token": "skipped"
+    },
+    {
+      "n": 2,
+      "token": "gap"
+    },
+    {
+      "n": 5,
+      "token": "stale"
+    }
+  ],
+  "lines": [
+    {
+      "amber": null,
+      "board": "drag",
+      "claim": "C1",
+      "errored": false,
+      "fed_by": [],
+      "marks": [],
+      "order": 0,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C1"
+      ],
+      "taps": [],
+      "token": "skipped",
+      "unseen": false,
+      "values": [],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "drag",
+      "claim": "A1",
+      "errored": false,
+      "fed_by": [],
+      "marks": [],
+      "order": 1,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:A1"
+      ],
+      "taps": [],
+      "token": "gap",
+      "unseen": false,
+      "values": [],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "drag",
+      "claim": "A2",
+      "errored": false,
+      "fed_by": [],
+      "marks": [],
+      "order": 2,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:A2"
+      ],
+      "taps": [],
+      "token": "gap",
+      "unseen": false,
+      "values": [],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "setup",
+      "claim": "C2",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:flow",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 3,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C2"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256",
+            "aero_body_group"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_u_inf_m_s",
+            "aero_ref_length_m",
+            "aero_sound_speed_m_s"
+          ],
+          "zone": "zone:flow"
+        },
+        {
+          "choices": [
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "stale",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_body_group",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_ref_length_m",
+        "aero-openfoam.aero_sound_speed_m_s",
+        "aero-openfoam.aero_timeout_s",
+        "aero-openfoam.aero_u_inf_m_s",
+        "aero.aero_body_group",
+        "aero.aero_case",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_ref_length_m",
+        "aero.aero_sound_speed_m_s",
+        "aero.aero_timeout_s",
+        "aero.aero_u_inf_m_s",
+        "aero_body_group",
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_ref_length_m",
+        "aero_sound_speed_m_s",
+        "aero_timeout_s",
+        "aero_u_inf_m_s"
+      ],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "setup",
+      "claim": "C3",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 4,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C3"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "stale",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_timeout_s",
+        "aero.aero_case",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_timeout_s",
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_timeout_s"
+      ],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "settle",
+      "claim": "C5",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:flow",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 5,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C5"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256",
+            "aero_body_group"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_u_inf_m_s"
+          ],
+          "zone": "zone:flow"
+        },
+        {
+          "choices": [
+            "aero_ranks",
+            "aero_iter_unc_max_pct",
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "stale",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_body_group",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_iter_unc_max_pct",
+        "aero-openfoam.aero_max_global_cells",
+        "aero-openfoam.aero_ranks",
+        "aero-openfoam.aero_timeout_s",
+        "aero-openfoam.aero_u_inf_m_s",
+        "aero.aero_body_group",
+        "aero.aero_case",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_iter_unc_max_pct",
+        "aero.aero_max_global_cells",
+        "aero.aero_ranks",
+        "aero.aero_timeout_s",
+        "aero.aero_u_inf_m_s",
+        "aero_body_group",
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_iter_unc_max_pct",
+        "aero_max_global_cells",
+        "aero_ranks",
+        "aero_timeout_s",
+        "aero_u_inf_m_s"
+      ],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim": "C4",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 6,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C4"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_ranks",
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "stale",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_max_global_cells",
+        "aero-openfoam.aero_ranks",
+        "aero-openfoam.aero_timeout_s",
+        "aero.aero_case",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_max_global_cells",
+        "aero.aero_ranks",
+        "aero.aero_timeout_s",
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_max_global_cells",
+        "aero_ranks",
+        "aero_timeout_s"
+      ],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim": "C6",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 7,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C6"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256",
+            "aero_body_group"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_ranks",
+            "aero_iter_unc_max_pct",
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "stale",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_body_group",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_iter_unc_max_pct",
+        "aero-openfoam.aero_max_global_cells",
+        "aero-openfoam.aero_ranks",
+        "aero-openfoam.aero_timeout_s",
+        "aero.aero_body_group",
+        "aero.aero_case",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_iter_unc_max_pct",
+        "aero.aero_max_global_cells",
+        "aero.aero_ranks",
+        "aero.aero_timeout_s",
+        "aero_body_group",
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_iter_unc_max_pct",
+        "aero_max_global_cells",
+        "aero_ranks",
+        "aero_timeout_s"
+      ],
+      "via": {}
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim": "C7",
+      "errored": false,
+      "fed_by": [
+        "zone:body",
+        "zone:run"
+      ],
+      "marks": [],
+      "order": 8,
+      "reads_all": null,
+      "serves": [
+        "R1"
+      ],
+      "sets": [],
+      "stop_kind": {},
+      "stops": [
+        "claim:C7"
+      ],
+      "taps": [
+        {
+          "choices": [
+            "aero_case",
+            "aero_geometry",
+            "aero_geometry_sha256",
+            "aero_body_group"
+          ],
+          "zone": "zone:body"
+        },
+        {
+          "choices": [
+            "aero_ranks",
+            "aero_iter_unc_max_pct",
+            "aero_ladder_ratio",
+            "aero_gci_max_pct",
+            "aero_timeout_s"
+          ],
+          "zone": "zone:run"
+        }
+      ],
+      "token": "failing",
+      "unseen": false,
+      "values": [
+        "aero",
+        "aero-openfoam",
+        "aero-openfoam.aero_body_group",
+        "aero-openfoam.aero_case",
+        "aero-openfoam.aero_gci_max_pct",
+        "aero-openfoam.aero_geometry",
+        "aero-openfoam.aero_geometry_sha256",
+        "aero-openfoam.aero_iter_unc_max_pct",
+        "aero-openfoam.aero_ladder_ratio",
+        "aero-openfoam.aero_max_global_cells",
+        "aero-openfoam.aero_ranks",
+        "aero-openfoam.aero_timeout_s",
+        "aero.aero_body_group",
+        "aero.aero_case",
+        "aero.aero_gci_max_pct",
+        "aero.aero_geometry",
+        "aero.aero_geometry_sha256",
+        "aero.aero_iter_unc_max_pct",
+        "aero.aero_ladder_ratio",
+        "aero.aero_max_global_cells",
+        "aero.aero_ranks",
+        "aero.aero_timeout_s",
+        "aero_body_group",
+        "aero_case",
+        "aero_gci_max_pct",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_iter_unc_max_pct",
+        "aero_ladder_ratio",
+        "aero_max_global_cells",
+        "aero_ranks",
+        "aero_timeout_s"
+      ],
+      "via": {}
+    }
+  ],
+  "meta": {
+    "name": "motorbike",
+    "records_digest": "f56c8e6a29e0ee6ed2eac8d54a18f622469c49736cf522ba503f63d772160b92",
+    "resolution_digest": "c7b2079ce0ec17e0e84d19c8fb32616651530de2597acb910d6ed2b564631fb3"
+  },
+  "nodes": [
+    {
+      "claims": [
+        "C1",
+        "A1",
+        "A2",
+        "C2",
+        "C3",
+        "C5",
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "errored": false,
+      "id": "requirement:R1",
+      "key": "R1",
+      "kind": "requirement",
+      "lane": "requirements",
+      "marks": [],
+      "order": 0,
+      "rank": 0,
+      "title": "The bike and rider must push through still air at 72 km/h with a drag area of at most 0.35 m^2.",
+      "token": "failing",
+      "word": "failing"
+    },
+    {
+      "assumptions": [],
+      "claims": [
+        "C2",
+        "C3",
+        "C5",
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "count": 4,
+      "estimate": [],
+      "feeds": [],
+      "generated": false,
+      "ground": {
+        "assumption": 0,
+        "chosen": 4,
+        "input": 0
+      },
+      "id": "zone:body",
+      "idle": false,
+      "key": "body",
+      "kind": "zone",
+      "lane": "zones",
+      "line": "",
+      "members": [
+        "aero_case",
+        "aero_geometry",
+        "aero_geometry_sha256",
+        "aero_body_group"
+      ],
+      "moved": [],
+      "order": 0,
+      "rank": 1,
+      "sources": {
+        "assumption": 0,
+        "chosen": 1,
+        "datasheet": 0,
+        "estimate": 0,
+        "unrecorded": 3
+      },
+      "taps": [
+        "C2",
+        "C3",
+        "C5",
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "title": "The body and the case",
+      "unmeasured": []
+    },
+    {
+      "assumptions": [],
+      "claims": [
+        "C2",
+        "C5"
+      ],
+      "count": 4,
+      "estimate": [],
+      "feeds": [],
+      "generated": false,
+      "ground": {
+        "assumption": 0,
+        "chosen": 4,
+        "input": 0
+      },
+      "id": "zone:flow",
+      "idle": false,
+      "key": "flow",
+      "kind": "zone",
+      "lane": "zones",
+      "line": "",
+      "members": [
+        "aero_u_inf_m_s",
+        "aero_ref_length_m",
+        "aero_sound_speed_m_s",
+        "aero_rho_kg_m3"
+      ],
+      "moved": [],
+      "order": 1,
+      "rank": 0,
+      "sources": {
+        "assumption": 0,
+        "chosen": 1,
+        "datasheet": 0,
+        "estimate": 0,
+        "unrecorded": 3
+      },
+      "taps": [
+        "C2",
+        "C5"
+      ],
+      "title": "The flow",
+      "unmeasured": []
+    },
+    {
+      "assumptions": [],
+      "claims": [
+        "C2",
+        "C3",
+        "C5",
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "count": 5,
+      "estimate": [],
+      "feeds": [],
+      "generated": false,
+      "ground": {
+        "assumption": 0,
+        "chosen": 5,
+        "input": 0
+      },
+      "id": "zone:run",
+      "idle": false,
+      "key": "run",
+      "kind": "zone",
+      "lane": "zones",
+      "line": "",
+      "members": [
+        "aero_ranks",
+        "aero_iter_unc_max_pct",
+        "aero_timeout_s",
+        "aero_ladder_ratio",
+        "aero_gci_max_pct"
+      ],
+      "moved": [],
+      "order": 2,
+      "rank": 2,
+      "sources": {
+        "assumption": 0,
+        "chosen": 4,
+        "datasheet": 0,
+        "estimate": 0,
+        "unrecorded": 1
+      },
+      "taps": [
+        "C2",
+        "C3",
+        "C5",
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "title": "The run",
+      "unmeasured": []
+    },
+    {
+      "claims": [
+        "C1",
+        "A1",
+        "A2"
+      ],
+      "errored": false,
+      "generated": false,
+      "id": "board:drag",
+      "key": "drag",
+      "kind": "board",
+      "lane": "boards",
+      "line": "The bike and the rider push through the air with a drag area of at most 0.35 m^2.",
+      "marks": [],
+      "order": 0,
+      "tally": [
+        {
+          "errored": 0,
+          "key": "skipped",
+          "label": "1 skipped",
+          "n": 1,
+          "status": "blocked"
+        },
+        {
+          "errored": 0,
+          "key": "gap",
+          "label": "2 gaps",
+          "n": 2,
+          "status": "unclaimed"
+        }
+      ],
+      "title": "Drag",
+      "token": "skipped",
+      "word": "skipped"
+    },
+    {
+      "claims": [
+        "C2",
+        "C3"
+      ],
+      "errored": false,
+      "generated": false,
+      "id": "board:setup",
+      "key": "setup",
+      "kind": "board",
+      "lane": "boards",
+      "line": "The run is the flow the person asked for, in a box large enough for it.",
+      "marks": [],
+      "order": 1,
+      "tally": [
+        {
+          "errored": 0,
+          "key": "stale",
+          "label": "2 stale",
+          "n": 2,
+          "status": "stale"
+        }
+      ],
+      "title": "Is the flow set up right",
+      "token": "stale",
+      "word": "stale"
+    },
+    {
+      "claims": [
+        "C5"
+      ],
+      "errored": false,
+      "generated": false,
+      "id": "board:settle",
+      "key": "settle",
+      "kind": "board",
+      "lane": "boards",
+      "line": "The solver stopped at a drag area that no longer changes.",
+      "marks": [],
+      "order": 2,
+      "tally": [
+        {
+          "errored": 0,
+          "key": "stale",
+          "label": "1 stale",
+          "n": 1,
+          "status": "stale"
+        }
+      ],
+      "title": "Did it settle",
+      "token": "stale",
+      "word": "stale"
+    },
+    {
+      "claims": [
+        "C4",
+        "C6",
+        "C7"
+      ],
+      "errored": false,
+      "generated": false,
+      "id": "board:mesh",
+      "key": "mesh",
+      "kind": "board",
+      "lane": "boards",
+      "line": "The mesh is good, the wall model applies, and a finer mesh gives the same drag area.",
+      "marks": [],
+      "order": 3,
+      "tally": [
+        {
+          "errored": 0,
+          "key": "failing",
+          "label": "1 failing",
+          "n": 1,
+          "status": "fail"
+        },
+        {
+          "errored": 0,
+          "key": "stale",
+          "label": "2 stale",
+          "n": 2,
+          "status": "stale"
+        }
+      ],
+      "title": "Is the mesh fine enough",
+      "token": "failing",
+      "word": "failing"
+    },
+    {
+      "amber": null,
+      "board": "drag",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C1",
+      "key": "C1",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 0,
+      "row": 0,
+      "severity": 2,
+      "title": "The drag area of the bike and rider is at most 0.35 m^2 at 72 km/h in still sea-level air",
+      "token": "skipped",
+      "value_text": "",
+      "word": "skipped"
+    },
+    {
+      "amber": null,
+      "board": "drag",
+      "claim_kind": "assumption",
+      "critical": true,
+      "errored": false,
+      "id": "claim:A1",
+      "key": "A1",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 1,
+      "row": 1,
+      "severity": 3,
+      "title": "The wheels do not turn in the model, and the drag of turning wheels is not part of the drag area",
+      "token": "gap",
+      "value_text": "",
+      "word": "gap"
+    },
+    {
+      "amber": null,
+      "board": "drag",
+      "claim_kind": "assumption",
+      "critical": true,
+      "errored": false,
+      "id": "claim:A2",
+      "key": "A2",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 2,
+      "row": 2,
+      "severity": 3,
+      "title": "The mean of a steady RANS solution stands for the time-mean drag of the real, unsteady wake",
+      "token": "gap",
+      "value_text": "",
+      "word": "gap"
+    },
+    {
+      "amber": null,
+      "board": "setup",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C2",
+      "key": "C2",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 3,
+      "row": 0,
+      "severity": 5,
+      "title": "The run is the stated flow: air at 20 m/s along +x past the body group, with a Reynolds number in the turbulent range and a Mach number far below 0.3",
+      "token": "stale",
+      "value_text": "",
+      "word": "stale"
+    },
+    {
+      "amber": null,
+      "board": "setup",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C3",
+      "key": "C3",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 4,
+      "row": 1,
+      "severity": 5,
+      "title": "The box around the bike is large enough for the flow and the wake",
+      "token": "stale",
+      "value_text": "",
+      "word": "stale"
+    },
+    {
+      "amber": null,
+      "board": "settle",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C5",
+      "key": "C5",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 5,
+      "row": 0,
+      "severity": 5,
+      "title": "The drag area settles on the base mesh: its iterative uncertainty over the last 100 iterations is at most 1% of its mean",
+      "token": "stale",
+      "value_text": "",
+      "word": "stale"
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C4",
+      "key": "C4",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 6,
+      "row": 0,
+      "severity": 5,
+      "title": "The base mesh is the one asked for: no face past the pack's quality limits, and no cell cap reached",
+      "token": "stale",
+      "value_text": "",
+      "word": "stale"
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C6",
+      "key": "C6",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 7,
+      "row": 1,
+      "severity": 5,
+      "title": "The wall model applies on the body: y+ is at most 300 on at least 90% of its area",
+      "token": "stale",
+      "value_text": "",
+      "word": "stale"
+    },
+    {
+      "amber": null,
+      "board": "mesh",
+      "claim_kind": "measurable",
+      "critical": true,
+      "errored": false,
+      "id": "claim:C7",
+      "key": "C7",
+      "kind": "claim",
+      "lane": "boards",
+      "marks": [],
+      "order": 8,
+      "row": 2,
+      "severity": 0,
+      "title": "The drag area does not depend on the mesh: three meshes converge, and the mesh error band (GCI) of the finest is at most 5%",
+      "token": "failing",
+      "value_text": "",
+      "word": "failing"
+    }
+  ],
+  "schema": 2,
+  "self": "e07e3bb119060921966811358ee0aa1f8f7af4fac573354027b231f3a18b611a",
+  "trace": {
+    "amber": "none",
+    "key": "3056a945c411",
+    "notice": "The model was built again with each choice changed by 10%. A thin line joins a group of choices to each shared value that moved.",
+    "round": null,
+    "singles": 0,
+    "skipped": {
+      "aero_body_group": "word",
+      "aero_case": "word",
+      "aero_geometry": "word",
+      "aero_geometry_sha256": "word"
+    },
+    "state": "traced",
+    "text": "The test did not change 4 choices: aero_body_group, aero_case, aero_geometry, aero_geometry_sha256. The map cannot show what they change. The test did not see 4 shared values change: aero_body_group, aero_case, aero_geometry, aero_geometry_sha256. This does not show that no choice changes them.",
+    "ties": 0,
+    "unmoved": [
+      "aero_body_group",
+      "aero_case",
+      "aero_geometry",
+      "aero_geometry_sha256"
+    ]
+  },
+  "unread": [
+    "aero_rho_kg_m3"
+  ],
+  "values": {
+    "aero": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_body_group": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_case": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_gci_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_geometry": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_geometry_sha256": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_iter_unc_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_ladder_ratio": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_max_global_cells": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_ranks": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_ref_length_m": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_sound_speed_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_timeout_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero-openfoam.aero_u_inf_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_body_group": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_case": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_gci_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_geometry": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_geometry_sha256": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_iter_unc_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_ladder_ratio": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_max_global_cells": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_ranks": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_ref_length_m": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_sound_speed_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_timeout_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero.aero_u_inf_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero_body_group": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "motorBikeGroup",
+      "zone": "zone:body"
+    },
+    "aero_case": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "case",
+      "zone": "zone:body"
+    },
+    "aero_gci_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "%",
+      "value_text": "5 %",
+      "zone": "zone:run"
+    },
+    "aero_geometry": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "",
+      "value_text": "$FOAM_TUTORIALS/resources/geometry/motorBike.obj.gz",
+      "zone": "zone:body"
+    },
+    "aero_geometry_sha256": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "8ee223c3c3256cd71da52b80eae6569ccf3167eec6f7c3542f83296a0a777aad",
+      "zone": "zone:body"
+    },
+    "aero_iter_unc_max_pct": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "%",
+      "value_text": "1 %",
+      "zone": "zone:run"
+    },
+    "aero_ladder_ratio": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "",
+      "value_text": "1.5",
+      "zone": "zone:run"
+    },
+    "aero_max_global_cells": {
+      "ground": "chosen",
+      "read": true,
+      "role": "absent",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "",
+      "zone": null
+    },
+    "aero_ranks": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "",
+      "value_text": "6",
+      "zone": "zone:run"
+    },
+    "aero_ref_length_m": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "m",
+      "value_text": "1.42 m",
+      "zone": "zone:flow"
+    },
+    "aero_rho_kg_m3": {
+      "ground": "chosen",
+      "read": false,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "1.225",
+      "zone": "zone:flow"
+    },
+    "aero_sound_speed_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "340.3",
+      "zone": "zone:flow"
+    },
+    "aero_timeout_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "chosen",
+      "station": null,
+      "units": "s",
+      "value_text": "10800 s",
+      "zone": "zone:run"
+    },
+    "aero_u_inf_m_s": {
+      "ground": "chosen",
+      "read": true,
+      "role": "choice",
+      "source": "unrecorded",
+      "station": null,
+      "units": "",
+      "value_text": "20",
+      "zone": "zone:flow"
+    }
+  }
+}

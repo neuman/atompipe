@@ -10,6 +10,15 @@ __pycache__/
 /.vscode/launch.json
 # nopekit:end
 
-# The page is built on demand: nopekit site init, then nopekit site build. Only its text is tracked.
+# The page is built on demand: nopekit site init, then nopekit site build. Its text
+# is tracked, and so are the baked data and the figures of the first full round
+# (2026-10-25): the OpenFOAM run behind them takes about an hour, and a clone
+# without OpenFOAM or ParaView shows its results from these. The page's own files,
+# the evidence copies (the logs, about 4 MB) and the build time stay out.
 /site/*
 !/site/content/
+!/site/data/
+/site/data/build.json
+!/site/assets/
+/site/assets/*
+!/site/assets/figures/
