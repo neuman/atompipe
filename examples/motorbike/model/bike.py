@@ -106,10 +106,14 @@ class Config:
     If this one does the same, no GCI is computed and C7 reads Failing
     whatever this number is, first for the level that did not settle."""
 
-    aero_timeout_s: float = 3600.0
+    aero_timeout_s: float = 10800.0
     """s each OpenFOAM tool may run before it is stopped with every rank, and
-    the gate skips. The base mesh's solve took about 4 min on 10 ranks (2026-10-23);
-    an hour is far past it, so only a hung rank reaches it."""
+    the gate skips. The longest single run is the ladder's finest solve. P0's
+    finest tutorial mesh (2.6 million cells) took 5613 s for 1500 iterations on
+    8 ranks, and this base mesh's 500 iterations took about 6 min on 6 ranks
+    (2026-10-23): about an hour for the finest level's 500 on 6 ranks. Three
+    hours leaves room for a machine shared with other work, so only a hung rank
+    reaches it. What lost is in PARAMS."""
 
 
 CONFIG = Config()
@@ -138,6 +142,11 @@ PARAMS = [
         {"value": "20", "why": "the pack's selftest baseline states it for its "
                                "spheroid, whose band at the formal order is 15.7%; a "
                                "drag area known to 20% does not answer R1's 0.35 m^2"}]},
+    {"name": "aero_timeout_s", "units": "s", "rejected": [
+        {"value": "3600", "why": "measured on the base mesh only; the finest level's "
+                                 "solve is estimated at about an hour on 6 ranks, so "
+                                 "an hour would stop a healthy run and the ladder "
+                                 "would read Skipped, not judged"}]},
     {"name": "aero_geometry", "units": "", "rejected": [
         {"value": "a copy under the project", "why": "GPL-3.0-or-later with its origin "
                                                     "not stated; this repository is "
