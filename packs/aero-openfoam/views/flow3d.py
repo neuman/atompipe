@@ -163,18 +163,26 @@ CUTS_CAPTION = ("Each cut is a plane across the flow behind the bike, on the bas
                 "colour shows the energy that is left in the air. The picture does not show "
                 "the air that has all of its energy.")
 CUTS_ALT = "A grey motorcycle with a rider, and three coloured planes across the air behind it."
-WALL_CAPTION = ("The colour shows the wall value y+ on the bike and the rider, on the base "
+#: The wall's words name no body: the pack draws every project's. What
+#: slipped through P6 (its review): "on the bike and the rider" and "a
+#: motorcycle" were said over the baseline's spheroid too.
+WALL_CAPTION = ("The colour shows the wall value y+ on the surface of the body, on the base "
                 "mesh. Each cell shows its own band. The wall model applies in the bands below "
                 "the top band.")
-WALL_ALT = "A motorcycle with a rider, coloured in four bands of the wall value y+."
+WALL_ALT = "The body, coloured in four bands of the wall value y+."
 HISTORY_CAPTION = ("The drag area on the base mesh after each iteration, for the last part of "
                    "the run. The second colour shows the window that the result uses. The two "
                    "dotted lines are the highest and the lowest value in that window. The "
                    "iterative uncertainty is half of the distance between them.")
+#: What slipped through P6 (its review): the band went from the finest
+#: value up only, cfd-openfoam's chart of a judged upper limit, so the value
+#: at zero cell size fell under it; and "the solver results give" said the
+#: pack's extrapolation was the solver's.
 LADDER_CAPTION = ("The drag area on each mesh of the ladder, against the cell size relative "
-                  "to the finest mesh. If the solver results give a value at zero cell size, "
-                  "a circle with no fill shows it. A short bar at each end of a line at the "
-                  "finest mesh then shows the mesh error band (GCI).")
+                  "to the finest mesh. If the gate gets a value at zero cell size from the "
+                  "two finest meshes, a circle with no fill shows it. A line at the finest "
+                  "mesh then shows the mesh error band (GCI) on the two sides of its value. "
+                  "A short bar shows each end of the band.")
 
 #: How much of the run the history chart shows: the last this many windows.
 #: Measured on L0 (P0): CdA falls from 1.03 at iteration 1 to 0.31 by
@@ -511,8 +519,14 @@ def history(ctx):
 def ladder(ctx):
     """``levels[].cda_m2`` against ``levels[].h_rel``, each point named by its
     cell count; ``cda_ext_m2`` at ``h_rel_ext`` with no fill, and the band
-    from the finest ``cda_m2`` to ``band_top_m2``, when the gate computed
-    them (cfd-openfoam's ladder, with the drag area's quantity and units).
+    from ``band_bottom_m2`` to ``band_top_m2`` at the finest mesh, when the
+    gate computed them (cfd-openfoam's ladder, with the drag area's quantity
+    and units). The band is the GCI's both ways, the finest value times (1 -+
+    GCI): this entry judges no upper limit, so the chart draws the band as
+    the error estimate it is, and the value at zero cell size, taken at the
+    order the band is, falls inside it. *Rejected:* cfd-openfoam's one-sided
+    band (its entry judges the top of it; here the extrapolation fell under
+    the band's bottom).
     A ladder whose order or convergence the gate refused has no
     extrapolation and no band: the meshes alone are drawn.
 
@@ -540,9 +554,9 @@ def ladder(ctx):
         series.append({"key": "richardson", "label": "zero cell size",
                        "points": [[summary["h_rel_ext"], summary["cda_ext_m2"]]],
                        "labels": ["zero cell size"], "hollow": True})
-    top = summary.get("band_top_m2")
-    if _number(top):
-        data["band"] = [{"x": levels[-1]["h_rel"], "lo": levels[-1]["cda_m2"], "hi": top,
+    top, bottom = summary.get("band_top_m2"), summary.get("band_bottom_m2")
+    if _number(top) and _number(bottom):
+        data["band"] = [{"x": levels[-1]["h_rel"], "lo": bottom, "hi": top,
                          "label": "GCI band"}]
     return View(id="aero.ladder", kind=ViewKind.CHART, data=data,
                 meta={"caption": LADDER_CAPTION})

@@ -6,7 +6,13 @@ The pack runs k-omega SST with a wall function on the body: `nutUSpaldingWallFun
 for nut (Spalding's single formula for the velocity profile from the wall to
 the log layer: D. B. Spalding, "A single formula for the law of the wall",
 *J. Appl. Mech.* 28(3):455-458, 1961), `omegaWallFunction` and
-`kqRWallFunction`. The tutorial uses `nutkWallFunction`; the pack accepts both.
+`kqRWallFunction`. The tutorial uses `nutkWallFunction`. The pack accepts it
+on the ground, and `aero.wall_treatment` errors, before any tool runs, on a body
+whose `0/nut` condition is not Spalding's: the guard's band below is his
+formula's. It reads the condition under `aero_body_group`, and any other plain
+key of `0/nut` that is not a patch of the box must state the same, because
+OpenFOAM sets a patch by its own name, then by its groups (such as `wall`),
+before a regular expression.
 
 Spalding's formula holds through the viscous sublayer, the buffer layer and the
 log layer, so the first cell may sit anywhere from y+ about 1 to the top of the

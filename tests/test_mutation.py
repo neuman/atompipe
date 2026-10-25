@@ -2351,16 +2351,22 @@ class SlowWalk(NamedTuple):
 #: record serves only the runs of one out directory and the oracle gives
 #: each run its own. Every leaf that cannot land walks all 18 rungs.
 #:
-#: Rejected for every gate: ``aero_ranks`` (it moves the run time and the
-#: rank count, never the result: x1000 is 4000 ranks, past `RANKS_MAX` 64,
-#: an error, and /1000 one rank, the slowest run of all); ``aero_timeout_s``
-#: and ``aero_max_global_cells`` (bounds the baseline sits far inside: down
-#: the ladder they stop or cap a run, a skip or an error, and they never move
-#: the value; 18 full runs each). Rejected for the ladder gates:
-#: ``aero_rho_kg_m3`` (aero.drag_area only reports the force with it: it can
-#: never land, 18 ladders, about 54 min) and ``aero_iter_unc_max_pct`` (the
-#: ceiling each level's run is held to: lowered under the finest level's U_I
-#: the ladder gives no band, an error; raised it moves nothing; 18 ladders).
+#: Rejected for every gate, on cost: ``aero_ranks``. It does move the
+#: result: the ranks move the mesh (references/meshing.md), so the
+#: baseline's 4 gives other meshes and other values at 2, 6, 8, 12, 20 and
+#: 40 ranks, and on the ladder gates each rung is a full ladder, up to 36
+#: min at x5 (20 ranks on 7 cores, measured in the full walk). It moves no
+#: limit, so it lands only where a mesh moves the value past one; leaving
+#: it out leaves that unlooked at. What slipped through P6 (its review):
+#: this comment said the ranks never move the result. Rejected for every
+#: gate: ``aero_timeout_s`` and ``aero_max_global_cells`` (bounds the
+#: baseline sits far inside: down the ladder they stop or cap a run, a skip
+#: or an error, and they never move the value; 18 full runs each). Rejected
+#: for the ladder gates: ``aero_rho_kg_m3`` (aero.drag_area only reports the
+#: force with it: it can never land, 18 ladders, about 54 min) and
+#: ``aero_iter_unc_max_pct`` (the ceiling each level's run is held to:
+#: lowered under a level's U_I, aero.mesh_independence fails with no value
+#: and aero.drag_area errors; raised it moves nothing; 18 ladders).
 #: Rejected: a cap on rungs or runs per gate (it would walk a leaf part way
 #: and say nothing of where it stopped); the stand-in tools (the walk is of
 #: the real gates on the real tools, or it is not this detector).

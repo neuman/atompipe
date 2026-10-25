@@ -140,7 +140,7 @@ Measured (P6, the spheroid, 4 ranks, `hierarchical`):
 |---|---|---|
 | 1.5 | 41 574, 132 094, 386 302 | 1.470, 1.430 |
 | 1.3 (`narrow_ladder`) | 41 574, 78 726, 176 196 | 1.237, 1.308: fails before any solve |
-| 1.5, radii x1.125 (`bigger_body`) | 44 626, 141 285, 408 434 | 1.469, 1.443 |
+| 1.5, radii x1.125 (`bigger_body`) | 44 626, 141 285, 408 434 | 1.468, 1.425 |
 
 P0's box at ratio 1.3 gave 1.249 and 1.293; the motorBike's tutorial ladder at
 1.5, 1.42 and 1.37.

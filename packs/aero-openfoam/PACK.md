@@ -27,7 +27,7 @@ right equations or the right body. `lenses.md` lists what to attack.
 | `aero.mesh_quality` | 1 | established | snappyHexMesh finished without errors and reached no cell cap; `checkMesh -meshQuality` counts no face in error against the pack's limits |
 | `aero.converged` | 2 | established | on the base mesh, `simpleFoam` ran to its end on every rank, no residual climbed in the last window, and the drag area's iterative uncertainty U_I = (max - min) / 2 over the last 100 iterations is at most `aero_iter_unc_max_pct` of its mean (ITTC 7.5-03-01-01) |
 | `aero.wall_treatment` | 2 | sourced | on the base mesh solved again, y+ is at most 300 on at least 90% of the body's area (Spalding's wall function to the top of the log layer); the gate's area and area-mean y+ agree with OpenFOAM's `surfaceFieldValue` to 1e-4 |
-| `aero.mesh_independence` | 2 | sourced | three meshes, each block times `aero_ladder_ratio` (1.5); each passes aero.mesh_quality's rule; the effective ratios from the cells are at least 1.3, judged before any solve; each level passes aero.converged's rule; the drag area converges monotonically at an observed order of at least 0.95; the finest's U_I is at most a tenth of the change between the two finest; the GCI of the finest is at most `aero_gci_max_pct` (Celik et al. 2008; above the formal order + 0.05, the band at the formal order with Fs 3, Eca and Hoekstra 2014) |
+| `aero.mesh_independence` | 2 | sourced | three meshes, each block times `aero_ladder_ratio` (1.5); each passes aero.mesh_quality's rule; the effective ratios from the cells are at least 1.3, judged before any solve; each level passes aero.converged's rule; the drag area converges monotonically at an observed order of at least 0.95; the finest's U_I is at most a tenth of the change between the two finest; the GCI of the finest is at most `aero_gci_max_pct` (Celik et al. 2008; above the formal order, the band at the formal order with Fs 3, Eca and Hoekstra 2014) |
 | `aero.drag_area` | 2 | established | the top of the finest mesh's band, CdA (1 + GCI) + U_I in m^2, against the limit of the claim tagged `drag-area`: the only gate here that reads one |
 
 `aero.reference`, `aero.regime`, `aero.domain` and `aero.mesh_quality` each
@@ -47,7 +47,8 @@ and `gate selftest` solves each ladder at least once, and a file left under
 own ladder.
 
 Known-bad controls (`selftest/bad_cases.py`, one edit each to the baseline
-spheroid, each 15% past its limit): `coded_inlet` (a `codedFixedValue` inlet),
+spheroid; each that gives a value lands at least 15% past its limit, and
+`coded_inlet` and `narrow_ladder` fail with no value): `coded_inlet` (a `codedFixedValue` inlet),
 `wrong_speed` (the inlet at 23 m/s against 20), `thick_air` (Re 4.35e5),
 `short_wake` (the outlet 13.0 H behind the body), `cell_cap`
 (`aero_max_global_cells` 20 000: snappyHexMesh stops at the cap and still says
@@ -99,7 +100,10 @@ with the cause *unseen inputs*.
   the motorBike's faces at L0). It is reported, not judged: what layers are for
   is y+, which `aero.wall_treatment` judges.
 - **A low y+.** Spalding's function holds in the viscous and buffer layers, so
-  the pack does not refuse y+ under 30. The bands are in the detail.
+  the pack does not refuse y+ under 30. The bands are in the detail. That holds
+  for Spalding's function only: `aero.wall_treatment` errors, before any tool
+  runs, on a body whose `0/nut` condition is not `nutUSpaldingWallFunction`
+  (the tutorial's `nutkWallFunction` stays accepted on the ground).
 - **More than three meshes.** The GCI here is Celik's three-mesh procedure. Eca
   and Hoekstra's least-squares fit needs four or more meshes, and a ladder that
   oscillates (the motorBike's) fails rather than being fitted.

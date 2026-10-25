@@ -432,6 +432,16 @@ class TheJobIsThePacksConstants(_env.EnvCase):
                 if name != "ladder":
                     self.assertIn("base mesh", caption)
 
+    def test_the_wall_names_no_body(self):
+        """Review of P6: the wall's caption and alt text said "the bike and the
+        rider" and "a motorcycle" over every project's body, the baseline's
+        spheroid too."""
+        f3 = _flow3d()
+        for text in (f3.WALL_CAPTION, f3.WALL_ALT):
+            with self.subTest(text):
+                for word in ("bike", "rider", "motorcycle"):
+                    self.assertNotIn(word, text.lower())
+
     def test_every_figure_binds_to_its_gate(self):
         registry = _views()
         self.assertEqual({v: registry.get(v)[0].evidence_of for v in BINDS}, BINDS)
@@ -553,12 +563,14 @@ class ChartsNeedNoTool(_env.EnvCase):
 
         def edit(gate, summary):
             if gate == LADDER_GATE:
-                summary.update({"cda_ext_m2": 0.299, "h_rel_ext": 0.0, "band_top_m2": 0.304})
+                summary.update({"cda_ext_m2": 0.299, "h_rel_ext": 0.0, "band_top_m2": 0.304,
+                                "band_bottom_m2": 0.296})
         view, _note, _ctx, refusal = self.chart("aero.ladder", make_entries(self.tmp(),
                                                                             summary_edit=edit))
         self.assertEqual(refusal, "")
         self.assertEqual(view.data["series"][1]["points"], [[0.0, 0.299]])
-        self.assertEqual(view.data["band"][0]["hi"], 0.304)
+        self.assertEqual((view.data["band"][0]["lo"], view.data["band"][0]["hi"]),
+                         (0.296, 0.304))
 
     def test_every_chart_number_is_in_the_evidence(self):
         for view_id in CHARTS:
@@ -867,8 +879,13 @@ class TheViewsReadWhatTheGateWrites(_env.EnvCase):
                          [lv["cda_m2"] for lv in summary["levels"]])
         self.assertEqual(zero["points"], [[0.0, summary["cda_ext_m2"]]])
         (band,) = view.data["band"]
+        # Review of P6: the band went up from the finest value only, and the
+        # value at zero cell size fell under it.
+        fine, gci = summary["levels"][-1]["cda_m2"], summary["gci_fine_pct"] / 100
         self.assertEqual((band["lo"], band["hi"]),
-                         (summary["levels"][-1]["cda_m2"], summary["band_top_m2"]))
+                         (summary["band_bottom_m2"], summary["band_top_m2"]))
+        self.assertEqual((band["lo"], band["hi"]), (fine * (1 - gci), fine * (1 + gci)))
+        self.assertTrue(band["lo"] <= summary["cda_ext_m2"] <= band["hi"])
 
     def test_every_picture_bound_to_it_draws(self):
         for view_id in [v for v in PICTURES if BINDS[v] == GATE]:

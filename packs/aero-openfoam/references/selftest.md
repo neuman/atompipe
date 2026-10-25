@@ -55,8 +55,8 @@ isolated (`tests/test_packs.ControlsAreIsolated`).
 | `aero.mesh_independence` | GCI 15.67% (cells 41 574, 132 094, 386 302; CdA 0.00443257, 0.00384200, 0.00364309 m^2; observed p 2.712, so p = 2 with Fs 3) | <= 20% (the baseline's own) |
 | `aero.drag_area` | 0.00364309 x 1.15674 + 8.2e-9 = 0.00421412 m^2 | <= 0.0044 m^2 (B1) |
 
-B1's limit, 0.0044 m^2, sits 4.4% over the baseline's top and 20.4% under
-the `bigger_body` control's (`references/convergence.md` has the ladders).
+B1's limit, 0.0044 m^2, sits 4.4% over the baseline's top and 16.9% under
+the `bigger_body` control's (the control's is 20.4% over it) (`references/convergence.md` has the ladders).
 
 ## What it costs
 

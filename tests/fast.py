@@ -953,6 +953,9 @@ FAST: list[str] = [
     # mesh (~0.2 s), its four goalpost moves (~1.7 s), and a record of other
     # inputs never read (~2.5 s). The rest of each class is the gate's.
     "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_the_baseline_passes_at_the_top_of_its_band",
+    # Review of P6: the control note names the fixture's own scale (the
+    # registry and bad_cases.py, in process, ~0.1 s).
+    "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_the_control_says_the_fixtures_scale",
     "test_aero_openfoam.TheDragGateStatesItsOwnUnits",
     "test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse",
     "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_another_input_byte_is_another_record",
@@ -1132,6 +1135,10 @@ LEFT_FOR_THE_GATE: list[str] = [
     # aero-openfoam runs test_aero_openfoam whole.
     "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_a_bigger_body_lands_past_its_margin",
     "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_a_ladder_that_gives_no_band_here_is_an_error",
+    # Review of P6: every pack default the drag gate judges on is said (three
+    # ladders through the stand-in, ~3.3 s). The same `marks` path runs in
+    # test_the_baseline_passes_at_the_top_of_its_band, with none to say.
+    "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand.test_every_pack_default_it_judges_on_is_said",
     "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_behind_mesh_independence_it_judges_the_same_solves",
     "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess.test_a_record_of_another_process_or_another_byte_is_never_read",
     # Issue #15, P1.1: the rest of the evidence binding, each a figure project

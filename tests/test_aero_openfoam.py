@@ -1185,6 +1185,33 @@ class TheYPlusFractionIsOpenFOAMs(_StandinCase):
         self.assertEqual(v.outcome, "error", v.render())
         self.assertIn("fails the rule aero.converged passed", v.error)
 
+    def test_a_body_on_another_wall_function_is_an_error_before_any_tool(self):
+        """Review of P6: the rule (y+ at most 300, no floor) is Spalding's.
+        A body on the tutorial's nutkWallFunction, under its group or under a
+        key of its own patch, read Checked with no look at which one it had."""
+        nut = "0/nut"
+        for how in ("group", "patch", "wall group", "no group"):
+            with self.subTest(how):
+                case = _copy_case(os.path.join(self.tmp(), "case"))
+                if how == "group":
+                    _edit(case, nut, "boundaryField/bodyGroup/type", "nutkWallFunction")
+                elif how == "no group":
+                    _replace(case, nut, "    bodyGroup\n", "    \"body.*\"\n")
+                else:
+                    key = "spheroid" if how == "patch" else "wall"
+                    _replace(case, nut, "    bodyGroup\n",
+                             f"    {key}\n    {{\n        type            nutkWallFunction;\n"
+                             f"        value           uniform 0;\n    }}\n    bodyGroup\n")
+                v = self.gate("aero.wall_treatment", {"aero_case": case})
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn("0/nut", v.error)
+                self.assertEqual(self.calls(), [], "refused before any tool")
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _replace(case, nut, "    bodyGroup\n",
+                 "    spheroid\n    {\n        type            nutUSpaldingWallFunction;\n"
+                 "        value           uniform 0;\n    }\n    bodyGroup\n")
+        self.assertEqual(self.gate("aero.wall_treatment", {"aero_case": case}).outcome, "pass")
+
 
 # --------------------------------------------------------------------------- #
 # the ladder and the drag area
@@ -1221,6 +1248,23 @@ class EveryLadderLevelPassesTheGuards(_LadderCase):
     meshed and held to aero.mesh_quality's rule, the effective ratios judged
     before any solve, each level held to aero.converged's rule, then Celik's
     GCI with the pack's order rule."""
+
+    def test_the_references_ladder_table_is_its_own_cells(self):
+        """Review of P6: meshing.md gave bigger_body's effective ratios as
+        1.469 and 1.443, and its own cells give 1.468 and 1.425 (1.443 gives a
+        GCI of 17.4%, not the 18.28% the gate computed). Each row's ratios,
+        (N_fine / N_coarse)^(1/3), from the cells the same row states."""
+        with open(os.path.join(PACK, "references", "meshing.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        rows = re.findall(r"^\| [^|]+ \| ([\d ]+), ([\d ]+), ([\d ]+) \| "
+                          r"(\d\.\d{3}), (\d\.\d{3})", text, re.M)
+        self.assertEqual(len(rows), 3, "the three measured ladders")
+        for row in rows:
+            with self.subTest(row):
+                n = [int(c.replace(" ", "")) for c in row[:3]]
+                said = [float(x) for x in row[3:]]
+                self.assertEqual(said, [round((n[1] / n[0]) ** (1 / 3), 3),
+                                        round((n[2] / n[1]) ** (1 / 3), 3)])
 
     def test_the_baseline_passes_on_the_formal_order(self):
         ((v, calls),) = self.gates("aero.mesh_independence")
@@ -1289,6 +1333,32 @@ class EveryLadderLevelPassesTheGuards(_LadderCase):
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("level 0 (41546 cells) is not converged", v.detail)
 
+    def test_above_the_formal_order_the_band_is_the_formal_orders(self):
+        """Review of P6: the switch sat at formal + 0.05, so an observed order
+        of 2.0 to 2.05 kept the observed order with Fs 1.25, the estimate Eca
+        and Hoekstra 2014 drop above 2. Three drag areas on the baseline's
+        cells, exactly phi0 + a h^p at p 2.03 and at 1.97."""
+        from types import SimpleNamespace
+        g = _module(self.registry)
+        case = g["Case"](SPHEROID)
+        cells = [41574, 132094, 386302]
+        h = [(cells[-1] / n) ** (1.0 / 3.0) for n in cells]
+        for p, rule, fs in ((2.03, "formal", 3.0), (1.97, "observed", 1.25)):
+            with self.subTest(p):
+                means = [0.0035 + 0.0002 * x ** p for x in h]
+                settle = iter([{"why": [], "mean_m2": m, "u_i_m2": 1e-10, "u_i_pct": 1e-6}
+                               for m in means])
+                levels = [SimpleNamespace(k=k, cells=n, co=None, blocks=None,
+                                          mesh=SimpleNamespace(problems=lambda _cap: []))
+                          for k, n in enumerate(cells)]
+                with mock.patch.dict(g, {"_settling": lambda *_a: next(settle)}):
+                    j = g["_judge_ladder"](case, levels, 1.0, 20000000)
+                self.assertEqual(j["why"], [])
+                self.assertAlmostEqual(j["res"].p, p, places=6)
+                self.assertEqual((j["rule"], j["fs"]), (rule, fs))
+                lo, hi = (means[-1] * (1 + k * j["gci_pct"] / 100) for k in (-1, 1))
+                self.assertTrue(lo <= j["phi_ext"] <= hi, (lo, j["phi_ext"], hi))
+
     def test_a_ladder_ratio_out_of_range_is_an_error(self):
         for r in (1.05, 2.5):
             with self.subTest(r):
@@ -1322,6 +1392,29 @@ class TheDragAreaIsJudgedAtTheTopOfItsBand(_LadderCase):
         self.assertAlmostEqual(v.measured, 0.00421411818, places=11)
         self.assertAlmostEqual(data["force_n"], 0.5 * 1.225 * 20.0 ** 2 * data["cda_fine_m2"])
         self.assertEqual(calls.count("simpleFoam"), 3, "alone, it solves its own ladder")
+
+    def test_every_pack_default_it_judges_on_is_said(self):
+        """Review of P6: the ladder's marks and the iteration ceiling's were
+        dropped here, while each guard said them."""
+        for key in ("aero_ladder_ratio", "aero_iter_unc_max_pct"):
+            with self.subTest(key):
+                self.params = {k: v for k, v in _baseline().items() if k != key}
+                ((v, _calls),) = self.gates("aero.drag_area")
+                self.assertEqual(v.outcome, "pass", v.render())
+                self.assertIn(f"[pack default: {key}]", v.detail)
+                self.assertEqual(self.summary(v)["pack_default"], [key])
+        self.params = _baseline()
+        ((v, _calls),) = self.gates("aero.drag_area")
+        self.assertNotIn("pack default", v.detail)
+        self.assertEqual(self.summary(v)["pack_default"], [])
+
+    def test_the_control_says_the_fixtures_scale(self):
+        """Review of P6: the note said "15% larger ... about a third", the
+        scale bad_cases.py measured and rejected."""
+        bad = load_path(os.path.join(PACK, "selftest", "bad_cases.py"))
+        note = self.registry.get("aero.drag_area")[0].negative_control.note
+        self.assertIn(f"{100 * (bad.BODY_SCALE - 1):g}% larger", note)
+        self.assertNotIn("15%", note)
 
     def test_a_bigger_body_lands_past_its_margin(self):
         case = _copy_case(os.path.join(self.tmp(), "case"))

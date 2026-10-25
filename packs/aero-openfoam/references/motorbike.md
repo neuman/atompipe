@@ -48,7 +48,8 @@ from the tutorial with `foamDictionary -expand` on every file, then:
 - leaves out `decomposeParDict*` and `meshQualityDict` (the pack writes its
   own);
 - sets `0/nut`'s `motorBikeGroup` to `nutUSpaldingWallFunction` (the design's
-  choice; the tutorial's `nutkWallFunction` is also accepted).
+  choice; the tutorial's `nutkWallFunction` reads, and `aero.wall_treatment`
+  errors on it: its y+ rule is Spalding's).
 
 Read so, the tutorial case passes `aero.case_readable`, `aero.reference` and
 `aero.regime` (Re 1.89e6 on lRef 1.42 m), and fails `aero.domain` on four

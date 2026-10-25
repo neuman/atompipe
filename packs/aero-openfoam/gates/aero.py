@@ -2151,6 +2151,57 @@ WALL_AGREE = 1e-4
 
 YPLUS_UNITS = "%"
 
+#: The one nut condition the body may have for this gate's rule: Spalding's
+#: (`YP_HI`, and no floor, are his formula's band). What slipped through P6
+#: (its review): the pack accepts ``nutkWallFunction`` (the tutorial's, on its
+#: ground), nothing read which one the body had, and a body on
+#: ``nutkWallFunction`` with half its area at y+ 5-30 passed, under a picture
+#: whose key says the wall model is made for every band under 300. Rejected:
+#: refusing ``nutkWallFunction`` in aero.case_readable (the ground of both
+#: cases has it, and the ground's y+ is judged by no gate); judging
+#: ``nutkWallFunction`` on 30-300, the log layer it assumes (Pope, Table 7.1:
+#: no run of the pack measured it, and the picture's key is Spalding's).
+BODY_NUT = "nutUSpaldingWallFunction"
+
+#: The nut conditions a literal key of ``0/nut`` may hold and never reach the
+#: body: the constraint types in `BOUNDARY_TYPES`, which OpenFOAM refuses on a
+#: wall patch.
+NUT_CONSTRAINTS = ("empty", "symmetry", "symmetryPlane", "cyclic")
+
+
+def _body_nut_problem(case: Case, group: str) -> str | None:
+    """Why the body's nut condition is not shown to be `BODY_NUT`, or None.
+
+    OpenFOAM (ESI v2606, ``GeometricBoundaryField::readField``) sets a patch
+    from the literal key of its own name first, then from the literal key of
+    a group it is in (the last such entry wins), and from a regular
+    expression only where neither did. So the body's condition is the one
+    under ``aero_body_group``, unless another literal key names a body patch
+    or another group of the body (``wall``). Every literal key that is not
+    one of the box's patches may be that, and must state the same."""
+    bf = case.trees["0/nut"].sub("boundaryField")
+    if bf is None:
+        return "0/nut has no boundaryField"
+    mine = next((e for e in reversed(bf.entries)
+                 if not e.quoted and not e.directive and e.key == group), None)
+    if mine is None or not mine.is_dict:
+        return (f"0/nut states no condition under {group}, the body's group: the gate "
+                f"cannot tell which wall function the body has")
+    kind = F.word(mine.value, "type")
+    if kind != BODY_NUT:
+        return (f"0/nut: {group}/type is {kind}; this gate's y+ rule (at most {YP_HI:g}, no "
+                f"floor) is {BODY_NUT}'s, the formula from the wall into the log layer")
+    for e in bf.entries:
+        if (e.quoted or e.directive or e.key == group or e.key in case.patches
+                or not e.is_dict):
+            continue
+        other = F.word(e.value, "type")
+        if other != BODY_NUT and other not in NUT_CONSTRAINTS:
+            return (f"0/nut: {e.key}/type is {other}, and {e.key} is not a patch of the box: "
+                    f"it may set the body's patches by their own name or by another group "
+                    f"before {group} does; this gate's y+ rule is {BODY_NUT}'s")
+    return None
+
 
 def _wall_stats(yplus_path: str, average_path: str) -> dict:
     """The body's y+ by area, from the surface OpenFOAM's ``surfaces``
@@ -2220,7 +2271,11 @@ def wall_treatment(ctx: GateContext) -> Verdict:
     aero.converged's did is the two disagreeing, an error. Reported, not
     judged: the bands of y+ and the layer coverage. The same run writes the
     body's y+ surface, named with its sha256 in summary.json for the
-    picture (``aero.wall``)."""
+    picture (``aero.wall``).
+
+    The body's nut condition must be `BODY_NUT` (``_body_nut_problem``),
+    before any tool runs: the rule is that wall function's band. Any other is
+    an error, never a judgment."""
     gid = "aero.wall_treatment"
     s = _run_settings(ctx, gid)
     if isinstance(s, Verdict):
@@ -2234,6 +2289,9 @@ def wall_treatment(ctx: GateContext) -> Verdict:
         return got
     ceiling, default = got
     marks = list(s["marks"]) + (["aero_iter_unc_max_pct"] if default else [])
+    problem = _body_nut_problem(s["case"], str(group))
+    if problem:
+        return _error(gid, problem)
     opened = _open(ctx, gid)
     if isinstance(opened, Verdict):
         return opened
@@ -2313,13 +2371,13 @@ LADDER_RATIO_MIN, LADDER_RATIO_MAX = 1.1, 2.0
 #: of solving it would cost. P0: ratio 1.3 on the box gave 1.25 and 1.29.
 R_EFF_MIN = G.R_MIN_RECOMMENDED
 
-#: The observed order the ladder must show, cfd-openfoam's ``P_MIN`` and
-#: ``P_SLACK``: at least 0.95, and up to the scheme's formal order + 0.05 for
-#: Celik's band at the observed order with Fs 1.25. Below 0.95 the meshes are
-#: not in the asymptotic range, and a fail.
-P_MIN, P_SLACK = 0.95, 0.05
+#: The least observed order the ladder must show: 0.95, cfd-openfoam's
+#: ``P_MIN``. Below it the meshes are not in the asymptotic range, and a fail.
+#: Up to the formal order (2 for a second-order ``div(phi,U)``) the band is
+#: Celik's at the observed order with Fs 1.25.
+P_MIN = 0.95
 
-#: The order rule above formal + `P_SLACK`. Eca & Hoekstra 2014 (J. Comput.
+#: The order rule above the formal order. Eca & Hoekstra 2014 (J. Comput.
 #: Phys. 262:104-130, sec. 2.4.1 and the summary of sec. 4): "A value of p
 #: greater than the formal order of grid convergence (i.e. p > 2) is likely to
 #: cause too small error estimates. In that case, delta_RE is dropped and
@@ -2329,11 +2387,25 @@ P_MIN, P_SLACK = 0.95, 0.05
 #: finest, Roache's two-grid GCI with an assumed order (Roache 1998,
 #: Verification and Validation in Computational Science and Engineering, ch. 5;
 #: ``_gci.gci_two_grid``, Fs = 3): GCI = 3 |eps21 / phi1| / (r21^p_formal - 1).
-#: Measured: the spheroid's observed order is 2.72, where Celik's band at that
-#: order is 4.1% and at the formal 2 with Fs 3 it is 15.6%. Rejected: refusing
-#: the ladder (the design's first rule: every honest ladder of the baseline
-#: was refused); the observed order with Fs 1.25 (Eca & Hoekstra: too small);
-#: Eca & Hoekstra's least-squares choice between delta_1 and delta_2 (their
+#: The switch is at the formal order, the first sentence's "p > 2", and the
+#: safety factor is 3 on the whole of p > formal. **This departs from the
+#: second sentence, on the safe side:** between 2 and 2.1 Eca and Hoekstra
+#: keep Fs 1.25 when sigma < Delta_phi, and sigma is the standard deviation of
+#: their least-squares fit, which the two-grid estimate does not have, so the
+#: pack takes their "Otherwise". At p = 2 the band jumps by 3 / 1.25 = 2.4
+#: times, as theirs does at 2.1. Measured: the spheroid's observed order is
+#: 2.712, where Celik's band at that order is 4.2% and at the formal 2 with
+#: Fs 3 it is 15.67%; ``bigger_body``'s is 2.0528, where the pack's band is
+#: 18.28% and Fs 1.25 at the formal order would give 7.6%. What slipped
+#: through P6 (its review): the switch sat at formal + 0.05, a slack carried
+#: over from cfd-openfoam (there the top of the orders its GCI is believed
+#: at), so a ladder at p 2.0 to 2.05 kept delta_RE with Fs 1.25, the estimate
+#: the quoted sentence drops, and bigger_body's landing hung on 0.003 of
+#: order. Rejected: refusing the ladder (the design's first rule: every
+#: honest ladder of the baseline was refused); the observed order with Fs
+#: 1.25 (Eca & Hoekstra: too small); Fs 1.25 at the formal order up to 2.1 (it
+#: needs the fit's sigma); the switch at formal + 0.05 (above); Eca &
+#: Hoekstra's least-squares choice between delta_1 and delta_2 (their
 #: procedure "relies on the availability of at least four data points"; with
 #: three, each fit has one degree of freedom, and the first-order fit of a
 #: second-order scheme is the smaller error estimate of the two).
@@ -2505,6 +2577,15 @@ class _Record:
     pack's runs bit for bit the same on the same inputs (``hierarchical``;
     P0's scotch was not), so a record keyed on the inputs is the run they
     would give.
+
+    *What it does not stop:* code running in the same process between the
+    two gates (a project gate, a fixture) that rewrites a level's file and its
+    sha256 in the manifest. The manifest is plain sha256, as a results file's
+    seal is, and in-process code is trusted as the spine trusts it
+    (docs/SPINE_CONTRACT.md, "A re-sealed forgery counts"): it could as well
+    patch this module. The spine names the read as another gate's output
+    (``out:... (not written by this gate)``), so the entry is never served
+    fresh after its run.
 
     *Rejected:* a record any later process may read (a run store: it needs
     ``export`` and ``--force`` to bypass it, a spine change, the design's P9);
@@ -2775,7 +2856,7 @@ def _judge_ladder(case: Case, levels: list, ceiling: float, cap: int) -> dict:
                    f"(Celik App. A)")
     if why:
         return out
-    if res.p > formal + P_SLACK:
+    if res.p > formal:
         gci = G.gci_two_grid(phi[0], phi[1], res.r21, formal, fs=FS_FORMAL)
         a = res.r21 ** formal
         out.update(rule="formal", p_used=float(formal), fs=FS_FORMAL,
@@ -2811,7 +2892,8 @@ def _ladder_evidence(ctx, gid, case, levels, j, r, key, extra) -> list[str]:
     if j and j.get("gci_pct") is not None:
         payload.update(order_rule=j["rule"], order_used=j["p_used"], safety_factor=j["fs"],
                        gci_fine_pct=j["gci_pct"], cda_ext_m2=j["phi_ext"], h_rel_ext=0.0,
-                       band_top_m2=rows[-1]["cda_m2"] * (1.0 + j["gci_pct"] / 100.0))
+                       band_top_m2=rows[-1]["cda_m2"] * (1.0 + j["gci_pct"] / 100.0),
+                       band_bottom_m2=rows[-1]["cda_m2"] * (1.0 - j["gci_pct"] / 100.0))
     payload.update(extra)
     hists = []
     for lv in levels:
@@ -2853,8 +2935,8 @@ def mesh_independence(ctx: GateContext) -> Verdict:
     2008's GCI is taken on the three drag areas (``_gci.gci``, dim 3, the
     noise the largest U_I): the convergence must be monotone, the observed
     order at least `P_MIN`, the finest level's U_I at most a tenth of the
-    change between the two finest; above the formal order + `P_SLACK` the band
-    is taken at the formal order with Fs 3 (`FS_FORMAL`). The fine-grid GCI
+    change between the two finest; above the formal order the band is taken
+    at the formal order with Fs 3 (`FS_FORMAL`). The fine-grid GCI
     must be at most ``aero_gci_max_pct``. The value is the GCI in %.
 
     Reported, not judged: each level's y+ share, layer coverage and U_I. The
@@ -2896,8 +2978,8 @@ def mesh_independence(ctx: GateContext) -> Verdict:
                        evidence=ev)
     res, gci = j["res"], j["gci_pct"]
     passed = gci <= lim
-    rule = (f"observed order {res.p:.3g} above the formal {_formal_order(case)} + {P_SLACK:g}: "
-            f"the band at the formal order with Fs {FS_FORMAL:g} (Eca and Hoekstra 2014)"
+    rule = (f"observed order {res.p:.4g} above the formal {_formal_order(case)}: the band at "
+            f"the formal order with Fs {FS_FORMAL:g} (Eca and Hoekstra 2014)"
             if j["rule"] == "formal" else
             f"observed order {res.p:.3g}, Fs {j['fs']:g} (Celik et al. 2008)")
     return Verdict(gate=gid, passed=passed,
@@ -2927,8 +3009,11 @@ def mesh_independence(ctx: GateContext) -> Verdict:
     needs=["aero.mesh_independence", "aero.wall_treatment"],
     negative_control=NegativeControl(
         fixture="selftest/bad_cases.py:bigger_body",
-        note="the baseline spheroid with every radius 15% larger: the drag area grows by "
-             "about a third, past the baseline's limit",
+        # What slipped through P6 (its review): this note still said 15% and
+        # "about a third", the design's scale, which bad_cases.py measured and
+        # rejected; every control entry filed it as the admission evidence.
+        note="the baseline spheroid with every radius 12.5% larger: the top of the drag "
+             "area's band grows by about a quarter, past the baseline's limit",
     ),
 )
 def drag_area(ctx: GateContext) -> Verdict:
@@ -2969,7 +3054,7 @@ def drag_area(ctx: GateContext) -> Verdict:
     got = _positive(ctx, gid, "aero_iter_unc_max_pct", DEFAULT_ITER_UNC_MAX_PCT)
     if isinstance(got, Verdict):
         return got
-    ceiling, _default = got
+    ceiling, default = got
     got = _ladder(ctx, gid)
     if isinstance(got, Verdict):
         return got
@@ -2978,11 +3063,18 @@ def drag_area(ctx: GateContext) -> Verdict:
         return _error(gid, "the meshes refuse the ladder aero.mesh_independence passed: "
                       + "; ".join(why)[:400], logs)
     s, r, marks, u, levels, key = got
+    # The settings this verdict rests on that the project never stated, said
+    # as the guards say them. What slipped through P6 (its review): this gate
+    # dropped ``_ladder``'s marks and its own, so the one verdict that settles
+    # a drag-area claim was the one that never said it judged a pack default.
+    marks = marks + (["aero_iter_unc_max_pct"] if default else [])
+    mark = f" [pack default: {', '.join(marks)}]" if marks else ""
     j = _judge_ladder(s["case"], levels, ceiling, s["global"])
     if j["why"] or j["gci_pct"] is None:
         return _error(gid, "the ladder gives no band here, where aero.mesh_independence passed: "
-                      + "; ".join(j["why"])[:400],
-                      _ladder_evidence(ctx, gid, s["case"], levels, j, r, key, {}))
+                      + "; ".join(j["why"])[:400] + mark,
+                      _ladder_evidence(ctx, gid, s["case"], levels, j, r, key,
+                                       {"pack_default": marks}))
     cda = j["res"].phi[0]
     if not cda > 0:
         return _error(gid, f"the finest mesh's drag area is {cda:.6g} m^2: a body in a stream "
@@ -2993,7 +3085,8 @@ def drag_area(ctx: GateContext) -> Verdict:
     force = None if rho is None else 0.5 * rho * u * u * cda
     ev = _ladder_evidence(ctx, gid, s["case"], levels, j, r, key,
                           {"cda_fine_m2": cda, "u_i_fine_m2": u_i, "top_m2": top,
-                           "u_inf_m_s": u, "rho_kg_m3": rho, "force_n": force})
+                           "u_inf_m_s": u, "rho_kg_m3": rho, "force_n": force,
+                           "pack_default": marks})
     passed = acc.holds(top)
     said_force = ("" if force is None else
                   f"; drag force {force:.4g} N at {u:g} m/s in air of {rho:g} kg/m^3 "
@@ -3003,5 +3096,6 @@ def drag_area(ctx: GateContext) -> Verdict:
                    detail=f"drag area {cda:.6g} m^2 on the finest mesh ({levels[-1].cells} "
                           f"cells) + GCI {gci:.3g}% + U_I {u_i:.3g} m^2 = {top:.6g} m^2, "
                           f"{'within' if passed else 'past'} {acc.limit:g} m^2 "
-                          f"({j['rule']} order {j['p_used']:.3g}, Fs {j['fs']:g}){said_force}",
+                          f"({j['rule']} order {j['p_used']:.3g}, Fs {j['fs']:g}){said_force}"
+                          f"{mark}",
                    evidence=ev)

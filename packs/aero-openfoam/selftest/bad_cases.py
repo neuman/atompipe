@@ -25,8 +25,9 @@ readable, and ``cell_cap`` is a readable case.
 
 **Where each lands** was measured in P0 (2026-10-23, OpenFOAM v2606) and is
 derived here from the gate's own limit and the baseline's own numbers, so
-moving either cannot quietly turn a control into a pass: each lands 15% past
-its limit (``MARGIN``).
+moving either cannot quietly turn a control into a pass: each that gives a
+value lands at least 15% past its limit (``MARGIN``); ``coded_inlet`` and
+``narrow_ladder`` fail with no value.
 """
 from __future__ import annotations
 

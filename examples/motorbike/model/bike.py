@@ -72,8 +72,10 @@ class Config:
     aero_ranks: int = 6
     """MPI ranks for each parallel run. The machine the demo was measured on has
     7 physical cores, and other work shares it: 6 leaves one. The pack's default
-    is 8 (with --oversubscribe). The ranks move the time, not the result: the
-    pack decomposes with `hierarchical`, so one mesh gives one history."""
+    is 8 (with --oversubscribe). The ranks move the time, and the mesh and the
+    drag area a little (about 1e-6 of it, the pack's DEFAULT_RANKS note): the
+    pack decomposes with `hierarchical`, so one mesh on one rank count gives
+    one history."""
 
     aero_iter_unc_max_pct: float = 1.0
     """% of the mean drag area: the largest iterative uncertainty U_I = (max -
@@ -97,10 +99,12 @@ class Config:
     aero_gci_max_pct: float = 5.0
     """% of the finest mesh's drag area: the largest mesh error band (GCI)
     aero.mesh_independence accepts (the author's choice, design decision D3:
-    common practice for RANS verification). The tutorial's ladder does not
-    converge in one direction (0.3075, 0.2964, 0.3007 m^2, 2026-10-23), so no
-    GCI is computed and C7 reads Failing with that reason, whatever this
-    number is."""
+    common practice for RANS verification). This project's ladder has not
+    run. P0's ladder of the tutorial's own case (its box, block (20 8 8) and
+    1500 iterations a level, 2026-10-23) did not converge in one direction
+    (0.3075, 0.2964, 0.3007 m^2), and its finest mesh did not settle under 1%.
+    If this one does the same, no GCI is computed and C7 reads Failing
+    whatever this number is, first for the level that did not settle."""
 
     aero_timeout_s: float = 3600.0
     """s each OpenFOAM tool may run before it is stopped with every rank, and

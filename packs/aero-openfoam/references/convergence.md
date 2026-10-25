@@ -96,8 +96,8 @@ cfd-openfoam's copy, byte for byte), with the cell counts in 3D:
    U_I of the three levels.
 3. **The observed order p at least 0.95** (cfd-openfoam's `P_MIN`).
 4. **The finest level's U_I at most a tenth of |eps21|** (Celik App. A).
-5. **The band.** With p up to the formal order + 0.05 (the formal order is 2
-   for a second-order `div(phi,U)`, 1 for upwind), Celik's Eq. 7 at the
+5. **The band.** With p up to the formal order (2 for a second-order
+   `div(phi,U)`, 1 for upwind), Celik's Eq. 7 at the
    observed order with Fs = 1.25. Above it, the band at the formal order with
    Fs = 3: GCI = 3 |eps21 / phi1| / (r21^2 - 1), Roache's two-grid GCI with an
    assumed order on the two finest meshes (Roache 1998, *Verification and
@@ -108,10 +108,19 @@ cfd-openfoam's copy, byte for byte), with the cell counts in 3D:
    delta_RE is dropped and replaced by delta_1 or delta_2"; and their summary:
    "If 0.5 <= p < 2.1 and sigma < Delta_phi, Fs = 1.25. Otherwise, Fs = 3."
    The pack takes their delta_2 (the error at the formal order) on the two
-   finest meshes. Rejected: their least-squares choice between delta_1 and
-   delta_2 (it "relies on the availability of at least four data points");
-   refusing the ladder (every honest ladder of the baseline was refused); the
-   observed order with Fs 1.25 (their "too small").
+   finest meshes, with Fs 3 on the whole of p > 2. **That departs from their
+   second sentence, on the safe side:** between 2 and 2.1 they keep Fs 1.25
+   when sigma < Delta_phi, and sigma is the standard deviation of their
+   least-squares fit, which the two-grid estimate does not have, so the pack
+   takes their "Otherwise". At p = 2 the band jumps 2.4 times (3 / 1.25), as
+   theirs does at 2.1. Rejected: their least-squares choice between delta_1
+   and delta_2 (it "relies on the availability of at least four data
+   points"); refusing the ladder (every honest ladder of the baseline was
+   refused); the observed order with Fs 1.25 (their "too small"); Fs 1.25 at
+   the formal order up to 2.1 (it needs the fit's sigma); the switch at the
+   formal order + 0.05 (P6 as first written, cfd-openfoam's slack carried
+   over: a ladder at p 2.0 to 2.05 kept the estimate their first sentence
+   drops).
 6. **The GCI of the finest at most `aero_gci_max_pct`.** No source sets one
    value for every body. The demo states 5% (D3, the author's choice); the
    baseline states 20% (its band at the formal order is 15.7%).
@@ -131,16 +140,17 @@ distribution). Its claim must be in m^2 with `<=` or `<`.
 | CdA, window mean (m^2) | 0.00443257 | 0.00384200 | 0.00364309 |
 | U_I | 0.0148% | 0.0018% | 0.00022% |
 
-Monotone, r21 1.430, r32 1.470, observed p 2.712 (above 2.05): the band at
-p = 2 with Fs 3 is 15.67% (Celik's at p 2.71 would be 4.1%). U_I,fine /
+Monotone, r21 1.430, r32 1.470, observed p 2.712 (above 2): the band at
+p = 2 with Fs 3 is 15.67% (Celik's at p 2.712 would be 4.2%). U_I,fine /
 |eps21| = 4e-5. Extrapolated 0.00345275 m^2. Top of the band 0.00421412
 m^2 against B1's 0.0044.
 
 On the 1.125 times larger body (`bigger_body`): 0.00541140, 0.00475847,
-0.00447759 m^2, observed p 2.0528, 0.003 above 2.05, so the formal-order
-band: GCI 18.28%, top 0.00529625 m^2, 1.204 times B1's limit. Its landing
-hangs on that 0.003: at the observed order the band would be 7.3% and the top
-0.00481 m^2, 1.09 times the limit, still a fail but not 15% past it. The
+0.00447759 m^2, observed p 2.0528, above 2, so the formal-order band: GCI
+18.28%, top 0.00529625 m^2, 1.204 times B1's limit. Its landing rests on Fs 3
+above 2 (step 5): with Fs 1.25 at the formal order the band would be 7.6% and
+the top 0.00482 m^2, 1.095 times the limit, still a fail but not 15% past it;
+at the observed order with Fs 1.25, 7.3% and 0.00481 m^2. The
 meshes are bit for bit the same run to run (`hierarchical`), so the number
 moves only with the ranks, the build or the case.
 At 1.15 times the finest mesh cycled (U_I 0.53% of its drag area, 0.114 of
