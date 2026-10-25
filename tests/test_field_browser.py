@@ -25,6 +25,14 @@ bands of known values that ParaView 6.2.0 exported through the pack's
 Viridis preset (``packs/cfd-openfoam/views/viridis.json``) gives its value,
 within 2, magenta above the scale and grey below it.
 
+`TheBrowserDrawsTheHero` and `BothSidesOfTheHeroAreLit` (the motorBike
+design, P7 and R8) draw aero-openfoam's hero glTF lit and flat: on the
+committed fixture and, where ``site build`` ran on the demo, on the demo's
+own file. Flat, its faces are on the Turbo ramp; lit, they keep its hue, a
+back face is lit as its front, no face is black, and a drag keeps the bike
+in the middle of the view. Each check fails on a planted defect (a viewer
+edit `serve_viewer` makes, or a changed copy of the file).
+
 Skipped, saying "not walked", when a piece is absent: the headless Chromium
 under ``~/.cache/ms-playwright/`` (build 1228), trimesh and numpy, Pillow (to
 read the PNG), or three.js 0.169.0 (fetched once from the CDN into a cache in
@@ -230,10 +238,12 @@ def preset_colour(value: float, lo: float, hi: float) -> tuple[int, int, int]:
     return tuple(round(255 * (a + (c - a) * f)) for a, c in zip(rows[k][1:4], rows[k + 1][1:4]))
 
 
-def serve_viewer(files: dict[str, bytes]):
+def serve_viewer(files: dict[str, bytes], edits: tuple = ()):
     """``(folder, server)``: ``lib/viewer3d.js`` on a page of its own
     (`HARNESS`), with three.js 0.169.0 and ``files``, served on a free port of
-    127.0.0.1. Raises SkipTest ("not walked") when three.js cannot be had."""
+    127.0.0.1. Raises SkipTest ("not walked") when three.js cannot be had.
+    ``edits`` are ``(old, new)`` pairs planted in ``lib/viewer3d.js``, each
+    ``old`` found once: a defect a control shows the check catches."""
     three = _three()
     if three is None:
         raise unittest.SkipTest("not walked: three.js 0.169.0 did not download")
@@ -243,6 +253,12 @@ def serve_viewer(files: dict[str, bytes]):
     os.makedirs(lib)
     for rel, text in _template.template_files(".js").items():
         if rel.startswith("lib/"):
+            if rel == "lib/viewer3d.js":
+                for was, now in edits:
+                    if text.count(was) != 1:
+                        raise AssertionError(f"the planted edit's text is not in "
+                                             f"lib/viewer3d.js once: {was!r}")
+                    text = text.replace(was, now)
             with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
                 fh.write(text)
     with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
@@ -267,7 +283,8 @@ def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
     """The path of a headless Chromium screenshot of ``src`` drawn in the
     field mode, in the model mode (lights, shading) when ``mode`` is ``lit``,
     in the lit field mode when it is ``scene``, and in the lit field mode
-    with its flat colours on when it is ``flat`` (design P2). The page goes
+    with its flat colours on when it is ``flat`` (design P2), and in the lit
+    field mode turned by a reader's drag when it is ``drag``. The page goes
     red when the viewer reports an error."""
     out = os.path.join(case.tmp(), f"{mode}.png")
     profile = case.tmp()
@@ -677,7 +694,8 @@ def _interior(png: str, margin: int = 2):
 #: 0.95, then by 0.75 for the file), so a blend of two far colours leaves the
 #: ramp. Measured on 2026-10-23 (Chromium 1228, SwiftShader): 55% of the
 #: flat faces' pixels within 4, the lit drawing's 4.4%; the lit hue within 6
-#: degrees of the flat one on 98.3% of the saturated pixels. *Rejected:* 2
+#: degrees of the flat one on 98.3% of the saturated pixels. On the demo's own
+#: file (the full base mesh, 2026-10-25): 71%, 5.2% and 97.7%. *Rejected:* 2
 #: bytes on every pixel (the strip tests hold that, where each face is one
 #: colour; a blend across a face is not a colour of the key, flat or lit).
 HERO_RAMP_BYTES, HERO_FLAT_SHARE, HERO_HUE_SHARE = 4.0, 0.5, 0.95
@@ -689,33 +707,296 @@ class TheBrowserDrawsTheHero(_ViewerPage):
     and with its "Flat colours" toggle: flat, the faces are on the Turbo ramp
     the key is made from, and the lit drawing is not; lit, each pixel keeps
     the flat pixel's hue. The ramp is read here from the exported preset,
-    with no code of the pack."""
+    with no code of the pack. Held on the committed fixture and, where
+    ``site build`` ran on the demo, on the demo's own file
+    (`test_aero_views.demo_hero_gltf`)."""
 
     @classmethod
     def files(cls) -> dict[str, bytes]:
-        with open(HERO, "rb") as fh:
-            return {"hero.gltf": fh.read()}
-
-    def faces(self, mode: str):
         import test_aero_views as aero
-        png = shoot(self, self.server, mode, "hero.gltf", size=(640, 400))
+        out = {}
+        demo, _why = aero.demo_hero_gltf()
+        for name, path in (("hero.gltf", HERO), ("demo.gltf", demo)):
+            if path:
+                with open(path, "rb") as fh:
+                    out[name] = fh.read()
+        return out
+
+    def heroes(self) -> list[str]:
+        return [name for name in ("hero.gltf", "demo.gltf")
+                if os.path.isfile(os.path.join(self.site, name))]
+
+    def faces(self, mode: str, src: str = "hero.gltf"):
+        import test_aero_views as aero
+        png = shoot(self, self.server, mode, src, size=(640, 400))
         return png, aero.off_ramp(_interior(png))
 
     def test_the_flat_toggle_shows_the_keys_colours_and_the_lit_mode_does_not(self):
-        _png, flat = self.faces("flat")
-        _png, lit = self.faces("scene")
-        flat_share = float((flat <= HERO_RAMP_BYTES).mean())
-        lit_share = float((lit <= HERO_RAMP_BYTES).mean())
-        self.assertGreater(len(flat), 20000)
-        self.assertGreaterEqual(flat_share, HERO_FLAT_SHARE, (flat_share, lit_share))
-        self.assertLess(lit_share, flat_share / 5, (flat_share, lit_share))
+        for src in self.heroes():
+            with self.subTest(src):
+                _png, flat = self.faces("flat", src)
+                _png, lit = self.faces("scene", src)
+                flat_share = float((flat <= HERO_RAMP_BYTES).mean())
+                lit_share = float((lit <= HERO_RAMP_BYTES).mean())
+                self.assertGreater(len(flat), 20000)
+                self.assertGreaterEqual(flat_share, HERO_FLAT_SHARE, (flat_share, lit_share))
+                self.assertLess(lit_share, flat_share / 5, (flat_share, lit_share))
 
     def test_the_lit_hero_keeps_each_hue_of_the_file(self):
         import test_aero_views as aero
-        flat, _ = self.faces("flat")
-        lit, _ = self.faces("scene")
-        share = aero.same_hue_share(lit, flat, background=(0, 0, 0))
-        self.assertGreaterEqual(share, HERO_HUE_SHARE)
+        for src in self.heroes():
+            with self.subTest(src):
+                flat, _ = self.faces("flat", src)
+                lit, _ = self.faces("scene", src)
+                share = aero.same_hue_share(lit, flat, background=(0, 0, 0))
+                self.assertGreaterEqual(share, HERO_HUE_SHARE)
+
+
+def _indices(doc: dict, buffers: list, prim: dict):
+    """``(buffer index, start, rows)``: ``prim``'s triangle indices as an
+    ``(n, 3)`` numpy array copied out of ``buffers``."""
+    import numpy
+    acc = doc["accessors"][prim["indices"]]
+    view = doc["bufferViews"][acc["bufferView"]]
+    kind = {5121: numpy.uint8, 5123: numpy.uint16, 5125: numpy.uint32}[acc["componentType"]]
+    start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    size = numpy.dtype(kind).itemsize * acc["count"]
+    rows = numpy.frombuffer(bytes(buffers[view["buffer"]][start:start + size]), dtype=kind)
+    return view["buffer"], start, rows.reshape(-1, 3).copy()
+
+
+def _with_faces(gltf: bytes, change) -> bytes:
+    """``gltf`` (its buffers inline, as ParaView writes them) with each
+    primitive's triangles replaced by ``change(mesh index, rows)``, written
+    into a buffer of their own."""
+    import base64
+    doc = json.loads(gltf)
+    buffers = [base64.b64decode(b["uri"].split(",", 1)[1]) for b in doc["buffers"]]
+    for m, mesh in enumerate(doc["meshes"]):
+        for prim in mesh["primitives"]:
+            _k, _start, rows = _indices(doc, buffers, prim)
+            data = change(m, rows).astype("<u4").tobytes()
+            doc["buffers"].append({"byteLength": len(data), "uri":
+                                   "data:application/octet-stream;base64,"
+                                   + base64.b64encode(data).decode()})
+            doc["bufferViews"].append({"buffer": len(doc["buffers"]) - 1, "byteOffset": 0,
+                                       "byteLength": len(data), "target": 34963})
+            doc["accessors"].append({"bufferView": len(doc["bufferViews"]) - 1,
+                                     "byteOffset": 0, "componentType": 5125,
+                                     "count": len(data) // 4, "type": "SCALAR"})
+            prim["indices"] = len(doc["accessors"]) - 1
+    return json.dumps(doc).encode("utf-8")
+
+
+def turned_over(gltf: bytes) -> bytes:
+    """``gltf`` with each triangle's vertices in the other order: each front
+    face is a back face, and each back face a front face."""
+    return _with_faces(gltf, lambda _m, rows: rows[:, [0, 2, 1]])
+
+
+def baffled(gltf: bytes) -> bytes:
+    """``gltf`` with each triangle of its first mesh (the body) drawn twice,
+    the other way round on the same vertices: a baffle and its ``-shadow``
+    twin sharing their points. The normals the viewer computes there cancel,
+    so no light but the ambient reaches them (measured: SwiftShader draws a
+    zero normal unlit, not black)."""
+    import numpy
+    return _with_faces(gltf, lambda m, rows: numpy.concatenate([rows, rows[:, [0, 2, 1]]])
+                       if m == 0 else rows)
+
+
+def seen_from_behind(gltf: bytes) -> bytes:
+    """``gltf`` with its camera turned 180 degrees about the vertical (+z,
+    ParaView's up) through the middle of its first mesh (the body): the bike
+    from the rear and the right, the side the file's camera does not see. A
+    second angle the file states, so each drawing of it is the same; a drag
+    is not (its last pose moves from run to run, measured)."""
+    import numpy
+    doc = json.loads(gltf)
+    acc = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]]
+    middle = (numpy.array(acc["min"]) + numpy.array(acc["max"])) / 2
+    node = next(n for n in doc["nodes"] if "camera" in n)
+    pose = numpy.array(node["matrix"], dtype=float).reshape(4, 4).T
+    turn = numpy.diag([-1.0, -1.0, 1.0, 1.0])
+    to, back = numpy.eye(4), numpy.eye(4)
+    to[:3, 3], back[:3, 3] = middle, -middle
+    node["matrix"] = [float(v) for v in (to @ turn @ back @ pose).T.ravel()]
+    return json.dumps(doc).encode("utf-8")
+
+
+def changed_share(a_png: str, b_png: str, *, within: int = 8) -> float:
+    """Of the pixels either picture draws (not the page's black), the share
+    where the two differ by more than ``within`` in a channel."""
+    import numpy
+    from PIL import Image
+    with Image.open(a_png) as a, Image.open(b_png) as b:
+        x = numpy.asarray(a.convert("RGB")).astype(int)
+        y = numpy.asarray(b.convert("RGB")).astype(int)
+    drawn = (x != 0).any(-1) | (y != 0).any(-1)
+    return float((numpy.abs(x - y).max(-1)[drawn] > within).mean())
+
+
+def lit_over_flat(lit_png: str, flat_png: str) -> "numpy.ndarray":
+    """For each pixel the flat drawing draws (its brightest channel at least
+    40: the faces, not the page's black or the edges blended with it), the
+    lit drawing's brightest channel over the flat one's. The ambient light
+    alone gives 1/pi of the colour (three.js's units), the key light more."""
+    import numpy
+    from PIL import Image
+    with Image.open(lit_png) as a, Image.open(flat_png) as b:
+        lit = numpy.asarray(a.convert("RGB")).astype(int).max(-1)
+        flat = numpy.asarray(b.convert("RGB")).astype(int).max(-1)
+    drawn = flat >= 40
+    return lit[drawn] / flat[drawn]
+
+
+def drawn_middle(png: str) -> tuple[float, float, float]:
+    """``(share of the picture drawn, x, y)``: the drawn pixels' share and
+    their mean place, each as a fraction of the picture's width and height."""
+    import numpy
+    from PIL import Image
+    with Image.open(png) as image:
+        rgb = numpy.asarray(image.convert("RGB")).astype(int)
+    ys, xs = numpy.nonzero((rgb != 0).any(-1))
+    h, w = rgb.shape[:2]
+    if not len(xs):
+        return 0.0, 0.0, 0.0
+    return len(xs) / (w * h), float(xs.mean()) / w, float(ys.mean()) / h
+
+
+#: R8 of the design (the motorBike, P7): the thresholds, measured on
+#: 2026-10-25 (Chromium 1228, SwiftShader, 640 x 400) on the fixture and on
+#: the demo's own file, from the file's camera and from behind.
+#: - A face drawn the other way round changes no pixel by more than 8 bytes:
+#:   0.0% measured; a viewer that draws one side alone changes 94%.
+#:   *Rejected:* 0 (a rasteriser may break a tie on another pixel).
+TURNED_SHARE = 0.005
+#: - Black: under a quarter of the flat colour (the ambient floor is 0.32),
+#:   on no pixel (0.0% measured; 2.9% where a viewer drew the front faces
+#:   alone and the page's black showed through).
+BLACK, BLACK_SHARE = 0.25, 0.001
+#: - The ambient light alone (under 0.32 of the flat colour; 1/pi is 0.318)
+#:   on at most 4% of the pixels: 0.2% to 1.0% measured on the four views
+#:   (the faces that turn away from both lights); 12% from the file's camera
+#:   and 14% from behind where the body's faces are drawn twice on their
+#:   vertices and their normals cancel (`baffled`). *Rejected:* 0.34 (the
+#:   faces in the fill light's shade sit there: 4.9% from behind, measured).
+AMBIENT, AMBIENT_SHARE = 0.32, 0.04
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class BothSidesOfTheHeroAreLit(_env.EnvCase):
+    """(the motorBike design, R8 and P7) ParaView draws the motorBike's body
+    with its front faces culled: the body's faces wind inward, so the faces
+    toward the camera are back faces, and each ``-shadow`` baffle lies on its
+    twin. The viewer draws both sides (P2's departure from ``BackSide``), so
+    a back face must be lit as its front, and no face may be drawn black or
+    by the ambient light alone. Held on the committed fixture and, where
+    ``site build`` ran on the demo, on its own file, each from the file's
+    camera and from behind (`seen_from_behind`):
+
+    - the file and a copy with every face turned over draw the same pixels;
+    - lit over flat, no pixel is black and few are lit by the ambient alone;
+    - a reader's drag keeps the bike in the middle of the view.
+
+    Controls, each a planted defect that fails its check: a viewer that
+    draws the front faces alone or the back faces alone; a body whose faces
+    are drawn twice on their vertices, opposite ways; a viewer that turns
+    about the middle of the whole box, 15 m of tracks included."""
+
+    LIT_SIDE = "metalness: 0, toneMapped: false, side: THREE.DoubleSide"
+    AIM = "const centre = aim.getCenter(new THREE.Vector3());"
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        import test_aero_views as aero
+        sources = {"hero": HERO}
+        demo, _why = aero.demo_hero_gltf()
+        if demo:
+            sources["demo"] = demo
+        out = {}
+        for name, path in sources.items():
+            with open(path, "rb") as fh:
+                data = fh.read()
+            for angle, gltf in (("", data), ("_behind", seen_from_behind(data))):
+                out[f"{name}{angle}.gltf"] = gltf
+                out[f"{name}{angle}_over.gltf"] = turned_over(gltf)
+        out["hero_baffled.gltf"] = baffled(out["hero.gltf"])
+        out["hero_behind_baffled.gltf"] = baffled(out["hero_behind.gltf"])
+        return out
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.site, cls.server = serve_viewer(cls.files())
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        stop_viewer(cls.site, cls.server)
+        super().tearDownClass()
+
+    def views(self) -> list[str]:
+        """Each hero here, from its file's camera and from behind."""
+        return [f"{name}{angle}" for name in ("hero", "demo") for angle in ("", "_behind")
+                if os.path.isfile(os.path.join(self.site, f"{name}.gltf"))]
+
+    def shot(self, mode: str, src: str, server=None) -> str:
+        return shoot(self, server or self.server, mode, src, size=(640, 400))
+
+    def test_a_back_face_is_lit_as_its_front(self):
+        for view in self.views():
+            with self.subTest(view=view):
+                share = changed_share(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("scene", f"{view}_over.gltf"))
+                self.assertLessEqual(share, TURNED_SHARE)
+
+    def test_a_viewer_that_draws_one_side_fails_that_check(self):
+        for side in ("FrontSide", "BackSide"):
+            with self.subTest(side=side):
+                site, server = serve_viewer(self.files(), edits=(
+                    (self.LIT_SIDE, self.LIT_SIDE.replace("DoubleSide", side)),))
+                try:
+                    share = changed_share(self.shot("scene", "hero.gltf", server),
+                                          self.shot("scene", "hero_over.gltf", server))
+                finally:
+                    stop_viewer(site, server)
+                self.assertGreater(share, 0.5)
+
+    def test_no_face_is_black_or_lit_by_the_ambient_alone(self):
+        for view in self.views():
+            with self.subTest(view=view):
+                ratio = lit_over_flat(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("flat", f"{view}.gltf"))
+                self.assertGreater(len(ratio), 20000)
+                self.assertLessEqual(float((ratio < BLACK).mean()), BLACK_SHARE)
+                self.assertLessEqual(float((ratio < AMBIENT).mean()), AMBIENT_SHARE)
+
+    def test_faces_whose_normals_cancel_fail_that_check(self):
+        for view in ("hero_baffled", "hero_behind_baffled"):
+            with self.subTest(view=view):
+                ratio = lit_over_flat(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("flat", f"{view}.gltf"))
+                self.assertGreater(float((ratio < AMBIENT).mean()), 2 * AMBIENT_SHARE)
+
+    def test_a_drag_keeps_the_bike_in_the_middle(self):
+        for name in self.views():
+            if name.endswith("_behind"):
+                continue
+            with self.subTest(name=name):
+                still = drawn_middle(self.shot("scene", f"{name}.gltf"))
+                turned = drawn_middle(self.shot("drag", f"{name}.gltf"))
+                self.assertGreater(turned[0], still[0] / 2, (still, turned))
+                self.assertTrue(0.25 < turned[1] < 0.75 and 0.25 < turned[2] < 0.75,
+                                (still, turned))
+
+    def test_a_viewer_that_turns_about_the_whole_box_fails_that_check(self):
+        site, server = serve_viewer(self.files(), edits=(
+            (self.AIM, self.AIM.replace("aim.", "box.")),))
+        try:
+            turned = drawn_middle(self.shot("drag", "hero.gltf", server))
+        finally:
+            stop_viewer(site, server)
+        self.assertFalse(0.25 < turned[1] < 0.75 and 0.25 < turned[2] < 0.75, turned)
 
 
 #: A page that mounts `scaleLegend` and `figureStill` from ``lib/figures.js``

@@ -94,7 +94,8 @@ function sanitise(name) {
  *  where the file has none (ParaView's glTF writes none, measured); the first
  *  view is the file's own camera when it has one, else the box's diagonal,
  *  and the view turns about the world axis nearest that camera's up
- *  (``orbitAbout``).
+ *  (``orbitAbout``), through a point of its line of sight in the body it
+ *  looks at (``firstLitView``).
  *  Light and shade make a colour darker or lighter than the key's, so the
  *  viewer keeps the unlit material too, and ``setFlat(true)`` (the "Flat
  *  colours" toggle) swaps it in: then each pixel is the file's byte, as in
@@ -104,7 +105,9 @@ function sanitise(name) {
  *  sides, lit by the side the camera sees. *Rejected:* ``BackSide`` alone
  *  (ParaView's front-face cull on the motorBike body): it draws nothing of a
  *  mesh whose faces wind toward the camera, and which way a file winds is
- *  the exporter's (P7 checks the motorBike's baffles in the browser); an sRGB
+ *  the exporter's (P7 measured the motorBike's both ways in the browser: a
+ *  file with every face turned over draws the same pixels, and no face is
+ *  black, `test_field_browser.BothSidesOfTheHeroAreLit`); an sRGB
  *  output for the lit material (the flat toggle would then move every
  *  colour of the key). */
 export function createViewer({ host, view, onSelect, onReady, onError, onProgress, onSpinStop,
@@ -370,8 +373,18 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
   }
 
   /** A lit field's first view: the file's own camera, when it has one, aimed
-   *  at the point of the box nearest its line of sight; else the box's
-   *  diagonal, as a model is framed. */
+   *  at the point of its line of sight nearest the middle of the box; else
+   *  the box's diagonal, as a model is framed. The view turns about that
+   *  point. The box is the whole file's, or the smallest mesh box the line of
+   *  sight passes through when that one is less than half the whole box's
+   *  size. What slipped through P2 (found in P7 of the motorBike design): the
+   *  whole box alone, and the motorBike's stream tracks run 15 m downstream
+   *  of the bike, so a drag or the spin swung the bike to a corner of the
+   *  view and far off. *Rejected:* any smaller mesh box (a ground's own box,
+   *  nearly the whole one, moved the turn off the ground's middle:
+   *  `test_field_browser.ALitFieldTurnsAboutItsUp`); a ray cast to the first
+   *  face hit (a thin track in front of the body would be the point); the
+   *  file's own focal point (a glTF camera has none). */
   function firstLitView() {
     if (!fileCamera) { frameObjects(null); return; }
     const box = boundsOf(null);
@@ -380,7 +393,16 @@ export function createViewer({ host, view, onSelect, onReady, onError, onProgres
     const position = new THREE.Vector3().setFromMatrixPosition(fileCamera.matrixWorld);
     const ahead = new THREE.Vector3(0, 0, -1).transformDirection(fileCamera.matrixWorld);
     const up = new THREE.Vector3(0, 1, 0).transformDirection(fileCamera.matrixWorld);
-    const centre = box.getCenter(new THREE.Vector3());
+    const sight = new THREE.Ray(position, ahead);
+    const size = (b) => b.getSize(new THREE.Vector3()).length();
+    let aim = box;
+    root.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const part = new THREE.Box3().setFromObject(obj);
+      if (!part.isEmpty() && sight.intersectsBox(part) && size(part) < size(aim)) aim = part;
+    });
+    if (size(aim) >= size(box) / 2) aim = box;
+    const centre = aim.getCenter(new THREE.Vector3());
     const reach = Math.max(centre.clone().sub(position).dot(ahead), 1e-3);
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
     camera.fov = fileCamera.fov || camera.fov;

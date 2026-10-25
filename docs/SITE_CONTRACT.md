@@ -951,7 +951,13 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   Normals are computed where the file has none (ParaView's glTF holds none). The
   first view is the file's first perspective camera, else the box's diagonal; the
   view turns about the world axis nearest that camera's up (+Z for ParaView's), so a
-  drag or a spin never turns the body end over end. The output stays
+  drag or a spin never turns the body end over end, and through the point of the
+  camera's line of sight nearest the middle of the smallest mesh box that line
+  passes through (when it is less than half the size of the whole box; else the
+  whole box's), so the motorBike stays in the middle of the view and its 15 m of
+  stream tracks do not swing it off. A back face is lit as its front: a file with
+  every face turned over draws the same pixels, from the file's camera and from
+  behind, and no face is drawn black (`test_field_browser.BothSidesOfTheHeroAreLit`). The output stays
   `LinearSRGBColorSpace` with `NoToneMapping`. Light and shade make a colour darker
   or lighter than the key's, so the viewer keeps each mesh's unlit material, and
   `setFlat(true)` swaps it in: then each pixel is the file's byte within 2, as in the

@@ -99,7 +99,11 @@ bytes into a scratch folder before ParaView reads them. A picture bound to
 - **Why front faces are culled.** OpenFOAM's patch normals point into the
   body, so the faces toward the camera are back faces. Of the two coincident
   faces of each `-shadow` baffle on the motorBike, the one toward the camera
-  is kept. Drawn with both faces, the baffles speckled (measured).
+  is kept. Drawn with both faces, the baffles speckled (measured). The
+  page's 3D view draws both faces, each lit by the side the reader sees: in
+  the browser a file with every face turned over draws the same pixels, and
+  no face of the motorBike is black or lit by the ambient light alone
+  (measured in P7, from the file's camera and from behind).
 - **Why no SSAO, no tone mapping, no shadows.** SSAO made the sky white and
   added grain; tone mapping moved every colour; this build has no OSPRay for
   shadows (each measured).

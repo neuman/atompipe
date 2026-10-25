@@ -26,6 +26,12 @@ What these tests hold:
   another run's file, an unchecked or missing ParaView, another preset, a PNG
   or a glTF that is not the run's, an empty piece and bands in other colours
   draw nothing, and say why; a glTF over the cap leaves the still;
+- the hero's 3D file as the page takes it, with no ParaView
+  (``TheHerosThreeDFile``): the committed fixture and, where ``site build``
+  ran on the demo, the demo's own file pass the Khronos glTF validator, carry
+  ``COLOR_0`` and no ``TEXCOORD_0``, fit the cap and hold every vertex colour
+  within 2 of the Turbo ramp (an unlit twin's colours), while a shaded copy,
+  one vertex 3 bytes off and a colour accessor that is not normalized fail;
 - on the real ParaView 6.2.0 (``TheRealPictures``): the committed preset is
   ParaView's Turbo, the renderer control passes with Turbo, the unlit stills
   and the unlit twin of the hero hold every pixel to the Turbo ramp within 2
@@ -35,7 +41,8 @@ What these tests hold:
   committed files are what ParaView draws today.
 
 The browser's lit and flat drawing of the hero's glTF is
-``test_field_browser.TheBrowserDrawsTheHero``; the scales' rule, over every
+``test_field_browser.TheBrowserDrawsTheHero`` and, both sides of its faces
+(R8), ``test_field_browser.BothSidesOfTheHeroAreLit``; the scales' rule, over every
 scale of this pack, is ``test_figures.TheScaleIsAPackConstant``.
 
 Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_aero_views.py -v
@@ -945,6 +952,226 @@ class TheViewsReadWhatTheGateWrites(_env.EnvCase):
 
 ROLES_SCENE = {"aero.hero": "hero", "aero.surface_cp": "surface_cp", "aero.wake": "wake",
                "aero.wake_cuts": "wake_cuts", "aero.wall": "wall"}
+
+
+# --------------------------------------------------------------------------- #
+# the hero's 3D file, as the page takes it (P7)
+# --------------------------------------------------------------------------- #
+#: The hero's glTF as ParaView 6.2.0 exported it from the committed motorBike
+#: fixtures (``make_standin.py``): the body by Cp, the tracks by speed.
+HERO_GLTF = os.path.join(STANDIN, "hero.gltf")
+#: The motorbike demo, whose tracked sidecar names the hero's 3D file by
+#: name and digest. The file itself is under ``site/assets/live/``, which git
+#: ignores (a 3D file of a result no export re-ran): it is there only where
+#: ``site build`` ran on the demo's own result.
+DEMO = os.path.join(REPO, "examples", "motorbike")
+
+
+def demo_hero_gltf() -> tuple[str, str]:
+    """``(path, "")`` of the demo's hero glTF, the one its tracked sidecar
+    names, with the bytes it names; else ``("", why not)``."""
+    import glob
+    sidecars = sorted(glob.glob(os.path.join(DEMO, "site", "assets", "figures", GATE, "*",
+                                             "aero.hero.view.json")))
+    if len(sidecars) != 1:
+        return "", f"the demo tracks {len(sidecars)} hero sidecars, not one"
+    with open(sidecars[0], encoding="utf-8") as fh:
+        side = json.load(fh)
+    field = (side.get("files") or {}).get("field") or {}
+    if not field.get("name"):
+        return "", "the demo's hero names no 3D file"
+    path = os.path.join(DEMO, "site", "assets", "live", side["gate"], side["entry"], field["name"])
+    if not os.path.isfile(path):
+        return "", "the demo's hero 3D file is not built here (site build writes it under " \
+                   "site/assets/live/, which git ignores)"
+    if _sha256(path) != field.get("sha256"):
+        return "", "the demo's hero 3D file here is not the one its sidecar names"
+    return path, ""
+
+
+def _gltf_doc(path: str) -> dict:
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def gltf_colours(doc: dict, name: str) -> "numpy.ndarray":
+    """Every ``COLOR_0`` of ``doc`` (a glTF with its buffers inline) as RGB
+    bytes, read from its accessors with no code of the pack and no glTF
+    library (an UNSIGNED_BYTE VEC4 or VEC3, normalized, as ParaView writes
+    it; anything else is refused, naming ``name``)."""
+    import base64
+    import numpy
+    out = []
+    for mesh in doc["meshes"]:
+        for prim in mesh["primitives"]:
+            acc = doc["accessors"][prim["attributes"]["COLOR_0"]]
+            if acc["componentType"] != 5121 or acc["type"] not in ("VEC3", "VEC4"):
+                raise AssertionError(f"{name}: COLOR_0 is not unsigned bytes: {acc}")
+            view = doc["bufferViews"][acc["bufferView"]]
+            uri = doc["buffers"][view["buffer"]]["uri"]
+            raw = base64.b64decode(uri.split(",", 1)[1])
+            width = 4 if acc["type"] == "VEC4" else 3
+            stride = view.get("byteStride", width)
+            start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+            rows = numpy.frombuffer(raw[start:start + stride * acc["count"]], dtype=numpy.uint8)
+            out.append(rows.reshape(acc["count"], stride)[:, :3])
+    return numpy.concatenate(out)
+
+
+def solid_problems(path: str) -> list[str]:
+    """What keeps ``path`` from being the hero's 3D file the page may show:
+    over the cap, a primitive without ``COLOR_0`` or with ``TEXCOORD_0`` (a
+    texture the flat toggle would not show as the key), and a vertex colour
+    more than `RAMP_TOLERANCE` from the Turbo ramp that is not the colour past
+    either end. The colours sit where an unlit twin's pixels sit."""
+    import numpy
+    name = os.path.basename(path)
+    problems = []
+    if os.path.getsize(path) > page.EVIDENCE_MAX_BYTES:
+        problems.append(f"{name} is over the cap")
+    doc = _gltf_doc(path)
+    for mesh in doc["meshes"]:
+        for prim in mesh["primitives"]:
+            if "COLOR_0" not in prim["attributes"]:
+                problems.append(f"{name}: a primitive has no COLOR_0")
+            if "TEXCOORD_0" in prim["attributes"]:
+                problems.append(f"{name}: a primitive has TEXCOORD_0")
+    if problems:
+        return problems
+    colours = gltf_colours(doc, name)
+    special = (colours == OVER).all(1) | (colours == UNDER).all(1)
+    off = off_ramp(colours[~special])
+    if len(off) == 0 or float(off.max()) > RAMP_TOLERANCE:
+        far = int((off > RAMP_TOLERANCE).sum())
+        problems.append(f"{name}: {far} of {len(off)} vertex colours are off the Turbo ramp "
+                        f"(the farthest {float(off.max()) if len(off) else 0:.2f} bytes)")
+    return problems
+
+
+def edited_gltf(path: str, edit) -> bytes:
+    """``path``'s glTF with ``edit(doc, colours)`` applied: ``colours`` is the
+    bytes of each ``COLOR_0`` accessor's view, as a numpy array the edit may
+    change in place; the buffers are written back inline."""
+    import base64
+    import numpy
+    doc = _gltf_doc(path)
+    buffers = [bytearray(base64.b64decode(b["uri"].split(",", 1)[1])) for b in doc["buffers"]]
+    views = []
+    for mesh in doc["meshes"]:
+        for prim in mesh["primitives"]:
+            acc = doc["accessors"][prim["attributes"]["COLOR_0"]]
+            view = doc["bufferViews"][acc["bufferView"]]
+            start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+            views.append((view["buffer"], start, view["byteLength"]))
+    for k, start, length in views:
+        rows = numpy.frombuffer(bytes(buffers[k][start:start + length]), dtype=numpy.uint8).copy()
+        edit(doc, rows)
+        buffers[k][start:start + length] = rows.tobytes()
+    for b, raw in zip(doc["buffers"], buffers):
+        b["uri"] = "data:application/octet-stream;base64," + base64.b64encode(bytes(raw)).decode()
+    return json.dumps(doc).encode("utf-8")
+
+
+def _numpy_missing() -> str:
+    try:
+        __import__("numpy")
+    except ImportError:
+        return "numpy is not installed"
+    return ""
+
+
+class TheHerosThreeDFile(_env.EnvCase):
+    """(the motorBike design, P7) The hero's glTF (``field_src``), as the
+    page takes it, with no ParaView: the committed fixture ParaView exported
+    and, where ``site build`` ran on the demo, the demo's own file (1.5 MB,
+    the full base mesh). Each passes the Khronos glTF validator with no error
+    and no warning, carries ``COLOR_0`` and no ``TEXCOORD_0``, fits the cap,
+    and holds every vertex colour within 2 of the Turbo ramp or at a colour
+    past either end: the colours an unlit twin draws, so the "Flat colours"
+    toggle shows the key's colours. Controls: a file whose colours were
+    shaded fails the ramp, and one whose colour accessor is not normalized
+    fails the validator. ``TheRealPictures`` holds the file ParaView writes
+    today; ``test_field_browser.TheBrowserDrawsTheHero`` and
+    ``BothSidesOfTheHeroAreLit`` how the browser draws it."""
+
+    def setUp(self):
+        super().setUp()
+        missing = _numpy_missing()
+        if missing:
+            self.skipTest(f"not walked: {missing}")
+
+    def files(self) -> list[str]:
+        demo, _why = demo_hero_gltf()
+        return [HERO_GLTF] + ([demo] if demo else [])
+
+    def test_the_khronos_validator_passes_each(self):
+        import test_cfd_views
+        for path in self.files():
+            with self.subTest(os.path.basename(path)):
+                report = test_cfd_views.khronos(self, path)
+                self.assertEqual((report["errors"], report["warnings"]), (0, 0), report["codes"])
+                self.assertEqual(report["draws"], 2)
+
+    def test_each_holds_the_keys_colours_and_fits_the_cap(self):
+        for path in self.files():
+            with self.subTest(os.path.basename(path)):
+                self.assertEqual(solid_problems(path), [])
+                # Both scales reach the file: the body's Cp and the tracks'
+                # speed each span most of the ramp, not one colour.
+                self.assertGreater(len({tuple(c) for c in gltf_colours(_gltf_doc(path), "")}),
+                                   200)
+
+    def test_the_demo_is_walked_where_it_is_built(self):
+        demo, why = demo_hero_gltf()
+        if not demo:
+            self.skipTest(f"not walked: {why}")
+        self.assertGreater(os.path.getsize(demo), 10 * os.path.getsize(HERO_GLTF))
+
+    def test_shaded_colours_fail_the_ramp(self):
+        def shade(_doc, rows):
+            rgba = rows.reshape(-1, 4)
+            rgba[:, :3] = (rgba[:, :3] * 0.85).astype("uint8")
+        target = os.path.join(self.tmp(), "shaded.gltf")
+        with open(target, "wb") as fh:
+            fh.write(edited_gltf(HERO_GLTF, shade))
+        problems = solid_problems(target)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("off the Turbo ramp", problems[0])
+
+    def test_one_colour_three_bytes_off_fails_the_ramp(self):
+        """The tolerance is 2: one vertex 3 bytes off, in the body and in the
+        tracks, is found."""
+        def nudge(_doc, rows):
+            rgba = rows.reshape(-1, 4)
+            k = int(((rgba[:, :3] != OVER).any(1) & (rgba[:, :3] != UNDER).any(1)).argmax())
+            rgba[k, :3] = [min(255, int(c) + 3) if c < 128 else int(c) - 3 for c in rgba[k, :3]]
+        target = os.path.join(self.tmp(), "nudged.gltf")
+        with open(target, "wb") as fh:
+            fh.write(edited_gltf(HERO_GLTF, nudge))
+        problems = solid_problems(target)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("nudged.gltf: 2 of "), problems)
+
+    def test_a_texture_or_no_colour_is_refused(self):
+        doc = _gltf_doc(HERO_GLTF)
+        prim = doc["meshes"][0]["primitives"][0]
+        prim["attributes"]["TEXCOORD_0"] = prim["attributes"].pop("COLOR_0")
+        target = os.path.join(self.tmp(), "texture.gltf")
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        self.assertEqual(solid_problems(target), ["texture.gltf: a primitive has no COLOR_0",
+                                                  "texture.gltf: a primitive has TEXCOORD_0"])
+
+    def test_a_colour_accessor_not_normalized_fails_the_validator(self):
+        import test_cfd_views
+        doc = _gltf_doc(HERO_GLTF)
+        acc = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"]]
+        self.assertTrue(acc.pop("normalized"))
+        target = os.path.join(self.tmp(), "raw.gltf")
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        report = test_cfd_views.khronos(self, target)
+        self.assertGreater(report["errors"], 0, report)
 
 
 # --------------------------------------------------------------------------- #
