@@ -1124,8 +1124,11 @@ from nopekit.models import View, ViewKind
 def speed(ctx: BoundContext) -> View | None:
     path = ctx.entry.path("summary.json")     # a verified evidence file, or None
     if path is None:
-        ctx.note("summary.json: the file on this computer is from another run: "
-                 "`nopekit check --force --only flow.pressure_drop` solves it again")
+        # Cited but withheld: say the spine's reason, word for word. Never
+        # cited (the gate stopped before it wrote one): nothing to draw, nothing to say.
+        for cited, why in ctx.entry.withheld.items():
+            if cited.endswith("summary.json"):
+                ctx.note(f"summary.json: {why}")
         return None
     with open(path, encoding="utf-8") as fh:
         summary = json.load(fh)

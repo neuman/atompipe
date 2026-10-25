@@ -152,19 +152,26 @@ SETTLE_CAPTION = ("How much the pressure drop changed after each iteration, as a
 
 
 def _summary(ctx):
-    """The verified summary of the entry, or None, said in the warnings."""
+    """The verified summary of the entry, or None. A summary the entry cites
+    and the spine withholds is said in the warnings, in the spine's own
+    words, word for word (``BoundEntry.withheld``, `page._ANOTHER_RUN` among
+    them): one fault, one sentence to search a build's warnings for. What
+    slipped through (review of P2): the pack said "the evidence on this
+    computer", PACK.md quoted "the file on this computer", and PACK_FORMAT's
+    example a third spelling. An entry that cites no summary (a gate that
+    stopped before it wrote one) has nothing to draw and says nothing. What
+    slipped through aero-openfoam's copy of this (2026-10-24): a ladder that
+    failed on its meshes before any solve cited only logs, and the build
+    warned that summary.json "is from another run", a file no run wrote."""
     path = ctx.entry.path("summary.json")
-    if path is None:
-        # The spine's own sentence for a file of another run, word for word
-        # (`page._ANOTHER_RUN`): one fault, one sentence to search a build's
-        # warnings for. What slipped through (review of P2): the pack said
-        # "the evidence on this computer", PACK.md quoted "the file on this
-        # computer", and PACK_FORMAT's example a third spelling.
-        ctx.note(f"summary.json: the file on this computer is from another run: `nopekit "
-                 f"check --force --only {GATE}` solves it again")
-        return None
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    if path is not None:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    why = sorted(reason for cited, reason in ctx.entry.withheld.items()
+                 if str(cited).replace("\\", "/").rsplit("/", 1)[-1] == "summary.json")
+    if why:
+        ctx.note(f"summary.json: {why[0]}")
+    return None
 
 
 def _number(value) -> bool:

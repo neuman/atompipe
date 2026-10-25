@@ -651,7 +651,7 @@ class AMeshIsJudgedByThePacksLimits(_StandinCase):
         v = self.gate("aero.mesh_quality")
         self.assertEqual(v.outcome, "pass", v.render())
         self.assertEqual((v.measured, v.units, v.comparator, v.limit),
-                         (41546.0, "cells", "<", 2e7))
+                         (41574.0, "cells", "<", 2e7))
         self.assertIn("layers on 100% of the body's faces", v.detail)
         calls = self.calls()
         for tool in ("blockMesh", "decomposePar", "snappyHexMesh", "checkMesh"):
@@ -1274,12 +1274,13 @@ class EveryLadderLevelPassesTheGuards(_LadderCase):
         self.assertIn("the band at the formal order with Fs 3", v.detail)
         self.assertEqual(calls.count("simpleFoam"), 3)
         data = self.summary(v)
-        self.assertEqual([lv["cells"] for lv in data["levels"]], [41546, 132094, 386302])
+        self.assertEqual([lv["cells"] for lv in data["levels"]], [41574, 132094, 386302])
         self.assertEqual([lv["counts"] for lv in data["levels"]],
                          [[[28, 12, 8]], [[42, 18, 12]], [[63, 27, 18]]])
         self.assertEqual((data["order_rule"], data["order_used"], data["safety_factor"]),
                          ("formal", 2.0, 3.0))
-        # 2.712 on the real ladder; the stand-in's base mesh is P3's 41 546 cells.
+        # 2.712 on the real ladder; the stand-in's base mesh replays P3's history,
+        # solved on 41 546 cells (``_aero_standin.HISTORIES``).
         self.assertAlmostEqual(data["gci"]["p"], 2.71, delta=0.005)
         fine = data["levels"][-1]
         self.assertEqual(fine["h_rel"], 1.0)
@@ -1331,7 +1332,7 @@ class EveryLadderLevelPassesTheGuards(_LadderCase):
         self.mode({"simpleFoam": {"residual_climb": 40}})
         ((v, _calls),) = self.gates("aero.mesh_independence")
         self.assertEqual(v.outcome, "fail", v.render())
-        self.assertIn("level 0 (41546 cells) is not converged", v.detail)
+        self.assertIn("level 0 (41574 cells) is not converged", v.detail)
 
     def test_above_the_formal_order_the_band_is_the_formal_orders(self):
         """Review of P6: the switch sat at formal + 0.05, so an observed order

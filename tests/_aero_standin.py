@@ -185,13 +185,18 @@ if TOOL == "decomposePar":
 
 #: The cells the real snappyHexMesh meshed the selftest's cases to (P6, 4
 #: ranks, ``hierarchical``): ``{(background cells, radii, layers): cells}``,
-#: the base mesh's the count of ``snappy_baseline.log`` (41 546, the P3 run
-#: the log was cut from; P6 measured 41 574 on 4 ranks),
+#: the base mesh's 41 574 (P6, and again on 2026-10-24 by the motorbike's
+#: first full check, which ran the pack's controls on this baseline: 41 574,
+#: 132 094 and 386 302 on 4 ranks, as meshing.md and baseline.json say),
 #: the baseline spheroid's ladder at ratio 1.5, its ladder at 1.3
 #: (``narrow_ladder``), the 1.125 times larger body's ladder (``bigger_body``)
 #: and the mesh without layers (``no_layers``). A mesh the table does not hold
-#: scales the baseline's by its background cells.
-SNAPPED = {(2688, (0.5, 0.125, 0.125), True): 41546,
+#: scales the baseline's by its background cells. What slipped through P6:
+#: the base mesh stood at 41 546, the count in ``snappy_baseline.log``, the
+#: P3 run that log was cut from (decomposed with ``scotch``, which meshes
+#: 41 546 to 41 588), so the stand-in's ladder began on a mesh the pack no
+#: longer makes. The log's own count is replaced by this one, as every other.
+SNAPPED = {(2688, (0.5, 0.125, 0.125), True): 41574,
            (9072, (0.5, 0.125, 0.125), True): 132094,
            (30618, (0.5, 0.125, 0.125), True): 386302,
            (5760, (0.5, 0.125, 0.125), True): 78726,
@@ -203,8 +208,9 @@ SNAPPED = {(2688, (0.5, 0.125, 0.125), True): 41546,
 #: The drag-area history the real simpleFoam wrote on each of those meshes
 #: (``tests/aero_fixtures/``; the base mesh's is the full file, the others
 #: hold the Time and Cd columns only). A mesh with no history of its own
-#: replays the base mesh's.
-HISTORIES = {41546: "spheroid_coefficient.dat", 132094: "ladder/spheroid_L1.dat",
+#: replays the base mesh's (``spheroid_coefficient.dat``, P3's solve on its
+#: 41 546-cell mesh: the nearest history of the base mesh the fixtures hold).
+HISTORIES = {41574: "spheroid_coefficient.dat", 132094: "ladder/spheroid_L1.dat",
              386302: "ladder/spheroid_L2.dat", 44626: "ladder/bigger_L0.dat",
              141285: "ladder/bigger_L1.dat", 408434: "ladder/bigger_L2.dat"}
 

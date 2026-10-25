@@ -572,6 +572,48 @@ class ChartsNeedNoTool(_env.EnvCase):
         self.assertEqual((view.data["band"][0]["lo"], view.data["band"][0]["hi"]),
                          (0.296, 0.304))
 
+    def test_a_ladder_that_failed_before_solving_draws_nothing_and_warns_nothing(self):
+        """aero.mesh_independence's entry when its meshes fail before any
+        solve (``_solve_ladder``'s refusal): its evidence is the meshes' logs
+        and no summary.json. The chart draws nothing and says nothing; the
+        card is the entry's status and detail. Red before the fix: the
+        motorbike's first full check (2026-10-24) failed on level 2's mesh,
+        and the build warned "summary.json: the file on this computer is from
+        another run" of a file no run of that entry wrote."""
+        from nopekit import store
+        log = os.path.join(store.out_dir(self.root), "aero_mesh_independence", "level2",
+                           "log.snappyHexMesh")
+        os.makedirs(os.path.dirname(log))
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write("Finished meshing with 5 illegal faces\n")
+        files = {"aero_mesh_independence/level2/log.snappyHexMesh": log}
+        entry = site_mod.BoundEntry(gate=LADDER_GATE, name="0" * 16 + "-" + "0" * 8,
+                                    fresh=True, files=files)
+        view, note, ctx, _r = self.chart("aero.ladder", {**self.entries,
+                                                         LADDER_GATE: (entry, files)})
+        self.assertIsNone(view)
+        self.assertEqual(ctx.notes, [])
+        self.assertEqual(site_mod._note_status(view, note), "empty")
+
+    def test_a_withheld_summary_is_said_in_the_spines_words(self):
+        """A summary the entry cites and the spine withholds: the chart draws
+        nothing and says the spine's reason, word for word. Red before the
+        fix for a summary that is not on this computer (a fresh clone): the
+        view said it was "from another run"."""
+        _entry, files = self.entries[LADDER_GATE]
+        for reason in (page._ANOTHER_RUN.format(gate=LADDER_GATE), "it is not on this computer",
+                       page._NO_RECORDED_RUN):
+            with self.subTest(reason):
+                withheld = {p: reason for p in files if p.endswith("summary.json")}
+                kept = {p: a for p, a in files.items() if p not in withheld}
+                self.assertTrue(withheld)
+                entry = site_mod.BoundEntry(gate=LADDER_GATE, name="0" * 16 + "-" + "0" * 8,
+                                            fresh=True, files=kept, withheld=withheld)
+                view, _note, ctx, _r = self.chart("aero.ladder", {**self.entries,
+                                                                  LADDER_GATE: (entry, kept)})
+                self.assertIsNone(view)
+                self.assertEqual(ctx.notes, [f"summary.json: {reason}"])
+
     def test_every_chart_number_is_in_the_evidence(self):
         for view_id in CHARTS:
             with self.subTest(view_id):

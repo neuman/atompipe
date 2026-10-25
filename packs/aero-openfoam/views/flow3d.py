@@ -193,15 +193,26 @@ LADDER_CAPTION = ("The drag area on each mesh of the ladder, against the cell si
 HISTORY_WINDOWS = 3
 
 
-def _summary(ctx, gate: str):
-    """The verified summary of the entry, or None, said in the warnings."""
+def _summary(ctx):
+    """The verified summary of the entry, or None. A summary the entry cites
+    and the spine withholds is said in the warnings, in the spine's own words
+    (``BoundEntry.withheld``: another run's bytes, not on this computer, no
+    recorded run). An entry that cites no summary has nothing to draw and
+    says nothing: its gate stopped before it wrote one (a ladder whose meshes
+    fail before any solve, a run that errored), and the card says so by the
+    entry's status and detail. What slipped through the motorbike's first
+    full check (2026-10-24): aero.mesh_independence failed on level 2's mesh
+    before it solved, its entry cited only logs, and the build warned that
+    summary.json "is from another run", a file no run of that entry wrote."""
     path = ctx.entry.path("summary.json")
-    if path is None:
-        ctx.note(f"summary.json: the file on this computer is from another run: `nopekit "
-                 f"check --force --only {gate}` solves it again")
-        return None
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    if path is not None:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    why = sorted(reason for cited, reason in ctx.entry.withheld.items()
+                 if str(cited).replace("\\", "/").rsplit("/", 1)[-1] == "summary.json")
+    if why:
+        ctx.note(f"summary.json: {why[0]}")
+    return None
 
 
 def _number(value) -> bool:
@@ -319,7 +330,7 @@ def _picture(ctx, view_id: str, gate: str, scene: str, roles: tuple[str, ...], *
     to the scale builders of ``_scales.py``; ``as_list`` names, for a figure
     with ``scales``, where each is drawn (``(("cp", "surface"), ...)``); with
     none, the one scale is the figure's ``scale``."""
-    summary = _summary(ctx, gate)
+    summary = _summary(ctx)
     if summary is None:
         return None
     built = {name: fn(summary) for name, fn in scales.items()}
@@ -471,7 +482,7 @@ def history(ctx):
     at its lowest value: U_I is half the distance between them. A history
     whose window is not the summary's ``u_i`` draws no chart (it would not be
     the window the gate judged)."""
-    summary = _summary(ctx, GATE)
+    summary = _summary(ctx)
     if summary is None:
         return None
     rows = _cda_history(ctx, summary)
@@ -534,7 +545,7 @@ def ladder(ctx):
     not the drag area, so the spine draws no limit and no judged point here.
     *Rejected:* the claim's limit line (it is drag_area's, beside its own
     judged value, which this entry does not hold)."""
-    summary = _summary(ctx, LADDER_GATE)
+    summary = _summary(ctx)
     if summary is None:
         return None
     levels = [lv for lv in summary.get("levels") or ()

@@ -208,14 +208,20 @@ class _OnTheStandIn(_env.EnvCase):
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
 
-    def context(self, *, drop: tuple[str, ...] = ()) -> site_mod.BoundContext:
+    def context(self, *, drop: tuple[str, ...] = (),
+                omit: tuple[str, ...] = ()) -> site_mod.BoundContext:
         """A BoundContext over the verdict's evidence, as the spine hands it:
         ``files`` holds the verified evidence, less the base names in ``drop``
-        (files the entry's manifest does not vouch for)."""
-        files = {os.path.relpath(p, self.out).replace(os.sep, "/"): p
-                 for p in self.verdict.evidence if os.path.basename(p) not in drop}
+        (files the entry's manifest does not vouch for: ``withheld`` as
+        another run's, `site._bound_entry`'s words) and in ``omit`` (files
+        the entry never cited)."""
+        cited = {os.path.relpath(p, self.out).replace(os.sep, "/"): p
+                 for p in self.verdict.evidence if os.path.basename(p) not in omit}
+        files = {rel: p for rel, p in cited.items() if os.path.basename(p) not in drop}
+        withheld = {rel: page._ANOTHER_RUN.format(gate=GATE) for rel in cited
+                    if rel not in files}
         entry = site_mod.BoundEntry(gate=GATE, name="0" * 16 + "-" + "0" * 8, fresh=True,
-                                    files=files)
+                                    files=files, withheld=withheld)
         scratch = os.path.join(self.dir, "scratch")
         os.makedirs(scratch, exist_ok=True)
         ctx = site_mod.BoundContext(root=self.work, entry=entry, scratch=scratch, view_id="")
@@ -451,6 +457,18 @@ class ChartsNeedNoTool(_OnTheStandIn):
                 self.assertIsNone(view)
                 self.assertTrue(ctx.notes and "--only cfd.pressure_drop" in ctx.notes[0],
                                 ctx.notes)
+
+    def test_an_entry_that_cites_no_summary_draws_nothing_and_warns_nothing(self):
+        """A gate that stopped before it wrote its summary (meshes refused
+        before any solve) cites none: neither chart draws, and neither says
+        the summary is from another run. Red before the fix (aero-openfoam's
+        copy on the motorbike, 2026-10-24): the build warned of another run's
+        summary.json that no run of the entry wrote."""
+        for view_id in (LADDER, SETTLE):
+            with self.subTest(view_id):
+                _spec, view, ctx = self.draw(view_id, omit=("summary.json",))
+                self.assertIsNone(view)
+                self.assertEqual(ctx.notes, [])
 
     def test_a_computed_number_is_refused_by_the_spine(self):
         """The control of the evidence rule on these charts: one number the
