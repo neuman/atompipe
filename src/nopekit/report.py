@@ -307,7 +307,11 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
                    "current design.",
         "failing": "An evaluator or a test on a built part failed the current design.",
         "errored": "An evaluator stopped with an error. A crash settles nothing.",
-        "skipped": "An evaluator did not run. A tool that it needs is missing.",
+        # Every cause of a skip (S-54), as the CLI's hint says them. What slipped
+        # through (P8, the motorbike demo): a claim skipped behind a guard that
+        # FAILED carried "A tool that it needs is missing." on its chip.
+        "skipped": "An evaluator did not run. A tool or a value that it needs is missing, "
+                   "or an evaluator that it needs first did not pass.",
         "gap": "Nothing can settle this claim yet.",
         "open": "An evaluator can settle this claim. It did not run on the current design.",
         # Both of Stale's evaluator causes (issue #15, D1): a moved design, or
@@ -384,6 +388,18 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         "crash": "An evaluator stopped with an error. Repair it, then run the check again.",
         "tool": "A tool that an evaluator needs is missing. Install it, then run the check "
                 "again.",
+        # A skip behind a prerequisite (`page.settle`): the root, never the
+        # missing tool. What slipped through (P8, the motorbike demo): C1,
+        # skipped because the mesh ladder of C7 FAILED, read "A tool that an
+        # evaluator needs is missing. Install it" beside `nopekit doctor`, and
+        # installing changes nothing when a guard failed. {first} is the claim
+        # the root covers, or the root itself when it covers none.
+        "prerequisite": "{first} fails first: {root} failed, so {gate} did not run. Change "
+                        "the design until {first} passes. Then run the check again.",
+        "prerequisite_open": "{gate} did not run, because {root} did not pass first. Settle "
+                             "{first} first. Then run the check again.",
+        "prerequisite_crash": "{root} stopped with an error, so {gate} did not run. Repair "
+                              "{root}, then run the check again.",
         "run": "Run the check. It runs the evaluators and shows that each one can fail.",
         # Review of D1: "Run the check." promised what a check run cannot do —
         # the page reads the same after it. With a milestone that requires the
@@ -572,6 +588,15 @@ _SITE_WORDS: Mapping[str, Any] = MappingProxyType({
         # gates' pictures under one claim would share one sentence that names
         # one result); a short entry name such as "9c1e...-3a7b..." (two entries
         # can share both ends, and the folder on disk has the whole name).
+        # The evaluator's own words on a card that does not pass
+        # (`page.card_reason`): the gate, then its detail. What slipped through
+        # (P8, the motorbike demo): C7's card said "An evaluator failed the
+        # design in the last check run" and never why, while the check log said
+        # "level 2 (2674337 cells) is not converged".
+        "reason": "{gate}: {text}",
+        "reason_prerequisite": "{gate} did not run, because {root} did not pass first.",
+        "reason_prerequisite_named": "{gate} did not run, because {root} did not pass first "
+                                     "({claims}).",
         "drawn": "That other result: {outcome}, {value}.",
         "drawn_bare": "That other result: {outcome}.",
         "shown": "The pictures of {gate} come from its result {entry}. This page shows "

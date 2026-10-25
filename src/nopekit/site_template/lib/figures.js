@@ -491,6 +491,9 @@ function claimCard(row, words, build) {
     // sentence says it).
     row.cause_text && !["checked", "stale"].includes(row.token)
       ? el("p", { class: "fig-cause", text: row.cause_text }) : null,
+    // The evaluator's own words, baked (`page.card_reason`): what slipped
+    // through (P8) was a failing card that never said why it failed.
+    row.reason ? el("p", { class: "fig-reason", text: row.reason }) : null,
     others.length
       ? el("div", { class: "fig-tiles", "aria-label": said.others || "" },
           ...others.map((v) => el("div", { class: "fig-tile" },

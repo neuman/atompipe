@@ -866,7 +866,7 @@ one renderer of the verdict, so the two pages cannot read it two ways.
   drawer open on a wide screen the map scales into the column beside it, so the
   claims lane, with every glyph and word, stays in view.
 - **The drawer** (`lib/drawer.js`) shows a claim's blocks in the floor's order (the
-  same function, `claimBlocks`): the chip, `cause_text`, each value's `value_text`
+  same function, `claimBlocks`): the chip, `cause_text`, `reason`, each value's `value_text`
   (the binding one bold), the acceptance, the mechanism, each evaluator with its
   outcome, detail, basis and evidence links, a recorded result, what it rests on,
   and what settles it, then a link to `technical.html#claim=<id>`; a claim with a
@@ -1278,6 +1278,7 @@ A floor row (`claims[id]`, one home for the floor and the drawer):
   "critical": true, "board": "strength", "requirements": ["R1"],
   "token": "failing", "word": "failing", "errored": false, "marks": [],
   "hint": "...", "cause": "failed", "cause_text": "...",
+  "reason": "bracket.deflection: tip deflection 0.6997 mm ...",
   "mechanism": {"by": "closed_form", "by_word": "...", "how": "...",
                  "evaluators": ["bracket.deflection"] },
   "acceptance": "tip deflection <= 0.5 mm", "limit_text": "0.5 mm",
@@ -1389,7 +1390,18 @@ value; a decision's `values` and the top-level `losers`):
   is shown as `claim physical` takes it (`--evidence <file>`, and a judgment's
   `--authority <name>`). A test on a built part with no milestone has no `export`
   command: its text says how to build the part and to name the claim in a milestone
-  file. A step carries its claim's `marks`, as the floor row does.
+  file. A claim skipped behind a prerequisite names its root from the spine's mark
+  (`Verdict.blocked_by`, `blocked_kind`) and the claim that root covers: "C7 fails
+  first: ... Change the design until C7 passes." with `nopekit why C7`, a crashed
+  root's `nopekit gate show <root>`, never the missing tool's `nopekit doctor` (P8:
+  C1, skipped because C7's mesh ladder failed, read "Install it"). A step carries its
+  claim's `marks`, as the floor row does.
+- A floor row's `reason` (`page.card_reason`) is the evaluator's own words for a
+  claim that fails, crashed or skipped: `<gate>: <detail>` as `check` prints it, a
+  crash's first line, a skip's reason; for a skip behind a prerequisite, the root
+  and the claims it covers (`words.figure.reason_prerequisite`, `_named`); `""`
+  otherwise. The card and the drawer print it under `cause_text` (P8: a failing
+  card with no value said only "An evaluator failed the design").
 - `figures` (issue #15): the words depend on the records, the cache and the committed
   figure files alone, never on this computer's tools, so a clone bakes the same object.
   A chart's `limit` and `current` are the floor row's for (claim, gate), the claim's
@@ -1430,7 +1442,8 @@ value; a decision's `values` and the top-level `losers`):
   than the design.") and `no_story`: the page prints no heading of its own. From issue
   #15 `words.figure` holds `report.HUMAN["site"]["figure"]` whole: each currency's
   sentence (`current`, `stale`, `older`, `none`), `drawn`, `drawn_bare`, `shown`,
-  `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), and the
+  `other`, `limit_label`, `turn`, `live` and `tool_unchecked` (the bake's), `reason`,
+  `reason_prerequisite` and `reason_prerequisite_named` (`page.card_reason`'s), and the
   claim card's own words: `judged` ("Value from {gate}"), `others`, `pictures` (the
   drawer's line, "Pictures: {n}. Show them."), `table` (where the chart library did
   not load, above the chart's baked `table`), `table_more` and `table_band` (the words

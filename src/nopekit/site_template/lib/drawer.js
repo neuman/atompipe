@@ -35,6 +35,7 @@ export function claimBlocks(row, page, { onClaim } = {}) {
       row.kind_word ? el("span", { class: "cb-kind", text: row.kind_word }) : null,
       row.critical === false ? el("span", { class: "cb-kind", text: "Not required" }) : null),
     row.cause_text ? el("p", { class: "cb-cause", text: row.cause_text }) : null,
+    row.reason ? el("p", { class: "cb-reason", text: row.reason }) : null,
     (row.marks || []).includes("disagree") && notices.disagree
       ? el("p", { class: "nk-notice tone-bad", text: notices.disagree }) : null,
     values.length

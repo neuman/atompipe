@@ -1367,7 +1367,8 @@ class NextStepsAreThePredicate(unittest.TestCase):
             for command in commands:
                 argv = command.format(id="C1", gate="g.one", authority="Dana",
                                       authority_arg="Dana", milestone="print-v1",
-                                      tier_flag=" --tier 2").split()
+                                      tier_flag=" --tier 2", root="g.root",
+                                      first="C2").split()
                 self.assertEqual(argv[0], "nopekit")
                 with contextlib.redirect_stderr(io.StringIO()):
                     args = parser.parse_args(argv[1:])
@@ -1394,6 +1395,91 @@ class NextStepsAreThePredicate(unittest.TestCase):
         found = page.settle(claim, composed, milestone="print-v1")
         self.assertEqual(found["text"], said["article"].format(id="C5"))
         self.assertEqual(found["commands"][0], "nopekit export print-v1")
+
+
+class ASkipSaysItsRoot(unittest.TestCase):
+    """A claim skipped behind a prerequisite says, on the page, which claim
+    fails first and what to run; a card that does not pass says its
+    evaluator's own words. What slipped through (P8, the motorbike demo): C1,
+    skipped because the mesh ladder of C7 FAILED, read "A tool that an
+    evaluator needs is missing. Install it" beside `nopekit doctor`; and C7's
+    card said "An evaluator failed the design" and never why, while `check`
+    printed "level 2 (2674337 cells) is not converged"."""
+
+    LADDER = "level 2 is not converged: U_I 1.98% of the drag area, past 1%"
+
+    def _bake(self, kind: str = "failed", *, root_claim: bool = True) -> Baked:
+        from nopekit.models import Claim, Ledger, Verdict
+        claims = [Claim(id="C1", statement="the drag area is at most 0.35 m^2",
+                        gates=["g.drag"])]
+        found = [Verdict(gate="g.drag", claims=["C1"], passed=False, skipped=True,
+                         skip_reason="prerequisite failed: g.ladder",
+                         blocked_by=["g.ladder"], blocked_kind=kind)]
+        if root_claim:
+            claims.append(Claim(id="C7", statement="the drag area does not depend on the mesh",
+                                gates=["g.ladder"]))
+            found.append(Verdict(gate="g.ladder", claims=["C7"], passed=False,
+                                 detail=self.LADDER))
+        Milestone = test_export.milestone_cls()
+        ledger = Ledger(claims=claims, verdicts=found)
+        ledger = dataclasses.replace(ledger, milestones=[Milestone(
+            id="tunnel", description="a tunnel", requires=[c.id for c in claims])])
+        return bake(ledger, _Res(stale_gates=frozenset()))
+
+    def _step(self, baked: Baked, cid: str) -> dict:
+        [group] = baked.page_doc["next"]["milestones"]
+        [step] = [s for s in group["steps"] if s["claim"] == cid]
+        return step
+
+    def test_a_failed_root_names_the_claim_that_fails_first(self):
+        baked = self._bake()
+        self.assertEqual(baked.page_doc["claims"]["C1"]["token"], "skipped")
+        said = report.HUMAN["site"]["settle"]
+        for found in (baked.page_doc["claims"]["C1"]["settle"], self._step(baked, "C1")):
+            self.assertEqual(found["text"], said["prerequisite"].format(
+                first="C7", root="g.ladder", gate="g.drag"))
+            self.assertIn("C7 fails first", found["text"])
+            self.assertNotIn("Install", found["text"])
+            self.assertEqual(found["commands"], ["nopekit why C7", "nopekit check"])
+        # The chip's hint names every cause of a skip, the prerequisite's too.
+        self.assertIn("an evaluator that it needs first did not pass",
+                      baked.page_doc["claims"]["C1"]["hint"])
+
+    def test_a_root_that_did_not_run_is_settled_first(self):
+        baked = self._bake("skipped")
+        found = baked.page_doc["claims"]["C1"]["settle"]
+        self.assertEqual(found["text"], report.HUMAN["site"]["settle"][
+            "prerequisite_open"].format(first="C7", root="g.ladder", gate="g.drag"))
+        self.assertEqual(found["commands"], ["nopekit why C7", "nopekit check"])
+
+    def test_a_crashed_root_is_the_gate_to_show(self):
+        baked = self._bake("errored")
+        found = baked.page_doc["claims"]["C1"]["settle"]
+        self.assertEqual(found["text"], report.HUMAN["site"]["settle"][
+            "prerequisite_crash"].format(root="g.ladder", gate="g.drag"))
+        self.assertEqual(found["commands"], ["nopekit gate show g.ladder", "nopekit check"])
+
+    def test_a_root_no_claim_holds_is_named_by_its_gate(self):
+        baked = self._bake("not-registered", root_claim=False)
+        found = baked.page_doc["claims"]["C1"]["settle"]
+        self.assertIn("Settle g.ladder first", found["text"])
+        self.assertEqual(found["commands"], ["nopekit gate show g.ladder", "nopekit check"])
+
+    def test_a_card_says_why_it_does_not_pass(self):
+        baked = self._bake()
+        claims = baked.page_doc["claims"]
+        self.assertEqual(claims["C7"]["token"], "failing")
+        self.assertEqual(claims["C7"]["reason"], f"g.ladder: {self.LADDER}")
+        self.assertEqual(claims["C1"]["reason"],
+                         "g.drag did not run, because g.ladder did not pass first (C7).")
+
+    def test_the_card_and_the_drawer_show_the_reason(self):
+        import _template
+        js = _template.template_files(".js")
+        self.assertIn('row.reason ? el("p", { class: "fig-reason", text: row.reason })',
+                      js["lib/figures.js"])
+        self.assertIn('row.reason ? el("p", { class: "cb-reason", text: row.reason })',
+                      js["lib/drawer.js"])
 
 
 # --------------------------------------------------------------------------- #

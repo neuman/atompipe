@@ -2328,9 +2328,16 @@ _SETTLE: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "judged-fail": ("built_fail", ("nopekit why {id}",)),
     "contradiction": ("built_fail", ("nopekit why {id}",)),
     "errored": ("crash", ("nopekit gate show {gate}", "nopekit check{tier_flag}")),
-    "prerequisite-errored": ("crash", ("nopekit gate show {gate}", "nopekit check{tier_flag}")),
+    # A skip behind a prerequisite names its root (`settle`), never the
+    # missing tool: what slipped through (P8, the motorbike demo) was C1,
+    # skipped because C7's guard FAILED, under "Install it" and `nopekit
+    # doctor`. `{first}` is the claim the root covers (the root itself when it
+    # covers none); the crash's commands show the root, not the dependent that
+    # never ran.
+    "prerequisite-errored": ("prerequisite_crash",
+                             ("nopekit gate show {root}", "nopekit check{tier_flag}")),
     "skipped": ("tool", ("nopekit doctor", "nopekit check{tier_flag}")),
-    "prerequisite": ("tool", ("nopekit doctor", "nopekit check{tier_flag}")),
+    "prerequisite": ("prerequisite", ("nopekit why {first}", "nopekit check{tier_flag}")),
     "unqualified": ("run", ("nopekit check{tier_flag}",)),
     "unrun": ("run", ("nopekit check{tier_flag}",)),
     "invalidated": ("run", ("nopekit check{tier_flag}",)),
@@ -2357,13 +2364,25 @@ _SETTLE: dict[str, tuple[str | None, tuple[str, ...]]] = {
 }
 
 
+def _prerequisite_root(claim_id: str, verdict: Any,
+                       covered: Mapping[str, Iterable[str]] | None) -> tuple[str, list[str]]:
+    """``(root gate, the other claims it covers)`` of a verdict not run behind
+    a prerequisite: the spine's mark (`Verdict.blocked_by`), never the skip's
+    text, which a gate can write."""
+    root = str((list(getattr(verdict, "blocked_by", None) or ()) or [""])[0])
+    claims = [c for c in ((covered or {}).get(root) or ()) if c != claim_id] if root else []
+    return root, claims
+
+
 def settle(claim: Any, composed: Any, *, milestone: str | None = None,
-           cover: Iterable[str] = (), tiers: Mapping[str, int] | None = None) -> dict:
+           cover: Iterable[str] = (), tiers: Mapping[str, int] | None = None,
+           covered: Mapping[str, Iterable[str]] | None = None) -> dict:
     """What settles ``claim`` now, by its composition's cause: ``{text,
     commands}`` in the site's words. ``cover`` the claim's covering evaluators
     (`claims.effective_gates`), ``tiers`` each evaluator's tier; ``milestone``
-    names the export a test on a built part needs. A Checked claim has
-    none."""
+    names the export a test on a built part needs; ``covered`` is
+    `gate_cover`'s ``{gate: [claim id]}``, which names the claim behind a
+    prerequisite's root. A Checked claim has none."""
     cause = str(getattr(composed.cause, "value", composed.cause))
     key, commands = _SETTLE[cause]
     if key is None:
@@ -2374,10 +2393,26 @@ def settle(claim: Any, composed: Any, *, milestone: str | None = None,
     gate = (getattr(verdict, "gate", "") or (list(composed.cites)[0] if composed.cites else "")
             or (cover[0] if cover else ""))
     authority = str(getattr(claim, "authority", "") or "")
+    root, root_claims = _prerequisite_root(claim.id, verdict, covered)
     values = {"id": claim.id, "gate": gate, "authority": authority or "its expert",
               "authority_arg": shlex.quote(authority) if authority else "<name>",
-              "milestone": milestone or "", "tier_flag": f" --tier {tier}" if tier > 0 else ""}
+              "milestone": milestone or "", "tier_flag": f" --tier {tier}" if tier > 0 else "",
+              "root": root, "first": root_claims[0] if root_claims else root}
     said = _site_words()["settle"]
+    if key in ("prerequisite", "prerequisite_crash") and not root:
+        # No mark names a root (a verdict built by hand): the cause's own
+        # sentence, and the check that runs it again.
+        return {"text": _site_words()["cause"][cause],
+                "commands": [f"nopekit check{values['tier_flag']}"]}
+    if key == "prerequisite":
+        if str(getattr(verdict, "blocked_kind", "") or "") != "failed":
+            # Skipped, unqualified or not registered: it did not pass, and the
+            # root's own claim says what settles it.
+            key = "prerequisite_open"
+        if not root_claims:
+            # The root covers no other claim: `why` takes a claim, the root's
+            # own record is `gate show`'s.
+            commands = ("nopekit gate show {root}", "nopekit check{tier_flag}")
     if key == "article" and not milestone:
         # No milestone names the claim, so no `export` builds its article: the
         # text says how to build one, and how to let `export` build it.
@@ -2392,6 +2427,8 @@ def settle(claim: Any, composed: Any, *, milestone: str | None = None,
         if "{milestone}" in command and not milestone:
             continue
         if "{gate}" in command and not gate:
+            continue
+        if ("{root}" in command or "{first}" in command) and not root:
             continue
         out.append(command.format(**values))
     return {"text": said[key].format(**values), "commands": out}
@@ -3224,11 +3261,52 @@ def _counted_result(claim: Any) -> Any:
     return results[index]
 
 
+#: The causes whose card says the evaluator's own words (`card_reason`): a
+#: fail, a crash and a skip — the claims a reader asks "why" of. Not
+#: `acceptance` (its value and limit are on the card already) and not Gap's
+#: (`unqualified` is the spine's word, said by the cause).
+_REASON_CAUSES = (ClaimCause.FAILED, ClaimCause.ERRORED, ClaimCause.SKIPPED)
+_PREREQUISITE_CAUSES = (ClaimCause.PREREQUISITE, ClaimCause.PREREQUISITE_ERRORED)
+
+
+def card_reason(claim: Any, composed: Any, *,
+                covered: Mapping[str, Iterable[str]] | None = None) -> str:
+    """Why a claim that does not pass reads what it reads, in its evaluator's
+    own words: ``<gate>: <detail>`` for a fail, ``<gate>: <first line>`` for a
+    crash, ``<gate>: <reason>`` for a skip (`report._verdict_body`, the words
+    `check` prints), and the root a skip behind a prerequisite waits on, from
+    the spine's mark. ``""`` for every other cause. Baked, so the page reads it
+    and computes nothing (invariant 14).
+
+    What slipped through (P8, the motorbike demo): the card of C7, failing with
+    no value, said only "An evaluator failed the design in the last check run",
+    while `check` said "level 2 (2674337 cells) is not converged: U_I 1.98% of
+    the drag area, past 1%"; a reader of the page could not see why."""
+    said = _site_words()["figure"]
+    verdict = getattr(composed, "verdict", None)
+    cause = composed.cause
+    if verdict is None or not getattr(verdict, "gate", ""):
+        return ""
+    if cause in _PREREQUISITE_CAUSES:
+        root, claims_ = _prerequisite_root(claim.id, verdict, covered)
+        if not root:
+            return ""
+        if claims_:
+            return said["reason_prerequisite_named"].format(
+                gate=verdict.gate, root=root, claims=", ".join(claims_))
+        return said["reason_prerequisite"].format(gate=verdict.gate, root=root)
+    if cause not in _REASON_CAUSES:
+        return ""
+    text = report_logic._one(report_logic._verdict_body(verdict))
+    return said["reason"].format(gate=verdict.gate, text=text) if text else ""
+
+
 def _step(claim: Any, found: Any, *, milestone: str | None, cover: Mapping[str, list],
-          tiers: Mapping[str, int], marks: Mapping[str, list[str]] | None = None) -> dict:
+          tiers: Mapping[str, int], marks: Mapping[str, list[str]] | None = None,
+          covered: Mapping[str, list] | None = None) -> dict:
     token = token_of(found)
     done = settle(claim, found, milestone=milestone, cover=cover.get(claim.id) or (),
-                  tiers=tiers)
+                  tiers=tiers, covered=covered)
     return {"claim": claim.id, "token": token, "word": _word(token),
             "errored": token == "errored", "marks": list((marks or {}).get(claim.id) or ()),
             "statement": claim.statement,
@@ -3319,7 +3397,11 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                 "order": int(row.get("order", len(vrows))) if row else len(vrows),
                 "current": bool(row.get("fresh")) if row else False,
                 "stale_reason": str(row.get("stale_reason") or ""),
-                "detail": str(row.get("detail") or ""),
+                # A skip's words are its reason (`report._verdict_body`): what
+                # slipped through (P8) was a skipped evaluator's row with no
+                # words at all, its `detail` empty beside its `skip_reason`.
+                "detail": str(row.get("detail") or (row.get("skip_reason") if outcome == "skipped"
+                                                    else "") or ""),
                 "evidence": [{"name": item.name, "source": item.path, "href": item.href,
                               "missing": item.missing} for item in plan_by_gate.get(gid, ())]})
         physical = None
@@ -3359,7 +3441,8 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                                                               "resolves")],
             "settle": settle(claim, found, milestone=next(
                 (m.id for m in first_milestone if cid in (getattr(m, "requires", None) or ())),
-                None), cover=cover.get(cid) or (), tiers=tiers),
+                None), cover=cover.get(cid) or (), tiers=tiers, covered=covered),
+            "reason": card_reason(claim, found, covered=covered),
             "amber": ({"state": amber[cid].state, "word": amber_word(amber[cid].state),
                        "items": _amber_items(amber[cid])} if cid in amber else None)}
         shown = []
@@ -3433,7 +3516,8 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
             "sentence": report_logic._verdict_sentence(view, composed, registry, stale=False,
                                                        markdown=False, milestone=milestone,
                                                        register="site"),
-            "steps": [_step(c, composed[c.id], milestone=milestone.id, cover=cover, tiers=tiers,
+            "steps": [_step(c, composed[c.id], milestone=milestone.id, cover=cover, covered=covered,
+                            tiers=tiers,
                             marks=marks)
                       for c in report_logic.in_severity(view, composed, found.unresolved)],
             "missing": [{"claim": cid, "text": said["settle"]["missing"].format(
@@ -3444,7 +3528,7 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
                    "ready": bool(unresolved.ready),
                    "word": said["ready_word" if unresolved.ready else "not_ready_word"],
                    "next": not unresolved.ready, "sentence": verdict["sentence"],
-                   "steps": [_step(c, composed[c.id], milestone=None, cover=cover, tiers=tiers,
+                   "steps": [_step(c, composed[c.id], milestone=None, cover=cover, covered=covered, tiers=tiers,
                                    marks=marks)
                              for c in report_logic.in_severity(view, composed,
                                                                unresolved.unresolved)],
@@ -3457,7 +3541,7 @@ def bake_page(root: str, view: Any, lay: Layout, built: Any, toks: Any,
     else:
         open_claims = [c for c in getattr(view, "claims", None) or ()
                        if not c.critical and toks.claims.get(c.id) not in resolved_tokens]
-    open_steps = [_step(c, composed[c.id], milestone=None, cover=cover, tiers=tiers,
+    open_steps = [_step(c, composed[c.id], milestone=None, cover=cover, covered=covered, tiers=tiers,
                         marks=marks)
                   for c in report_logic.in_severity(view, composed, open_claims)]
     rebuild = [{"article": str(found.article)[:12], "claims": list(found.claims),
