@@ -240,4 +240,5 @@ CdA, is a broken run, not a design.
 | `references/rendering.md` | ParaView for the pictures: the build, its checks, Turbo, lit and unlit pictures |
 | `references/motorbike.md` | the motorBike geometry: where it comes from, its licence, its digest, its bounds |
 | `references/selftest.md` | the selftest on the real tools: each control's landing, the baseline's ladder, the times |
+| `references/open-work.md` | what is not done (stopped 2026-10-26): why the demo's C7 fails and where to start, the unmerged run store, the slow tests |
 | `lenses.md` | what to attack before anyone builds from a result |
