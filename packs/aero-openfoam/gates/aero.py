@@ -1636,6 +1636,59 @@ class Mesh:
         return "no layers" if lay is None else f"layers on {lay[2]:.3g}% of the body's faces"
 
 
+#: The tools a run of this pack runs on a staged case, each with its
+#: arguments, in order: what the run store keys as the run's argv
+#: (``GateContext.stored_run``), and what the calls below run, so the two
+#: cannot part. ``foamDictionary -expand`` runs once per dictionary
+#: (``_as_read``), the rank probe is ``/bin/sh`` on every rank (``_par``).
+DECOMPOSE = ("decomposePar", "-force")
+SNAPPY = ("snappyHexMesh", "-overwrite")
+CHECK = ("checkMesh", "-meshQuality", "-constant")
+POTENTIAL = ("potentialFoam", "-writephi")
+SOLVER = ("simpleFoam",)
+MESH_ARGV = (("foamDictionary", "-expand"), ("blockMesh",), ("surfaceFeatureExtract",),
+             DECOMPOSE, ("rankProbe",), SNAPPY, CHECK)
+SOLVE_ARGV = MESH_ARGV + (POTENTIAL, SOLVER)
+
+
+def _stored(ctx: GateContext, stages, s: dict, inst, env: dict, argv) -> "StoredRun":
+    """The run store's run of the staged ``stages`` (issue #15, P9): keyed on
+    every staged byte, ``argv``, the ranks, the install (its root, API, patch
+    and build) and the bytes of every tool ``argv`` names in ``FOAM_APPBIN``
+    and of ``mpirun``. Everything a tool reads of the case is staged
+    (``_prepare``: the copy and the pack's own dictionaries), so nothing it
+    reads of the project is outside the key. *Rejected:* the install's build
+    string alone (a tool rebuilt in place keeps it); the outputs (snappyHexMesh
+    is not the same byte for byte from run to run, design §15)."""
+    tools = sorted({a[0] for a in argv if a[0] != "rankProbe"})
+    binaries = [os.path.join(env["FOAM_APPBIN"], t) for t in tools] + [P._mpirun(env)]
+    return ctx.stored_run(stages, argv=[list(a) for a in argv], ranks=s["ranks"],
+                          tool={"root": inst.root, "api": inst.api, "patch": inst.patch,
+                                "build": inst.build},
+                          binaries=binaries)
+
+
+def _rels(stage: str, paths) -> list[str]:
+    """``paths`` relative to ``stage``, posix: what a stored run keeps of its logs."""
+    return [os.path.relpath(p, stage).replace(os.sep, "/") for p in paths]
+
+
+def _log_text(path: str) -> str:
+    """A log's tool output, as the log keeps it (``_tool.kept``), its stderr cut."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return _stdout_of(fh.read())
+
+
+def _mesh_of(stage: str, logs: list[str]) -> Mesh:
+    """The Mesh a run left, read from its logs (``logs``: relative to
+    ``stage``): the one reading of a mesh, whether its tools ran in this gate
+    or the run store served them, as ``_read_level`` reads a ladder's."""
+    paths = [F.case_file(stage, rel) for rel in logs]
+    snappy_log = F.case_file(stage, f"log.{SNAPPY[0]}")
+    check_log = F.case_file(stage, f"log.{CHECK[0]}")
+    return _read_mesh(_log_text(snappy_log), _log_text(check_log), paths, stage, check_log)
+
+
 def _mesh(env, stage: str, s: dict, timeout: float, cells: int | None = None) -> Mesh:
     """blockMesh, surfaceFeatureExtract (for a surface file), decomposePar, the
     rank probe, snappyHexMesh and checkMesh -meshQuality on the staged copy:
@@ -1647,11 +1700,11 @@ def _mesh(env, stage: str, s: dict, timeout: float, cells: int | None = None) ->
     logs.append(_block_mesh(env, stage, case, timeout, cells).log)
     if s["geometry"]:
         logs.append(_serial(env, stage, ["surfaceFeatureExtract"], timeout).log)
-    logs.append(_serial(env, stage, ["decomposePar", "-force"], timeout).log)
+    logs.append(_serial(env, stage, list(DECOMPOSE), timeout).log)
     logs.append(P.rank_probe(env, stage, n, timeout))
-    sn = P.run_parallel(env, stage, ["snappyHexMesh", "-overwrite"], n, timeout)
+    sn = P.run_parallel(env, stage, list(SNAPPY), n, timeout)
     logs.append(sn.log)
-    check = P.run_parallel(env, stage, ["checkMesh", "-meshQuality", "-constant"], n, timeout)
+    check = P.run_parallel(env, stage, list(CHECK), n, timeout)
     logs.append(check.log)
     return _read_mesh(sn.stdout, check.stdout, logs, stage, check.log)
 
@@ -1711,14 +1764,19 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     opened = _open(ctx, gid)
     if isinstance(opened, Verdict):
         return opened
-    _inst, env = opened
+    inst, env = opened
     stage = _stage_dir(ctx, gid, "case")
     try:
         _prepare(stage, s)
-        mesh = _mesh(env, stage, s, s["timeout"])
+        run = _stored(ctx, stage, s, inst, env, MESH_ARGV)
+        if not run.hit:
+            with run.solving():
+                built = _mesh(env, stage, s, s["timeout"])
+            run.keep(built.logs, meta={"logs": _rels(stage, built.logs)})
+        mesh = _mesh_of(stage, run.meta["logs"])
     except P.Timeout as exc:
         return _skip(gid, str(exc))
-    except (T.RunError, ValueError, KeyError) as exc:
+    except (T.RunError, ValueError, KeyError, OSError) as exc:
         return _error(gid, str(exc), getattr(exc, "evidence", []))
     why = mesh.problems(s["global"])
     marks = f" [pack default: {', '.join(s['marks'])}]" if s["marks"] else ""
@@ -1958,26 +2016,23 @@ def converged(ctx: GateContext) -> Verdict:
         box, box_logs = _body_bounds(env, ctx, gid, s, timeout)
         _prepare(stage, s, FO.functions(group=str(group), u_inf=u, l_ref=L_REF, cofr=COFR,
                                         box=box))
-        mesh = _mesh(env, stage, s, timeout)
-        bad = mesh.problems(s["global"])
-        if bad:
-            # aero.mesh_quality passed this recipe, or this gate would not run,
-            # but the mesh solved here is built again in this gate's own stage:
-            # it is judged where it is solved. (P0 read the meshes of two runs
-            # as differing; P3 traced that to scotch, which the pack no longer
-            # uses. The rule holds whatever the cause.)
-            raise T.RunError("the mesh this run built fails the rule aero.mesh_quality passed: "
-                             + "; ".join(bad), mesh.logs)
-        _restore_zero(stage)
-        pot = P.run_parallel(env, stage, ["potentialFoam", "-writephi"], n, timeout)
-        sol = P.run_parallel(env, stage, ["simpleFoam"], n, timeout)
+        run = _stored(ctx, stage, s, inst, env, SOLVE_ARGV)
+        if not run.hit:
+            with run.solving():
+                built, solved = _mesh_and_solve(env, stage, s, timeout)
+            run.keep([*built.logs, *solved, os.path.join(stage, "postProcessing")],
+                     meta={"mesh": _rels(stage, built.logs), "solve": _rels(stage, solved)})
+        mesh = _mesh_of(stage, run.meta["mesh"])
+        _judged_where_solved(mesh, s)
         co = _coefficients(stage, u)
+        solve_logs = [F.case_file(stage, rel) for rel in run.meta["solve"]]
+        sol_text = _log_text(F.case_file(stage, f"log.{SOLVER[0]}"))
     except P.Timeout as exc:
         return _skip(gid, str(exc))
     except (T.RunError, ValueError, KeyError, OSError) as exc:
         return _error(gid, str(exc), getattr(exc, "evidence", []))
-    logs = [*box_logs, *mesh.logs, pot.log, sol.log]
-    blocks = P.iterations(sol.stdout)
+    logs = [*box_logs, *mesh.logs, *solve_logs]
+    blocks = P.iterations(sol_text)
     if len(blocks) != len(co.cda) or co.iterations != list(range(1, len(co.cda) + 1)):
         return _error(gid, f"simpleFoam's log has {len(blocks)} iterations and forceCoeffs "
                            f"{len(co.cda)} rows: the history is not the run's", logs)
@@ -2040,6 +2095,32 @@ def converged(ctx: GateContext) -> Verdict:
 # --------------------------------------------------------------------------- #
 # what a solve leaves, read once
 # --------------------------------------------------------------------------- #
+def _judged_where_solved(mesh: Mesh, s: dict) -> None:
+    """T.RunError when the mesh a gate solves fails aero.mesh_quality's rule.
+    aero.mesh_quality passed this recipe, or the gate would not run, but the
+    mesh solved here is built again in the gate's own stage: it is judged where
+    it is solved. (P0 read the meshes of two runs as differing; P3 traced that
+    to scotch, which the pack no longer uses. The rule holds whatever the
+    cause.)"""
+    bad = mesh.problems(s["global"])
+    if bad:
+        raise T.RunError("the mesh this run built fails the rule aero.mesh_quality passed: "
+                         + "; ".join(bad), mesh.logs)
+
+
+def _mesh_and_solve(env, stage: str, s: dict, timeout: float):
+    """The base mesh of the staged case, judged where it is solved, then
+    potentialFoam and simpleFoam: ``(Mesh, [potentialFoam's and simpleFoam's
+    logs])``, or T.RunError / P.Timeout. The tools alone: what a gate reads of
+    their outputs it reads after, from the stage (``GateContext.stored_run``)."""
+    mesh = _mesh(env, stage, s, timeout)
+    _judged_where_solved(mesh, s)
+    _restore_zero(stage)
+    pot = P.run_parallel(env, stage, list(POTENTIAL), s["ranks"], timeout)
+    sol = P.run_parallel(env, stage, list(SOLVER), s["ranks"], timeout)
+    return mesh, [pot.log, sol.log]
+
+
 def _inlet_speed(case: Case) -> float:
     """The speed the case runs at: its inlet's ``fixedValue`` along +x. The
     gates that solve a ladder or the wall make the drag area dimensionless by
@@ -2060,16 +2141,15 @@ def _inlet_speed(case: Case) -> float:
     return float(vec[0])
 
 
-def _solve(env, stage: str, n: int, timeout: float, u: float):
-    """potentialFoam and simpleFoam on the meshed stage: ``(Coefficients,
-    iteration blocks, [logs])``, or T.RunError / P.Timeout."""
-    _restore_zero(stage)
-    pot = P.run_parallel(env, stage, ["potentialFoam", "-writephi"], n, timeout)
-    sol = P.run_parallel(env, stage, ["simpleFoam"], n, timeout)
+def _solved(stage: str, u: float, logs: list[str]):
+    """What potentialFoam and simpleFoam left in the stage (``logs``, their
+    logs' paths): ``(Coefficients, iteration blocks)``, the history held to the
+    log, or T.RunError. Read from the files, so a run the store served reads as
+    one solved here."""
     co = _coefficients(stage, u)
-    blocks = P.iterations(sol.stdout)
-    _same_run(co, blocks, [pot.log, sol.log])
-    return co, blocks, [pot.log, sol.log]
+    blocks = P.iterations(_log_text(F.case_file(stage, f"log.{SOLVER[0]}")))
+    _same_run(co, blocks, logs)
+    return co, blocks
 
 
 def _same_run(co, blocks, logs) -> None:
@@ -2295,18 +2375,22 @@ def wall_treatment(ctx: GateContext) -> Verdict:
     opened = _open(ctx, gid)
     if isinstance(opened, Verdict):
         return opened
-    _inst, env = opened
+    inst, env = opened
     stage = _stage_dir(ctx, gid, "case")
     n, timeout = s["ranks"], s["timeout"]
     try:
         u = _inlet_speed(s["case"])
         _prepare(stage, s, FO.wall_functions(group=str(group), u_inf=u))
-        mesh = _mesh(env, stage, s, timeout)
-        bad = mesh.problems(s["global"])
-        if bad:
-            raise T.RunError("the mesh this run built fails the rule aero.mesh_quality passed: "
-                             + "; ".join(bad), mesh.logs)
-        co, blocks, run_logs = _solve(env, stage, n, timeout, u)
+        run = _stored(ctx, stage, s, inst, env, SOLVE_ARGV)
+        if not run.hit:
+            with run.solving():
+                built, solved = _mesh_and_solve(env, stage, s, timeout)
+            run.keep([*built.logs, *solved, os.path.join(stage, "postProcessing")],
+                     meta={"mesh": _rels(stage, built.logs), "solve": _rels(stage, solved)})
+        mesh = _mesh_of(stage, run.meta["mesh"])
+        _judged_where_solved(mesh, s)
+        run_logs = [F.case_file(stage, rel) for rel in run.meta["solve"]]
+        co, blocks = _solved(stage, u, run_logs)
         settle = _settling(co, blocks, ceiling)
         if settle["why"]:
             raise T.RunError("the run this gate solved fails the rule aero.converged passed: "
@@ -2425,8 +2509,9 @@ NOISE_FRACTION = 0.1
 #: ladder: three meshes refined unlike one another, which Celik's procedure
 #: assumes away). An ``inside`` region is a place, kept as written.
 
-#: The format of a ladder record (``_Record``): its version, in its key.
-RECORD_VERSION = 1
+#: The format of a ladder record (``_Record``): its version, in its key. 2
+#: (issue #15, P9): the record says whether the run store served its ladder.
+RECORD_VERSION = 2
 
 #: The files of the pack's code a record is keyed on: a record of another
 #: version of the pack is never read.
@@ -2587,10 +2672,18 @@ class _Record:
     (``out:... (not written by this gate)``), so the entry is never served
     fresh after its run.
 
-    *Rejected:* a record any later process may read (a run store: it needs
-    ``export`` and ``--force`` to bypass it, a spine change, the design's P9);
-    module memory (S-27's channel, which no trace sees); solving twice (twice
-    the cost of the slowest gate, for the same numbers)."""
+    **Under it, the run store** (issue #15, P9; ``GateContext.stored_run``):
+    a later ``check`` that finds no record of this process is served the
+    ladder an earlier check solved, from ``.nopekit/cache/runs/``, keyed on the
+    same staged bytes; the record then says so (``reused``), and every gate
+    that judges it says *reused* on its line. ``--force``, ``export`` and
+    ``export --dry-run`` get no store, so the boundary still solves each ladder
+    once per process.
+
+    *Rejected:* making this record the store (any later process may read it:
+    the spine's run store is that, with the bypass at the boundary the spine
+    owns); module memory (S-27's channel, which no trace sees); solving twice
+    (twice the cost of the slowest gate, for the same numbers)."""
 
     def __init__(self, ctx: GateContext, key: str):
         self.key = key
@@ -2624,15 +2717,21 @@ class _Record:
                             "files": files})
         except (AttributeError, KeyError, TypeError, ValueError):
             return None
-        return {"levels": out} if len(out) == 3 else None
+        reused = data.get("reused")
+        if not isinstance(reused, str):
+            return None
+        return {"levels": out, "reused": reused} if len(out) == 3 else None
 
-    def write(self, levels: list) -> None:
+    def write(self, levels: list, reused: str = "") -> None:
         """``levels``: ``[(k, counts, {name: source path})]``. Written whole
-        beside the record and moved into place, so a record is never half one."""
+        beside the record and moved into place, so a record is never half one.
+        ``reused``: the run store's key when the store served the ladder
+        (issue #15, P9), so a gate that judges the record says *reused* too
+        (``GateContext.note_reused``)."""
         tmp = self.dir + ".writing"
         _rm(tmp)
         manifest = {"version": RECORD_VERSION, "key": self.key, "process": _PROCESS,
-                    "levels": []}
+                    "reused": reused, "levels": []}
         for k, counts, sources in levels:
             dst = os.path.join(tmp, f"level{k}")
             os.makedirs(dst)
@@ -2735,13 +2834,30 @@ def _ladder(ctx: GateContext, gid: str):
         record = _Record(ctx, key)
         found = record.read()
         if found is None:
-            got = _solve_ladder(env, case, s, stages, counts_of, u, timeout)
-            if isinstance(got, tuple):
-                return got
-            record.write(got)
+            # The run store under the record (issue #15, P9): a later check's
+            # mesh_independence is served the ladder an earlier check solved,
+            # keyed on the same staged bytes; drag_area behind it still reads
+            # this process's record. Off at the boundary, so `export` solves.
+            run = _stored(ctx, stages, s, inst, env, SOLVE_ARGV)
+            if not run.hit:
+                with run.solving():
+                    got = _solve_ladder(env, case, s, stages, counts_of, u, timeout)
+                if isinstance(got, tuple):
+                    return got
+                run.keep([p for _k, _c, files in got for p in files.values()],
+                         meta={"levels": [[k, [list(c) for c in counts],
+                                           {name: _rels(stages[k], [p])[0]
+                                            for name, p in files.items()}]
+                                          for k, counts, files in got]})
+            got = [(k, [tuple(c) for c in counts],
+                    {name: F.case_file(stages[k], rel) for name, rel in files.items()})
+                   for k, counts, files in run.meta["levels"]]
+            record.write(got, reused=run.key if run.hit else "")
             found = record.read()
             if found is None:
                 raise T.RunError("the ladder's record did not read back as it was written")
+        if found["reused"]:
+            ctx.note_reused(found["reused"])
         levels = [_read_level(lv, u) for lv in found["levels"]]
     except P.Timeout as exc:
         return _skip(gid, str(exc))
@@ -2779,7 +2895,10 @@ def _solve_ladder(env, case: Case, s: dict, stages: list, counts_of: list, u: fl
         return why, logs
     out = []
     for k, (stage, mesh) in enumerate(zip(stages, meshes)):
-        _co, _blocks, _logs = _solve(env, stage, n, timeout, u)
+        _restore_zero(stage)
+        _logs = [P.run_parallel(env, stage, list(tool), n, timeout).log
+                 for tool in (POTENTIAL, SOLVER)]
+        _solved(stage, u, _logs)
         time = _last_dir(os.path.join(stage, "postProcessing", FO.SURFACES))
         if time is None:
             raise T.RunError(f"level {k}: simpleFoam wrote no y+ surface of the body", _logs)

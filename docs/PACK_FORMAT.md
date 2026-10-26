@@ -531,6 +531,7 @@ class GateContext:                     # a gate's one argument — a traced view
     pack: str; key_scope: str          # stamped by run_gate: whose namespace param() reads
     memo: SweepMemo | None             # the sweep's file memo: load_file's alone; None outside a sweep
     trace: GateTrace | None            # what this view records into; yours to leave alone
+    runs: RunStore | None              # the run store this run may use: the sweep's; never read it
     def scopes(self) -> list[str]      # ["fdm", "fdm-print"]: this gate's scopes, best first
     def param(self, name, default=None, *, scope=...) -> Any   # scoped first: see below
     def pack_param(self, name, default=None) -> Any
@@ -544,6 +545,11 @@ class GateContext:                     # a gate's one argument — a traced view
     def load_file(self, path, loader=None) -> Any # a file several gates read: loaded once per
                                                   #   sweep; it and every file the loader
                                                   #   opened recorded for EVERY caller
+    def stored_run(self, stages, *, argv, ranks, tool=None, binaries=()) -> StoredRun
+                                                  # a solve served from the run store by
+                                                  #   what it read, or yours to run and keep
+    def note_reused(self, key) -> None            # this result rests on a stored run another
+                                                  #   gate of this check was served
 ```
 
 **`Verdict.unqualified` is the spine's, never a gate's** (P2.1). The resolver and
@@ -610,6 +616,23 @@ by exactly those reads (`rho`). So:
   from a function, a `global` rebound from one, a mutable default argument — cannot be
   emptied from outside: `nopekit doctor`'s `memos` row names it. Share a file between
   gates with `ctx.load_file`.
+- **`ctx.stored_run(stages, argv=, ranks=, tool=, binaries=)` keeps a long solve
+  between checks** (issue #15's run store). Stage every input the tools read into
+  `stages` first; the run's key is every staged byte, the tools' `argv`, the rank
+  count, the install's identity (`tool`), the bytes of each of `binaries`, and your
+  gate's code — never what the tools write (a mesher that is not the same byte for
+  byte would never be found again). On `run.hit` the stored outputs are back in the
+  stages and `run.meta` is what you kept; otherwise run the tools inside
+  `with run.solving():` and call `run.keep(outputs, meta)`. Then read the outputs
+  from the stages through ONE code path either way: a hit replays what the solve's
+  window recorded, so it files the entry the solve filed, and a window that reads a
+  parameter, a claim, the model or the tier is refused (read those before it). The
+  store lives in `.nopekit/cache/runs/` (ignored); `check --force`, `export` and
+  `export --dry-run` never read it, so the boundary that spends solves again; a
+  mutation run gets none. `check` says *reused* on the line of a run it served. A gate
+  that judges a solve an earlier gate of the same check was served, through a file of
+  that gate's, says so with `ctx.note_reused(key)`. (aero-openfoam's gates are the
+  worked example: `_stored`, `_mesh_and_solve`, `_mesh_of`.)
 - **Asking whether a file is there is reading it.** `os.path.isfile`, `exists`,
   `isdir`, `getsize`, `pathlib.Path.exists`/`is_file`, a `glob` of a literal path: a
   path under the project or your pack that the gate asked about is one of its inputs —

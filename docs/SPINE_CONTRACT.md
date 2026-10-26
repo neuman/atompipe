@@ -38,6 +38,7 @@ is `cli.py`'s.
 | time savers: file digests, re-verified fixtures | `.nopekit/cache/digests.json`, `controls.json` | ignored | `check`; losing either costs a re-hash or a fixture run, never a verdict |
 | gate scratch and evidence | `.nopekit/out/` (a control's: `out/controls/<gate id>/`) | ignored | gates |
 | which bytes a recorded run cited as its evidence, per entry it wrote (issue #15) — never a verdict | `.nopekit/cache/evidence/<gate id>/<rho16>-<out8>.json` | ignored | a recorded `check` (and `export`'s re-runs), beside each entry it writes; never `--no-record`, a control or a mutation |
+| a solve a gate ran on a staged copy, kept for the next check whose staged bytes, tools, ranks, argv and gate code are the same (issue #15, the motorBike design's P9) — never a verdict | `.nopekit/cache/runs/<key>/` (`manifest.json`: the outputs' sha256, the gate's `meta`, the trace its solve's window recorded; `files/<n>/`: the outputs of the n-th stage) | ignored | a `check` that is not forced, and its controls, through `GateContext.stored_run`; never `--force`, `export`, `export --dry-run`, `gate selftest` or a mutation run; losing it costs a solve, never a verdict |
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
 | a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
@@ -2243,6 +2244,7 @@ class GateContext:                                      # the full surface: docs
     pack: str; key_scope: str                           # stamped by run_gate from the spec
     memo: SweepMemo | dict | None                       # the sweep's file memo (run_all): load_file's alone
     trace: GateTrace | None                             # the trace this view records into (run_gate)
+    runs: RunStore | None                               # the run store this run may use (the sweep's)
     def scopes(self) -> list[str]                       # ["fdm", "fdm-print"]: key namespaces, best first
     def param(self, name, default=None, *, scope=...) -> Any   # PACK-SCOPED first: see below
     def pack_param(self, name, default=None) -> Any
@@ -2254,6 +2256,21 @@ class GateContext:                                      # the full surface: docs
     def out_path(self, *parts) -> str                   # an evidence path under out_dir, dir created
     def with_extra(self, extra) -> GateContext          # a copy with `extra` merged over
     def load_file(self, path, loader=None) -> Any       # once per sweep; it and all the loader opened: reads of THIS gate, hit or miss
+    def stored_run(self, stages, *, argv, ranks, tool=None, binaries=()) -> StoredRun
+                                                        # issue #15 P9: a solve served by what it read, or to run
+    def note_reused(self, key) -> None                  # this run rests on a stored run another gate was served
+RUN_STORE_DIR = ".nopekit/cache/runs"                   # <key>/manifest.json, <key>/files/<n>/<rel>; ignored
+RUN_STORE_SCHEMA = 1                                    # the manifest's format, inside every key
+@dataclass
+class RunStore: directory; gate; code; hits; code_of   # the sweep's, per run; directory "" = off
+    enabled: bool                                       # directory, gate and a code (or code_of) set
+    def digest(self) -> str                             # the gate's code digest, code_of run once
+class StoredRun:                                        # GateContext.stored_run's; never made by hand
+    key: str; hit: bool; meta: Any                      # key: sha256 over the staged bytes, argv,
+                                                        #   ranks, tool, binaries' bytes, gate, code
+    def solving(self)                                   # context manager: the window a hit replays
+    def keep(self, outputs, meta=None) -> None          # the outputs and the window, when the store is on
+def reused_note(store) -> str                           # "" or the words `check` adds to a reused run's line
 def scope_of(gate_id: str) -> str                       # "fdm.bed_fit" -> "fdm"
 SCOPE_SEP = "."
 class Registry:
@@ -2294,8 +2311,10 @@ PREREQUISITE_FAILED = "prerequisite failed"             # skip_reason leads (spi
 PREREQUISITE_NOT_ESTABLISHED = "prerequisite not established"
 NEGATIVE_KINDS: tuple[str, ...]                         # errored failed skipped unqualified not-registered
 NOT_CURRENT_KINDS: tuple[str, ...]                      # invalidated unrun
-def selftest(spec, fn, ctx, *, trace=None, out_dir=None, fixture_root=None) -> Verdict
-                                                        # runs the KNOWN-BAD control, traced
+def selftest(spec, fn, ctx, *, trace=None, out_dir=None, fixture_root=None,
+             blank_model=False, runs=None) -> Verdict
+                                                        # runs the KNOWN-BAD control, traced;
+                                                        #   `runs` the gate's store, never the fixture's
 def run_fixture(spec, fn, ctx, *, trace, out_dir, fixture_root=None) -> GateContext
                                                         # the known-bad fixture ONLY; never calls fn
 def run_good_fixture(spec, fn, ctx, *, trace, out_dir, fixture_root=None) -> GateContext
@@ -5358,7 +5377,57 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
   server's lock, record, log and lease); `site status` gains a `live:` line and `--json`
   a `server` object; `doctor`'s `site` row names a running server.
 
+## What the run store moved (issue #15, the motorBike design's P9)
+
+`gates.py` and `verdicts.py` moved, so every entry re-keyed and the bracket's cache
+and round record were regenerated in the same change.
+
+- **`gates.py`**: `GateContext.runs` (the last field, neither shown nor compared),
+  `GateContext.stored_run` and `note_reused`; `RunStore`, `StoredRun`,
+  `RUN_STORE_DIR`, `RUN_STORE_SCHEMA` and `reused_note`; `selftest(..., runs=)`, which
+  hands the gate the spine's store whatever the fixture built; `_mutated_run` hands a
+  walk run none (invariant 15). The key is sha256 over the staged files (path and
+  bytes, every stage's own path too), the argv, the rank count, the install's identity,
+  the bytes of each named binary, the gate id, its code digest and the schema; never
+  an output. The store's own file work runs under `modelio`'s bookkeeping (recorded on
+  no trace), and a hit replays the trace the solve's window recorded
+  (`verdicts.replay`), so a hit and a miss file one entry
+  (`test_aero_openfoam.OneSetOfInputsIsOneEntry`, the first test to catch a hit that
+  keyed its own reads). A window that reads a parameter, a claim, the model or the
+  tier is refused: a hit could not replay those.
+- **`verdicts.py`**: `_Session.runs` (the store's directory, `""` off), set by `sweep`
+  unless `force`; `_run_store` (a disabled store, or one whose code digest is computed
+  on first use, `RunStore.code_of`) and `_with_store`, at the check run and at each
+  control half; after the entry is filed, the check run's verdict detail gains
+  `reused_note`, and a control half that was served one gets a `note:` line.
+- **aero-openfoam**: `aero.mesh_quality`, `aero.converged`, `aero.wall_treatment` and
+  the ladder (`_ladder`, under `_Record`) run their tools inside `run.solving()` and
+  read what they left through one path (`_mesh_of`, `_solved`); the ladder record says
+  whether the store served it (`RECORD_VERSION` 2), and `aero.drag_area` then says
+  *reused* through `note_reused`.
+
 ## Limits: what the spine cannot see, named
+
+- **A stored run stands for the tools as they were (issue #15, P9).** The run store's
+  key holds what the gate staged, the tools' argv, the rank count, the install's
+  identity and the bytes of each binary the gate names. It does not hold what the
+  tools read of the install outside the stage (an `etc/caseDicts` dictionary, a shared
+  library rebuilt under the same build string, the MPI's own libraries) or of the
+  machine (the number of cores under `--oversubscribe`). An edit there is served the
+  old solve until `check --force` or `export` solves again. *Rejected:* digesting the
+  whole install per run (gigabytes; a library list is the pack's, and it changes with
+  the build); the outputs in the key (snappyHexMesh is not the same byte for byte from
+  run to run, so no solve would ever be found again).
+- **A run planted in the store is served by `check`.** The manifest's sha256 is
+  integrity, not authentication, as the verdict cache's digest is: a stored run forged
+  under the right key, its bytes and its manifest made to agree, is served and filed as
+  the solve's entry. It is never Fresh (the entry is opaque), its line says *reused*,
+  and the boundary — `check --force`, `export`, `export --dry-run` — never reads the
+  store, solves again and judges its own solve
+  (`test_run_store.TheBoundaryNeverReadsTheRunStore`). The defence is R-9's, never the
+  store.
+- **The store is never pruned.** Every design a check solved keeps its runs (tens of
+  MB each on the motorBike) until `rm -rf .nopekit/cache/runs`, which is always safe.
 
 - **`people` guards against surprise, not against the agent (architecture phase 6).**
   It is a key of `.nopekit/project.json`, which the agent edits like every record: it

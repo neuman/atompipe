@@ -2155,6 +2155,52 @@ and while building it:
 - **Phase 2, built in P0.2 and P2.1:** a solver history is CSV evidence,
   never JSON (a JSON history puts thousands of unit-less numbers into the prose pool).
 
+**The aero-openfoam pack and the motorBike demo** (2026-10-22 to 10-25, issue #15's
+aero work: the "motorBike on nopekit" design, its P0-P10), decided while building them:
+
+- **A pack of its own, `aero-openfoam`.** The claim is the drag area, CdA in m^2, of
+  a body in an open stream (forceCoeffs with `Aref 1`), solved by snappyHexMesh and
+  simpleFoam with k-omega SST. Nine gates: four guards before any solve (the case, the
+  stated flow, the regime, the domain by Franke et al. 2007 and Blocken 2015), the
+  mesh, the base-mesh solve (ITTC's iterative uncertainty), y+ (Spalding), three meshes
+  (Celik's GCI, the band at the formal order with Fs 3 above it) and the drag area at
+  the top of the finest mesh's band. *Rejected:* extending `cfd-openfoam` (its laminar
+  description and "cannot" list would blur, and its selftest widen). The helpers it
+  shares with `cfd-openfoam` are copies, held byte for byte by
+  `TheSharedHelpersHaveNotDrifted`; *rejected:* loading them across packs.
+- **The pictures bind to `aero.converged`**, the base-mesh solve, so a design that
+  fails a later guard still shows its flow beside its Failing chip. OpenFOAM computes
+  every number and every geometry a picture draws (`pressure`, `mag`, `streamLine`,
+  `surfaces`); ParaView only draws them; Turbo for the 3D pictures only. The site gained
+  `scales` (several colour keys on one figure), `light` (a lit picture, with a border
+  and a "Flat colours" toggle in the 3D view) and a card's `reason` (its evaluator's
+  own words): `docs/SITE_CONTRACT.md`.
+- **The demo ships Failing with its reason** (decision D6): on the motorBike the
+  finest of the three meshes does not settle in 500 iterations, so C7 (mesh
+  independence) fails and C1 (the drag area) is skipped behind it; the base mesh's
+  pictures still show. Its geometry is never committed (GPL, part of the OpenFOAM
+  tutorials); `model/bike.py` pins its sha256.
+- **The run store (P9; D2: "yes, as the last phase").** A cold `check --tier 2` of
+  the demo solves for about an hour, and an OpenFOAM gate is never Fresh (its tools
+  read files nopekit cannot see), so every check ran every solve again.
+  `GateContext.stored_run` keeps each solve in `.nopekit/cache/runs/<key>/`, ignored,
+  keyed on what the tools read: every staged byte, the argv, the rank count, the
+  install and its binaries' bytes, and the gate's code. **Inputs only** (§15 of the
+  design: snappyHexMesh is not the same byte for byte from run to run, so a key over
+  outputs would never find a solve again). A hit replays what the solve's trace window
+  recorded, so it files the solve's own entry (two checks of one design are one entry
+  each, and the round record does not move); `check` says *reused* on the run's line.
+  `check --force`, `export` and `export --dry-run` never read it, and a mutation run is
+  handed none: the boundary that spends solves again, and a run planted in the store
+  is caught there. A spine change (`gates.py`, `verdicts.py`), so the bracket's cache
+  was regenerated with it. *Rejected:* a key over the outputs (above); a store in the
+  tracked cache (tens of MB a solve, served to a clone that never made it); a hit that
+  records its own reads of the store (another entry per warm check; caught by
+  `OneSetOfInputsIsOneEntry`); the store in `.nopekit/out/` (a control empties its
+  out directory before it runs); a pack-level store over a spine-given directory (the
+  bypass at the boundary and the gate's code digest are the spine's to give, and a
+  second pack would have to get both right again).
+
 ## 9. Retired
 
 `docs/PLAN.md`, `docs/PLAN-v0.14.md`, `docs/plan/phase-1.md` to `phase-5.md`,

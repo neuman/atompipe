@@ -129,7 +129,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         # design moved past is never shown as current.
         "test_round.ABehindRoundRecordSaysSo",
         # Architecture phase 3b: a trace is served only for its design.
-        "test_derivation.TheTraceIsKeyedToItsDesign"],
+        "test_derivation.TheTraceIsKeyedToItsDesign",
+        # Issue #15, the motorBike design's P9: a stored solve is served only to
+        # the staged inputs, tools, ranks, argv and gate code it was solved from.
+        "test_run_store.TheRunStoreKeyIsWhatTheSolverRead"],
     8: ["test_records.IndexNeverDisagreesWithRecords",
         "test_records.NoCommandWritesARecord",
         # P2.5b: milestones and export records are records; `export` a kept writer.
@@ -157,7 +160,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_derivation.TheTraceIsWrittenOnce",
         # Issue #15: the evidence manifest `check` writes is scratch git ignores,
         # and `site build` writes nothing outside `site/` but what git ignores.
-        "test_figures.TheEvidenceManifestIsScratch"],
+        "test_figures.TheEvidenceManifestIsScratch",
+        # The motorBike design's P9: the run store is ignored scratch, and a
+        # check served from it writes nothing git sees.
+        "test_run_store.TheRunStoreIsScratch"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -237,7 +243,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          "test_unseen.UnseenMovesNoStatus",
          # The motorBike design's P6: a ladder is judged twice but solved once
          # a process, so the boundary still solves it.
-         "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess"],
+         "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess",
+         # The motorBike design's P9: `--force`, `export` and its dry run solve
+         # again, and a run planted in the store is caught at the boundary.
+         "test_run_store.TheBoundaryNeverReadsTheRunStore"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and

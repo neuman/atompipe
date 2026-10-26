@@ -1754,5 +1754,38 @@ class TheRealAeroGates(_env.EnvCase):
         self.assertEqual((v.measured, v.units), (2.70044912, "H"))
 
 
+@unittest.skipIf(_real_install() is None, "ESI OpenFOAM v2606 is not installed: not walked")
+class TheRunStoreOnTheRealTools(_env.EnvCase):
+    """The motorBike design's P9 on the real v2606: a second check of the
+    baseline spheroid is served its solve from the run store — no tool runs
+    it again, the line says *reused* — and files no second entry. (The store's
+    invariants are held through the stand-in in test_run_store, which may not
+    skip; this is the one walk on the tools themselves.)"""
+
+    def test_a_second_check_reuses_the_spheroids_solve(self):
+        import _projects
+        import time
+        root = _projects.wrap_pack_baseline("aero-openfoam", os.path.join(self.tmp(), "proj"))
+        runs = []
+        for _ in range(2):
+            t0 = time.perf_counter()
+            proc = _env.nopekit(["check", "--tier", "2", "--only", "aero.converged"], cwd=root,
+                                timeout=3600)
+            runs.append((proc, time.perf_counter() - t0))
+        (cold, cold_s), (warm, warm_s) = runs
+        line = re.compile(r"(?m)^\[ok  \] aero\.converged : (.*)$")
+        first, second = line.search(cold.stdout), line.search(warm.stdout)
+        self.assertIsNotNone(first, cold.stdout[-3000:] + cold.stderr[-3000:])
+        self.assertIsNotNone(second, warm.stdout[-3000:] + warm.stderr[-3000:])
+        self.assertNotIn("reused", first.group(1))
+        self.assertIn("reused: the run store held the run of these inputs", second.group(1))
+        self.assertEqual(first.group(1), second.group(1).split("; reused: ")[0])
+        self.assertLess(warm_s, cold_s, f"cold {cold_s:.0f} s, warm {warm_s:.0f} s")
+        entries = [n for n in os.listdir(os.path.join(root, ".nopekit", "verdicts",
+                                                      "aero.converged"))
+                   if not n.startswith("control-")]
+        self.assertEqual(len(entries), 1, entries)
+
+
 if __name__ == "__main__":
     unittest.main()

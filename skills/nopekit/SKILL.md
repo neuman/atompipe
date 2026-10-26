@@ -131,8 +131,12 @@ Change the design, run `nopekit check`, read the verdict lines. Tier 0 takes sec
   it, what it rests on, and what lost to it.
 - **Decisions keep their losers.** `nopekit decide` with each rejected alternative's
   `--type` and, where you can say it, `--returns-if`.
-- **Pictures.** `site build` draws `cfd-openfoam`'s flow pictures only with `pvbatch62`;
-  no status needs them. On "from another run", run `nopekit check --force --only <gate>`.
+- **Pictures.** `site build` draws `cfd-openfoam`'s and `aero-openfoam`'s flow pictures
+  only with `pvbatch62`; no status needs them. On "from another run", run
+  `nopekit check --force --only <gate>`.
+- **Long solves.** An OpenFOAM gate keeps its solve in `.nopekit/cache/runs/`, and the
+  next `check` on the same staged inputs reuses it (its line says *reused*). Never edit
+  the store; `rm -rf .nopekit/cache/runs` is safe. `check --force` and `export` solve again.
 - **The trace.** `round` starts `nopekit model trace` in the background; run it yourself
   after a gate or acceptance edit, before your turn ends. Never edit `.nopekit/trace/`.
 - **Review.** Before anything is built, review the design along each live pack's lenses

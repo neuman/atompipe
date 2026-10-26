@@ -137,6 +137,20 @@ judged against and the range it was qualified on:
    passing landing outside the context as inconclusive and so qualified a gate
    keyed to its own control behind a narrow context).
 
+And a ninth with issue #15's run store, because an hour-long solve run again
+at every check is a cost nobody pays twice, and a solve served from a cache is
+a place to show a pass nothing earned:
+
+9. **A solve is reused by what it read, and re-run at the boundary.**
+   :meth:`GateContext.stored_run` keys a run on every staged input byte, the
+   tools' bytes and identity, the rank count, the argv and the gate's own code
+   (:class:`StoredRun`), never on what the tools wrote; it lives in the ignored
+   ``RUN_STORE_DIR``, and a hit files the same entry the solve filed, its
+   window's trace replayed. The sweep hands a store only to a ``check`` run and
+   its controls: ``--force``, ``export`` and ``export --dry-run`` get a
+   disabled one and solve again, and a mutation run gets none. A reused run is
+   not a re-run: the check line says *reused* (:func:`reused_note`).
+
 The gate function itself stays an ordinary function: :func:`gate` registers it
 and returns it **unchanged**, so it is directly callable and directly testable
 without the registry in the way.
@@ -154,10 +168,12 @@ import math
 import contextlib
 import dataclasses
 import fnmatch
+import hashlib
 import importlib
 import importlib.machinery
 import importlib.util
 import inspect
+import json
 import numbers
 import copy
 import os
@@ -182,6 +198,11 @@ __all__ = [
     "SCOPE_SEP",
     "scope_of",
     "GateContext",
+    "RunStore",
+    "StoredRun",
+    "RUN_STORE_DIR",
+    "RUN_STORE_SCHEMA",
+    "reused_note",
     "Registry",
     "REGISTRY",
     "active_registry",
@@ -446,13 +467,20 @@ class GateContext:
     ``trace``    the ``verdicts.GateTrace`` this view records into, set by
                  :func:`run_gate` (and :func:`selftest` for a fixture). ``None``
                  on a context nobody is tracing.
+    ``runs``     the run store this one run may use (:class:`RunStore`), behind
+                 :meth:`stored_run`: stamped by the sweep (``verdicts``) for a
+                 ``check`` run and its controls, disabled under ``--force``,
+                 ``export`` and ``export --dry-run``, ``None`` on every other
+                 context (a mutation run, a test, ``gate selftest``). A gate
+                 never reads it itself.
 
     Every field has a default so a test can build a context with the one thing
     it cares about. That is additive to the contract's declaration, not a change
     to it: field order is unchanged and positional construction still works.
-    New fields go on the END for that reason — ``memo`` and ``trace`` are there
-    now, and are neither shown nor compared: two contexts that differ only in who
-    is watching are the same context.
+    New fields go on the END for that reason — ``memo``, ``trace`` and ``runs``
+    are there now, and are neither shown nor compared: two contexts that differ
+    only in who is watching, or in where a solve may be found, are the same
+    context.
     """
 
     root: str = ""
@@ -467,6 +495,7 @@ class GateContext:
     key_scope: str = ""
     memo: SweepMemo | dict | None = field(default=None, repr=False, compare=False)
     trace: Any = field(default=None, repr=False, compare=False)
+    runs: Any = field(default=None, repr=False, compare=False)
 
     # -- parameter access -------------------------------------------------- #
     def scopes(self) -> list[str]:
@@ -790,6 +819,44 @@ class GateContext:
             memo[key] = (loader, signature, value, _signatures(loaded, abspath), loaded)
         return value
 
+    # -- the run store ------------------------------------------------------ #
+    def stored_run(self, stages: Any, *, argv: Any, ranks: int, tool: Any = None,
+                   binaries: Iterable[str] = ()) -> "StoredRun":
+        """The run of the staged inputs in ``stages`` — served from the run
+        store when it holds one, else for the gate to solve (issue #15, P9).
+
+        ``stages``: the directory (or the directories) the gate staged its
+        inputs in, before any tool ran; every file in them is a key. ``argv``
+        (the tools and their arguments, as JSON), ``ranks``, ``tool`` (the
+        install's identity, as JSON) and ``binaries`` (paths whose bytes are
+        the tools) are the rest of the key, with the running gate's code
+        digest the sweep put in :attr:`runs` (:class:`RunStore`). Its outputs
+        are never a key: a solve whose bytes are not the same from run to run
+        (snappyHexMesh's) would never be found again (design §15).
+
+        A hit (``run.hit``) has put the stored outputs back in the stages and
+        recorded on this view's trace what the stored solve's window recorded
+        (``verdicts.replay``), so the entry the gate files is the one a solve
+        would have filed; ``run.meta`` is what that solve kept. A miss: the
+        gate solves inside ``with run.solving():`` and then ``run.keep(outputs,
+        meta)``. Off (no store, a disabled one: ``--force``, ``export``), every
+        run is a miss and ``keep`` writes nothing. Either way the gate then
+        reads its outputs from the stages through one code path, so a hit and a
+        miss read the same files the same way (the mesh ladder record's rule,
+        ``aero-openfoam``'s ``_Record``)."""
+        return StoredRun._open(self, stages, argv=argv, ranks=ranks, tool=tool,
+                               binaries=binaries)
+
+    def note_reused(self, key: str) -> None:
+        """Say that this run's result rests on a stored run another gate of this
+        process was served (``key``, its :class:`StoredRun` key): the check line
+        says *reused* for this gate too (:func:`reused_note`). For a gate that
+        judges a solve an earlier gate of the same check made, and was handed
+        it through a file of that gate's (aero-openfoam's ladder record)."""
+        store = self.runs
+        if isinstance(store, RunStore) and key and key not in store.hits:
+            store.hits.append(str(key))
+
 
 def _loader_id(loader: Any) -> Any:
     """``id(loader)`` — or, for a bound method, the ids of its object and function.
@@ -876,6 +943,375 @@ def _report_read(trace: Any, abspath: str) -> None:
     window = tracing(trace) if trace is not None else contextlib.nullcontext()
     with window:
         sys.audit("open", abspath, "r", _READ_FLAGS)
+
+
+# --------------------------------------------------------------------------- #
+# the run store (issue #15, P9): a solve reused by what it read
+# --------------------------------------------------------------------------- #
+#: Where the run store lives, under the project root: in the ignored cache, so
+#: ``check`` writes no record when it writes there (invariant 8). One directory
+#: per run, named by its key: ``<key>/manifest.json`` and ``<key>/files/<n>/``
+#: (the outputs of the n-th stage). *Rejected:* ``.nopekit/out/`` (``site
+#: build`` and the gates' scratch live there, and a control empties its own
+#: out directory before it runs, so a control's solve would be thrown away
+#: every check); the tracked ``.nopekit/verdicts/`` (a solve is tens of MB of
+#: files, and a clone would be served a solve its own machine never made).
+RUN_STORE_DIR = ".nopekit/cache/runs"
+
+#: The format of a stored run, inside its key: a run stored by another format
+#: is never found. 1: the manifest of 2026-10-25.
+RUN_STORE_SCHEMA = 1
+
+
+@dataclass
+class RunStore:
+    """Where one gate run may find a stored solve, and what it was served.
+
+    Made by the sweep for each check run and each control half
+    (``verdicts._run_store``) and handed in ``GateContext.runs``: ``directory``
+    (``<root>/RUN_STORE_DIR``, ``""`` when the store is off), ``gate`` and
+    ``code`` (the running gate's id and code digest, ``verdicts.code_digest``:
+    a key of every run it stores, so an edit of the gate's code finds no
+    run stored before it). ``hits``: the keys this run was served, which the
+    sweep says beside its verdict (:func:`reused_note`). Off — ``--force``,
+    ``export`` and ``export --dry-run`` (the sweep's ``force``) — it serves
+    nothing and keeps nothing: invariant 12's boundary re-executes every solve,
+    so a run planted in the store is caught where money is spent."""
+
+    directory: str = ""
+    gate: str = ""
+    code: str = ""
+    hits: list = field(default_factory=list)
+    #: ``code`` computed on first use, for a sweep that hands every gate a store
+    #: and most gates never open one: a digest of the gate's code closure is
+    #: not free, and a gate with no solve should not pay it.
+    code_of: Any = field(default=None, repr=False, compare=False)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.directory and self.gate and (self.code or self.code_of))
+
+    def digest(self) -> str:
+        """The running gate's code digest, ``""`` when it cannot be keyed (and
+        then the store is off for this run)."""
+        if not self.code and self.code_of is not None:
+            self.code = str(self.code_of() or "")
+            self.code_of = None
+        return self.code
+
+
+def reused_note(store: Any) -> str:
+    """The words a verdict's detail gains when its run was served from the
+    store: ``""`` when it was not. Said where the detail says what ran, never
+    in the entry: a reused run and the solve it stands for file one entry
+    (``StoredRun``), and this run's line says which of the two it was."""
+    hits = list(getattr(store, "hits", None) or ()) if isinstance(store, RunStore) else []
+    if not hits:
+        return ""
+    keys = ", ".join(k[:12] for k in hits)
+    return (f"reused: the run store held the run of these inputs ({keys}), so the tools "
+            f"did not run again; nopekit check --force runs them")
+
+
+def _unrecorded() -> Any:
+    """The spine's own file work, recorded on no trace: a digest the store takes
+    of what the gate staged, the copy it keeps, the copy it puts back. What the
+    gate reads of them afterwards is recorded as any read is."""
+    return modelio._bookkeeping()
+
+
+def _digest_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _stage_files(stage: str) -> list[list[str]]:
+    """``[[rel, sha256], ...]`` of every file under ``stage``, sorted. A link is
+    refused: what it points at is not in the stage."""
+    out: list[list[str]] = []
+    for dirpath, dirs, files in os.walk(stage):
+        dirs.sort()
+        for name in [*dirs, *files]:
+            if os.path.islink(os.path.join(dirpath, name)):
+                raise NopekitError(f"the stage {stage} holds a link, {name}: a stored run "
+                                   f"keys files, never what a link points at")
+        for name in sorted(files):
+            full = os.path.join(dirpath, name)
+            out.append([os.path.relpath(full, stage).replace(os.sep, "/"), _digest_file(full)])
+    return out
+
+
+def _json_value(value: Any, what: str) -> Any:
+    try:
+        return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise NopekitError(f"a stored run's {what} must be plain JSON: {exc}") from None
+
+
+def _trace_form(trace: GateTrace) -> dict:
+    """What a solve's window recorded, as ``verdicts.replay`` replays it."""
+    return {"files_read": list(trace.files_read), "sources": list(trace.sources),
+            "stats": [[p, trace.stat_existed(p)] for p in trace.stats],
+            "files_written": sorted(trace.files_written), "dirs": sorted(trace.dirs),
+            "opaque": sorted(trace.opaque), "tier": trace.tier}
+
+
+def _trace_of(form: Any) -> GateTrace | None:
+    if not isinstance(form, dict):
+        return None
+    try:
+        t = GateTrace()
+        for p in form["files_read"]:
+            t._note_read(str(p))
+        for p in form["sources"]:
+            t._note_source(str(p))
+        for p, existed in form["stats"]:
+            t._note_stat(str(p), existed if isinstance(existed, bool) else None)
+        for p in form["files_written"]:
+            t._note_write(str(p))
+        t.dirs.update(str(p) for p in form["dirs"])
+        t.opaque.update(str(c) for c in form["opaque"])
+        if form["tier"] is not None:
+            t._note_tier(int(form["tier"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return t
+
+
+def _view_reads(trace: Any) -> tuple:
+    """The reads a view records through its own channels, not the hook's: a
+    solve's window that moved one of these read something a hit cannot
+    replay."""
+    if trace is None:
+        return ()
+    return (len(getattr(trace, "params", {}) or {}), len(getattr(trace, "ledger", {}) or {}),
+            bool(getattr(trace, "model_used", False)), getattr(trace, "tier", None))
+
+
+def _safe_rel(rel: Any) -> bool:
+    if not isinstance(rel, str) or not rel or rel.startswith("/") or "\\" in rel:
+        return False
+    return all(part not in ("", ".", "..") for part in rel.split("/"))
+
+
+class StoredRun:
+    """One run of staged inputs: served from the run store (``hit``) or to be
+    solved and kept. Made by :meth:`GateContext.stored_run`, never by hand.
+
+    **The key is what the solver reads** — every staged byte, the tools'
+    bytes and identity, the rank count, the argv and the gate's code — and
+    never what it wrote (design §15: snappyHexMesh is not the same byte for
+    byte from run to run, so a key over outputs would find nothing). A
+    qualification run keys its own staged inputs, so its fixture's one edit
+    is another key; a mutation run is handed no store at all
+    (``gates._mutated_run``: invariant 15, nothing written in the project).
+
+    **A hit files the entry the solve filed.** The solve runs inside
+    :meth:`solving`, a trace window of its own; :meth:`keep` stores what that
+    window recorded beside the outputs, and a hit replays it into the gate's
+    trace (``verdicts.replay``, as ``GateContext.load_file`` replays a
+    loader's) after putting the outputs back unrecorded, so they read as a
+    tool's output reads (``out:... (not written by this gate)``). The entry is
+    still opaque, so never Fresh, and its claim reads *unseen* between checks
+    as before (issue #15, D1). What slipped through the first sketch of this
+    design: a hit that recorded its own reads of the store keyed another
+    entry, so two check runs of one design filed two entries
+    (``OneSetOfInputsIsOneEntry``), and the round record moved after every
+    warm check. The window may read no parameter, claim, model or tier:
+    those are the view's channels, not the hook's, and a hit could not replay
+    them (``solving`` refuses).
+
+    *What it does not stop* (docs/SPINE_CONTRACT.md, the limits): a file the
+    tools read that is not staged (an install's ``etc/`` dictionary, a library
+    rebuilt under the same build string) is not a key; and a run planted in
+    the store under the right key is served by ``check`` — reused, said so on
+    its line, never Fresh — until the boundary (``--force``, ``export``)
+    solves it again and the disagreement is caught there."""
+
+    def __init__(self, ctx: Any, stages: list[str], key: str, store: RunStore | None,
+                 inputs: list) -> None:
+        self.key = key
+        self.hit = False
+        self.meta: Any = None
+        self._ctx = ctx
+        self._stages = stages
+        self._store = store
+        self._inputs = {(i, rel) for i, files in enumerate(inputs) for rel, _sha in files}
+        self._window: GateTrace | None = None
+
+    # -- opening ------------------------------------------------------------ #
+    @classmethod
+    def _open(cls, ctx: Any, stages: Any, *, argv: Any, ranks: int, tool: Any,
+              binaries: Iterable[str]) -> "StoredRun":
+        if isinstance(stages, (str, os.PathLike)):
+            stages = [stages]
+        dirs = [os.path.abspath(os.fspath(p)) for p in stages]
+        if not dirs or any(not os.path.isdir(d) for d in dirs):
+            raise NopekitError(f"a stored run's stages must be directories: {dirs}")
+        store = ctx.runs if isinstance(ctx.runs, RunStore) and ctx.runs.enabled else None
+        if store is not None and not store.digest():
+            store = None
+        with _unrecorded():
+            inputs = [_stage_files(d) for d in dirs]
+            tools = []
+            for b in binaries:
+                path = os.path.realpath(os.fspath(b))
+                tools.append([os.fspath(b), _digest_file(path) if os.path.isfile(path)
+                              else None])
+        form = {"schema": RUN_STORE_SCHEMA, "gate": store.gate if store else "",
+                "code": store.code if store else "", "argv": _json_value(argv, "argv"),
+                "ranks": int(ranks), "tool": _json_value(tool, "tool"), "binaries": tools,
+                # The stages' own paths too: what a hit replays names them, so a
+                # project moved elsewhere solves again rather than replay reads
+                # of another place.
+                "stages": [[d, files] for d, files in zip(dirs, inputs)]}
+        key = hashlib.sha256(json.dumps(form, sort_keys=True, separators=(",", ":"))
+                             .encode("utf-8")).hexdigest()
+        run = cls(ctx, dirs, key, store, inputs)
+        if store is not None:
+            run._fetch()
+        return run
+
+    def _where(self) -> str:
+        return os.path.join(self._store.directory, self.key) if self._store else ""
+
+    def _fetch(self) -> None:
+        """Serve the stored run of this key, whole and unchanged, or nothing."""
+        where = self._where()
+        with _unrecorded():
+            try:
+                with open(os.path.join(where, "manifest.json"), encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, ValueError):
+                return
+            if not isinstance(data, dict) or data.get("schema") != RUN_STORE_SCHEMA \
+                    or data.get("key") != self.key or data.get("gate") != self._store.gate:
+                return
+            trace = _trace_of(data.get("trace"))
+            files = data.get("files")
+            if trace is None or not isinstance(files, list) or not files:
+                return
+            plan = []
+            for row in files:
+                if not (isinstance(row, list) and len(row) == 3 and isinstance(row[0], int)
+                        and 0 <= row[0] < len(self._stages) and _safe_rel(row[1])
+                        and isinstance(row[2], str)) or (row[0], row[1]) in self._inputs:
+                    return
+                src = os.path.join(where, "files", str(row[0]), *row[1].split("/"))
+                try:
+                    if os.path.islink(src) or _digest_file(src) != row[2]:
+                        return
+                except OSError:
+                    return
+                plan.append((src, os.path.join(self._stages[row[0]], *row[1].split("/"))))
+            done: list[str] = []
+            try:
+                for src, dst in plan:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+                    done.append(dst)
+            except OSError:
+                # Half a run put back is no run: the gate solves on the stage
+                # as it staged it.
+                for dst in done:
+                    with contextlib.suppress(OSError):
+                        os.remove(dst)
+                return
+        replay(trace, getattr(self._ctx, "trace", None))
+        self.hit = True
+        self.meta = data.get("meta")
+        self._store.hits.append(self.key)
+
+    # -- a miss --------------------------------------------------------------- #
+    @contextlib.contextmanager
+    def solving(self) -> Any:
+        """The window the solve runs in: everything the hook records here is
+        what a hit replays. Refuses a window that read a parameter, a claim,
+        the model or the tier (:func:`_view_reads`)."""
+        if self.hit:
+            raise NopekitError(f"{self.key[:12]}: a run the store served is not solved again")
+        view = getattr(self._ctx, "trace", None)
+        own = GateTrace(kind=getattr(view, "kind", "gate"), anchors=getattr(view, "anchors", None))
+        before = _view_reads(view)
+        with tracing(own):
+            yield self
+        if _view_reads(view) != before:
+            raise NopekitError("a stored run's solve read a parameter, a claim, the model or "
+                               "the tier: read those before `solving()`, so a run the store "
+                               "serves reads what the solve read")
+        self._window = own
+
+    def keep(self, outputs: Iterable[str], meta: Any = None) -> None:
+        """Keep the solve's ``outputs`` (paths of files, or of directories of
+        them, in the stages) with ``meta`` (plain JSON: what the gate needs to
+        read them, its log names) and what :meth:`solving` recorded. Sets
+        ``meta`` on a miss whether or not the store is on; writes only when it
+        is. A write that fails keeps nothing and costs the next check a solve,
+        never a verdict."""
+        if self.hit:
+            return
+        if self._window is None:
+            raise NopekitError("keep() before solving(): a run is kept only with what its "
+                               "solve's window recorded")
+        self.meta = _json_value(meta, "meta")
+        if self._store is None:
+            return
+        with _unrecorded():
+            # The store's own look at what to keep: a listing here recorded on
+            # the gate's trace made the solve's entry another than the hit's
+            # (first run of OneSetOfInputsIsOneEntry with the store).
+            files = self._outputs(outputs)
+        where = self._where()
+        tmp = f"{where}.writing-{os.getpid()}"
+        manifest = {"schema": RUN_STORE_SCHEMA, "key": self.key, "gate": self._store.gate,
+                    "files": [], "meta": self.meta, "trace": _trace_form(self._window)}
+        with _unrecorded():
+            try:
+                shutil.rmtree(tmp, ignore_errors=True)
+                for i, rel, src in files:
+                    dst = os.path.join(tmp, "files", str(i), *rel.split("/"))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+                    manifest["files"].append([i, rel, _digest_file(dst)])
+                with open(os.path.join(tmp, "manifest.json"), "w", encoding="utf-8") as fh:
+                    json.dump(manifest, fh, indent=1, sort_keys=True)
+                shutil.rmtree(where, ignore_errors=True)
+                os.replace(tmp, where)
+            except OSError as exc:
+                shutil.rmtree(tmp, ignore_errors=True)
+                log = getattr(self._ctx, "log", None)
+                if callable(log):
+                    log(f"the run store kept nothing of {self.key[:12]}: {exc}")
+
+    def _outputs(self, outputs: Iterable[str]) -> list[tuple[int, str, str]]:
+        found: dict[tuple[int, str], str] = {}
+        for raw in outputs:
+            path = os.path.abspath(os.fspath(raw))
+            i = next((n for n, d in enumerate(self._stages)
+                      if path == d or path.startswith(d + os.sep)), None)
+            if i is None or path == self._stages[i]:
+                raise NopekitError(f"a stored run keeps files in its stages, and {path} is not "
+                                   f"one")
+            if os.path.isdir(path):
+                paths = [os.path.join(dp, f) for dp, _ds, fs in os.walk(path) for f in fs]
+            elif os.path.isfile(path):
+                paths = [path]
+            else:
+                raise NopekitError(f"a stored run's output {path} is not there")
+            for p in paths:
+                if os.path.islink(p):
+                    raise NopekitError(f"a stored run keeps no link: {p}")
+                rel = os.path.relpath(p, self._stages[i]).replace(os.sep, "/")
+                if (i, rel) in self._inputs:
+                    raise NopekitError(f"{rel} is a staged input: a stored run keeps what the "
+                                       f"tools wrote, never what they read")
+                found[(i, rel)] = p
+        if not found:
+            raise NopekitError("a stored run keeps at least one output")
+        return [(i, rel, p) for (i, rel), p in sorted(found.items())]
 
 
 # --------------------------------------------------------------------------- #
@@ -3198,7 +3634,8 @@ def run_good_fixture(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: Gate
 
 def selftest(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext, *,
              trace: GateTrace | None = None, out_dir: str | None = None,
-             fixture_root: str | None = None, blank_model: bool = False) -> Verdict:
+             fixture_root: str | None = None, blank_model: bool = False,
+             runs: Any = None) -> Verdict:
     """Run the gate against its own known-bad input. The verdict is on the GATE.
 
     ``passed=True`` here means *the gate correctly failed on input that is known
@@ -3251,6 +3688,11 @@ def selftest(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext,
     (``verdicts._no_model``) — set for an evaluator the mutation pass applies
     to, whose check run is handed none, so neither control sees a channel the
     check run lacks.
+
+    ``runs``: the :class:`RunStore` the gate runs on what the fixture built
+    with, whatever the fixture put there — the spine's, or ``None``: a fixture
+    never hands its gate a store of its own choosing. The key covers the
+    fixture's staged bytes, so its one edit is another key.
     """
     selftest_id = f"{spec.id}#selftest"
     tier = Tier(int(spec.tier))
@@ -3301,6 +3743,8 @@ def selftest(spec: GateSpec, fn: Callable[[GateContext], Any], ctx: GateContext,
     from . import verdicts as _verdicts
     trace.handed_extra = _verdicts._extra_keys(bad_ctx)
     bad_ctx = _verdicts._no_model(bad_ctx, blank_model)
+    if any(f.name == "runs" for f in dataclasses.fields(bad_ctx)):
+        bad_ctx = dataclasses.replace(bad_ctx, runs=runs)
 
     inner = run_gate(spec, fn, bad_ctx, trace=trace)
     elapsed, cpu = clock.spent()
@@ -4111,6 +4555,12 @@ def _mutated_run(spec: GateSpec, fn: Callable[[GateContext], Any], good_ctx: Gat
     changes: dict[str, Any] = {"params": params, "out_dir": out_dir}
     if "memo" in names:
         changes["memo"] = _verdicts.SweepMemo()
+    if "runs" in names:
+        # No run store on a walk run (issue #15, P9): the store is in the
+        # project, and a mutation pass writes nothing there (invariant 15).
+        # The known-good half's context carries the sweep's store, and this
+        # copy of it would have kept every mutated solve.
+        changes["runs"] = None
     own = GateTrace(kind=getattr(trace, "kind", "control"),
                     anchors=getattr(trace, "anchors", None))
     verdict = run_gate(spec, fn, dataclasses.replace(good_ctx, **changes), trace=own)

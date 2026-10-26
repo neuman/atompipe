@@ -41,10 +41,10 @@ judges its own quantity, not a drag area. Only `aero.drag_area` covers
 and writes a record of what the tools wrote, keyed on every byte they read
 (`gates/aero.py`, `_Record`). `aero.drag_area` runs after it in the same check
 run and judges that record: the same solves, read through the same code. A
-record is read only by the process that wrote it, so every `check`, `export`
-and `gate selftest` solves each ladder at least once, and a file left under
-`.nopekit/out` never stands in for a solve. Alone, `aero.drag_area` solves its
-own ladder.
+record is read only by the process that wrote it, so a file left under
+`.nopekit/out` never stands in for a solve. Under it is the run store (below):
+a later `check` is served the ladder an earlier one solved, and both gates then
+say *reused*. Alone, `aero.drag_area` solves its own ladder.
 
 Known-bad controls (`selftest/bad_cases.py`, one edit each to the baseline
 spheroid; each that gives a value lands at least 15% past its limit, and
@@ -81,6 +81,22 @@ checks read what the tools printed.
 These gates read inside a subprocess, so they are **opaque**: they run again on
 every check where OpenFOAM exists. Between check runs their claims read Stale
 with the cause *unseen inputs*.
+
+**The run store.** Each gate that runs OpenFOAM on a staged copy
+(`aero.mesh_quality`, `aero.converged`, `aero.wall_treatment`, the ladder)
+keeps what the tools wrote in `.nopekit/cache/runs/<key>/`
+(`GateContext.stored_run`), keyed on every staged byte, the tools' argv, the
+rank count, the install (root, API, patch, build), the bytes of each tool and
+of `mpirun`, and the gate's code: never on what the tools wrote, since
+snappyHexMesh is not the same byte for byte from run to run. A later `check`
+whose staged copy is the same is served the stored run: no tool runs it, the
+gate reads the same files through the same code and files the same entry, and
+its line says *reused*. `check --force`, `export` and `export --dry-run` never
+read the store, so the boundary solves again. What the key does not see: a
+file the tools read from the install that the stage does not hold (an
+`etc/caseDicts` dictionary, a library rebuilt under the same build string).
+`rm -rf .nopekit/cache/runs` is always safe. On the motorBike demo a warm
+`check --tier 2` takes minutes instead of an hour (`examples/motorbike`).
 
 ## What this pack CANNOT settle
 

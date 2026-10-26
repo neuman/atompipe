@@ -136,6 +136,9 @@ below names:
    holding the same bytes on disk — never from one for another (phase 3b; in its
    review, a model whose `build()` read `model/e.json` kept its old trace and amber
    after the file changed).
+   A solve the run store serves is keyed on what its tools read — every staged byte,
+   the tools, the rank count, the argv and the gate's code, never what they wrote —
+   and files the entry its solve filed, the solve's window replayed (issue #15, P9).
    (Observed before this: one hash of the whole model decided every gate, and a model
    that failed to import compared equal, so three claims read Checked for a design that
    could not be built.)
@@ -320,7 +323,8 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     claim is unresolved, and re-runs every evaluator a required claim rests on, with
     its controls, its mutation pass and its prerequisites, at the top tier, refusing
     when a re-run disagrees with the entry the cache served or with what the records
-    hold — on every later export too; `--dry-run` is the same code path and writes
+    hold — on every later export too, never served a stored solve (the run store is
+    `check`'s alone, and `--force` skips it too); `--dry-run` is the same code path and writes
     nothing of its own (a generator it runs that writes outside its directory is
     refused and named, not undone). Going ahead over an unresolved claim is a
     decision a person records in their own shell, naming each claim with its status,
@@ -465,12 +469,12 @@ named.)
 | 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus`, `test_aero_openfoam.NoGuardSpeaksForTheDragArea`, `test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand`, `test_aero_openfoam.TheDragGateStatesItsOwnUnits` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
-| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo`, `test_derivation.TheTraceIsKeyedToItsDesign` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository`, `test_derivation.TheTraceIsWrittenOnce`, `test_figures.TheEvidenceManifestIsScratch` |
+| 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo`, `test_derivation.TheTraceIsKeyedToItsDesign`, `test_run_store.TheRunStoreKeyIsWhatTheSolverRead` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository`, `test_derivation.TheTraceIsWrittenOnce`, `test_figures.TheEvidenceManifestIsScratch`, `test_run_store.TheRunStoreIsScratch` |
 | 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies`, `test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus`, `test_unseen.UnseenMovesNoStatus`, `test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus`, `test_unseen.UnseenMovesNoStatus`, `test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess`, `test_run_store.TheBoundaryNeverReadsTheRunStore` |
 | 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
 | 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved`, `test_figures.EvidenceIsBoundByContent`, `test_figures.NothingTheBuildDeletesIsLinked`, `test_figures.AMissingRendererMovesNoStatus`, `test_figures.AFigureIsItsEntrysEvidence`, `test_figures.AFigureSaysWhichResultItIs`, `test_figures.TheClaimsStatusSitsBesideEveryFigure`, `test_figures.TheScaleIsAPackConstant` |
 | 15 | `test_mutation.MutationIsSealed`, `test_derivation.TheTraceBuildsInACopy`, `test_derivation.AnAmberRunWritesNothing` |
@@ -535,7 +539,9 @@ Each fact has one home; everything else that shows it is an output of that home.
   cost), `.nopekit/out/` (scratch and evidence), `.nopekit/cache/evidence/` (the
   bytes each recorded run cited, so the page copies evidence by content),
   `REPORT.md` (the readiness report, `report --write`), `out/<milestone>/` (the
-  package `export` wrote),
+  package `export` wrote), `.nopekit/cache/runs/` (the run store: each solve a
+  gate ran on a staged copy, keyed on what its tools read and served to the next
+  `check` whose inputs are the same; `check --force` and `export` never read it),
   `.nopekit/cache/trace/` (a trace's resumable scratch), `.nopekit/out/trace.log`
   (a background trace's log), `.nopekit/out/serve.json`, `serve.lock` and `serve.log`
   (a detached live server's address, the lock it holds for its life, and its log),
@@ -573,9 +579,11 @@ layout in full, with each writer.
 | `src/nopekit/rounds.py` | the round record, `.nopekit/round.json` (SPEC 18): its digests, its bytes, its reader states; imported only by `cli` |
 | `site/` | a project's site — scaffolded by `nopekit site init` from `src/nopekit/site_template/`: `index.html` (a redirect to `engineering/`), `engineering/index.html` (the outline: the representation, the verdict, the map, a section per board, next steps), `marketing/index.html` (the product in a viewer, its story, what it must do, the choices behind it; SPEC 40) and `technical.html` (today's panels), all four the project's own; `content/` the agent's prose (`story.md` the marketing page's), stamped; `data/` and `assets/` baked by `site build`. Plain HTML/CSS/ES modules, no build step |
 | `packs/` | domain packs: evaluators (`gates/`) and proposers (`proposers/`). Ordinary directories: no build step, no registration |
+| `packs/aero-openfoam/` | the drag area of a body in an open stream, solved by ESI OpenFOAM v2606 (snappyHexMesh, simpleFoam, k-omega SST): nine gates (the guards, the base mesh, y+, a three-mesh GCI, the drag area), its 3D pictures (`views/flow3d.py`, ParaView), its runs through the run store (`GateContext.stored_run`) |
 | `skills/` | the Claude Code skills (`nopekit`, `pack-authoring`) |
 | `hooks/` | the plugin's Stop hook (`hooks.json`): `stop.py` runs `nopekit round --hook`, which commits each round, with the session's cwd kept off the import path |
 | `examples/bracket/` | the reference project — zero dependencies, runs the whole loop |
+| `examples/motorbike/` | the OpenFOAM demo: the motorBike tutorial's body at 20 m/s through `aero-openfoam`; commits its verdicts, round record, figures and scrubbed evidence, since a cold `check --tier 2` takes about an hour (a warm one, served by the run store, minutes); needs v2606 and, for the pictures, ParaView 6.2 |
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |
 | `tests/_projects.py` | test projects built once: a bracket copy (the legacy bracket by default, the committed one with `migrated=True`), and a pack's baseline wrapped as a project |

@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "gate": "bracket.bearing",
+  "rho": "f673272f2b1c30d657a2a5f20903a7037b6a4e554b84375182c0e5bfcfa9ed1a",
+  "code": {
+    "digest": "9099f9aa45b57a7fe1e27132311a2c1259955446903d64eb7c0297d602a7f321",
+    "files": [
+      "gates/structural.py"
+    ],
+    "fallback": ""
+  },
+  "spine": "dd32113288df01198c02e21df2c24c0d5e3684405d546f97cf6f0bade61ab347",
+  "reads": {
+    "params": [
+      [
+        [
+          "bearing_area"
+        ],
+        "58fffc371c36f2f34d37d77390404d56b5911fcb12711aa2570386a970a33ea9",
+        77.0
+      ],
+      [
+        [
+          "bearing_stress"
+        ],
+        "882c1b0f554a21ad1b0ab70ac634c6bf2f4aa4439314e3a3f883b61028b16ff3",
+        0.19480519480519481
+      ],
+      [
+        [
+          "config",
+          "n_bolts"
+        ],
+        "772c51c318a4bea2d58dec86dbdafe096cb75369a5638c345acaa0fe5ce8aa82",
+        2
+      ],
+      [
+        [
+          "design_stress"
+        ],
+        "b34f99646d287db0e67fa4f3d5b7715260045d9c6226d860a653be73642ea84f",
+        15.0
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "model": null,
+    "opaque": []
+  },
+  "instruments": {},
+  "verdict": {
+    "passed": true,
+    "measured": 0.195,
+    "limit": 15.0,
+    "units": "MPa",
+    "comparator": "<=",
+    "settles": "bearing stress",
+    "detail": "0.19 MPa on 77 mm^2 across 2 bolt(s), allowable 15.0 MPa",
+    "evidence": [],
+    "locators": [],
+    "claims": [
+      "structural",
+      "fastener",
+      "bearing"
+    ],
+    "tier": 0,
+    "pack": ""
+  },
+  "digest": "0a2ce15159612df1a08a58429d2a1e20cbdbbf00ba93528bc1e2a0b250a1623b"
+}

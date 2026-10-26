@@ -103,6 +103,14 @@ because the verdict cache keys each verdict by exactly what it read. Write for t
   value one gate left there was the next gate's read of a file it never opened.
   `ctx.memo is None` (a hand-run script, outside a sweep) is the one question to ask
   of it. `ctx.trace` is what your reads are recorded into; never touch it.
+- **A solve that takes minutes goes through `ctx.stored_run`.** Stage every input, then
+  `run = ctx.stored_run(stage, argv=..., ranks=n, tool=..., binaries=[...])`; on
+  `run.hit` the outputs are back, else run the tools inside `with run.solving():` and
+  `run.keep(outputs, meta)`. Read the outputs from the stage the same way on both
+  paths. The key is what the tools read, never what they wrote; `check --force` and
+  `export` never read the store, and `check` says *reused*. `ctx.runs` is the sweep's:
+  never read it. A gate judging a solve another gate of the check was served says so
+  with `ctx.note_reused(key)`.
 - **Keep no memo of your own.** An `lru_cache` at module level is emptied before every
   run, so it saves nothing across gates; a module-level dict you fill from a function
   is never emptied, and the second gate to ask gets a value whose file it never opened

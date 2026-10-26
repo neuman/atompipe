@@ -1,0 +1,326 @@
+{
+  "alt": "A grey motorcycle with a rider, and three coloured planes across the air behind it.",
+  "caption": "Each cut is a plane across the flow behind the bike, on the base mesh. The colour shows the energy that is left in the air. The picture does not show the air that has all of its energy.",
+  "entry": "6c723b658b87d338-27e0c212",
+  "files": {
+    "image": {
+      "bytes": 288487,
+      "name": "aero.wake_cuts.51dfd37f2e49.png",
+      "sha256": "51dfd37f2e497c14ae11d4539637b4868f363aaa9727aca47177997cf0c6934a"
+    }
+  },
+  "gate": "aero.converged",
+  "kind": "image",
+  "light": "none",
+  "marks": [],
+  "recipe": "e07f5ecf8db3cfdc5280f6927622df1362c9c8c31b105f0c1a8584c89d878b3c",
+  "scale": {
+    "hi": 1.05,
+    "lo": -0.2,
+    "over": "#ff00ff",
+    "over_word": "more than 1.05",
+    "quantity": "total pressure coefficient CpT",
+    "source": [],
+    "source_text": "At CpT = 1, the air has all of its energy. The scale is the same for each design.",
+    "stops": [
+      {
+        "at": 0.0,
+        "colour": "#30123b"
+      },
+      {
+        "at": 0.015686,
+        "colour": "#351e58"
+      },
+      {
+        "at": 0.031373,
+        "colour": "#392a73"
+      },
+      {
+        "at": 0.047059,
+        "colour": "#3d358b"
+      },
+      {
+        "at": 0.062745,
+        "colour": "#4040a2"
+      },
+      {
+        "at": 0.078431,
+        "colour": "#424bb5"
+      },
+      {
+        "at": 0.094118,
+        "colour": "#4456c7"
+      },
+      {
+        "at": 0.1098,
+        "colour": "#4661d6"
+      },
+      {
+        "at": 0.12549,
+        "colour": "#466be3"
+      },
+      {
+        "at": 0.14118,
+        "colour": "#4776ee"
+      },
+      {
+        "at": 0.15686,
+        "colour": "#4680f6"
+      },
+      {
+        "at": 0.17255,
+        "colour": "#458afc"
+      },
+      {
+        "at": 0.18824,
+        "colour": "#4294ff"
+      },
+      {
+        "at": 0.20392,
+        "colour": "#3d9efe"
+      },
+      {
+        "at": 0.21961,
+        "colour": "#37a8fa"
+      },
+      {
+        "at": 0.23529,
+        "colour": "#2fb2f4"
+      },
+      {
+        "at": 0.25098,
+        "colour": "#28bceb"
+      },
+      {
+        "at": 0.26667,
+        "colour": "#22c5e2"
+      },
+      {
+        "at": 0.28235,
+        "colour": "#1ccdd8"
+      },
+      {
+        "at": 0.29804,
+        "colour": "#19d5cd"
+      },
+      {
+        "at": 0.31373,
+        "colour": "#18ddc2"
+      },
+      {
+        "at": 0.32941,
+        "colour": "#19e3b9"
+      },
+      {
+        "at": 0.3451,
+        "colour": "#1fe9af"
+      },
+      {
+        "at": 0.36078,
+        "colour": "#27eea4"
+      },
+      {
+        "at": 0.37647,
+        "colour": "#32f298"
+      },
+      {
+        "at": 0.39216,
+        "colour": "#3ff68a"
+      },
+      {
+        "at": 0.40784,
+        "colour": "#4ef97d"
+      },
+      {
+        "at": 0.42353,
+        "colour": "#5dfc6f"
+      },
+      {
+        "at": 0.43922,
+        "colour": "#6dfe62"
+      },
+      {
+        "at": 0.4549,
+        "colour": "#7dff56"
+      },
+      {
+        "at": 0.47059,
+        "colour": "#8bff4b"
+      },
+      {
+        "at": 0.48627,
+        "colour": "#99fe42"
+      },
+      {
+        "at": 0.50196,
+        "colour": "#a4fc3c"
+      },
+      {
+        "at": 0.51765,
+        "colour": "#affa37"
+      },
+      {
+        "at": 0.53333,
+        "colour": "#b9f635"
+      },
+      {
+        "at": 0.54902,
+        "colour": "#c3f134"
+      },
+      {
+        "at": 0.56471,
+        "colour": "#cdec34"
+      },
+      {
+        "at": 0.58039,
+        "colour": "#d7e535"
+      },
+      {
+        "at": 0.59608,
+        "colour": "#dfdf37"
+      },
+      {
+        "at": 0.61176,
+        "colour": "#e7d739"
+      },
+      {
+        "at": 0.62745,
+        "colour": "#eecf3a"
+      },
+      {
+        "at": 0.64314,
+        "colour": "#f4c73a"
+      },
+      {
+        "at": 0.65882,
+        "colour": "#f8be39"
+      },
+      {
+        "at": 0.67451,
+        "colour": "#fbb637"
+      },
+      {
+        "at": 0.6902,
+        "colour": "#fdac34"
+      },
+      {
+        "at": 0.70588,
+        "colour": "#fea130"
+      },
+      {
+        "at": 0.72157,
+        "colour": "#fe962b"
+      },
+      {
+        "at": 0.73725,
+        "colour": "#fd8a26"
+      },
+      {
+        "at": 0.75294,
+        "colour": "#fb7e21"
+      },
+      {
+        "at": 0.76863,
+        "colour": "#f8721c"
+      },
+      {
+        "at": 0.78431,
+        "colour": "#f46617"
+      },
+      {
+        "at": 0.8,
+        "colour": "#f05b12"
+      },
+      {
+        "at": 0.81569,
+        "colour": "#eb500e"
+      },
+      {
+        "at": 0.83137,
+        "colour": "#e5470b"
+      },
+      {
+        "at": 0.84706,
+        "colour": "#df3f08"
+      },
+      {
+        "at": 0.86275,
+        "colour": "#d83706"
+      },
+      {
+        "at": 0.87843,
+        "colour": "#d02f05"
+      },
+      {
+        "at": 0.89412,
+        "colour": "#c82803"
+      },
+      {
+        "at": 0.9098,
+        "colour": "#be2102"
+      },
+      {
+        "at": 0.92549,
+        "colour": "#b41b01"
+      },
+      {
+        "at": 0.94118,
+        "colour": "#a91601"
+      },
+      {
+        "at": 0.95686,
+        "colour": "#9e1001"
+      },
+      {
+        "at": 0.97255,
+        "colour": "#920b01"
+      },
+      {
+        "at": 0.98824,
+        "colour": "#850702"
+      },
+      {
+        "at": 1.0,
+        "colour": "#7a0403"
+      }
+    ],
+    "ticks": [
+      {
+        "at": 0.16,
+        "text": "0.00",
+        "value": 0.0
+      },
+      {
+        "at": 0.36,
+        "text": "0.25",
+        "value": 0.25
+      },
+      {
+        "at": 0.5599999999999999,
+        "text": "0.50",
+        "value": 0.5
+      },
+      {
+        "at": 0.76,
+        "text": "0.75",
+        "value": 0.75
+      },
+      {
+        "at": 0.96,
+        "text": "1.00",
+        "value": 1.0
+      }
+    ],
+    "under": "#808080",
+    "under_word": "less than -0.2",
+    "units": ""
+  },
+  "scales": [],
+  "schema": 2,
+  "title": "Cuts across the wake",
+  "tool": {
+    "accepted_by": "lock",
+    "identity": "paraview-6.2.0-py312ha24fc4a_1:24e7bc58bea0"
+  },
+  "view": "aero.wake_cuts"
+}

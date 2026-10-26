@@ -55,7 +55,23 @@ each, `aero.mesh_quality` 1 min 17 s, and the controls on the pack's spheroid 4 
 26 s in all.
 
 Every OpenFOAM gate runs again at each check: its tools read files nopekit cannot
-see, so between checks its claims read *stale*, with that cause.
+see, so between checks its claims read *stale*, with that cause. Its tools do not:
+each gate keeps what they wrote in the run store, `.nopekit/cache/runs/` (ignored by
+git), keyed on every byte of the case it staged, the tools and their bytes, the
+ranks and the gate's code. A later check on the same inputs reads the stored run,
+and its line says *reused*. Measured on 2026-10-26, on 6 ranks, after the review of
+the run store had moved the spine (every entry re-keyed):
+
+| Step | Time | What runs |
+|---|---|---|
+| `check --tier 2`, cold (no verdict cache, no run store) | 61 min 30 s | every tool of every gate and control, as above; the store then holds 11 runs, 43 MB |
+| `check --tier 2`, warm (the same inputs, right after) | 28 s | the gates and their controls, served all 11 stored runs (each named in its line or a `note:`); surfaceCheck for the body's bounds, and the three spheroid meshes of `aero.mesh_independence`'s known-bad control (`narrow_ladder` is refused before any solve, so it keeps no run) |
+
+The warm check files no new entry: a stored run is read through the same code and
+keyed on the same reads as the solve it stands for, so `git status` stays as the
+cold check left it. `nopekit check --force` and `nopekit export` never read the
+store: they solve again (about an hour), and an export judges its own solve.
+`rm -rf .nopekit/cache/runs` is always safe; it costs the next check a solve.
 
 ## What you should see
 

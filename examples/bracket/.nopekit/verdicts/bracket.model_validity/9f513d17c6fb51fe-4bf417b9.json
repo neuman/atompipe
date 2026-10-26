@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "gate": "bracket.model_validity",
+  "rho": "9f513d17c6fb51fe6186826f983dbfe00e4ac1551fb9896ae1b39c7c92d48493",
+  "code": {
+    "digest": "b296b9f02a670006bfdb03b1af25a79dd23b4722ee0c292a9b2ec0238917a133",
+    "files": [
+      "gates/structural.py"
+    ],
+    "fallback": ""
+  },
+  "spine": "dd32113288df01198c02e21df2c24c0d5e3684405d546f97cf6f0bade61ab347",
+  "reads": {
+    "params": [
+      [
+        [
+          "slenderness"
+        ],
+        "5f0d6f2ddb84cb9abc48ee69ec90955b094bf91b70d97d1cbda1fc7b2651850f",
+        8.571428571428571
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "model": null,
+    "opaque": []
+  },
+  "instruments": {},
+  "verdict": {
+    "passed": true,
+    "measured": 8.57,
+    "limit": 5.0,
+    "units": "L/h",
+    "comparator": ">=",
+    "settles": "beam model validity",
+    "detail": "slenderness 8.6 (>= 5.0 for Euler-Bernoulli; below this the deflection gate under-predicts)",
+    "evidence": [],
+    "locators": [],
+    "claims": [
+      "structural",
+      "stiffness",
+      "strength",
+      "fastener"
+    ],
+    "tier": 0,
+    "pack": ""
+  },
+  "digest": "46a7b3b24d3029d3a86776f74e8207d07564b509bf4296f4fb8c4ad8f23bd2fe"
+}

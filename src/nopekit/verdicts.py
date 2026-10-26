@@ -9494,6 +9494,11 @@ class _Session:
     #: A reader's ``_Now`` (no tier), made by ``_reader_state`` on the first gate
     #: a sweep prunes under a prerequisite, and only then.
     reader: Any = None
+    #: The run store's directory (``gates.RUN_STORE_DIR`` under the root), ``""``
+    #: when it is off: off unless a ``check`` that is not forced set it
+    #: (``sweep``), so ``admission``, ``status`` and ``gate selftest`` never
+    #: serve a stored solve (issue #15, P9).
+    runs: str = ""
 
 
 def _session(root: str, host_ctx: Any, *, projection: Any, anchors: Anchors,
@@ -9978,9 +9983,10 @@ def _good_half(s: _Session, spec: Any, fn: Any, host_ctx: Any) -> _GoodHalf:
         return _GoodHalf("not-run", trace=trace)
     # No model, whatever the builder put there (`_no_model`): the walk runs on
     # this context, and the check run is handed none either.
-    ctx = _no_model(dataclasses.replace(built, out_dir=out_dir),
-                    _mutation_applies(fn, s.root))
+    ctx = _with_store(_no_model(dataclasses.replace(built, out_dir=out_dir),
+                                _mutation_applies(fn, s.root)), _run_store(s, spec, fn))
     verdict = _gates.run_gate(spec, fn, ctx, trace=trace)
+    _note_reused(s, spec.id, "known-good", ctx.runs)
     # The goalposts the known-good run read are moved at its own design
     # (`gates.goalpost_runs`); a walk run adds the ones only it reads.
     _gates.note_goalpost_sites(trace, trace, ctx.params, verdict)
@@ -10005,6 +10011,15 @@ def _good_half(s: _Session, spec: Any, fn: Any, host_ctx: Any) -> _GoodHalf:
         # element removed, often outside the range, and a fail outside counts).
         return _GoodHalf("outside", **half)
     return _GoodHalf(verdict.outcome, **half)
+
+
+def _note_reused(s: _Session, gate_id: str, half: str, store: Any) -> None:
+    """A note naming each stored run a control half was served: its line says
+    nothing of it otherwise (issue #15, P9: a reused run is not a re-run)."""
+    from . import gates as _gates
+    said = _gates.reused_note(store)
+    if said:
+        s.notes.append(f"{gate_id}: its {half} control {said}")
 
 
 def _bad_line(trace: Any, held: Verdict | None) -> str:
@@ -10062,9 +10077,11 @@ def _run_control(s: _Session, spec: Any, fn: Any, host_ctx: Any, *, force: bool)
         facts = QualificationFacts(known_bad="errored", known_good="errored",
                                    bad_line=_first(exc), good_line=_first(exc), expect=expect)
         return _hold(s, spec, fn, static_digest, _trace_tier(trace), facts, executed=True)
+    bad_runs = _run_store(s, spec, fn)
     result = _gates.selftest(spec, fn, handed, trace=trace, out_dir=out_dir,
                              fixture_root=s.root,
-                             blank_model=_mutation_applies(fn, s.root))
+                             blank_model=_mutation_applies(fn, s.root), runs=bad_runs)
+    _note_reused(s, gid, "known-bad", bad_runs)
     _add_closure(trace, closure)
     bad, kind = _control_outcome(spec, result)
     if bad is None and kind == "availability":
@@ -10707,8 +10724,9 @@ def _sweep_one(s: _Session, spec: Any, fn: Any, state: Any, run_ctx: Any, *,
     # model where the walk applies: none of its qualification runs had one
     # (`_no_model`).
     trace = GateTrace(anchors=s.anchors)
-    verdict = _gates.run_gate(spec, fn, _no_model(run_ctx, _mutation_applies(fn, s.root)),
-                              trace=trace)
+    runs = _run_store(s, spec, fn)
+    verdict = _gates.run_gate(spec, fn, _with_store(_no_model(
+        run_ctx, _mutation_applies(fn, s.root)), runs), trace=trace)
     keyed = _keyed(gid, spec, fn, trace=trace, reads=None, anchors=s.anchors,
                    digests=s.digests)
     verdict = dataclasses.replace(verdict, rho=keyed.rho)
@@ -10765,6 +10783,13 @@ def _sweep_one(s: _Session, spec: Any, fn: Any, state: Any, run_ctx: Any, *,
     if s.record:
         record_obs(s.root, gid, entry=name, when=s.when, duration_s=verdict.duration_s,
                    cpu_s=verdict.cpu_s)
+    # A reused run is not a re-run (issue #15, P9): this run's line says so,
+    # after the entry is filed — the entry is the one the solve filed, and a
+    # detail that differed would be D-05's "nondeterministic detail".
+    reused = _gates.reused_note(runs)
+    if reused:
+        verdict = dataclasses.replace(
+            verdict, detail=f"{verdict.detail}; {reused}" if verdict.detail else reused)
     if clash:
         refused = dataclasses.replace(_synthesized(spec, error=clash, rho=keyed.rho),
                                       duration_s=verdict.duration_s, cpu_s=verdict.cpu_s)
@@ -10794,6 +10819,30 @@ def _sweep_one(s: _Session, spec: Any, fn: Any, state: Any, run_ctx: Any, *,
             return dataclasses.replace(outranked, disagrees=disagrees)
     return SweepRow(verdict, executed=True, fresh=measured, rho=keyed.rho, admission=judged,
                     reads=keyed.reads, disagrees=disagrees)
+
+
+def _run_store(s: _Session, spec: Any, fn: Any) -> Any:
+    """The ``gates.RunStore`` one run of ``spec`` is handed (issue #15, P9):
+    the session's store, keyed by the gate's code digest — or a disabled one
+    (``--force``, ``export``, ``admission``; a gate whose code cannot be
+    keyed), which serves and keeps nothing and still says what was reused
+    (nothing)."""
+    from . import gates as _gates
+    if not s.runs:
+        return _gates.RunStore()
+
+    def code() -> str:
+        found = code_digest(spec, fn, anchors=s.anchors)
+        return "" if found.opaque else found.digest
+    return _gates.RunStore(directory=s.runs, gate=spec.id, code_of=code)
+
+
+def _with_store(ctx: Any, store: Any) -> Any:
+    """``ctx`` with ``store`` in its ``runs``, whatever was there (a fixture's,
+    a caller's): only the sweep chooses a store."""
+    if any(f.name == "runs" for f in dataclasses.fields(ctx)):
+        return dataclasses.replace(ctx, runs=store)
+    return ctx
 
 
 def _reader_state(s: _Session, spec: Any, fn: Any) -> tuple:
@@ -10944,6 +10993,11 @@ def sweep(root: str, registry: Any, ctx: Any, *, projection: Any, ledger: Any,
                        model=getattr(ctx, "model", None), tier=int(max_tier))
     s = _session(root, ctx, projection=projection, anchors=anchors, digests=digests,
                  record=record, when=now, out_dir=out_dir, tier=int(max_tier))
+    # The run store (issue #15, P9): a check that is not forced may be served a
+    # stored solve; `--force`, `export` and `export --dry-run` (all `force`)
+    # solve again, so the boundary that spends re-executes (invariant 12).
+    if not force:
+        s.runs = os.path.join(root, *_gates.RUN_STORE_DIR.split("/"))
     # The context every gate of this sweep runs on: its tier the sweep's (a gate
     # must not pick its cheap path under an expensive run), one memo shared by
     # every gate — a SweepMemo, which only load_file opens — never left on the

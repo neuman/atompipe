@@ -1120,6 +1120,14 @@ FAST: list[str] = [
     # The motorBike design's P5: every scale of aero-openfoam's `_scales.SCALES`
     # built from a summary alone, in process (~0.05 s: no build, no tool).
     "test_figures.TheScaleIsAPackConstant.test_every_aero_scale_is_a_pack_constant",
+    # The motorBike design's P9 (the run store): the key and the hit in process
+    # (~1 s for the class: a toy gate and its child process, and aero.converged
+    # three times through the stand-in in process); the store's place under
+    # the cache the spine ignores (git check-ignore, ~0.1 s); and the sweep's
+    # disabled store (in process, ~0 s).
+    "test_run_store.TheRunStoreKeyIsWhatTheSolverRead",
+    "test_run_store.TheRunStoreIsScratch.test_the_store_is_in_the_cache_the_spine_ignores",
+    "test_run_store.TheBoundaryNeverReadsTheRunStore.test_the_sweep_hands_force_a_disabled_store",
 ]
 
 
@@ -1127,6 +1135,17 @@ FAST: list[str] = [
 # leaving it to the full suite is safe. FastTierHoldsEveryInvariant reads this
 # list: a test of an invariant class must be named in FAST or here.
 LEFT_FOR_THE_GATE: list[str] = [
+    # The motorBike design's P9: the run store through the CLI and the
+    # stand-in, each one to four cold checks of the wrapped baseline (~8 s
+    # each) and up to two exports. The key and the hit, in process, are in
+    # FAST, and so are the store's ignored place and the sweep's disabled store
+    # under force; an iteration touching `StoredRun`, `_run_store` or the
+    # aero-openfoam gates' runs runs test_run_store whole.
+    "test_run_store.TheRunStoreIsScratch.test_the_store_is_under_the_ignored_cache",
+    "test_run_store.TheRunStoreIsScratch.test_a_check_served_from_the_store_writes_nothing_git_sees",
+    "test_run_store.TheBoundaryNeverReadsTheRunStore.test_force_solves_again",
+    "test_run_store.TheBoundaryNeverReadsTheRunStore.test_export_and_its_dry_run_solve_again",
+    "test_run_store.TheBoundaryNeverReadsTheRunStore.test_a_planted_run_is_caught_at_the_boundary",
     # The motorBike design's P6: the rest of the drag gate's classes, each one to
     # three ladders through the stand-in (~1.3-3 s each, ~9 s in all): a bigger
     # body past its margin, a ladder that gives no band, the same solves behind

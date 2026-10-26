@@ -172,7 +172,7 @@
           "detail": "Re 1.893e+06 = U L / nu: U 20 m/s, L 1.42 m (the body runs 2.04282 m along the flow), nu 1.5e-05 m^2/s from the case; limit 500000, flat-plate transition. Mach 0.0588 = U / c, c 340.3 m/s; limit 0.3",
           "evidence": [
             {
-              "href": "assets/evidence/aero.regime/d9f3cc63dc51cd58-985882ca/log.surfaceCheck",
+              "href": "assets/evidence/aero.regime/e0d78fee418e77e0-985882ca/log.surfaceCheck",
               "missing": "",
               "name": "log.surfaceCheck",
               "source": "<out>/aero-openfoam/aero_regime/surfaceCheck/log.surfaceCheck"
@@ -251,13 +251,13 @@
           "detail": "H 1.352 m (the body's top over the ground); upstream 5.7 H (>= 5); downstream 16.5 H (>= 15); side 5.66 H (>= 5); top 7.88 H (>= 5); blockage 0.48 % (<= 3); lateral blockage 4.27 % (<= 17); vertical blockage 11.3 % (<= 17)",
           "evidence": [
             {
-              "href": "assets/evidence/aero.domain/25d41663821106e9-e1d237b7/summary.json",
+              "href": "assets/evidence/aero.domain/5f853dfa0b78f5ed-e1d237b7/summary.json",
               "missing": "",
               "name": "summary.json",
               "source": "<out>/aero-openfoam/aero_domain/summary.json"
             },
             {
-              "href": "assets/evidence/aero.domain/25d41663821106e9-e1d237b7/log.surfaceCheck",
+              "href": "assets/evidence/aero.domain/5f853dfa0b78f5ed-e1d237b7/log.surfaceCheck",
               "missing": "",
               "name": "log.surfaceCheck",
               "source": "<out>/aero-openfoam/aero_domain/surfaceCheck/log.surfaceCheck"
@@ -335,97 +335,97 @@
           "detail": "snappyHexMesh finished without errors, checkMesh -meshQuality: 0 faces in error against the pack's limits; 358654 cells on 6 ranks, cap 20000000; layers on 56.2% of the body's faces (reported, not judged) [pack default: aero_max_global_cells]",
           "evidence": [
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/summary.json",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/summary.json",
               "missing": "",
               "name": "summary.json",
               "source": "<out>/aero-openfoam/aero_mesh_quality/summary.json"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.controlDict",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.controlDict",
               "missing": "",
               "name": "log.foamDictionary.controlDict",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.controlDict"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.fvSchemes",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.fvSchemes",
               "missing": "",
               "name": "log.foamDictionary.fvSchemes",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSchemes"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.fvSolution",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.fvSolution",
               "missing": "",
               "name": "log.foamDictionary.fvSolution",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.fvSolution"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.snappyHexMeshDict",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.snappyHexMeshDict",
               "missing": "",
               "name": "log.foamDictionary.snappyHexMeshDict",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.snappyHexMeshDict"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.transportProperties",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.transportProperties",
               "missing": "",
               "name": "log.foamDictionary.transportProperties",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.transportProperties"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.turbulenceProperties",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.turbulenceProperties",
               "missing": "",
               "name": "log.foamDictionary.turbulenceProperties",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.turbulenceProperties"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.surfaceFeatureExtractDict",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.surfaceFeatureExtractDict",
               "missing": "",
               "name": "log.foamDictionary.surfaceFeatureExtractDict",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.surfaceFeatureExtractDict"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.meshQualityDict",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.meshQualityDict",
               "missing": "",
               "name": "log.foamDictionary.meshQualityDict",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.meshQualityDict"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.foamDictionary.decomposeParDict",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.foamDictionary.decomposeParDict",
               "missing": "",
               "name": "log.foamDictionary.decomposeParDict",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.foamDictionary.decomposeParDict"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.blockMesh",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.blockMesh",
               "missing": "",
               "name": "log.blockMesh",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.blockMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.surfaceFeatureExtract",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.surfaceFeatureExtract",
               "missing": "",
               "name": "log.surfaceFeatureExtract",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.surfaceFeatureExtract"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.decomposePar",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.decomposePar",
               "missing": "",
               "name": "log.decomposePar",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.decomposePar"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.rankProbe",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.rankProbe",
               "missing": "",
               "name": "log.rankProbe",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.rankProbe"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.snappyHexMesh",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_quality/a7d5391457871326-a8a12986/log.checkMesh",
+              "href": "assets/evidence/aero.mesh_quality/c774b3d2384a5321-a8a12986/log.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
               "source": "<out>/aero-openfoam/aero_mesh_quality/case/log.checkMesh"
@@ -488,7 +488,7 @@
     "C5": {
       "acceptance": "",
       "amber": null,
-      "binding_text": "The pictures of aero.converged come from its result 5dd15b2904d35f7d-27e0c212. This page shows that result.",
+      "binding_text": "The pictures of aero.converged come from its result 6c723b658b87d338-27e0c212. This page shows that result.",
       "board": "settle",
       "cause": "unseen",
       "cause_text": "An evaluator reads inputs that nopekit cannot see. Only a check run can show that its result is current.",
@@ -503,121 +503,121 @@
           "detail": "U_I 0.603% of the drag area 0.29925 m^2 over iterations 401-500 (within 1%) [pack default: aero_max_global_cells]; drift -0.131% from the window before (reported, not judged); 358654 cells (base mesh), layers on 56.2% of the body's faces; k bounded in 1 iterations, omega bounded in 1 iterations (reported, not judged)",
           "evidence": [
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/summary.json",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/summary.json",
               "missing": "",
               "name": "summary.json",
               "source": "<out>/aero-openfoam/aero_converged/summary.json"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/history.csv",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/history.csv",
               "missing": "",
               "name": "history.csv",
               "source": "<out>/aero-openfoam/aero_converged/history.csv"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.surfaceCheck",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.surfaceCheck",
               "missing": "",
               "name": "log.surfaceCheck",
               "source": "<out>/aero-openfoam/aero_converged/surfaceCheck/log.surfaceCheck"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.controlDict",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.controlDict",
               "missing": "",
               "name": "log.foamDictionary.controlDict",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.controlDict"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.fvSchemes",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.fvSchemes",
               "missing": "",
               "name": "log.foamDictionary.fvSchemes",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSchemes"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.fvSolution",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.fvSolution",
               "missing": "",
               "name": "log.foamDictionary.fvSolution",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSolution"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.snappyHexMeshDict",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.snappyHexMeshDict",
               "missing": "",
               "name": "log.foamDictionary.snappyHexMeshDict",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.snappyHexMeshDict"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.transportProperties",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.transportProperties",
               "missing": "",
               "name": "log.foamDictionary.transportProperties",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.transportProperties"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.turbulenceProperties",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.turbulenceProperties",
               "missing": "",
               "name": "log.foamDictionary.turbulenceProperties",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.turbulenceProperties"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.surfaceFeatureExtractDict",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.surfaceFeatureExtractDict",
               "missing": "",
               "name": "log.foamDictionary.surfaceFeatureExtractDict",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.surfaceFeatureExtractDict"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.meshQualityDict",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.meshQualityDict",
               "missing": "",
               "name": "log.foamDictionary.meshQualityDict",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.meshQualityDict"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.foamDictionary.decomposeParDict",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.foamDictionary.decomposeParDict",
               "missing": "",
               "name": "log.foamDictionary.decomposeParDict",
               "source": "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.decomposeParDict"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.blockMesh",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.blockMesh",
               "missing": "",
               "name": "log.blockMesh",
               "source": "<out>/aero-openfoam/aero_converged/case/log.blockMesh"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.surfaceFeatureExtract",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.surfaceFeatureExtract",
               "missing": "",
               "name": "log.surfaceFeatureExtract",
               "source": "<out>/aero-openfoam/aero_converged/case/log.surfaceFeatureExtract"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.decomposePar",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.decomposePar",
               "missing": "",
               "name": "log.decomposePar",
               "source": "<out>/aero-openfoam/aero_converged/case/log.decomposePar"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.rankProbe",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.rankProbe",
               "missing": "",
               "name": "log.rankProbe",
               "source": "<out>/aero-openfoam/aero_converged/case/log.rankProbe"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.snappyHexMesh",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
               "source": "<out>/aero-openfoam/aero_converged/case/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.checkMesh",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
               "source": "<out>/aero-openfoam/aero_converged/case/log.checkMesh"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.potentialFoam",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.potentialFoam",
               "missing": "",
               "name": "log.potentialFoam",
               "source": "<out>/aero-openfoam/aero_converged/case/log.potentialFoam"
             },
             {
-              "href": "assets/evidence/aero.converged/5dd15b2904d35f7d-27e0c212/log.simpleFoam",
+              "href": "assets/evidence/aero.converged/6c723b658b87d338-27e0c212/log.simpleFoam",
               "missing": "",
               "name": "log.simpleFoam",
               "source": "<out>/aero-openfoam/aero_converged/case/log.simpleFoam"
@@ -649,10 +649,10 @@
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
           "data_src": "",
           "drawn_text": "",
-          "entry": "5dd15b2904d35f7d-27e0c212",
+          "entry": "6c723b658b87d338-27e0c212",
           "field_src": "",
           "gate": "aero.converged",
-          "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.hero",
+          "id": "aero.converged/6c723b658b87d338-27e0c212/aero.hero",
           "kind": "image",
           "light": "scene",
           "marks": [],
@@ -1280,7 +1280,7 @@
             }
           ],
           "sha256": "2a9d1b44ebf4f00bb1ce164a1e4dee07df248bcee3c216b50dbd8ff8937b9831",
-          "src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.hero.2a9d1b44ebf4.png",
+          "src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.hero.2a9d1b44ebf4.png",
           "title": "The air around the bike",
           "tool_word": "",
           "turn": {
@@ -1308,10 +1308,10 @@
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
           "data_src": "",
           "drawn_text": "",
-          "entry": "5dd15b2904d35f7d-27e0c212",
+          "entry": "6c723b658b87d338-27e0c212",
           "field_src": "",
           "gate": "aero.converged",
-          "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.surface_cp",
+          "id": "aero.converged/6c723b658b87d338-27e0c212/aero.surface_cp",
           "kind": "image",
           "light": "none",
           "marks": [],
@@ -1625,7 +1625,7 @@
             "units": ""
           },
           "sha256": "72b3772c9fe1d26141fbdcaaa6519a735009e5b2b311228175bd074bb3fc63d1",
-          "src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.surface_cp.72b3772c9fe1.png",
+          "src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.surface_cp.72b3772c9fe1.png",
           "title": "The pressure on the surface",
           "tool_word": "",
           "turn": {},
@@ -1649,10 +1649,10 @@
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
           "data_src": "",
           "drawn_text": "",
-          "entry": "5dd15b2904d35f7d-27e0c212",
+          "entry": "6c723b658b87d338-27e0c212",
           "field_src": "",
           "gate": "aero.converged",
-          "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.wake",
+          "id": "aero.converged/6c723b658b87d338-27e0c212/aero.wake",
           "kind": "image",
           "light": "scene",
           "marks": [],
@@ -1972,7 +1972,7 @@
             }
           ],
           "sha256": "6e03716c0d7009a33b4de4c27abdb57031925fea474c210b84e99524e0ff0bae",
-          "src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.wake.6e03716c0d70.png",
+          "src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.wake.6e03716c0d70.png",
           "title": "The wake",
           "tool_word": "",
           "turn": {},
@@ -1996,10 +1996,10 @@
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
           "data_src": "",
           "drawn_text": "",
-          "entry": "5dd15b2904d35f7d-27e0c212",
+          "entry": "6c723b658b87d338-27e0c212",
           "field_src": "",
           "gate": "aero.converged",
-          "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.wake_cuts",
+          "id": "aero.converged/6c723b658b87d338-27e0c212/aero.wake_cuts",
           "kind": "image",
           "light": "none",
           "marks": [],
@@ -2308,7 +2308,7 @@
             "units": ""
           },
           "sha256": "51dfd37f2e497c14ae11d4539637b4868f363aaa9727aca47177997cf0c6934a",
-          "src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.wake_cuts.51dfd37f2e49.png",
+          "src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.wake_cuts.51dfd37f2e49.png",
           "title": "Cuts across the wake",
           "tool_word": "",
           "turn": {},
@@ -7367,12 +7367,12 @@
           ],
           "currency": "unseen",
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
-          "data_src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.history.ac850f319ad1.chart.json",
+          "data_src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.history.ac850f319ad1.chart.json",
           "drawn_text": "",
-          "entry": "5dd15b2904d35f7d-27e0c212",
+          "entry": "6c723b658b87d338-27e0c212",
           "field_src": "",
           "gate": "aero.converged",
-          "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.history",
+          "id": "aero.converged/6c723b658b87d338-27e0c212/aero.history",
           "kind": "chart",
           "marks": [],
           "outcome": "pass",
@@ -7436,7 +7436,7 @@
     "C6": {
       "acceptance": "",
       "amber": null,
-      "binding_text": "The pictures of aero.wall_treatment come from its result 3b727988520b09d8-179e6d68. This page shows that result.",
+      "binding_text": "The pictures of aero.wall_treatment come from its result fe6e22b21256d951-179e6d68. This page shows that result.",
       "board": "mesh",
       "cause": "unseen",
       "cause_text": "An evaluator reads inputs that nopekit cannot see. Only a check run can show that its result is current.",
@@ -7451,109 +7451,109 @@
           "detail": "y+ at most 300 on 96.32% of the body's area (at least 90%); y+ < 5 on 0.291%, 5-30 on 23.8%, 30-300 on 72.3%, above 300 on 3.68% of 11.2435 m^2; area-mean y+ 90.47 (OpenFOAM's 90.47); 358654 cells (base mesh), layers on 56.2% of the body's faces (reported, not judged) [pack default: aero_max_global_cells]",
           "evidence": [
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/summary.json",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/summary.json",
               "missing": "",
               "name": "summary.json",
               "source": "<out>/aero-openfoam/aero_wall_treatment/summary.json"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.controlDict",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.controlDict",
               "missing": "",
               "name": "log.foamDictionary.controlDict",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.controlDict"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.fvSchemes",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.fvSchemes",
               "missing": "",
               "name": "log.foamDictionary.fvSchemes",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSchemes"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.fvSolution",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.fvSolution",
               "missing": "",
               "name": "log.foamDictionary.fvSolution",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.fvSolution"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.snappyHexMeshDict",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.snappyHexMeshDict",
               "missing": "",
               "name": "log.foamDictionary.snappyHexMeshDict",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.snappyHexMeshDict"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.transportProperties",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.transportProperties",
               "missing": "",
               "name": "log.foamDictionary.transportProperties",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.transportProperties"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.turbulenceProperties",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.turbulenceProperties",
               "missing": "",
               "name": "log.foamDictionary.turbulenceProperties",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.turbulenceProperties"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.surfaceFeatureExtractDict",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.surfaceFeatureExtractDict",
               "missing": "",
               "name": "log.foamDictionary.surfaceFeatureExtractDict",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.surfaceFeatureExtractDict"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.meshQualityDict",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.meshQualityDict",
               "missing": "",
               "name": "log.foamDictionary.meshQualityDict",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.meshQualityDict"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.foamDictionary.decomposeParDict",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.foamDictionary.decomposeParDict",
               "missing": "",
               "name": "log.foamDictionary.decomposeParDict",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.foamDictionary.decomposeParDict"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.blockMesh",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.blockMesh",
               "missing": "",
               "name": "log.blockMesh",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.blockMesh"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.surfaceFeatureExtract",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.surfaceFeatureExtract",
               "missing": "",
               "name": "log.surfaceFeatureExtract",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.surfaceFeatureExtract"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.decomposePar",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.decomposePar",
               "missing": "",
               "name": "log.decomposePar",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.decomposePar"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.rankProbe",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.rankProbe",
               "missing": "",
               "name": "log.rankProbe",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.rankProbe"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.snappyHexMesh",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.checkMesh",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.checkMesh"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.potentialFoam",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.potentialFoam",
               "missing": "",
               "name": "log.potentialFoam",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.potentialFoam"
             },
             {
-              "href": "assets/evidence/aero.wall_treatment/3b727988520b09d8-179e6d68/log.simpleFoam",
+              "href": "assets/evidence/aero.wall_treatment/fe6e22b21256d951-179e6d68/log.simpleFoam",
               "missing": "",
               "name": "log.simpleFoam",
               "source": "<out>/aero-openfoam/aero_wall_treatment/case/log.simpleFoam"
@@ -7585,10 +7585,10 @@
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
           "data_src": "",
           "drawn_text": "",
-          "entry": "3b727988520b09d8-179e6d68",
+          "entry": "fe6e22b21256d951-179e6d68",
           "field_src": "",
           "gate": "aero.wall_treatment",
-          "id": "aero.wall_treatment/3b727988520b09d8-179e6d68/aero.wall",
+          "id": "aero.wall_treatment/fe6e22b21256d951-179e6d68/aero.wall",
           "kind": "image",
           "light": "none",
           "marks": [],
@@ -7657,7 +7657,7 @@
             "units": ""
           },
           "sha256": "3970b362cb70777511a1de5dde86545536315040560a4e12de065d0008bde920",
-          "src": "assets/figures/aero.wall_treatment/3b727988520b09d8-179e6d68/aero.wall.3970b362cb70.png",
+          "src": "assets/figures/aero.wall_treatment/fe6e22b21256d951-179e6d68/aero.wall.3970b362cb70.png",
           "title": "The wall value y+",
           "tool_word": "",
           "turn": {},
@@ -7713,7 +7713,7 @@
     "C7": {
       "acceptance": "",
       "amber": null,
-      "binding_text": "The pictures of aero.mesh_independence come from its result f257a262b75a7687-edef0a17. This page shows that result.",
+      "binding_text": "The pictures of aero.mesh_independence come from its result c54990c10ce0517a-edef0a17. This page shows that result.",
       "board": "mesh",
       "cause": "failed",
       "cause_text": "An evaluator failed the design in the last check run. It reads inputs that nopekit cannot see, and a fail counts until a check run passes it.",
@@ -7728,82 +7728,82 @@
           "detail": "level 2 (2674337 cells) is not converged: U_I 1.98% of the drag area, past 1% (358654/926215/2674337 cells (ratio 1.5) [pack default: aero_max_global_cells]; y+ at most 300 on 96.32%, 99.28%, 99.94% of the body (reported, not judged))",
           "evidence": [
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/summary.json",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/summary.json",
               "missing": "",
               "name": "summary.json",
               "source": "<out>/aero-openfoam/aero_mesh_independence/summary.json"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/history_level0.csv",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/history_level0.csv",
               "missing": "",
               "name": "history_level0.csv",
               "source": "<out>/aero-openfoam/aero_mesh_independence/history_level0.csv"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/history_level1.csv",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/history_level1.csv",
               "missing": "",
               "name": "history_level1.csv",
               "source": "<out>/aero-openfoam/aero_mesh_independence/history_level1.csv"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/history_level2.csv",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/history_level2.csv",
               "missing": "",
               "name": "history_level2.csv",
               "source": "<out>/aero-openfoam/aero_mesh_independence/history_level2.csv"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log.snappyHexMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level0/log.snappyHexMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level0/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log.checkMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level0/log.checkMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level0/log.checkMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log.simpleFoam",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log.simpleFoam",
               "missing": "",
               "name": "log.simpleFoam",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level0/log.simpleFoam"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level0/log.simpleFoam"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-2.snappyHexMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-2.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level1/log.snappyHexMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level1/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-2.checkMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-2.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level1/log.checkMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level1/log.checkMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-2.simpleFoam",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-2.simpleFoam",
               "missing": "",
               "name": "log.simpleFoam",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level1/log.simpleFoam"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level1/log.simpleFoam"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-3.snappyHexMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-3.snappyHexMesh",
               "missing": "",
               "name": "log.snappyHexMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level2/log.snappyHexMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level2/log.snappyHexMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-3.checkMesh",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-3.checkMesh",
               "missing": "",
               "name": "log.checkMesh",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level2/log.checkMesh"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level2/log.checkMesh"
             },
             {
-              "href": "assets/evidence/aero.mesh_independence/f257a262b75a7687-edef0a17/log-3.simpleFoam",
+              "href": "assets/evidence/aero.mesh_independence/c54990c10ce0517a-edef0a17/log-3.simpleFoam",
               "missing": "",
               "name": "log.simpleFoam",
-              "source": "<out>/aero-openfoam/ladder/7008d7f23ee3a206916d9ccd92d64f2d/level2/log.simpleFoam"
+              "source": "<out>/aero-openfoam/ladder/ce9ce6867d534426fd17a9679185f52d/level2/log.simpleFoam"
             }
           ],
           "id": "aero.mesh_independence",
@@ -8095,12 +8095,12 @@
           ],
           "currency": "unseen",
           "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
-          "data_src": "assets/figures/aero.mesh_independence/f257a262b75a7687-edef0a17/aero.ladder.57dc588822d2.chart.json",
+          "data_src": "assets/figures/aero.mesh_independence/c54990c10ce0517a-edef0a17/aero.ladder.57dc588822d2.chart.json",
           "drawn_text": "",
-          "entry": "f257a262b75a7687-edef0a17",
+          "entry": "c54990c10ce0517a-edef0a17",
           "field_src": "",
           "gate": "aero.mesh_independence",
-          "id": "aero.mesh_independence/f257a262b75a7687-edef0a17/aero.ladder",
+          "id": "aero.mesh_independence/c54990c10ce0517a-edef0a17/aero.ladder",
           "kind": "chart",
           "marks": [],
           "outcome": "fail",
@@ -8233,17 +8233,17 @@
     "content_digest": "7757bcfa572bc4dc718df8f1426e03c39067c8c366bf4f4874b723ed810835f1",
     "name": "motorbike",
     "records_digest": "f56c8e6a29e0ee6ed2eac8d54a18f622469c49736cf522ba503f63d772160b92",
-    "resolution_digest": "aab661ff4cd1a8a34e39871b3a5029bfe741dbff58b4707dcc5e1495cd732fbd",
+    "resolution_digest": "28dfe8785b647c2246723b7925fd076985504efbba5214d4b38f9b5a3b007a28",
     "revision": "v0.1",
     "summary": "The OpenFOAM motorBike in still air at 72 km/h: its drag area, and the flow around it",
     "views": {
-      "aero.hero": "3ce9f76142494570570589a6e723f73eafd0f7ce9ed64bff5498a44b63ce81ae",
-      "aero.history": "66860d0affa2f8ebd504562cb7af4d5c1c0c65c8468d370dd1b96f68acb58780",
-      "aero.ladder": "926056b5d3678520fe00f78989fb75e3741141a47f2d677849ed869170e816bb",
-      "aero.surface_cp": "de91b8f5d76d197630b3dbbc39c02c670c1ad91db5f7e1a3b9069e3f2bd93711",
-      "aero.wake": "1b3fd5d1e6c926f4a47e455774af0ee7cca28cbe63151f03ebfa6ac26337c9fb",
-      "aero.wake_cuts": "9f458a629853e3f1ad4527b11b81bffed6f476fba3e409e3d1e7fa6da4269742",
-      "aero.wall": "772361d4f88830786d0fcd48f28ee59d933ef325bfccdb1c6f4010e733ab7bee"
+      "aero.hero": "c254ee05c3ca33a62410dff6d7e6719ae470a008da0814c89faa8a6a2e05688a",
+      "aero.history": "f1bf97ef91cafaef97243751259a89a49ccbd31a82dc9a246d00da636f9959b6",
+      "aero.ladder": "d27384f34e7688314b79f276b6d2aa60f3ee07b74284c98e4290d44571949236",
+      "aero.surface_cp": "5460c5fcd59a3fcb2f350755906927216e1bda12e88caabe76155ba1886a8dc2",
+      "aero.wake": "932feddbc7772dc36f9b240f765a8f3e6843816c4e16eb4316c21c32ff8d4d72",
+      "aero.wake_cuts": "f0c9f8b7a4b8ad391f2059644634f48b8c3498def2637e3d21bebae48df57029",
+      "aero.wall": "46c0223fbe1b001f69788e129995515aae9c8da0d9e994cc4b02af1ac5e7cf8d"
     }
   },
   "next": {
@@ -8410,10 +8410,10 @@
       "currency_word": "This picture is from the result on this page. Its evaluator reads inputs that nopekit cannot see, so only a check run can show that the result is current.",
       "data_src": "",
       "drawn_text": "",
-      "entry": "5dd15b2904d35f7d-27e0c212",
+      "entry": "6c723b658b87d338-27e0c212",
       "field_src": "",
       "gate": "aero.converged",
-      "id": "aero.converged/5dd15b2904d35f7d-27e0c212/aero.hero",
+      "id": "aero.converged/6c723b658b87d338-27e0c212/aero.hero",
       "kind": "image",
       "light": "scene",
       "marks": [],
@@ -9041,7 +9041,7 @@
         }
       ],
       "sha256": "2a9d1b44ebf4f00bb1ce164a1e4dee07df248bcee3c216b50dbd8ff8937b9831",
-      "src": "assets/figures/aero.converged/5dd15b2904d35f7d-27e0c212/aero.hero.2a9d1b44ebf4.png",
+      "src": "assets/figures/aero.converged/6c723b658b87d338-27e0c212/aero.hero.2a9d1b44ebf4.png",
       "title": "The air around the bike",
       "tool_word": "",
       "turn": {
@@ -9191,7 +9191,7 @@
       "word": "failing"
     }
   ],
-  "self": "89b815c5c4798f8de5f75dbc79686de553e722b81263b2002621692e320136e4",
+  "self": "c11b8b359e9abe87fae0848dbaf9dc5188921b6bdb75385f76b9ee78f6d6f918",
   "story": {
     "as_of": "b2c25115e0ce4c68",
     "blocks": [

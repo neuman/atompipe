@@ -88,6 +88,7 @@ flowchart LR
         board["Routed board"]
         bom["Assembly and its<br/>bill of materials"]
         heat["Heat and flow system"]
+        body["Body in a stream of air"]
     end
     subgraph F["Falsifiers: try to reject it (built in)"]
         fdm["fdm-print"]
@@ -96,8 +97,9 @@ flowchart LR
         pcb["pcb-kicad"]
         src["sourcing"]
         thermo["thermal-analytic, fluids-analytic,<br/>cfd-openfoam, openmodelica"]
+        aero["aero-openfoam"]
     end
-    agent --> part & board & bom & heat
+    agent --> part & board & bom & heat & body
     topo --> part
     route --> board
     parts -.-> bom
@@ -105,6 +107,7 @@ flowchart LR
     board --> pcb
     bom --> src & cad
     heat --> thermo
+    body --> aero
 ```
 
 *Solid arrows are things that exist today. The dashed arrow is an illustration. `pcb.autoroute` is the only proposer a built-in pack ships. The topology optimizer lives in the PETGasus repository, not in Nopekit.*
@@ -232,6 +235,25 @@ A clean DRC does not say the circuit is right. A wrong pin map or a missing pull
 
 Two methods can judge one quantity: the analytic pipe pressure drop and the OpenFOAM one. Each has limits. `thermal-analytic` cannot see the flow field, and `cfd-openfoam` runs only laminar flow at one temperature, so neither one judges heated flow in a duct.
 
+#### A body in a stream of air
+
+**Proposer:** the agent, editing the OpenFOAM case. The demo is OpenFOAM's own motorBike tutorial: a motorcycle and its rider at 72 km/h (`examples/motorbike`).
+
+<p align="center">
+<img src="docs/img/packs/aero-openfoam-motorbike.jpg" width="900" alt="A motorcycle with a rider, seen from the front and the left. The colour on the bike and the rider shows the pressure of the air on the surface: red where the air stops on the front of the fairing and the helmet. Coloured lines show the paths of the air around them, coloured by the speed of the air">
+</p>
+
+*The picture that `aero-openfoam` puts on the site beside the drag-area claim, here from the motorBike demo's last check (a 900-pixel copy of the still the page publishes): the pressure on the body (Cp, Turbo) and the paths of the air (by speed) that OpenFOAM solved on the base mesh, drawn by ParaView with light and shade. The demo's drag-area claim is not checked: the finest of its three meshes did not settle, so the mesh-independence guard fails and says why.*
+
+| Falsifier | What it tries to catch | Basis |
+|---|---|---|
+| `aero.case_readable`, `aero.reference` | A case the pack cannot vouch for, or a run at another speed or direction than the stated one | model-only |
+| `aero.regime`, `aero.domain` | A flow that is not turbulent at the wall or not incompressible; a domain too small for the body (Franke et al. 2007, Blocken 2015) | sourced |
+| `aero.mesh_quality`, `aero.converged` | A mesher that gave up or stopped at its cell cap; a run that did not settle (ITTC's iterative uncertainty) | established (ESI OpenFOAM v2606) |
+| `aero.wall_treatment`, `aero.mesh_independence`, `aero.drag_area` | A wall function used outside its band of y+; a drag area that still moves with the mesh (Celik's GCI); a drag area over the claim's limit at the top of its band | sourced, established |
+
+An hour-long solve runs once for each set of inputs: a later `check` on the same case is served the stored run and says *reused*, and `check --force` and `export` solve again.
+
 #### A hull that floats and prints
 
 **Proposer:** illustrative. Today the agent models the hull and splits it into printable segments.
@@ -274,10 +296,11 @@ Every `fluids-analytic` gate is hydrostatic. Planing, waves and the free surface
 
 Every falsifier above names its **basis**: `established` (an existing tool's own answer), `sourced` (a cited formula, standard or datasheet) or `model-only` (logic the AI wrote, with no outside source). A gate that fails its known-bad input has shown that it *can* fail. That does not show that its logic is correct or complete. A pass establishes what that gate measures, on the candidate it measured, and no more. [Packs and how far to trust them](#packs-and-how-far-to-trust-them) has the details, with every gate.
 
-### The nine built-in packs
+### The ten built-in packs
 
 | Pack | The question it asks |
 |---|---|
+| `aero-openfoam` | Is the drag area of a body in a stream of air under its limit, and was the run sound enough to say so? |
 | `beam-analytic` | Can this beam carry the load? |
 | `cad-solid` | Is it a real solid? Do the parts fit together? |
 | `cfd-openfoam` | Is the pressure drop under its limit, and was the run sound enough to say so? |
@@ -429,7 +452,7 @@ The example includes a deliberately failing check. That's intentional: a useful 
 
 ## Packs and how far to trust them
 
-A **pack** adds checks for one domain. Nopekit ships nine. A pack can hold two kinds of tool:
+A **pack** adds checks for one domain. Nopekit ships ten. A pack can hold two kinds of tool:
 
 - **Gates** (falsifiers) evaluate a claim and can say "nope". Every bundled gate is **qualified**: it passes a known-good input and fails a known-bad one, and CI re-runs both controls on every change, so a gate that cannot fail does not ship. A gate from anywhere else, such as one the agent writes for your project, must also fail each time one of its inputs is pushed past its limit.
 - **Proposers** suggest options or evidence, such as a parts search or a slicer's estimate. A proposal settles nothing; it becomes an input that a gate can then check. `pcb-kicad` ships one, `pcb.autoroute` (Freerouting); its routed board is checked by the same DRC gates as any other. The [pack format](docs/PACK_FORMAT.md#proposers) describes how to add one.
@@ -446,6 +469,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 
 | Pack | What it covers | Gates | Basis | Needs |
 |---|---|---|---|---|
+| `aero-openfoam` | Runs a steady turbulent OpenFOAM case (ESI v2606: snappyHexMesh, simpleFoam, k-omega SST) past a body behind guards: case readable, the stated flow, regime, domain size, mesh quality, convergence on the base mesh, y+ at the wall, mesh independence by GCI, then the drag area. Its solves go through the run store. | 9 | 3 established, 4 sourced, 2 model-only | ESI OpenFOAM v2606 (`openfoam2606`) for six gates (and `aero.regime` for a surface-file body); ParaView 6.2.0 (`pvbatch62`) for the pictures on the site only |
 | `beam-analytic` | Closed-form beam checks with zero dependencies: deflection, bending and shear stress, buckling, bearing, a slenderness guard on the theory itself, and a unit/sign guard on the projection. | 8 | 7 sourced, 1 model-only | nothing |
 | `cad-solid` | Validates that exported solids are real solids, that placed parts do not interfere, and that every part is held by something: watertightness, validity, clash, contact coverage, envelope, wall. | 7 | 1 established, 6 model-only | trimesh, numpy |
 | `cfd-openfoam` | Runs a laminar OpenFOAM case (ESI v2606) behind guards: case readable, laminar regime, checkMesh, convergence, mesh independence by GCI, then the pressure drop. | 6 | 3 established, 2 sourced, 1 model-only | ESI OpenFOAM v2606 (`openfoam2606`) for four gates; ParaView 6.2.0 (`pvbatch62`) for the pictures on the site only |
@@ -455,6 +479,23 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 | `pcb-kicad` | Checks a KiCad board and its schematic: DRC, ERC, schematic parity, connectivity, pin names, IPC-2221 trace heating, a fab's limits, ngspice measurements, and fit in its enclosure. | 10 | 6 established, 3 sourced, 1 model-only | KiCad 9 (`kicad-cli`) for six gates, ngspice for one, CadQuery for the fit |
 | `sourcing` | Checks a project's BOM offline: every line orderable and priced in one convertible currency, rolled-up cost vs budget, lead times, MOQ overbuy, vendor process rules, single-source risk. | 7 | 1 sourced, 6 model-only | nothing |
 | `thermal-analytic` | Closed-form heat transfer and solar: conduction networks, convection correlations, radiation, fins, steady-state and lumped transient temperature, flat-plate collectors, clear-sky irradiance. | 10 | 9 sourced, 1 model-only | nothing |
+
+<details>
+<summary><code>aero-openfoam</code>: 9 gates</summary>
+
+| Gate | What it checks | Basis |
+|---|---|---|
+| `aero.case_readable` | The OpenFOAM case is one this pack can run and vouch for | model-only |
+| `aero.converged` | simpleFoam settled on the base mesh: the drag area's iterative uncertainty is inside its ceiling (needs OpenFOAM) | established |
+| `aero.domain` | The domain is large enough around the body: distances and blockage (Franke et al. 2007) (needs OpenFOAM) | sourced |
+| `aero.drag_area` | The drag area of the finest mesh, with its mesh and iteration error bands, is under the limit (needs OpenFOAM) | established |
+| `aero.mesh_independence` | Three meshes agree: the drag area converges, and its grid convergence index is inside its limit (needs OpenFOAM) | sourced |
+| `aero.mesh_quality` | snappyHexMesh builds a mesh with no face in error against the pack's quality limits (needs OpenFOAM) | established |
+| `aero.reference` | The run is the stated flow: the inlet at the stated speed along +x, the body a still wall | model-only |
+| `aero.regime` | The flow is turbulent at the wall and incompressible: Reynolds and Mach numbers | sourced |
+| `aero.wall_treatment` | The wall function applies on the body: y+ at most 300 on at least 90% of its area (needs OpenFOAM) | sourced |
+
+</details>
 
 <details>
 <summary><code>beam-analytic</code>: 8 gates</summary>

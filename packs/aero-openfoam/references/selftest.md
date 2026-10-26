@@ -71,3 +71,11 @@ the `bigger_body` control's (the control's is 20.4% over it) (`references/conver
   spine cannot empty (`nopekit doctor`'s `memos` row).
 - `narrow_ladder` meshes three levels and solves none (about 20 s).
 - `no_layers` is one base-mesh solve (about 10 s).
+- **No run store here.** `gate selftest` never reads `.nopekit/cache/runs/`
+  (only a `check` that is not forced does, issue #15's P9), so this run, the
+  pack's admission evidence, solves every control each time. In a project, the
+  controls that `check` re-runs on the spheroid are served from the store from
+  the second check on, and each one is named in a `note:` line (*its known-bad
+  control reused: ...*). A control's stored run is keyed on its own staged
+  copy: `cut_short`'s endTime 110 is another key than the baseline's 300
+  (`tests/test_run_store.TheRunStoreKeyIsWhatTheSolverRead`).
