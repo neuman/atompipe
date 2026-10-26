@@ -859,6 +859,131 @@ class TheParallelBannerIsChecked(_StandinCase):
         self.assertEqual(left.stdout.strip(), "", "a rank outlived its timeout")
 
 
+#: A host and a home no machine running this suite has, for the stand-in to
+#: print where v2606 prints the machine's own.
+PLANTED_HOST = "frodo-laptop-7f3a"
+PLANTED_HOME = "/home/frodo"
+
+
+def machine_details(text: str, out: str, host: str = PLANTED_HOST) -> list[str]:
+    """What of the machine ``text`` (a log) still names: the host, a home
+    directory, the gate's out directory as an absolute path, or a banner's
+    date, time or PID with its value."""
+    return [what for what, hit in (
+        ("the host", re.search(r"(?<![\w.-])" + re.escape(host) + r"(?![\w.-])", text)),
+        ("a home directory", re.search(r"(?<![\w.~/-])/(?:home|Users)/", text)),
+        ("the out directory", out in text),
+        ("a date", re.search(r"^Date\s*:\s*(?!<date>$)\S", text, re.M)),
+        ("a time", re.search(r"^Time\s*:\s*(?!<time>$)\S", text, re.M)),
+        ("a PID", re.search(r"^PID\s*:\s*(?!<pid>$)\S", text, re.M))) if hit]
+
+
+def tool_logs(out: str) -> dict[str, str]:
+    """``{path relative to out: text}`` of every tool log under ``out``."""
+    found = {}
+    for dirpath, _dirs, files in os.walk(out):
+        for name in files:
+            if name.startswith("log."):
+                path = os.path.join(dirpath, name)
+                with open(path, encoding="utf-8") as fh:
+                    found[os.path.relpath(path, out)] = fh.read()
+    return found
+
+
+class ALogKeepsNoMachineDetail(_StandinCase):
+    """Every log a gate writes, the bytes its verdict cites and a site copies,
+    names no host, no home, no absolute path of this machine and no banner
+    date, time or PID (``_tool.kept``); the checks of the banner and the ranks
+    still read what the tools printed. What slipped through: the motorbike
+    demo's committed evidence carried the author's home path and host name in
+    34 logs."""
+
+    def planted(self, host: str = PLANTED_HOST, **extra) -> None:
+        self.mode(dict({"host": host,
+                        "say": [f'Writing featureEdgeMesh to "{PLANTED_HOME}/work/body.eMesh"'],
+                        "say_err": [f"[{host}] a warning about {PLANTED_HOME}/.ssh/config"]},
+                       **extra))
+
+    def test_a_run_leaves_no_machine_detail_in_its_logs(self):
+        self.planted()
+        v = self.gate("aero.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        logs = tool_logs(os.path.join(self.out, "out", "aero_converged"))
+        case = os.path.join("aero-openfoam", "aero_converged", "case")
+        for name in ("log.blockMesh", "log.decomposePar", "log.rankProbe",
+                     "log.snappyHexMesh", "log.checkMesh", "log.potentialFoam",
+                     "log.simpleFoam"):
+            self.assertIn(os.path.join(case, name), logs, sorted(logs))
+        self.assertTrue([p for p in v.evidence or ()
+                         if os.path.basename(str(p)).startswith("log.")],
+                        "the verdict cites no log")
+        for rel, text in sorted(logs.items()):
+            self.assertEqual(machine_details(text, self.out), [], rel)
+        snappy = logs[os.path.join(case, "log.snappyHexMesh")]
+        for line in ("Date   : <date>", "Time   : <time>", "Host   : <host>", "PID    : <pid>",
+                     "Case   : <out>/aero-openfoam/aero_converged/case",
+                     '"~/work/body.eMesh"', "[<host>] a warning about ~/.ssh/config",
+                     "trapFpe: Floating point exception trapping enabled",
+                     "allowSystemOperations : Disallowing"):
+            self.assertIn(line, snappy)
+        self.assertRegex(snappy, r"(?m)^Hosts\s*:\n\(\n    \(<host> \d+\)\n\)$")
+        self.assertIn("|<out>/aero-openfoam/home|true",
+                      logs[os.path.join(case, "log.rankProbe")])
+
+    def test_the_same_run_on_another_machine_writes_the_same_logs(self):
+        """Another host, another out directory, another PID and clock: the
+        same bytes."""
+        self.planted()
+        self.assertEqual(self.gate("aero.mesh_quality").outcome, "pass")
+        first = tool_logs(os.path.join(self.out, "out", "aero_mesh_quality"))
+        self.planted(host="samwise-desktop")
+        self.assertEqual(self.gate("aero.mesh_quality").outcome, "pass")
+        second = tool_logs(os.path.join(self.out, "out", "aero_mesh_quality"))
+        self.assertTrue(first)
+        self.assertEqual(first, second)
+
+    def test_a_bad_banner_is_still_an_error_and_its_log_keeps_no_machine_detail(self):
+        """The scrub is of what is written: a banner without trapping, one
+        that allows system operations, one with another rank count and a rank
+        with another HOME are each still the error they were."""
+        for extra, said in (({"omit": ["no-fpe"]}, "floating-point trapping"),
+                            ({"omit": ["allowing"]}, "system operations allowed"),
+                            ({"nprocs_banner": 3}, "nProcs 3"),
+                            ({"probe": {"home_rank": 1}}, "rank 1 runs with HOME '/elsewhere'")):
+            with self.subTest(said):
+                self.planted(**extra)
+                v = self.gate("aero.mesh_quality")
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                logs = tool_logs(os.path.join(self.out, "out", "aero_mesh_quality"))
+                self.assertTrue(logs)
+                for rel, text in sorted(logs.items()):
+                    self.assertEqual(machine_details(text, self.out), [], rel)
+
+    def test_the_kept_text_is_the_rule(self):
+        """``kept`` alone: a path is replaced only whole (``/a/out`` never
+        inside ``/a/output``), a relative ``.../home/...`` is kept, the host
+        only as a word and only in the banner and stderr, and a line after
+        the banner as printed."""
+        env = {"HOME": "/w/p/.nopekit/out/aero-openfoam/home",
+               "WM_PROJECT_DIR": "/opt/openfoam2606"}
+        stdout = ("Exec   : /opt/openfoam2606/platforms/bin/simpleFoam -parallel\n"
+                  "Host   : End\nPID    : 77\nCase   : /w/p/.nopekit/out/aero-openfoam/c\n"
+                  "Hosts  :\n(\n    (End 4)\n)\n// * * * * //\n"
+                  "Reading /w/p/.nopekit/output/x and out:aero-openfoam/home/OpenFOAM/bin\n"
+                  "Time = 1\nEnd\n")
+        out, err = T.kept(stdout, "End: /home/x/y\n", env)
+        self.assertEqual(out, (
+            "Exec   : <install>/platforms/bin/simpleFoam -parallel\n"
+            "Host   : <host>\nPID    : <pid>\nCase   : <out>/aero-openfoam/c\n"
+            "Hosts  :\n(\n    (<host> 4)\n)\n// * * * * //\n"
+            "Reading /w/p/.nopekit/output/x and out:aero-openfoam/home/OpenFOAM/bin\n"
+            "Time = 1\nEnd\n"))
+        self.assertEqual(err, "<host>: ~/y\n")
+        self.assertEqual(T.kept(stdout, "", env, banner=False)[0].splitlines()[1],
+                         "Host   : End", "without a banner, no line is read as one")
+
+
 class TheBodysBoundsAreOpenFOAMs(_StandinCase):
     """For a surface file, ``aero.domain`` reads the body's bounds from
     OpenFOAM's surfaceCheck, run in its own scratch: it writes files where it

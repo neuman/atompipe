@@ -25,6 +25,10 @@ The banner follows the environment as the real one does: the trapping line only
 with ``FOAM_SIGFPE=true``, the disallowing line only when
 ``$HOME/.OpenFOAM/2606/controlDict`` sets ``allowSystemOperations 0``.
 
+It names where and when it ran as v2606's does (``Date``, ``Time``, ``Host``: the
+mode's ``host`` or this machine's, ``PID``), so a test sees what a log
+keeps of them; ``say`` and ``say_err`` print lines after the banner and on stderr.
+
 Not a test module: its name starts with ``_``, as tests/_env.py's does.
 """
 import json
@@ -32,11 +36,15 @@ import math
 import os
 import re
 import signal
+import socket
 import sys
+import time
 
 ROOT = os.environ.get("WM_PROJECT_DIR", "")
 with open(os.path.join(ROOT, "standin.json"), encoding="utf-8") as fh:
     MODE = json.load(fh)
+#: The host the banner names: the mode's, else this machine's.
+HOST = MODE.get("host") or socket.gethostname()
 TOOL = os.environ.get("STANDIN_TOOL") or os.path.basename(sys.argv[0])
 with open(os.path.join(ROOT, "calls"), "a", encoding="utf-8") as fh:
     fh.write(TOOL + "\n")
@@ -49,7 +57,13 @@ def banner() -> str:
              "|  \\\\    /   O peration     | Version:  2606                                  |",
              "\\*---------------------------------------------------------------------------*/",
              f"Build  : _standin-20260618 OPENFOAM={MODE.get('api', 2606)} version=2606",
-             f"Exec   : {TOOL}", f"Case   : {os.getcwd()}", "nProcs : 1"]
+             f"Exec   : {TOOL}",
+             # Where and when it ran, as v2606 prints it: the machine's own host
+             # (or the mode's), the process's PID and the clock. A log keeps
+             # none of them (``_tool.kept``).
+             f"Date   : {time.strftime('%b %d %Y')}", f"Time   : {time.strftime('%H:%M:%S')}",
+             f"Host   : {HOST}", f"PID    : {os.getpid()}", f"Case   : {os.getcwd()}",
+             "nProcs : 1"]
     if os.environ.get("FOAM_SIGFPE") == "true" and "no-fpe" not in MODE.get("omit", []):
         lines.append("trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).")
     cfg = os.path.join(os.environ.get("HOME", ""), ".OpenFOAM", "2606", "controlDict")
@@ -132,6 +146,12 @@ if TOOL == "foamDictionary":
     sys.exit(0)
 
 print(banner(), end="")
+# What the mode says the tool printed after its banner (``say``) and on
+# stderr (``say_err``): a path a log must not keep, say.
+for _line in MODE.get("say", ()):
+    print(_line)
+for _line in MODE.get("say_err", ()):
+    sys.stderr.write(_line + "\n")
 fail_if_asked()
 
 if TOOL == "blockMesh":

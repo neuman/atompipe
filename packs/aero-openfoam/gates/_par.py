@@ -116,10 +116,9 @@ def run_parallel(env: dict, case: str, argv: list[str], n: int, timeout: float, 
                          f"this one does ({os.path.abspath(case)})")
     rc, out, err, seconds = _call(_mpi_argv(env, n, [exe, *argv[1:], "-parallel"]), case,
                                   env, timeout, tool)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(out)
-        if err:
-            fh.write("\n--- stderr ---\n" + err)
+    # The log keeps no machine detail (``_tool.kept``); every check below
+    # reads what the ranks printed.
+    out_k, err_k = T.write_log(path, env, out, err)
     r = T.Run(tool, rc, out, err, path, seconds)
     sig = _RANK_SIGNAL.search(err) or _RANK_SIGNAL.search(out)
     if rc < 0 or sig:
@@ -128,7 +127,7 @@ def run_parallel(env: dict, case: str, argv: list[str], n: int, timeout: float, 
                if num == 8 else "")
         raise T.RunError(f"{tool} on {n} ranks: a rank was killed by signal {num}{why}", [path])
     if rc != 0:
-        msg = T._fatal(err) or T._fatal(out) or (err or out).strip()[-300:]
+        msg = T._fatal(err_k) or T._fatal(out_k) or (err_k or out_k).strip()[-300:]
         raise T.RunError(f"{tool} on {n} ranks exited {rc}: {msg}", [path])
     T.check_header(r)
     m = re.search(r"^nProcs\s*:\s*(\d+)", out[:6000], re.M)
@@ -159,11 +158,12 @@ def rank_probe(env: dict, case: str, n: int, timeout: float) -> str:
     path = os.path.join(case, "log.rankProbe")
     rc, out, err, _s = _call(_mpi_argv(env, n, ["/bin/sh", "-c", _PROBE]), case, env, timeout,
                              "the rank probe")
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(out + (("\n--- stderr ---\n" + err) if err else ""))
+    # The log keeps no machine detail (``_tool.kept``); the ranks are judged
+    # below on what they printed.
+    out_k, err_k = T.write_log(path, env, out, err, banner=False)
     if rc != 0:
-        raise T.RunError(f"the rank probe on {n} ranks exited {rc}: {(err or out).strip()[-300:]}",
-                         [path])
+        raise T.RunError(f"the rank probe on {n} ranks exited {rc}: "
+                         f"{(err_k or out_k).strip()[-300:]}", [path])
     seen: dict[int, tuple] = {}
     for rank, home, fpe in re.findall(r"^rank=(\d*)\|(.*)\|(.*)$", out, re.M):
         if not rank.isdigit():

@@ -36,6 +36,11 @@ class here pins one of them shut:
   slipped through (P2.3's gate): a ``check`` running in the bracket while the
   suite ran put its live ``build.lock`` into a test's copy, and the copy's own
   ``check`` refused to start. The scan has planted violators it must catch.
+* **TheCommittedOutputsNameNoMachine** — no file an example commits under
+  ``.nopekit/`` or ``site/`` (its verdict cache, trace, round record, baked data,
+  figures and evidence copies) holds an absolute home or temp path or this
+  machine's host name. What slipped through: the motorbike demo committed its
+  evidence copies with the author's home path and host name in 34 OpenFOAM logs.
 
 Every in-process test works on a TEMP COPY of the bracket, never the tracked
 tree: loading a fixture through the stock import system writes ``__pycache__``
@@ -59,7 +64,7 @@ import unittest
 import _env
 import _projects
 import test_fresh_clone
-from nopekit import gates, modelio, packs, verdicts
+from nopekit import gates, modelio, packs, vcs, verdicts
 from nopekit.models import Acceptance, Claim, Ledger, Verdict
 
 REPO = _env.REPO
@@ -864,6 +869,93 @@ class TheBracketIsCopiedAsAClone(_env.EnvCase):
                     shutil.copy2(os.path.join(root, *name.split("/")), target)
                 checked = _env.nopekit(["check"], cwd=dest)
                 self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+
+
+
+# --------------------------------------------------------------------------- #
+#: An absolute path into a home or a temp directory: what a committed output
+#: never holds. The look-behind keeps a relative ``aero-openfoam/home/...``
+#: (the pack's private HOME as the verdict trace spells it, under ``out:``).
+MACHINE_PATH = re.compile(r"(?<![\w.~/-])/(?:home|Users|tmp|root)/")
+
+#: What an example commits as outputs: everything under these, in each example.
+COMMITTED_OUTPUTS = (".nopekit", "site")
+
+
+def committed_outputs() -> list[str]:
+    """Every file under an example's `COMMITTED_OUTPUTS` that git tracks or
+    would commit (``vcs.ls_files``: tracked, and untracked files no ignore rule
+    excludes), as paths relative to the repository; a walk where git cannot
+    answer (an exported tree, in which every file is committed)."""
+    rels = [f"examples/{name}/{part}" for name in sorted(os.listdir(os.path.join(REPO, "examples")))
+            for part in COMMITTED_OUTPUTS
+            if os.path.isdir(os.path.join(REPO, "examples", name, part))]
+    listed = vcs.ls_files(REPO, rels)
+    if listed is not None:
+        return listed
+    found = []
+    for rel in rels:
+        for dirpath, dirs, files in os.walk(os.path.join(REPO, *rel.split("/"))):
+            dirs[:] = [d for d in dirs if d not in ("out", "cache", "__pycache__")]
+            found += [os.path.relpath(os.path.join(dirpath, f), REPO).replace(os.sep, "/")
+                      for f in files]
+    return sorted(found)
+
+
+def _committed_text() -> dict[str, str]:
+    out = {}
+    for rel in committed_outputs():
+        try:
+            with open(os.path.join(REPO, *rel.split("/")), "rb") as fh:
+                out[rel] = fh.read().decode("utf-8", "replace")
+        except OSError:
+            continue
+    return out
+
+
+class TheCommittedOutputsNameNoMachine(unittest.TestCase):
+    """No committed output of an example names the machine it was made on. What
+    slipped through: the motorbike demo committed its evidence copies (OpenFOAM's
+    logs) with the author's home path in every banner's ``Case`` and every file
+    surfaceFeatureExtract wrote, and the host name in every banner; a tool's log
+    now keeps neither (``_tool.kept``, in both OpenFOAM packs)."""
+
+    def test_the_listing_is_not_empty(self):
+        files = committed_outputs()
+        self.assertIn("examples/bracket/.nopekit/round.json", files)
+        self.assertTrue([f for f in files if "/.nopekit/verdicts/" in f])
+
+    def test_no_committed_output_holds_a_home_or_temp_path(self):
+        found = [f"{rel}: {text[max(0, m.start() - 40):m.end() + 40]!r}"
+                 for rel, text in sorted(_committed_text().items())
+                 for m in [MACHINE_PATH.search(text)] if m]
+        self.assertEqual(found, [], f"{len(found)} committed outputs name a home or temp "
+                                    f"path; the first: {found[:3]}")
+
+    def test_no_committed_output_holds_this_machines_host_name(self):
+        try:
+            host = socket.gethostname().strip()
+        except OSError:
+            host = ""
+        if not host or host.lower() in ("localhost", "localhost.localdomain"):
+            self.skipTest("this machine's host name cannot be read")
+        names = {host, host.split(".")[0]}
+        pattern = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names)))
+                             + r")(?![\w-])", re.I)
+        found = [rel for rel, text in sorted(_committed_text().items()) if pattern.search(text)]
+        self.assertEqual(found, [], f"{len(found)} committed outputs name this machine "
+                                    f"({host}); the first: {found[:3]}")
+
+    def test_the_patterns_catch_what_shipped(self):
+        """The positive control: the lines the motorbike demo committed."""
+        for line in ("Case   : /home/someone/work/examples/motorbike/.nopekit/out/a/case",
+                     'Writing featureEdgeMesh to "/tmp/x/case/constant/triSurface/b.eMesh"',
+                     "rank=1|/Users/someone/p/.nopekit/out/aero-openfoam/home|true"):
+            self.assertTrue(MACHINE_PATH.search(line), line)
+        for line in ('"out:aero-openfoam/home/OpenFOAM/nopekit-v2606/bin/mpirun"',
+                     "Case   : <out>/aero-openfoam/aero_converged/case",
+                     "rank=1|<out>/aero-openfoam/home|true", '"~/work/body.eMesh"'):
+            self.assertIsNone(MACHINE_PATH.search(line), line)
 
 
 if __name__ == "__main__":

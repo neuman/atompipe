@@ -35,6 +35,7 @@ import csv
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import sys
@@ -1374,6 +1375,77 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
                 v = self.gate("cfd.mesh_quality", {key: value})
                 self.assertEqual(v.outcome, "fail", v.render())
                 self.assertIn("checkMesh said Mesh OK, but", v.detail)
+
+
+@unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
+class ALogKeepsNoMachineDetail(_env.EnvCase):
+    """Every log a gate writes, the bytes its verdict cites and a site copies,
+    names no host, no home, no absolute path of this machine and no banner
+    date, time or PID (``_tool.kept``), and a banner without its safety lines
+    is still an error. What slipped through: a committed demo's evidence (the
+    motorbike's, aero-openfoam's copy of ``_tool.py``) carried the author's
+    home path and host name in 34 logs."""
+
+    HOST = "frodo-laptop-7f3a"
+
+    def setUp(self):
+        self.root, self.bin = install_standin(self.tmp())
+        self.registry = _registry()
+
+    def run_gate(self, gid: str, **mode):
+        with open(os.path.join(self.root, "standin.json"), "w") as fh:
+            json.dump(dict({"host": self.HOST,
+                            "say": ['Reading "/home/frodo/work/channel.stl"'],
+                            "say_err": [f"[{self.HOST}] a warning about /home/frodo/.ssh"]},
+                           **mode), fh)
+        work = self.tmp()
+        with mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}):
+            v = _run(self.registry, gid, work, _baseline())
+        logs = {}
+        for dirpath, _dirs, files in os.walk(work):
+            for name in files:
+                if name.startswith("log."):
+                    with open(os.path.join(dirpath, name), encoding="utf-8") as fh:
+                        logs[os.path.relpath(os.path.join(dirpath, name), work)] = fh.read()
+        return v, work, logs
+
+    def details(self, text: str, work: str) -> list[str]:
+        return [what for what, hit in (
+            ("the host", self.HOST in text),
+            ("a home directory", re.search(r"(?<![\w.~/-])/(?:home|Users)/", text)),
+            ("the out directory", work in text),
+            ("a date", re.search(r"^Date\s*:\s*(?!<date>$)\S", text, re.M)),
+            ("a time", re.search(r"^Time\s*:\s*(?!<time>$)\S", text, re.M)),
+            ("a PID", re.search(r"^PID\s*:\s*(?!<pid>$)\S", text, re.M))) if hit]
+
+    def test_a_run_leaves_no_machine_detail_in_its_logs(self):
+        v, work, logs = self.run_gate("cfd.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        names = {os.path.basename(p) for p in logs}
+        self.assertTrue({"log.blockMesh", "log.checkMesh", "log.simpleFoam"} <= names, names)
+        self.assertTrue([p for p in v.evidence or ()
+                         if os.path.basename(str(p)).startswith("log.")],
+                        "the verdict cites no log")
+        for rel, text in sorted(logs.items()):
+            self.assertEqual(self.details(text, work), [], rel)
+        solver = next(t for p, t in logs.items() if p.endswith("log.simpleFoam"))
+        for line in ("Date   : <date>", "Time   : <time>", "Host   : <host>", "PID    : <pid>",
+                     "Case   : <out>/cfd-openfoam/", '"~/work/channel.stl"',
+                     "[<host>] a warning about ~/.ssh",
+                     "trapFpe: Floating point exception trapping enabled",
+                     "allowSystemOperations : Disallowing"):
+            self.assertIn(line, solver)
+
+    def test_a_bad_banner_is_still_an_error_and_its_log_keeps_no_machine_detail(self):
+        for omit, said in (("no-fpe", "floating-point trapping"),
+                           ("allowing", "system operations allowed")):
+            with self.subTest(said):
+                v, work, logs = self.run_gate("cfd.mesh_quality", omit=[omit])
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                self.assertTrue(logs)
+                for rel, text in sorted(logs.items()):
+                    self.assertEqual(self.details(text, work), [], rel)
 
 
 # --------------------------------------------------------------------------- #

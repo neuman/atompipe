@@ -46,7 +46,11 @@ convergence criteria; any difference is an error. Every tool runs with a
 private HOME that holds only a controlDict turning off `allowSystemOperations`
 (anything else found there is removed before the run: OpenFOAM reads etc files
 from it before the install's) and with floating-point
-trapping forced on, and a log whose banner does not show both is an error. These gates read inside a
+trapping forced on, and a log whose banner does not show both is an error. Each log
+the pack writes keeps no detail of the machine (`_tool.kept`): a path reads from
+`<out>` (the gate's out directory) or `<install>`, and the banner's date, time,
+host and PID read `<date>`, `<time>`, `<host>` and `<pid>`; the checks read what
+the tools printed. These gates read inside a
 subprocess, so they are **opaque**: they re-run on every check where OpenFOAM
 exists (the baseline's six gates take about 10 s in all). Between check runs their
 claims read Stale with the cause *unseen inputs*: nopekit cannot see the inputs

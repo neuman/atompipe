@@ -73,6 +73,10 @@ run, OpenFOAM's own reading of every dictionary (`foamDictionary -expand`) must
 equal the reader's. Every tool runs with a private HOME that turns off
 `allowSystemOperations`, with floating-point trapping on, and every parallel
 run first asks each rank for its HOME and its `FOAM_SIGFPE` (`_par.rank_probe`).
+Each log the pack writes keeps no detail of the machine (`_tool.kept`): a path
+reads from `<out>` (the gate's out directory) or `<install>`, and the banner's
+date, time, host and PID read `<date>`, `<time>`, `<host>` and `<pid>`. The
+checks read what the tools printed.
 
 These gates read inside a subprocess, so they are **opaque**: they run again on
 every check where OpenFOAM exists. Between check runs their claims read Stale

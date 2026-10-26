@@ -277,6 +277,110 @@ def _fatal(text: str) -> str:
     return " ".join(m.group(1).split())[:300]
 
 
+# --------------------------------------------------------------------------- #
+# what a log keeps
+# --------------------------------------------------------------------------- #
+#: The banner lines that say where and when a tool ran, as v2606 prints them
+#: (``Date   : Oct 25 2026``, ``Time   : 07:59:21``, ``Host   : <name>``,
+#: ``PID    : 2284649``): each is kept with its value replaced. ``Build``,
+#: ``Arch``, ``nProcs`` and the safety lines are kept as printed: they say
+#: which run it was, and nothing of the machine. Rejected: dropping the lines
+#: (a reader could not tell a scrubbed banner from one OpenFOAM printed short).
+_STAMPS = {"Date": "<date>", "Time": "<time>", "Host": "<host>", "PID": "<pid>"}
+_STAMP_LINE = re.compile(r"^(" + "|".join(_STAMPS) + r")(\s*:\s*)\S.*$", re.M)
+
+#: Where the banner ends: its rule line (``// * * * ...``). A log without one
+#: in its first 6000 characters, the window ``check_header`` reads (a tool that
+#: died first), is banner for those 6000.
+_BANNER_END = re.compile(r"^// \* \* \*.*$", re.M)
+_BANNER_MAX = 6000
+
+#: A home directory no placeholder below replaced reads ``~``: a net, not the
+#: rule, since every path a run prints is under the gate's out directory or the
+#: install. The look-behind keeps a relative ``aero-openfoam/home/...`` as it is.
+_HOME_DIR = re.compile(r"(?<![\w.~/-])/(?:home|Users)/[^/\s\"'<>|:;,()]+")
+
+#: What may follow a path's last name: a separator, a character no path here
+#: holds, or the end (so ``/a/out`` never matches inside ``/a/output``).
+_PATH_END = r"(?=[/\s\"'<>|:;,()]|$)"
+
+
+def _placeholders(env: dict) -> list[tuple[str, str]]:
+    """``[(absolute path, placeholder)]``, longest first: the gate's out
+    directory as ``<out>`` (the private HOME is ``<out>/<pack>/home``,
+    :func:`home`), and the install as ``<install>``. Read from ``env`` alone,
+    never ``os.environ``: the spine names a gate's environment read opaque,
+    and an opaque entry is never served fresh."""
+    found = []
+    private = env.get("HOME") or ""
+    if os.path.isabs(private) and os.path.basename(os.path.normpath(private)) == "home":
+        found.append((os.path.dirname(os.path.dirname(os.path.normpath(private))), "<out>"))
+    install = env.get("WM_PROJECT_DIR") or ""
+    if os.path.isabs(install):
+        found.append((os.path.normpath(install), "<install>"))
+    return sorted(((p, n) for p, n in found if p != os.sep), key=lambda pn: -len(pn[0]))
+
+
+def _scrub(text: str, places: list, host: str) -> str:
+    for path, name in places:
+        text = re.sub(r"(?<![\w.~/-])" + re.escape(path) + _PATH_END, name, text)
+    if host:
+        text = re.sub(r"(?<![\w.-])" + re.escape(host) + r"(?![\w.-])", "<host>", text)
+    return _HOME_DIR.sub("~", text)
+
+
+def kept(stdout: str, stderr: str, env: dict, *, banner: bool = True) -> tuple[str, str]:
+    """``(stdout, stderr)`` as a log keeps them: with no detail of the machine.
+
+    A path under the gate's out directory or the install reads from its
+    placeholder (``<out>/aero-openfoam/aero_converged/case``), any other home
+    directory ``~``; with ``banner``, the banner's date, time, host and PID read
+    ``<date>``, ``<time>``, ``<host>`` and ``<pid>``, and the host does wherever
+    the banner (a parallel run's ``Hosts`` list) or stderr names it. So the
+    bytes a verdict cites, and the copy a site publishes of them, are the same
+    on any machine for the same run.
+
+    Only what is written is scrubbed. Every check of what OpenFOAM printed
+    (``check_header``, the ranks, ``End``) and every reader of a value reads the
+    tool's own output, ``Run.stdout``; and nothing replaced here is a line a
+    reader of a recorded log reads (aero.py's ``_read_level``: its counts,
+    residuals and iterations are after the banner, and hold no path). What
+    slipped through: a committed demo carried the author's home path and host
+    name in 34 logs: in each banner's ``Case`` and ``Host``, a parallel run's
+    ``Hosts``, the rank probe's HOME and every file surfaceFeatureExtract
+    wrote. Rejected: scrubbing at the site's copy (the copy is bound by
+    content, invariant 14: its bytes must be the ones the run cited); the host
+    replaced everywhere in the output (a host named like a word a reader
+    parses, ``End``, would move a value); the person's own ``$HOME`` read from
+    the environment (an opaque read: every entry stale)."""
+    head_end, host = len(stdout), ""
+    if banner:
+        m = _BANNER_END.search(stdout, 0, _BANNER_MAX)
+        head_end = m.end() if m else min(len(stdout), _BANNER_MAX)
+        h = re.search(r"^Host\s*:\s*(\S+)\s*$", stdout[:head_end], re.M)
+        host = h.group(1) if h and h.group(1) != _STAMPS["Host"] else ""
+    places = _placeholders(env)
+    head = stdout[:head_end]
+    if banner:
+        head = _STAMP_LINE.sub(lambda m: m.group(1) + m.group(2) + _STAMPS[m.group(1)], head)
+    return (_scrub(head, places, host) + _scrub(stdout[head_end:], places, ""),
+            _scrub(stderr, places, host))
+
+
+def write_log(path: str, env: dict, stdout: str, stderr: str, *,
+              banner: bool = True) -> tuple[str, str]:
+    """Write a tool's log at ``path``: its output as :func:`kept` keeps it,
+    then its stderr after ``--- stderr ---`` (aero.py's ``_stdout_of`` cuts
+    there). Returns what it wrote, ``(stdout, stderr)``, for an error's
+    message: an error is cached as the log is."""
+    out, err = kept(stdout, stderr, env, banner=banner)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(out)
+        if err:
+            fh.write("\n--- stderr ---\n" + err)
+    return out, err
+
+
 def run(env: dict, case: str, argv: list[str], timeout: float, *, banner: bool = True,
         log: str | None = None) -> Run:
     """``argv`` (a tool in ``$FOAM_APPBIN`` and its arguments) with the case as
@@ -308,10 +412,7 @@ def run(env: dict, case: str, argv: list[str], timeout: float, *, banner: bool =
     except subprocess.TimeoutExpired:
         raise Timeout(f"{tool} ran past {timeout:g} s (cfd_timeout_s) and was killed")
     seconds = time.perf_counter() - t0
-    with open(log, "w", encoding="utf-8") as fh:
-        fh.write(proc.stdout)
-        if proc.stderr:
-            fh.write("\n--- stderr ---\n" + proc.stderr)
+    out, err = write_log(log, env, proc.stdout, proc.stderr, banner=banner)
     r = Run(tool, proc.returncode, proc.stdout, proc.stderr, log, seconds)
     if proc.returncode < 0:
         sig = -proc.returncode
@@ -319,7 +420,7 @@ def run(env: dict, case: str, argv: list[str], timeout: float, *, banner: bool =
                if sig == 8 else "")
         raise RunError(f"{tool} was killed by signal {sig}{why}", [log])
     if proc.returncode != 0:
-        msg = _fatal(proc.stderr) or _fatal(proc.stdout) or (proc.stderr or proc.stdout).strip()[-300:]
+        msg = _fatal(err) or _fatal(out) or (err or out).strip()[-300:]
         raise RunError(f"{tool} exited {proc.returncode}: {msg}", [log])
     if not banner:
         return r
