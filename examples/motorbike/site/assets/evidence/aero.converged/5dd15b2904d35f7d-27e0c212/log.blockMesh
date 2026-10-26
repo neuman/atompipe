@@ -1,0 +1,77 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2606                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : _481094f-20260618 OPENFOAM=2606 version=2606
+Arch   : "LSB;label=32;scalar=64"
+Exec   : <install>/platforms/linux64GccDPInt32Opt/bin/blockMesh
+Date   : <date>
+Time   : <time>
+Host   : <host>
+PID    : <pid>
+I/O    : uncollated
+Case   : <out>/aero-openfoam/aero_converged/case
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+memory pool : not available
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 5, maxFileModificationPolls 20)
+allowSystemOperations : Disallowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Creating block mesh from "system/blockMeshDict"
+Creating block edges
+No non-planar block faces defined
+Creating topology blocks
+
+Creating topology patches - from boundary section
+
+Creating block mesh topology
+
+Check topology
+
+	Basic statistics
+		Number of internal faces : 0
+		Number of boundary faces : 6
+		Number of defined boundary faces : 6
+		Number of undefined boundary faces : 0
+	Checking patch -> block consistency
+
+Creating block offsets
+Creating merge list (topological search)...
+
+Creating polyMesh from blockMesh
+Creating patches
+Creating cells
+Creating points with scale (1 1 1)
+    Block 0 cell size :
+        i : 1 .. 1
+        j : 1 .. 1
+        k : 1 .. 1
+
+No patch pairs to merge
+
+Writing polyMesh with 0 cellZones
+----------------
+Mesh Information
+----------------
+  boundingBox: (-8 -8 0) (24 8 12)
+  nPoints: 7293
+  nCells: 6144
+  nFaces: 19520
+  nInternalFaces: 17344
+----------------
+Patches
+----------------
+  patch 0 (start: 17344 size: 768) name: frontAndBack
+  patch 1 (start: 18112 size: 192) name: inlet
+  patch 2 (start: 18304 size: 192) name: outlet
+  patch 3 (start: 18496 size: 512) name: lowerWall
+  patch 4 (start: 19008 size: 512) name: upperWall
+
+End
+

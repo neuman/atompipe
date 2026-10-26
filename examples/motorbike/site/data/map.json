@@ -913,7 +913,7 @@
   "meta": {
     "name": "motorbike",
     "records_digest": "f56c8e6a29e0ee6ed2eac8d54a18f622469c49736cf522ba503f63d772160b92",
-    "resolution_digest": "c7b2079ce0ec17e0e84d19c8fb32616651530de2597acb910d6ed2b564631fb3"
+    "resolution_digest": "aab661ff4cd1a8a34e39871b3a5029bfe741dbff58b4707dcc5e1495cd732fbd"
   },
   "nodes": [
     {
@@ -1385,7 +1385,7 @@
     }
   ],
   "schema": 2,
-  "self": "e07e3bb119060921966811358ee0aa1f8f7af4fac573354027b231f3a18b611a",
+  "self": "7b81f3e1742f6f02bac5a7a7ee6c558b7cbc9b2bb0ddaceefb28b0fd04b5a1b8",
   "trace": {
     "amber": "none",
     "key": "3056a945c411",

@@ -1,0 +1,21 @@
+{
+  "cap_reached": null,
+  "cells": 358654,
+  "faces_in_error": {
+    "faces on cells with determinant < 0.001": 0,
+    "faces with concavity > 80 degrees": 0,
+    "faces with face pyramid volume < 1e-13": 0,
+    "faces with face twist < 0.02": 0,
+    "faces with face-decomposition tet quality < 1e-15": 0,
+    "faces with interpolation weights (0..1) < 0.05": 0,
+    "faces with skewness > 4 (internal) or 20 (boundary)": 0,
+    "faces with volume ratio of neighbour cells < 0.01": 0,
+    "non-orthogonality > 65 degrees": 0
+  },
+  "finished_ok": true,
+  "layer_coverage_pct": 56.1740281622,
+  "pack_default": [
+    "aero_max_global_cells"
+  ],
+  "ranks": 6
+}

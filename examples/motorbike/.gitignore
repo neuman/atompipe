@@ -11,10 +11,16 @@ __pycache__/
 # nopekit:end
 
 # The page is built on demand: nopekit site init, then nopekit site build. Its text
-# is tracked, and so are the baked data and the figures of the first full round
-# (2026-10-25): the OpenFOAM run behind them takes about an hour, and a clone
-# without OpenFOAM or ParaView shows its results from these. The page's own files,
-# the evidence copies (the logs, about 4 MB) and the build time stay out.
+# is tracked, and so are the baked data, the figures and the evidence copies of the
+# last full round: the OpenFOAM run behind them takes about an hour, and a clone
+# without OpenFOAM or ParaView shows its results from these. A clone's site build
+# keeps the evidence copies it finds (it cannot copy them again: the run's own
+# files are in the ignored .nopekit/out/). The page's own files, the build time and
+# the live 3D file stay out.
+# What slipped through (review of the first round): the evidence copies (about
+# 4 MB of logs, far less in git) stayed out, so in a clone the page linked 70
+# files that were not there, and its site build marked 8 numbers of the story as
+# matched by nothing: they matched only the summary.json copies.
 /site/*
 !/site/content/
 !/site/data/
@@ -22,3 +28,4 @@ __pycache__/
 !/site/assets/
 /site/assets/*
 !/site/assets/figures/
+!/site/assets/evidence/

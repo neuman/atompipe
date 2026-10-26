@@ -104,11 +104,13 @@ class Config:
     aero.mesh_independence accepts (the author's choice, design decision D3:
     common practice for RANS verification). This project's ladder ran on
     2026-10-25 (500 iterations a level, 6 ranks): 0.29925, 0.29625 and 0.30206
-    m^2 on 358654, 926215 and 2674337 cells, which does not converge in one
-    direction, and its finest mesh did not settle under 1% (U_I 1.98%). So no
-    GCI is computed, and C7 reads Failing whatever this number is, first for
-    the level that did not settle. P0's ladder of the tutorial's own case (its
-    box, block (20 8 8) and 1500 iterations a level, 2026-10-23) did the same
+    m^2 on 358654, 926215 and 2674337 cells, and its finest mesh did not settle
+    under 1% (U_I 1.98%). So the gate compared none of them and computed no
+    GCI, and C7 reads Failing whatever this number is, for the level that did
+    not settle. Their order (down, then up) is not resolved: the change between
+    the two finest, 0.0058 m^2, is inside the finest's U_I, 0.0060 m^2. P0's
+    ladder of the tutorial's own case (its box, block (20 8 8) and 1500
+    iterations a level, 2026-10-23) also had a finest level that did not settle
     (0.3075, 0.2964, 0.3007 m^2; U_I 1.09% on its finest)."""
 
     aero_timeout_s: float = 10800.0

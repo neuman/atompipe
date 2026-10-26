@@ -77,16 +77,21 @@ From `nopekit check --tier 2` on 2026-10-25:
   drag area. `aero.drag_area` judges the finest of three meshes at the top of its
   band, after C6 (the wall model, `aero.wall_treatment`) and C7 (mesh
   independence, `aero.mesh_independence`). On 2026-10-25 the ladder gave a drag
-  area of 0.29925, 0.29625 and 0.30206 m^2 on 358654, 926215 and 2674337 cells:
-  down, then up, which is not convergence in one direction. The finest mesh did
-  not settle in its 500 iterations (U_I 1.98%, past 1%), and that is the reason
-  C7 gives first: the gate holds each level to `aero.converged`'s rule before it
-  compares the three. So no mesh error band (GCI) is computed, and
+  area of 0.29925, 0.29625 and 0.30206 m^2 on 358654, 926215 and 2674337 cells.
+  The finest mesh did not settle in its 500 iterations (U_I 1.98%, past 1%), and
+  that is the reason C7 gives: the gate holds each level to `aero.converged`'s
+  rule before it compares the three, so it did not judge their order and
+  computed no mesh error band (GCI). The values go down, then up, but that order
+  is not resolved: the change between the two finest meshes (0.0058 m^2) is less
+  than the finest mesh's iterative uncertainty (0.0060 m^2), and the pack's
+  three-grid procedure calls such a change unresolved, not oscillatory.
   `aero.drag_area` does not run (design decision D6: the demo ships so). P0
-  (2026-10-23) saw the same on the tutorial's own case (its box and block
-  (20 8 8), 1500 iterations a level): 0.3075, 0.2964 and 0.3007 m^2, and U_I
-  1.09% on the finest. More iterations on the finest mesh, or a ladder of other
-  mesh sizes, is what could change it.
+  (2026-10-23) saw a finest level that did not settle either, on the tutorial's
+  own case (its box and block (20 8 8), 1500 iterations a level): 0.3075, 0.2964
+  and 0.3007 m^2, and U_I 1.09% on the finest. More iterations on the finest mesh
+  come first; a ladder of other mesh sizes, only if the three settled values then
+  do not converge in one direction. A second full check after the review of this
+  round (2026-10-25, the spine moved) gave the same values to the last digit.
 - **A1 and A2 are assumptions**: the wheels do not turn, and a steady solution
   stands for an unsteady wake. Each counts only when the person it names records
   it in their own shell (`nopekit claim physical A1 assume`).
