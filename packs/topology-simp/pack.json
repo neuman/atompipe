@@ -1,0 +1,60 @@
+{
+  "name": "topology-simp",
+  "version": "0.1.0",
+  "description": "Proposes 3D material layouts with SIMP; independently checks exported parts for volume, displacement and stress with CalculiX.",
+  "settles": [
+    "topology optimization",
+    "material layout",
+    "material volume",
+    "static displacement",
+    "von Mises stress",
+    "structural stiffness"
+  ],
+  "claim_classes": [
+    "topology",
+    "structural",
+    "stiffness",
+    "strength"
+  ],
+  "provides_gates": [
+    "simp.case_valid",
+    "simp.volume",
+    "simp.displacement",
+    "simp.stress"
+  ],
+  "provides_proposers": [
+    {
+      "id": "fea.topopt3d",
+      "basis": "sourced",
+      "description": "3D SIMP topology optimization with filtered densities, projection and multiple load cases; proposes a density field, preview and history.",
+      "run": "proposers/topopt3d.py"
+    }
+  ],
+  "provides_views": [
+    "simp.part"
+  ],
+  "provides_generators": [],
+  "requires_tools": [
+    "ccx"
+  ],
+  "requires_python": [
+    "numpy",
+    "scipy",
+    "numba",
+    "pyamg",
+    "matplotlib",
+    "trimesh",
+    "gmsh"
+  ],
+  "max_tier": 2,
+  "lenses": [
+    "the load case nobody wrote down",
+    "density field versus exported shape",
+    "the restraint that makes the answer",
+    "mesh and surface convergence",
+    "isotropic strength versus printed layers"
+  ],
+  "licence": "Apache-2.0",
+  "origin": "SIMP and CalculiX helpers extracted from PETGasusDrone's solid-fea pack; reusable static gates and independent cantilever controls added in Nopekit. See references/upstream.json.",
+  "basis": "model-only"
+}

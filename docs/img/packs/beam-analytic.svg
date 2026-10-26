@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="440" viewBox="0 0 800 440" role="img" aria-labelledby="title desc">
+  <title id="title">A beam that has to carry its load</title>
+  <desc id="desc">Illustration of the beam-analytic baseline: a 60 mm cantilever, 12 by 10 mm aluminium section, under a 300 N end load. The bent shape is exaggerated, not a simulation field.</desc>
+  <defs>
+    <linearGradient id="beam"><stop stop-color="#ff715b"/><stop offset=".45" stop-color="#f2c56b"/><stop offset="1" stop-color="#62d6c5"/></linearGradient>
+    <pattern id="hatch" width="14" height="14" patternUnits="userSpaceOnUse"><path d="M0 14L14 0" stroke="#708398" stroke-width="2"/></pattern>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#ff715b"/></marker>
+  </defs>
+  <rect width="800" height="440" rx="20" fill="#101f30"/>
+  <g font-family="sans-serif">
+    <text x="40" y="51" fill="#ffffff" font-size="27" font-weight="700">Will it bend too far?</text>
+    <text x="40" y="82" fill="#adc1d3" font-size="18">60 mm cantilever · 12 × 10 mm aluminium section</text>
+    <rect x="96" y="127" width="48" height="163" fill="url(#hatch)"/>
+    <path d="M144 127V290" stroke="#d4e2ef" stroke-width="5"/>
+    <path d="M147 191H663" stroke="#71899d" stroke-width="3" stroke-dasharray="9 7"/>
+    <path d="M147 191C320 191 497 215 661 271" stroke="url(#beam)" stroke-width="26" fill="none"/>
+    <path d="M661 145V228" stroke="#ff715b" stroke-width="4" marker-end="url(#arrow)"/>
+    <text x="683" y="173" fill="#ff9c8c" font-size="23" font-weight="700">300 N</text>
+    <path d="M176 247L233 219" stroke="#adc1d3" stroke-width="2"/>
+    <text x="167" y="272" fill="#d4e2ef" font-size="17">Highest bending stress at the root</text>
+    <text x="40" y="348" fill="#62d6c5" font-size="21" font-weight="700">Deflection · strength · buckling · joint bearing</text>
+    <text x="40" y="383" fill="#adc1d3" font-size="17">Baseline illustration. Bending exaggerated; colours are illustrative.</text>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/neuman/PETGasusDrone",
+  "commit": "34f869fc384615dbb4609ec0646753c961a4b5ea",
+  "pack": ".nopekit/packs/solid-fea",
+  "license": "Apache-2.0 (upstream pack.json)",
+  "sha256": {
+    "proposers/topopt3d.py": "33f2b77e03f2a11a6c55fb3aa8f0fb133c7c4b5bd69aa2a6d681327a4e02b14f",
+    "proposers/_fe3d.py": "2d6015f476ce322961e679d508f9bd03566de0236fda7cc20e3800e3e4296c8b",
+    "solid_fea_ccx.py": "2348e412adcd910e3a86845e26130b309daf3731bbc8bd3eec88eae1bf5ea13f",
+    "references/methods.md": "c37f17e77d7ad6aba790209e1b664c26723f35d0a67018cef34eb38fa6f85dcb"
+  }
+}

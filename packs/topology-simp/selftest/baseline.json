@@ -1,0 +1,63 @@
+{
+  "simp_case": {
+    "mesh": "selftest/assets/cantilever.stl",
+    "young_mpa": 1000.0,
+    "poisson": 0.3,
+    "mesh_mm": 1.5,
+    "support": [
+      [
+        -0.01,
+        -0.01,
+        -0.01
+      ],
+      [
+        0.01,
+        8.01,
+        8.01
+      ]
+    ],
+    "loads": [
+      {
+        "box": [
+          [
+            39.99,
+            -0.01,
+            -0.01
+          ],
+          [
+            40.01,
+            8.01,
+            8.01
+          ]
+        ],
+        "force_n": [
+          0.0,
+          0.0,
+          -1.0
+        ]
+      }
+    ],
+    "stress_region": [
+      [
+        8.0,
+        -0.01,
+        -0.01
+      ],
+      [
+        32.0,
+        8.01,
+        8.01
+      ]
+    ]
+  },
+  "simp_volume_limit_mm3": 3000.0,
+  "simp_displacement_limit_mm": 0.1,
+  "simp_stress_limit_mpa": 1.0,
+  "_aliases": {},
+  "_notes": {
+    "simp_case": "One exported part, STL in mm in the same frame as the support, load and stress-region boxes. Linear isotropic static elasticity. Young's modulus MPa; forces N (total per patch, shared over selected nodes). One simultaneous load case. Baseline: a 40x8x8 mm beam held at x=0 under 1 N at x=40. E=1000 MPa is a test material, not a filament recommendation. Mesh 1.5 mm, refined to 0.975 mm; Poisson 0.3. Stress sampled only between x=8 and x=32 to exclude clamp and load singularities.",
+    "simp_volume_limit_mm3": "Maximum volume of the exported connected solid in mm^3. Baseline 2560 against 3000; doubled width is 5120 and must fail.",
+    "simp_displacement_limit_mm": "Maximum displacement magnitude anywhere in the exported part, mm. Baseline around 0.063 against 0.1; half-modulus control around 0.126 and must fail.",
+    "simp_stress_limit_mpa": "Maximum von Mises stress in the explicitly selected stress region, MPa. Baseline about 0.28 against 1; tenfold load about 2.8 and must fail. The regions excluded from this assertion still require other checks."
+  }
+}
