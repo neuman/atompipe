@@ -465,17 +465,38 @@ def pack_gates(pack: str) -> list[Any]:
     return sorted(registry.specs(), key=lambda spec: spec.id)
 
 
+def _stated_acceptance(spec: Any, pack: str) -> dict[str, Any] | None:
+    """The acceptance condition of the first claim ``pack``'s baseline states
+    (``_claims``) that shares a tag with ``spec``, in the legacy form, or None.
+
+    A pack gate that reads its limit through ``ctx.acceptance`` reads it by a tag
+    (cfd.pressure_drop: ``pressure-drop``), and every ``G`` claim carrying that
+    tag must then state one condition, the pack's own, or the gate errors on the
+    wrapped project. *Rejected:* the baseline's claims in place of the ``G``
+    claims (tests name ``G5`` and ``G6`` as the claims a gate's figures sit on)."""
+    for row in pack_baseline(pack).get("_claims") or ():
+        if set(row.get("tags") or ()) & set(spec.claims):
+            acc = row.get("acceptance") or {}
+            return {"comparator": acc.get("comparator", "<="), "limit": acc.get("limit"),
+                    "limit_hi": acc.get("limit_hi"), "quantity": acc.get("quantity", ""),
+                    "units": acc.get("units", "")}
+    return None
+
+
 def _claim(n: int, spec: Any, pack: str) -> dict[str, Any]:
     """Claim ``G<n>``, critical and measurable, covered by ``spec`` through its tags.
 
     ``G``, not ``C``: openmodelica's baseline binds variables to claims C1 and
     C2 and prefers a ledger claim's limit when one of that id exists (packs:H20),
     so a wrapped project whose claims were C-numbered would judge the pack's
-    design against the wrapper's limits instead of the pack's own.
+    design against the wrapper's limits instead of the pack's own. Its
+    condition states no limit, unless the baseline states a claim that shares
+    a tag with ``spec`` (``_stated_acceptance``): then that claim's condition.
     """
     return {
-        "acceptance": {"comparator": "<=", "limit": None, "limit_hi": None,
-                       "quantity": spec.settles or spec.title, "units": ""},
+        "acceptance": _stated_acceptance(spec, pack) or {
+            "comparator": "<=", "limit": None, "limit_hi": None,
+            "quantity": spec.settles or spec.title, "units": ""},
         "critical": True,
         "gates": [],
         "grounded_by": [],
@@ -525,7 +546,9 @@ def wrap_pack_baseline(pack: str, dest: str, *, legacy: bool = True,
       touching the checkout.
     * One critical measurable claim per gate, ``G1…Gn`` in gate-id order, with
       ``tags = spec.claims``, so each claim is covered by its gate (and by any
-      other gate sharing a tag, exactly as a user's claim would be).
+      other gate sharing a tag, exactly as a user's claim would be). A claim
+      that shares a tag with one the baseline states (``_claims``) takes its
+      acceptance condition: the limit a pack gate reads by that tag.
     * The **legacy** layout: ``.nopekit/ledger.json`` and ``.nopekit/.gitignore``
       (``LEGACY_GITIGNORE``), keys sorted, indent 2 — what the 1e09113 spine
       wrote, so that spine reads the project natively, this phase's spine
@@ -676,3 +699,306 @@ class Planted:
         found = [r for r in result.rows if r.verdict.gate == gate_id]
         assert len(found) == 1, (gate_id, [r.verdict.gate for r in result.rows])
         return found[0]
+
+
+# --------------------------------------------------------------------------- #
+# the figure project (issue #15, design B.6)
+# --------------------------------------------------------------------------- #
+#: The figure project's model: one parameter ``x``, which the gate reads. ``{x}``
+#: is the stated value, so a test moves the design by rewriting this one line
+#: (:func:`set_figure_x`).
+_FIGURE_MODEL = '''\
+"""Planted by tests/_projects.figure_project: one parameter, read by demo.drop."""
+from dataclasses import dataclass
+
+
+@dataclass
+class Config:
+    x: float = {x}
+
+
+CONFIG = Config()
+
+
+def build(config=None):
+    c = config if config is not None else CONFIG
+    return {{"value": round(2.0 * c.x, 6)}}
+'''
+
+#: ``demo.drop``: a tier-0 evaluator with evidence, the stdlib stand-in for a
+#: solver that leaves fields behind. It writes ``<out>/demo/field.txt`` (the
+#: "solved field", which a picture would draw) and ``<out>/demo/summary.json``
+#: (what it measured, with the field's sha256, as a CFD gate's summary lists
+#: its fields), and cites the summary. Each value of ``x`` writes other bytes in
+#: both, so a run at another ``x`` is told apart by content alone.
+_FIGURE_GATE = '''\
+"""Planted by tests/_projects.figure_project: an evaluator that leaves evidence."""
+import hashlib
+import json
+
+from nopekit.gates import gate
+from nopekit.models import NegativeControl, Verdict
+
+
+@gate(id="demo.drop", claims=["D1"], settles="value",
+      negative_control=NegativeControl(fixture="selftest/bad.py:big", note="x past the limit"))
+def drop(ctx):
+    x = float(ctx.params["x"])
+    value = round(2.0 * x, 6)
+    body = ("field at x = %r\\n" % x).encode("utf-8")
+    with open(ctx.out_path("demo", "field.txt"), "wb") as fh:
+        fh.write(body)
+    summary = ctx.out_path("demo", "summary.json")
+    with open(summary, "w", encoding="utf-8", newline="\\n") as fh:
+        json.dump({"x": x, "value": value, "field_sha256": hashlib.sha256(body).hexdigest(),
+                   "u_ref": 1.0}, fh, sort_keys=True)
+        fh.write("\\n")
+    return Verdict(gate="demo.drop", passed=value <= 10.0, measured=value, limit=10.0,
+                   units="Pa", comparator="<=", evidence=[summary])
+'''
+
+_FIGURE_FIXTURES = '''\
+"""Planted by tests/_projects.figure_project: the known-bad control, the
+known-good design with x past the limit."""
+import copy
+import dataclasses
+import os
+
+from nopekit.modelio import load_path
+
+kg = load_path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "known_good.py"))
+
+
+def big(ctx):
+    params = copy.deepcopy(kg.PARAMS)
+    params.update(x=50.0, value=100.0)
+    return dataclasses.replace(kg.context(ctx), params=params)
+'''
+
+#: The figure project's two BOUND viewgens (issue #15, B.6), both
+#: ``evidence_of="demo.drop"``. ``views/draw.cfg`` (JSON; absent: ``{}``; never ``.json``, which ``views/`` reads as a view record) sets
+#: what they do, so a test plants a fault without editing a module this
+#: process may have imported already: ``mode`` (the stand-in's,
+#: `tests/_draw_standin.py`), ``timeout_s``, ``glb`` (the still writes a 3D
+#: file too: ``"asset"`` with `write_asset`, ``"live"`` with `write_live`),
+#: ``solid`` (that file's format: ``"glb"``, the default, or ``"gltf"``),
+#: ``caption``, ``scale`` and ``marks`` (the still's), ``bind`` (``disk``: the
+#: still binds the field at the digest of the file on disk, which no evidence
+#: file need hold), ``chart`` (``ok``, ``planted-limit``: a limit in the
+#: payload, ``computed``: a number no evidence file holds) and ``note_limits``
+#: (the chart notes every claim's limit its context hands it).
+#:
+#: ``demo.pic`` is a still drawn by the tool ``nopekit-test-draw``: it reads
+#: the verified summary, binds the field file at the digest the summary lists,
+#: and calls the tool under a timeout. Its recipe file is
+#: ``views/_demo_scene.txt``. ``demo.chart`` is a chart that needs no tool:
+#: the summary's ``x`` and ``value`` as one point. Each module carries the two
+#: helpers itself: a project's ``views/`` is not on the import path.
+_FIGURE_DRAW_COMMON = '''\
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+
+from nopekit.models import View, ViewKind
+from nopekit.site import viewgen
+
+
+def settings(ctx):
+    path = os.path.join(ctx.root, "views", "draw.cfg")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def summary(ctx):
+    path = ctx.entry.path("summary.json")
+    if path is None:
+        ctx.note("the solved field on this computer is from another run: "
+                 "`nopekit check --force --only demo.drop` solves it again")
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+'''
+
+_FIGURE_PIC = _FIGURE_DRAW_COMMON + '''
+
+@viewgen(id="demo.pic", kind=ViewKind.IMAGE, title="The demo field",
+         evidence_of="demo.drop", requires_tools=["nopekit-test-draw"],
+         recipe=("views/_demo_scene.txt",))
+def pic(ctx):
+    """A still of the demo field, drawn by nopekit-test-draw."""
+    found = summary(ctx)
+    if found is None:
+        return None
+    cfg = settings(ctx)
+    want = found["field_sha256"]
+    if cfg.get("bind") == "disk":
+        import hashlib
+        with open(os.path.join(ctx.root, ".nopekit", "out", "demo", "field.txt"), "rb") as fh:
+            want = hashlib.sha256(fh.read()).hexdigest()
+    bound = ctx.bind({"<out>/demo/field.txt": want})
+    if bound is None:
+        return None
+    glb = cfg.get("glb", "")
+    with tempfile.TemporaryDirectory() as tmp:
+        png_path = os.path.join(tmp, "pic.png")
+        solid_name = "pic." + cfg.get("solid", "glb")
+        glb_path = os.path.join(tmp, solid_name)
+        argv = [shutil.which("nopekit-test-draw"), "--png", png_path,
+                "--field", bound["<out>/demo/field.txt"], "--entry", ctx.entry.name,
+                "--value", repr(found["value"]), "--mode", cfg.get("mode", "ok")]
+        if glb:
+            argv += ["--glb", glb_path, "--shape", cfg.get("shape", "box")]
+        subprocess.run(argv, check=True, capture_output=True,
+                       timeout=float(cfg.get("timeout_s", 20)))
+        with open(png_path, "rb") as fh:
+            src = ctx.write_asset("pic.png", fh.read())
+        if glb:
+            with open(glb_path, "rb") as fh:
+                (ctx.write_live if glb == "live" else ctx.write_asset)(solid_name, fh.read())
+    hi = 4.0 * float(found["u_ref"])
+    scale = cfg.get("scale", {
+        "quantity": "value", "units": "Pa", "lo": 0.0, "hi": hi,
+        "stops": [{"at": 0.0, "colour": "#440154"}, {"at": 0.25, "colour": "#3b528b"},
+                  {"at": 0.5, "colour": "#21918c"}, {"at": 0.75, "colour": "#5ec962"},
+                  {"at": 1.0, "colour": "#fde725"}],
+        "over": "#ff00ff", "under": "#808080",
+        "over_word": "Magenta shows a value over the top of the scale.",
+        "under_word": "Grey shows a value under the bottom of the scale.",
+        "ticks": [{"at": 0.0, "value": 0.0, "text": "0"},
+                  {"at": 0.5, "value": hi / 2, "text": f"{hi / 2:g} Pa"},
+                  {"at": 1.0, "value": hi, "text": f"{hi:g} Pa"}],
+        "source": [{"key": "u_ref", "factor": 4.0}],
+        "source_text": "The scale is 4 times the reference value of the run."})
+    meta = {"caption": cfg.get("caption", "The field of the demo, from the run "
+                                          "that wrote this result."),
+            "alt": "A strip of colour", "scale": scale,
+            "marks": cfg.get("marks", [{"at": 0.5, "text": "the middle"}])}
+    # design P2: several scales on one figure (``scale`` then goes, unless
+    # ``keep_scale`` plants both), and the figure's light
+    if "scales" in cfg:
+        if not cfg.get("keep_scale"):
+            del meta["scale"]
+        meta["scales"] = cfg["scales"]
+    if "light" in cfg:
+        meta["light"] = cfg["light"]
+    return View(id="demo.pic", kind=ViewKind.IMAGE, src=src, meta=meta)
+'''
+
+_FIGURE_CHART = _FIGURE_DRAW_COMMON + '''
+
+@viewgen(id="demo.chart", kind=ViewKind.CHART, title="The demo value",
+         evidence_of="demo.drop")
+def chart(ctx):
+    """The demo's value against x, from the run's summary."""
+    found = summary(ctx)
+    if found is None:
+        return None
+    mode = settings(ctx).get("chart", "ok")
+    if settings(ctx).get("note_limits"):
+        ctx.note("limits seen: " + ", ".join(
+            "%s=%r" % (c.id, c.acceptance.limit) for c in ctx.ledger.claims))
+    data = {"series": {"value": [[found["x"], found["value"]]]},
+            "x": {"label": "x"}, "y": {"label": "value", "units": "Pa"}}
+    if mode == "planted-limit":
+        data["limit"] = {"value": 10.0, "comparator": "<="}
+    elif mode == "computed":
+        data["series"]["value"].append([found["x"] + 0.5, found["value"] * 0.5 + 0.123])
+    return View(id="demo.chart", kind=ViewKind.CHART, data=data,
+                meta={"caption": "The value the run wrote, against x."})
+'''
+
+#: The still's recipe file: its bytes key the memo with the module's, so an
+#: edit here draws the still again.
+_FIGURE_SCENE = "scene 1: a strip, one colour per value\n"
+
+
+#: The claim ``demo.drop`` covers, ``value <= 10 Pa``.
+FIGURE_CLAIM = {"statement": "The drop stays at or under 10 Pa", "kind": "measurable",
+                "acceptance": {"quantity": "value", "comparator": "<=", "limit": 10.0,
+                               "units": "Pa"}}
+
+
+#: The figure project's ignore files, as `nopekit init` writes them: the
+#: deny-list block in ``.nopekit/.gitignore`` and the bytecode block at the
+#: root, byte for byte as ``examples/bracket`` tracks them. Literals, never
+#: ``store.ensure_ignore_blocks`` (the module docstring's rule). Without them
+#: git ignores none of ``check``'s scratch, and invariant 8's question (is
+#: every path a command writes ignored?) has no answer to read.
+_FIGURE_IGNORES = {
+    ".nopekit/.gitignore": """\
+# nopekit:begin
+# Written by nopekit, which rewrites everything between these two markers.
+# Outputs, not sources: ledger.json is the generated index of the records,
+# ledger.legacy.json the ledger they migrated from, and the rest this checkout's
+# scratch and memory. verdicts/ is evidence and stays tracked.
+ledger.json
+ledger.legacy.json
+obs/
+cache/
+out/
+export/
+runs/
+*.tmp
+*.lock
+# nopekit:end
+""",
+    ".gitignore": """\
+# nopekit:begin
+# Written by nopekit: bytecode from importing model/, gates/ and selftest/,
+# the readiness report `nopekit report --write` renders, the packages
+# `nopekit export` writes, and the editor launch entry `nopekit init` writes
+# with this machine's paths. Outputs, never sources.
+__pycache__/
+*.py[cod]
+/REPORT.md
+/out/
+/.vscode/launch.json
+# nopekit:end
+"""}
+
+
+def figure_project(dest: str, *, x: float = 1.0, figures: bool = True) -> str:
+    """The figure project of issue #15's design (B.6), at ``x``; return its root.
+
+    A stdlib project whose one evaluator leaves evidence behind: ``demo.drop``
+    (tier 0) reads ``x``, writes ``<out>/demo/summary.json`` and
+    ``<out>/demo/field.txt``, cites the summary, and covers ``D1`` (``value <=
+    10``). At ``x = 1`` and ``x = 2`` it passes with other bytes in both files:
+    the A, B, A sequence (a design that moves and comes back, so a cache hit
+    serves A while ``.nopekit/out`` holds B's files) needs exactly that. Its
+    known-good control is ``x = 1``, its known-bad ``x = 50``. Its ignore files
+    are `init`'s, and it is a git repository from the start, so a test can ask
+    git what it ignores. With ``figures`` (the default), its two bound
+    viewgens: ``demo.pic`` (a still, drawn by the stand-in tool
+    ``nopekit-test-draw``, which a test puts on PATH) and ``demo.chart``.
+    """
+    kg = {"x": 1.0, "value": 2.0}
+    files = {"model/m.py": _FIGURE_MODEL.format(x=repr(float(x))),
+             "gates/demo.py": _FIGURE_GATE, "selftest/bad.py": _FIGURE_FIXTURES}
+    if figures:
+        files.update({"views/demo_pic.py": _FIGURE_PIC, "views/demo_chart.py": _FIGURE_CHART,
+                      "views/_demo_scene.txt": _FIGURE_SCENE})
+    root = plant_project(dest, files, claims={"D1": FIGURE_CLAIM}, known_good_params=kg)
+    for rel, text in _FIGURE_IGNORES.items():
+        with open(os.path.join(root, *rel.split("/")), "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write(text)
+    if shutil.which("git"):
+        _env.git(["init", "--quiet"], cwd=root)
+    return root
+
+
+def set_figure_x(root: str, x: float) -> None:
+    """The figure project's ``x``, rewritten in its one model line."""
+    path = os.path.join(root, "model", "m.py")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    lines = [line for line in text.splitlines() if line.startswith("    x: float = ")]
+    assert len(lines) == 1, lines
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text.replace(lines[0], f"    x: float = {float(x)!r}"))

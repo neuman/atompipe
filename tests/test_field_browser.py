@@ -1,0 +1,1276 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The field viewer draws the colours a field file holds (issue #15, B.6).
+
+A field's colours are its data, and a legend beside it says which value each
+colour is. So the page must show each vertex colour as the file holds it: no
+light shading a face, no tone mapping, no colour conversion on the way out.
+`lib/viewer3d.js`'s field mode does that with three.js's own pieces
+(``MeshBasicMaterial`` with vertex colours and ``toneMapped: false``, no
+lights, ``LinearSRGBColorSpace`` output). This test draws a GLB in a real
+headless Chromium (SwiftShader) and reads the screenshot's pixels.
+
+The GLB is built with trimesh (rule 0.2 of the issue's design: a trusted tool,
+never a stdlib glTF writer), a strip of four quads, each one colour, its
+COLOR_0 the colour's own sRGB bytes as UNSIGNED_BYTE: the layout ParaView 6.2's
+glTF exporter writes (measured on 2026-10-21: the Grayscale map at 0.25 is the
+byte 64). A colour is drawn true when at least `MIN_PIXELS` pixels of the
+screenshot are within `TOLERANCE` of it in every channel. The same file drawn
+in the model mode (three lights, the material's own shading) must fail that
+check, so the test can fail.
+
+`TheBrowserDrawsAParaViewField` (P2.4) does the same with ParaView's own
+glTF, as cfd-openfoam publishes it: ``tests/cfd_fields/bands.gltf``, seven
+bands of known values that ParaView 6.2.0 exported through the pack's
+``views/_scene.py``. Each band must be drawn in the colour the exported
+Viridis preset (``packs/cfd-openfoam/views/viridis.json``) gives its value,
+within 2, magenta above the scale and grey below it.
+
+`TheBrowserDrawsTheHero` and `BothSidesOfTheHeroAreLit` (the motorBike
+design, P7 and R8) draw aero-openfoam's hero glTF lit and flat: on the
+committed fixture and, where ``site build`` ran on the demo, on the demo's
+own file. Flat, its faces are on the Turbo ramp; lit, they keep its hue, a
+back face is lit as its front, no face is black, and a drag keeps the bike
+in the middle of the view. Each check fails on a planted defect (a viewer
+edit `serve_viewer` makes, or a changed copy of the file).
+
+Skipped, saying "not walked", when a piece is absent: the headless Chromium
+under ``~/.cache/ms-playwright/`` (build 1228), trimesh and numpy, Pillow (to
+read the PNG), or three.js 0.169.0 (fetched once from the CDN into a cache in
+the system's temporary folder). Not an invariant class: it reads a browser
+that CI does not have, and an invariant class never skips.
+"""
+from __future__ import annotations
+
+import http.server
+import json
+import os
+import pwd
+import shutil
+import socketserver
+import sys
+import tempfile
+import threading
+import unittest
+import urllib.request
+
+import _env
+import _template
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+from nopekit import site as site_mod  # noqa: E402
+
+#: The headless browsers this test may drive, in order: Chromium build 1228's
+#: headless shell (it honours ``--virtual-time-budget``, so a screenshot waits
+#: for the model to load), then the full Chromium of the same build. Measured
+#: on 2026-10-21: the full build with ``--headless=new`` ran 85 s on the
+#: figure project's page and wrote no screenshot, and the shell wrote it in
+#: 2.7 s. *Rejected:* Playwright (a Python package this repository does not
+#: depend on).
+#: Under the account's own home, never ``$HOME``: the suite runs each test
+#: under a temporary one (`_env`).
+_CACHE = os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".cache", "ms-playwright")
+BROWSERS = (
+    os.path.join(_CACHE, "chromium_headless_shell-1228", "chrome-headless-shell-linux64",
+                 "chrome-headless-shell"),
+    os.path.join(_CACHE, "chromium-1228", "chrome-linux64", "chrome"),
+)
+
+#: The four colours of the strip, as sRGB bytes: three greys (where a
+#: conversion between linear and sRGB moves a byte most, 64 to 137 and back)
+#: and viridis's middle stop.
+RAMP = ((64, 64, 64), (128, 128, 128), (192, 192, 192), (33, 145, 140))
+
+#: Within 2 of each byte: the design's tolerance (B.6), the room SwiftShader's
+#: rasteriser and the 8-bit round trip need. *Rejected:* 0 (one rounding step
+#: in the browser would fail a true drawing).
+TOLERANCE = 2
+
+#: The pixels a colour must cover to count as drawn: a column of the strip
+#: covers some 2 000 at 480 x 360; 200 leaves the antialiased edges out.
+MIN_PIXELS = 200
+
+THREE_FILES = ("vendor/three.module.js", "vendor/jsm/loaders/GLTFLoader.js",
+               "vendor/jsm/controls/OrbitControls.js",
+               "vendor/jsm/utils/BufferGeometryUtils.js",
+               "vendor/jsm/libs/meshopt_decoder.module.js")
+
+HARNESS = """<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html, body { margin: 0; background: #000; }
+#v, .viewer-canvas { position: absolute; inset: 0; }
+canvas { display: block; width: 100%; height: 100%; }</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.js",
+"three/addons/": "./vendor/jsm/"}}</script>
+</head><body><div id="v"></div>
+<script type="module">
+import { createViewer } from "./lib/viewer3d.js";
+const query = new URLSearchParams(location.search);
+const mode = query.get("mode");
+const lit = mode === "lit";
+const scene = mode === "scene" || mode === "flat" || mode === "drag";
+// A reader's drag across the canvas, as pointer events reach OrbitControls:
+// 30 moves of 6 px to the right, each one an update of the controls.
+function drag() {
+  const canvas = document.querySelector("#v canvas");
+  const at = (type, x) => canvas.dispatchEvent(new PointerEvent(type, { pointerId: 1,
+    pointerType: "mouse", isPrimary: true, button: type === "pointermove" ? -1 : 0,
+    buttons: type === "pointerup" ? 0 : 1, clientX: x, clientY: 180, bubbles: true }));
+  at("pointerdown", 200);
+  for (let i = 1; i <= 30; i++) at("pointermove", 200 + 6 * i);
+  at("pointerup", 380);
+}
+createViewer({ host: document.getElementById("v"),
+  view: { id: "f", kind: lit ? "model3d" : "field", src: query.get("src") || "field.glb",
+          meta: {} },
+  field: !lit, light: scene ? "scene" : "",
+  onReady: (api) => { if (mode === "flat") api.setFlat(true); if (mode === "drag") drag(); },
+  onError: () => { document.body.style.background = "#ff0000"; } });
+</script></body></html>
+"""
+
+
+def _browser() -> str | None:
+    return next((b for b in BROWSERS if os.access(b, os.X_OK)), None)
+
+
+def _missing() -> str:
+    """Why the test cannot be walked here, or ``""``."""
+    if _browser() is None:
+        return "no headless Chromium under ~/.cache/ms-playwright/ (build 1228)"
+    for module in ("trimesh", "numpy", "PIL"):
+        try:
+            __import__(module)
+        except ImportError:
+            return f"{module} is not installed"
+    return ""
+
+
+def _three() -> str | None:
+    """A folder holding three.js 0.169.0's files at their vendored paths,
+    fetched once into the system's temporary folder, or None (offline)."""
+    cache = os.path.join(tempfile.gettempdir(), f"nopekit-test-three-{site_mod.THREE_VERSION}")
+    urls = site_mod.vendor_urls()
+    if all(os.path.isfile(os.path.join(cache, *p.split("/"))) for p in THREE_FILES):
+        return cache
+    staging = tempfile.mkdtemp(prefix="nopekit-three-")
+    try:
+        for relative in THREE_FILES:
+            with urllib.request.urlopen(urls[relative], timeout=30) as response:
+                body = response.read()
+            target = os.path.join(staging, *relative.split("/"))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as fh:
+                fh.write(body)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+        return None
+    try:
+        os.replace(staging, cache)
+    except OSError:
+        shutil.rmtree(staging, ignore_errors=True)
+    return cache if os.path.isdir(cache) else None
+
+
+def strip_glb() -> bytes:
+    """Four unit quads in a row, each with its own four vertices in one colour
+    of `RAMP`, as trimesh exports a mesh with vertex colours."""
+    import numpy
+    import trimesh
+    vertices, faces, colours = [], [], []
+    for i, rgb in enumerate(RAMP):
+        base = len(vertices)
+        vertices += [[i, 0, 0], [i + 1, 0, 0], [i + 1, 1, 0], [i, 1, 0]]
+        faces += [[base, base + 1, base + 2], [base, base + 2, base + 3]]
+        colours += [list(rgb) + [255]] * 4
+    mesh = trimesh.Trimesh(vertices=numpy.array(vertices, dtype=float),
+                           faces=numpy.array(faces), process=False,
+                           vertex_colors=numpy.array(colours, dtype=numpy.uint8))
+    return mesh.export(file_type="glb")
+
+
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args) -> None:
+        pass
+
+
+def _pixels(png: str) -> list[tuple]:
+    """Every pixel of ``png`` as an RGB triple (Pillow reads the file)."""
+    from PIL import Image
+    with Image.open(png) as image:
+        raw = image.convert("RGB").tobytes()
+    return [tuple(raw[i:i + 3]) for i in range(0, len(raw), 3)]
+
+
+def drawn_counts(png: str, colours=RAMP) -> list[int]:
+    """For each of ``colours``, the pixels of ``png`` within `TOLERANCE`."""
+    pixels = _pixels(png)
+    return [sum(1 for p in pixels if all(abs(a - b) <= TOLERANCE for a, b in zip(p, rgb)))
+            for rgb in colours]
+
+
+#: The colour past each end of a field's scale, as the legend says them
+#: (cfd-openfoam's ``_scales.OVER`` and ``UNDER``), typed here so that the
+#: test reads no code of the pack.
+OVER, UNDER = (255, 0, 255), (128, 128, 128)
+
+#: ParaView's Viridis preset as it exported it (the legend's source).
+PRESET = os.path.join(ROOT, "packs", "cfd-openfoam", "views", "viridis.json")
+
+
+def preset_colour(value: float, lo: float, hi: float) -> tuple[int, int, int]:
+    """The sRGB bytes the exported preset gives ``value`` on [lo, hi]: the
+    two points of ``RGBPoints`` around it, linear between them in RGB (the
+    table's ``ColorSpace``), each channel rounded; `OVER` above, `UNDER`
+    below. Read here from the file, with no code of the pack."""
+    import json
+    with open(PRESET, encoding="utf-8") as fh:
+        pts = json.load(fh)["RGBPoints"]
+    rows = [pts[i:i + 4] for i in range(0, len(pts), 4)]
+    t = (value - lo) / (hi - lo)
+    if t > 1:
+        return OVER
+    if t < 0:
+        return UNDER
+    k = next(j for j in range(len(rows) - 1) if rows[j][0] <= t <= rows[j + 1][0])
+    f = (t - rows[k][0]) / (rows[k + 1][0] - rows[k][0])
+    return tuple(round(255 * (a + (c - a) * f)) for a, c in zip(rows[k][1:4], rows[k + 1][1:4]))
+
+
+def serve_viewer(files: dict[str, bytes], edits: tuple = ()):
+    """``(folder, server)``: ``lib/viewer3d.js`` on a page of its own
+    (`HARNESS`), with three.js 0.169.0 and ``files``, served on a free port of
+    127.0.0.1. Raises SkipTest ("not walked") when three.js cannot be had.
+    ``edits`` are ``(old, new)`` pairs planted in ``lib/viewer3d.js``, each
+    ``old`` found once: a defect a control shows the check catches."""
+    three = _three()
+    if three is None:
+        raise unittest.SkipTest("not walked: three.js 0.169.0 did not download")
+    site = tempfile.mkdtemp(prefix="nopekit-field-")
+    shutil.copytree(os.path.join(three, "vendor"), os.path.join(site, "vendor"))
+    lib = os.path.join(site, "lib")
+    os.makedirs(lib)
+    for rel, text in _template.template_files(".js").items():
+        if rel.startswith("lib/"):
+            if rel == "lib/viewer3d.js":
+                for was, now in edits:
+                    if text.count(was) != 1:
+                        raise AssertionError(f"the planted edit's text is not in "
+                                             f"lib/viewer3d.js once: {was!r}")
+                    text = text.replace(was, now)
+            with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                fh.write(text)
+    with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(HARNESS)
+    for name, data in files.items():
+        with open(os.path.join(site, name), "wb") as fh:
+            fh.write(data)
+    handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+    server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return site, server
+
+
+def stop_viewer(site: str, server) -> None:
+    server.shutdown()
+    server.server_close()
+    shutil.rmtree(site, ignore_errors=True)
+
+
+def shoot(case: _env.EnvCase, server, mode: str, src: str, *,
+          size: tuple[int, int] = (480, 360), page: str = "index.html") -> str:
+    """The path of a headless Chromium screenshot of ``src`` drawn in the
+    field mode, in the model mode (lights, shading) when ``mode`` is ``lit``,
+    in the lit field mode when it is ``scene``, and in the lit field mode
+    with its flat colours on when it is ``flat`` (design P2), and in the lit
+    field mode turned by a reader's drag when it is ``drag``. The page goes
+    red when the viewer reports an error."""
+    out = os.path.join(case.tmp(), f"{mode}.png")
+    profile = case.tmp()
+    url = f"http://127.0.0.1:{server.server_address[1]}/{page}?mode={mode}&src={src}"
+    browser = _browser()
+    shell = browser.endswith("chrome-headless-shell")
+    _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+              "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+              "--force-color-profile=srgb", "--force-device-scale-factor=1",
+              "--hide-scrollbars", f"--window-size={size[0]},{size[1]}",
+              "--virtual-time-budget=10000", f"--user-data-dir={profile}",
+              f"--screenshot={out}", url], cwd=case.tmp(), timeout=120)
+    case.assertTrue(os.path.isfile(out), "the browser wrote no screenshot")
+    red = sum(1 for p in _pixels(out) if p == (255, 0, 0))
+    case.assertLess(red, 1000, "the viewer reported an error (the page went red)")
+    return out
+
+
+class _ViewerPage(_env.EnvCase):
+    """`serve_viewer` for the class, with the files `files` names, and
+    `shot`: a screenshot of one of them (`shoot`)."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        raise NotImplementedError
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.site, cls.server = serve_viewer(cls.files())
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        stop_viewer(cls.site, cls.server)
+        super().tearDownClass()
+
+    def shot(self, mode: str, src: str = "field.glb") -> str:
+        return shoot(self, self.server, mode, src)
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsTheField(_ViewerPage):
+    """(issue #15, B.6) A field drawn in the browser shows the bytes its file
+    holds, within 2, and the lit mode does not."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"field.glb": strip_glb()}
+
+    def shot(self, mode: str, src: str = "field.glb") -> list[int]:
+        return drawn_counts(super().shot(mode, src))
+
+    def test_the_field_mode_draws_the_bytes_the_file_holds(self):
+        counts = self.shot("field")
+        for rgb, n in zip(RAMP, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+    def test_a_lit_mode_differs(self):
+        """The control: the model mode's lights and shading move the colours,
+        so the check above can fail."""
+        counts = self.shot("lit")
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the lit drawing kept every colour of the ramp: {counts}")
+
+
+#: The lit field's four colours (design P2): saturated, each of its own hue
+#: and below full brightness, so light and shade move each byte and keep
+#: its hue.
+LIT_RAMP = ((200, 40, 40), (40, 170, 60), (40, 90, 200), (150, 60, 170))
+
+#: The tilt of each of the lit strip's four quads about its long side, in
+#: degrees: each face meets the lights at its own angle.
+LIT_TILTS = (-35, -12, 12, 35)
+
+
+def lit_glb() -> bytes:
+    """Four unit quads in a row, each tilted by its `LIT_TILTS` angle and in
+    one colour of `LIT_RAMP`, as trimesh exports a mesh with vertex colours
+    and no normals (ParaView's glTF holds none)."""
+    import math
+    import numpy
+    import trimesh
+    vertices, faces, colours = [], [], []
+    for i, (rgb, tilt) in enumerate(zip(LIT_RAMP, LIT_TILTS)):
+        c, s = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+        base = len(vertices)
+        vertices += [[i, 0, 0], [i + 1, 0, 0], [i + 1, c, s], [i, c, s]]
+        faces += [[base, base + 1, base + 2], [base, base + 2, base + 3]]
+        colours += [list(rgb) + [255]] * 4
+    mesh = trimesh.Trimesh(vertices=numpy.array(vertices, dtype=float),
+                           faces=numpy.array(faces), process=False,
+                           vertex_colors=numpy.array(colours, dtype=numpy.uint8))
+    return mesh.export(file_type="glb")
+
+
+def hue_counts(png: str, colours=LIT_RAMP, *, within: float = 12.0,
+               saturation: float = 0.25) -> list[int]:
+    """For each of ``colours``, the pixels of ``png`` whose hue is within
+    ``within`` degrees of its hue, at a saturation of at least
+    ``saturation``: a colour drawn lighter or darker, never another colour."""
+    import colorsys
+
+    def hs(rgb):
+        h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in rgb))
+        return h * 360, s
+
+    want = [hs(rgb)[0] for rgb in colours]
+    counts = [0] * len(colours)
+    for p in _pixels(png):
+        h, s = hs(p)
+        if s < saturation:
+            continue
+        for k, target in enumerate(want):
+            if min(abs(h - target), 360 - abs(h - target)) <= within:
+                counts[k] += 1
+    return counts
+
+
+def brightness(png: str, colours=LIT_RAMP) -> list[float]:
+    """For each of ``colours``, the median over the pixels of its hue
+    (`hue_counts`' rule) of the pixel's brightest channel over the colour's:
+    1 where a face is drawn at the file's colour, less in shade."""
+    import colorsys
+    pixels = _pixels(png)
+    out = []
+    for rgb in colours:
+        want = colorsys.rgb_to_hls(*(c / 255 for c in rgb))[0] * 360
+        ratios = []
+        for p in pixels:
+            h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in p))
+            if s >= 0.25 and min(abs(h * 360 - want), 360 - abs(h * 360 - want)) <= 12:
+                ratios.append(max(p) / max(rgb))
+        ratios.sort()
+        out.append(round(ratios[len(ratios) // 2], 3) if ratios else 0.0)
+    return out
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsALitField(_ViewerPage):
+    """(design P2) A lit field (``light: "scene"``) is drawn with lights and
+    shade, its hue the file's colours; its "Flat colours" toggle draws each
+    colour as the file holds it, within 2, as the key shows it. The lit
+    drawing is not held to the bytes: it must differ from them, so the flat
+    check can fail."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"lit.glb": lit_glb()}
+
+    def test_the_flat_toggle_shows_the_bytes_the_file_holds(self):
+        counts = drawn_counts(self.shot("flat", "lit.glb"), LIT_RAMP)
+        for rgb, n in zip(LIT_RAMP, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+    def test_the_lit_mode_shades_and_keeps_each_hue(self):
+        png = self.shot("scene", "lit.glb")
+        counts = drawn_counts(png, LIT_RAMP)
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the lit drawing kept every byte of the file: {counts}")
+        hues = hue_counts(png)
+        for rgb, n in zip(LIT_RAMP, hues):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb}'s hue is drawn on {n} pixels: {hues}")
+        # Shade follows the angle of each face (review of P2): the four quads,
+        # each at its own tilt, are each drawn at their own brightness. What
+        # slipped through: a drawing lit by the ambient light alone (no
+        # normals, or the key and the fill dead) dims every colour by the same
+        # third, kept every hue and passed the two checks above.
+        shades = brightness(png)
+        self.assertGreater(max(shades) / max(min(shades), 1e-6), 1.5,
+                           f"the quads are all drawn at about one brightness: {shades}")
+        for i, a in enumerate(shades):
+            for b in shades[i + 1:]:
+                self.assertGreater(abs(a - b), 0.05,
+                                   f"two quads at other tilts have one shade: {shades}")
+
+
+#: A page that mounts a claim's figure card (``figureCards`` in
+#: ``lib/figures.js``) for one lit 3D figure, as page.json bakes it, presses
+#: its "Turn it in 3D" button, and, with ``mode=flat``, the "Flat colours"
+#: toggle once the viewer has mounted it. The viewer fills the window.
+CARD = """<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html, body { margin: 0; background: #000; }
+.fig-viewer { position: fixed; inset: 0; z-index: 1; }
+.viewer-canvas { position: absolute; inset: 0; }
+canvas { display: block; width: 100%; height: 100%; }</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.js",
+"three/addons/": "./vendor/jsm/"}}</script>
+</head><body>
+<script type="module">
+import { figureCards } from "./lib/figures.js";
+const query = new URLSearchParams(location.search);
+const fig = { id: "aero.hero", view: "aero.hero", kind: "field", src: query.get("src"),
+  title: "The flow", currency: "current", light: "scene",
+  turn: { word: "Turn it in 3D", flat_word: "Flat colours" } };
+const page = { claims: { C1: { id: "C1", statement: "", token: "checked", word: "Checked",
+  figures: [fig] } }, words: { figure: {} } };
+document.body.append(...figureCards({ claims: ["C1"] }, page));
+document.querySelector(".fig-turn").click();
+(function press() {
+  const flat = document.querySelector(".fig-flat");
+  if (!flat) { setTimeout(press, 50); return; }
+  if (query.get("mode") === "flat") flat.click();
+})();
+</script></body></html>
+"""
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheCardTurnsALitField(_ViewerPage):
+    """(review of P2) The claim card's 3D view passes its figure's ``light``
+    to the viewer and mounts the "Flat colours" toggle, which draws the
+    file's bytes: turned, the lit figure is shaded; with the toggle pressed,
+    each colour is the file's within 2. What slipped through: the browser
+    tests drove the viewer alone, so the card could drop the light (the
+    figure drawn unlit, no toggle) or mount a toggle that did nothing, and
+    every test stayed green. The engineering and marketing heroes are held
+    in `test_site_truth` (``TheTemplateShowsWhatItIsGiven``)."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"lit.glb": lit_glb(), "card.html": CARD.encode("utf-8")}
+
+    def test_the_card_draws_it_lit(self):
+        png = shoot(self, self.server, "lit", "lit.glb", page="card.html")
+        counts = drawn_counts(png, LIT_RAMP)
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the card drew the lit figure unlit: {counts}")
+        hues = hue_counts(png)
+        for rgb, n in zip(LIT_RAMP, hues):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb}'s hue is drawn on {n} pixels: {hues}")
+
+    def test_the_cards_flat_toggle_draws_the_bytes(self):
+        png = shoot(self, self.server, "flat", "lit.glb", page="card.html")
+        counts = drawn_counts(png, LIT_RAMP)
+        for rgb, n in zip(LIT_RAMP, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+
+#: The ground of `ground_glb`, and its two posts: one colour each, of its own
+#: hue, so a pixel says which it shows.
+GROUND, EAST, WEST = (40, 90, 200), (200, 40, 40), (40, 170, 60)
+
+
+def ground_glb() -> bytes:
+    """A Z-up scene as ParaView exports one (design P2): a round ground at
+    z = 0 about the Z axis, a post on it at +x and one at -x, and the file's
+    own camera 15 degrees above the ground, aimed at the middle of the box,
+    its up tilted with its line of sight. trimesh writes the camera."""
+    import math
+    import numpy
+    import trimesh
+    n, radius = 96, 3.0
+    ring = [[radius * math.cos(2 * math.pi * k / n), radius * math.sin(2 * math.pi * k / n), 0]
+            for k in range(n)]
+    ground = trimesh.Trimesh(vertices=numpy.array([[0, 0, 0]] + ring, dtype=float),
+                             faces=numpy.array([[0, 1 + k, 1 + (k + 1) % n] for k in range(n)]),
+                             process=False)
+    parts = [(ground, GROUND)]
+    for x, rgb in ((1.5, EAST), (-1.5, WEST)):
+        post = trimesh.creation.box(extents=(0.4, 0.4, 1.0))
+        post.apply_translation((x, 0, 0.5))
+        parts.append((post, rgb))
+    scene = trimesh.Scene()
+    for mesh, rgb in parts:
+        mesh.visual = trimesh.visual.ColorVisuals(
+            mesh, vertex_colors=numpy.array([list(rgb) + [255]] * len(mesh.vertices),
+                                            dtype=numpy.uint8))
+        scene.add_geometry(mesh)
+    target = numpy.array([0.0, 0.0, 0.5])
+    el, az, distance = math.radians(15), math.radians(-130), 11.0
+    position = target + distance * numpy.array([math.cos(el) * math.cos(az),
+                                                math.cos(el) * math.sin(az), math.sin(el)])
+    ahead = (target - position) / numpy.linalg.norm(target - position)
+    right = numpy.cross(ahead, [0, 0, 1])
+    right /= numpy.linalg.norm(right)
+    up = numpy.cross(right, ahead)
+    pose = numpy.eye(4)
+    pose[:3, 0], pose[:3, 1], pose[:3, 2], pose[:3, 3] = right, up, -ahead, position
+    scene.camera_transform = pose
+    return scene.export(file_type="glb")
+
+
+def hue_mask(png: str, rgb, *, within: float = 12.0, saturation: float = 0.25) -> set:
+    """The pixels of ``png`` (as row-major indices) whose hue is ``rgb``'s
+    (`hue_counts`' rule)."""
+    import colorsys
+    want = colorsys.rgb_to_hls(*(c / 255 for c in rgb))[0] * 360
+    out = set()
+    for i, p in enumerate(_pixels(png)):
+        h, _l, s = colorsys.rgb_to_hls(*(c / 255 for c in p))
+        if s >= saturation and min(abs(h * 360 - want), 360 - abs(h * 360 - want)) <= within:
+            out.add(i)
+    return out
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class ALitFieldTurnsAboutItsUp(_ViewerPage):
+    """(review of P2) A lit field whose file camera is Z-up, as ParaView's
+    is, turns about the data's up: dragged across, the round ground keeps its
+    place on the screen and the posts on it move. What slipped through:
+    OrbitControls reads the camera's up once, when built, and the viewer set
+    the file's up after, so a drag or the hero's spin (the same rotation)
+    turned the motorBike end over end about the world's Y and took the camera
+    under the ground."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {"ground.glb": ground_glb()}
+
+    def test_a_drag_keeps_the_ground_in_its_place(self):
+        still, spun = self.shot("scene", "ground.glb"), self.shot("drag", "ground.glb")
+        ground = [hue_mask(png, GROUND) for png in (still, spun)]
+        self.assertGreater(len(ground[0]), 5000, "the ground is not drawn")
+        overlap = len(ground[0] & ground[1]) / len(ground[0] | ground[1])
+        moved = [len(hue_mask(still, rgb) ^ hue_mask(spun, rgb)) for rgb in (EAST, WEST)]
+        # The control: the drag turned the scene, so the posts moved.
+        self.assertGreater(min(moved), 200, f"the posts did not move: {moved}")
+        self.assertGreater(overlap, 0.9, f"the ground moved on the screen: {overlap:.2f} of "
+                                         f"its pixels in common")
+
+
+#: ParaView 6.2.0's own glTF of seven bands of known values on the
+#: baseline's coarsest mesh (`tests/cfd_fields/make_bands.py` made it with
+#: the pack's ``views/_scene.py``; `test_cfd_views.TheRealStills` holds it to
+#: what ParaView writes today).
+BANDS = os.path.join(ROOT, "tests", "cfd_fields", "bands.gltf")
+
+
+def _bands():
+    """``make_bands`` (the band values and the scale), loaded from its file."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "nopekit_test_make_bands", os.path.join(ROOT, "tests", "cfd_fields", "make_bands.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _missing_paraview_page() -> str:
+    if _browser() is None:
+        return "no headless Chromium under ~/.cache/ms-playwright/ (build 1228)"
+    try:
+        __import__("PIL")
+    except ImportError:
+        return "PIL is not installed"
+    return ""
+
+
+@unittest.skipIf(_missing_paraview_page(), f"not walked: {_missing_paraview_page()}")
+class TheBrowserDrawsAParaViewField(_ViewerPage):
+    """(issue #15, P2.4) The page turns ParaView's own glTF as ParaView wrote
+    it: each band of `BANDS` drawn in the field mode is the preset's colour
+    for its value within 2, magenta above the scale and grey below it,
+    as the legend says them. The model mode's lights move the colours, so
+    the check can fail. Needs no ParaView: the file is the one it wrote."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        with open(BANDS, "rb") as fh:
+            return {"bands.gltf": fh.read()}
+
+    def colours(self) -> list[tuple]:
+        bands = _bands()
+        return [preset_colour(v, bands.LO, bands.HI) for v in bands.VALUES]
+
+    def test_each_band_is_the_presets_colour_for_its_value(self):
+        colours = self.colours()
+        self.assertIn(OVER, colours)
+        self.assertIn(UNDER, colours)
+        counts = drawn_counts(self.shot("field", "bands.gltf"), colours)
+        for rgb, n in zip(colours, counts):
+            self.assertGreaterEqual(n, MIN_PIXELS, f"{rgb} is drawn on {n} pixels: {counts}")
+
+    def test_a_lit_mode_differs(self):
+        counts = drawn_counts(self.shot("lit", "bands.gltf"), self.colours())
+        self.assertTrue(any(n < MIN_PIXELS for n in counts),
+                        f"the lit drawing kept every band's colour: {counts}")
+
+
+#: aero-openfoam's hero glTF as ParaView 6.2.0 exported it from the committed
+#: motorBike fixtures (``tests/aero_fixtures/views/make_standin.py``): the
+#: body by Cp and the tracks by speed, ``COLOR_0`` on the Turbo ramp, its
+#: camera in the file.
+HERO = os.path.join(ROOT, "tests", "aero_fixtures", "views", "standin", "hero.gltf")
+
+
+def _interior(png: str, margin: int = 2):
+    """The pixels of ``png`` that are drawn (not the page's black) with every
+    pixel within ``margin`` of them drawn too: the faces, not their edges or
+    the one-pixel tubes, where the browser blends with the background."""
+    import numpy
+    from PIL import Image
+    with Image.open(png) as image:
+        rgb = numpy.asarray(image.convert("RGB")).astype(int)
+    drawn = (rgb != 0).any(-1)
+    inner = drawn.copy()
+    for dy in range(-margin, margin + 1):
+        for dx in range(-margin, margin + 1):
+            inner &= numpy.roll(numpy.roll(drawn, dy, 0), dx, 1)
+    return rgb[inner]
+
+
+#: How near the Turbo ramp a flat face must be, and on what share of the
+#: faces' pixels, in bytes. The browser blends the vertex colours of each
+#: triangle, and the fixture's triangles are large (its body decimated by
+#: 0.95, then by 0.75 for the file), so a blend of two far colours leaves the
+#: ramp. Measured on 2026-10-23 (Chromium 1228, SwiftShader): 55% of the
+#: flat faces' pixels within 4, the lit drawing's 4.4%; the lit hue within 6
+#: degrees of the flat one on 98.3% of the saturated pixels. On the demo's own
+#: file (the full base mesh, 2026-10-25): 71%, 5.2% and 97.7%. *Rejected:* 2
+#: bytes on every pixel (the strip tests hold that, where each face is one
+#: colour; a blend across a face is not a colour of the key, flat or lit).
+HERO_RAMP_BYTES, HERO_FLAT_SHARE, HERO_HUE_SHARE = 4.0, 0.5, 0.95
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class TheBrowserDrawsTheHero(_ViewerPage):
+    """(the motorBike design, P7) The hero's glTF, lit (``light: "scene"``)
+    and with its "Flat colours" toggle: flat, the faces are on the Turbo ramp
+    the key is made from, and the lit drawing is not; lit, each pixel keeps
+    the flat pixel's hue. The ramp is read here from the exported preset,
+    with no code of the pack. Held on the committed fixture and, where
+    ``site build`` ran on the demo, on the demo's own file
+    (`test_aero_views.demo_hero_gltf`)."""
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        import test_aero_views as aero
+        out = {}
+        demo, _why = aero.demo_hero_gltf()
+        for name, path in (("hero.gltf", HERO), ("demo.gltf", demo)):
+            if path:
+                with open(path, "rb") as fh:
+                    out[name] = fh.read()
+        return out
+
+    def heroes(self) -> list[str]:
+        return [name for name in ("hero.gltf", "demo.gltf")
+                if os.path.isfile(os.path.join(self.site, name))]
+
+    def faces(self, mode: str, src: str = "hero.gltf"):
+        import test_aero_views as aero
+        png = shoot(self, self.server, mode, src, size=(640, 400))
+        return png, aero.off_ramp(_interior(png))
+
+    def test_the_flat_toggle_shows_the_keys_colours_and_the_lit_mode_does_not(self):
+        for src in self.heroes():
+            with self.subTest(src):
+                _png, flat = self.faces("flat", src)
+                _png, lit = self.faces("scene", src)
+                flat_share = float((flat <= HERO_RAMP_BYTES).mean())
+                lit_share = float((lit <= HERO_RAMP_BYTES).mean())
+                self.assertGreater(len(flat), 20000)
+                self.assertGreaterEqual(flat_share, HERO_FLAT_SHARE, (flat_share, lit_share))
+                self.assertLess(lit_share, flat_share / 5, (flat_share, lit_share))
+
+    def test_the_lit_hero_keeps_each_hue_of_the_file(self):
+        import test_aero_views as aero
+        for src in self.heroes():
+            with self.subTest(src):
+                flat, _ = self.faces("flat", src)
+                lit, _ = self.faces("scene", src)
+                share = aero.same_hue_share(lit, flat, background=(0, 0, 0))
+                self.assertGreaterEqual(share, HERO_HUE_SHARE)
+
+
+def _indices(doc: dict, buffers: list, prim: dict):
+    """``(buffer index, start, rows)``: ``prim``'s triangle indices as an
+    ``(n, 3)`` numpy array copied out of ``buffers``."""
+    import numpy
+    acc = doc["accessors"][prim["indices"]]
+    view = doc["bufferViews"][acc["bufferView"]]
+    kind = {5121: numpy.uint8, 5123: numpy.uint16, 5125: numpy.uint32}[acc["componentType"]]
+    start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    size = numpy.dtype(kind).itemsize * acc["count"]
+    rows = numpy.frombuffer(bytes(buffers[view["buffer"]][start:start + size]), dtype=kind)
+    return view["buffer"], start, rows.reshape(-1, 3).copy()
+
+
+def _with_faces(gltf: bytes, change) -> bytes:
+    """``gltf`` (its buffers inline, as ParaView writes them) with each
+    primitive's triangles replaced by ``change(mesh index, rows)``, written
+    into a buffer of their own."""
+    import base64
+    doc = json.loads(gltf)
+    buffers = [base64.b64decode(b["uri"].split(",", 1)[1]) for b in doc["buffers"]]
+    for m, mesh in enumerate(doc["meshes"]):
+        for prim in mesh["primitives"]:
+            _k, _start, rows = _indices(doc, buffers, prim)
+            data = change(m, rows).astype("<u4").tobytes()
+            doc["buffers"].append({"byteLength": len(data), "uri":
+                                   "data:application/octet-stream;base64,"
+                                   + base64.b64encode(data).decode()})
+            doc["bufferViews"].append({"buffer": len(doc["buffers"]) - 1, "byteOffset": 0,
+                                       "byteLength": len(data), "target": 34963})
+            doc["accessors"].append({"bufferView": len(doc["bufferViews"]) - 1,
+                                     "byteOffset": 0, "componentType": 5125,
+                                     "count": len(data) // 4, "type": "SCALAR"})
+            prim["indices"] = len(doc["accessors"]) - 1
+    return json.dumps(doc).encode("utf-8")
+
+
+def turned_over(gltf: bytes) -> bytes:
+    """``gltf`` with each triangle's vertices in the other order: each front
+    face is a back face, and each back face a front face."""
+    return _with_faces(gltf, lambda _m, rows: rows[:, [0, 2, 1]])
+
+
+def baffled(gltf: bytes) -> bytes:
+    """``gltf`` with each triangle of its first mesh (the body) drawn twice,
+    the other way round on the same vertices: a baffle and its ``-shadow``
+    twin sharing their points. The normals the viewer computes there cancel,
+    so no light but the ambient reaches them (measured: SwiftShader draws a
+    zero normal unlit, not black)."""
+    import numpy
+    return _with_faces(gltf, lambda m, rows: numpy.concatenate([rows, rows[:, [0, 2, 1]]])
+                       if m == 0 else rows)
+
+
+def seen_from_behind(gltf: bytes) -> bytes:
+    """``gltf`` with its camera turned 180 degrees about the vertical (+z,
+    ParaView's up) through the middle of its first mesh (the body): the bike
+    from the rear and the right, the side the file's camera does not see. A
+    second angle the file states, so each drawing of it is the same; a drag
+    is not (its last pose moves from run to run, measured)."""
+    import numpy
+    doc = json.loads(gltf)
+    acc = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]]
+    middle = (numpy.array(acc["min"]) + numpy.array(acc["max"])) / 2
+    node = next(n for n in doc["nodes"] if "camera" in n)
+    pose = numpy.array(node["matrix"], dtype=float).reshape(4, 4).T
+    turn = numpy.diag([-1.0, -1.0, 1.0, 1.0])
+    to, back = numpy.eye(4), numpy.eye(4)
+    to[:3, 3], back[:3, 3] = middle, -middle
+    node["matrix"] = [float(v) for v in (to @ turn @ back @ pose).T.ravel()]
+    return json.dumps(doc).encode("utf-8")
+
+
+def changed_share(a_png: str, b_png: str, *, within: int = 8) -> float:
+    """Of the pixels either picture draws (not the page's black), the share
+    where the two differ by more than ``within`` in a channel."""
+    import numpy
+    from PIL import Image
+    with Image.open(a_png) as a, Image.open(b_png) as b:
+        x = numpy.asarray(a.convert("RGB")).astype(int)
+        y = numpy.asarray(b.convert("RGB")).astype(int)
+    drawn = (x != 0).any(-1) | (y != 0).any(-1)
+    return float((numpy.abs(x - y).max(-1)[drawn] > within).mean())
+
+
+def lit_over_flat(lit_png: str, flat_png: str) -> "numpy.ndarray":
+    """For each pixel the flat drawing draws (its brightest channel at least
+    40: the faces, not the page's black or the edges blended with it), the
+    lit drawing's brightest channel over the flat one's. The ambient light
+    alone gives 1/pi of the colour (three.js's units), the key light more."""
+    import numpy
+    from PIL import Image
+    with Image.open(lit_png) as a, Image.open(flat_png) as b:
+        lit = numpy.asarray(a.convert("RGB")).astype(int).max(-1)
+        flat = numpy.asarray(b.convert("RGB")).astype(int).max(-1)
+    drawn = flat >= 40
+    return lit[drawn] / flat[drawn]
+
+
+def drawn_middle(png: str) -> tuple[float, float, float]:
+    """``(share of the picture drawn, x, y)``: the drawn pixels' share and
+    their mean place, each as a fraction of the picture's width and height."""
+    import numpy
+    from PIL import Image
+    with Image.open(png) as image:
+        rgb = numpy.asarray(image.convert("RGB")).astype(int)
+    ys, xs = numpy.nonzero((rgb != 0).any(-1))
+    h, w = rgb.shape[:2]
+    if not len(xs):
+        return 0.0, 0.0, 0.0
+    return len(xs) / (w * h), float(xs.mean()) / w, float(ys.mean()) / h
+
+
+#: R8 of the design (the motorBike, P7): the thresholds, measured on
+#: 2026-10-25 (Chromium 1228, SwiftShader, 640 x 400) on the fixture and on
+#: the demo's own file, from the file's camera and from behind.
+#: - A face drawn the other way round changes no pixel by more than 8 bytes:
+#:   0.0% measured; a viewer that draws one side alone changes 94%.
+#:   *Rejected:* 0 (a rasteriser may break a tie on another pixel).
+TURNED_SHARE = 0.005
+#: - Black: under a quarter of the flat colour (the ambient floor is 0.32),
+#:   on no pixel (0.0% measured; 2.9% where a viewer drew the front faces
+#:   alone and the page's black showed through).
+BLACK, BLACK_SHARE = 0.25, 0.001
+#: - The ambient light alone (under 0.32 of the flat colour; 1/pi is 0.318)
+#:   on at most 4% of the pixels: 0.2% to 1.0% measured on the four views
+#:   (the faces that turn away from both lights); 12% from the file's camera
+#:   and 14% from behind where the body's faces are drawn twice on their
+#:   vertices and their normals cancel (`baffled`). *Rejected:* 0.34 (the
+#:   faces in the fill light's shade sit there: 4.9% from behind, measured).
+AMBIENT, AMBIENT_SHARE = 0.32, 0.04
+
+
+@unittest.skipIf(_missing(), f"not walked: {_missing()}")
+class BothSidesOfTheHeroAreLit(_env.EnvCase):
+    """(the motorBike design, R8 and P7) ParaView draws the motorBike's body
+    with its front faces culled: the body's faces wind inward, so the faces
+    toward the camera are back faces, and each ``-shadow`` baffle lies on its
+    twin. The viewer draws both sides (P2's departure from ``BackSide``), so
+    a back face must be lit as its front, and no face may be drawn black or
+    by the ambient light alone. Held on the committed fixture and, where
+    ``site build`` ran on the demo, on its own file, each from the file's
+    camera and from behind (`seen_from_behind`):
+
+    - the file and a copy with every face turned over draw the same pixels;
+    - lit over flat, no pixel is black and few are lit by the ambient alone;
+    - a reader's drag keeps the bike in the middle of the view.
+
+    Controls, each a planted defect that fails its check: a viewer that
+    draws the front faces alone or the back faces alone; a body whose faces
+    are drawn twice on their vertices, opposite ways; a viewer that turns
+    about the middle of the whole box, 15 m of tracks included."""
+
+    LIT_SIDE = "metalness: 0, toneMapped: false, side: THREE.DoubleSide"
+    AIM = "const centre = aim.getCenter(new THREE.Vector3());"
+
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        import test_aero_views as aero
+        sources = {"hero": HERO}
+        demo, _why = aero.demo_hero_gltf()
+        if demo:
+            sources["demo"] = demo
+        out = {}
+        for name, path in sources.items():
+            with open(path, "rb") as fh:
+                data = fh.read()
+            for angle, gltf in (("", data), ("_behind", seen_from_behind(data))):
+                out[f"{name}{angle}.gltf"] = gltf
+                out[f"{name}{angle}_over.gltf"] = turned_over(gltf)
+        out["hero_baffled.gltf"] = baffled(out["hero.gltf"])
+        out["hero_behind_baffled.gltf"] = baffled(out["hero_behind.gltf"])
+        return out
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.site, cls.server = serve_viewer(cls.files())
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        stop_viewer(cls.site, cls.server)
+        super().tearDownClass()
+
+    def views(self) -> list[str]:
+        """Each hero here, from its file's camera and from behind."""
+        return [f"{name}{angle}" for name in ("hero", "demo") for angle in ("", "_behind")
+                if os.path.isfile(os.path.join(self.site, f"{name}.gltf"))]
+
+    def shot(self, mode: str, src: str, server=None) -> str:
+        return shoot(self, server or self.server, mode, src, size=(640, 400))
+
+    def test_a_back_face_is_lit_as_its_front(self):
+        for view in self.views():
+            with self.subTest(view=view):
+                share = changed_share(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("scene", f"{view}_over.gltf"))
+                self.assertLessEqual(share, TURNED_SHARE)
+
+    def test_a_viewer_that_draws_one_side_fails_that_check(self):
+        for side in ("FrontSide", "BackSide"):
+            with self.subTest(side=side):
+                site, server = serve_viewer(self.files(), edits=(
+                    (self.LIT_SIDE, self.LIT_SIDE.replace("DoubleSide", side)),))
+                try:
+                    share = changed_share(self.shot("scene", "hero.gltf", server),
+                                          self.shot("scene", "hero_over.gltf", server))
+                finally:
+                    stop_viewer(site, server)
+                self.assertGreater(share, 0.5)
+
+    def test_no_face_is_black_or_lit_by_the_ambient_alone(self):
+        for view in self.views():
+            with self.subTest(view=view):
+                ratio = lit_over_flat(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("flat", f"{view}.gltf"))
+                self.assertGreater(len(ratio), 20000)
+                self.assertLessEqual(float((ratio < BLACK).mean()), BLACK_SHARE)
+                self.assertLessEqual(float((ratio < AMBIENT).mean()), AMBIENT_SHARE)
+
+    def test_faces_whose_normals_cancel_fail_that_check(self):
+        for view in ("hero_baffled", "hero_behind_baffled"):
+            with self.subTest(view=view):
+                ratio = lit_over_flat(self.shot("scene", f"{view}.gltf"),
+                                      self.shot("flat", f"{view}.gltf"))
+                self.assertGreater(float((ratio < AMBIENT).mean()), 2 * AMBIENT_SHARE)
+
+    def test_a_drag_keeps_the_bike_in_the_middle(self):
+        for name in self.views():
+            if name.endswith("_behind"):
+                continue
+            with self.subTest(name=name):
+                still = drawn_middle(self.shot("scene", f"{name}.gltf"))
+                turned = drawn_middle(self.shot("drag", f"{name}.gltf"))
+                self.assertGreater(turned[0], still[0] / 2, (still, turned))
+                self.assertTrue(0.25 < turned[1] < 0.75 and 0.25 < turned[2] < 0.75,
+                                (still, turned))
+
+    def test_a_viewer_that_turns_about_the_whole_box_fails_that_check(self):
+        site, server = serve_viewer(self.files(), edits=(
+            (self.AIM, self.AIM.replace("aim.", "box.")),))
+        try:
+            turned = drawn_middle(self.shot("drag", "hero.gltf", server))
+        finally:
+            stop_viewer(site, server)
+        self.assertFalse(0.25 < turned[1] < 0.75 and 0.25 < turned[2] < 0.75, turned)
+
+
+#: A page that mounts `scaleLegend` and `figureStill` from ``lib/figures.js``
+#: with ``page.css``, in a box of each width, and writes what it measured
+#: into ``#out`` as JSON: each tick's mark against its value's place on the
+#: ramp, and each plane mark against its place on the picture, with the
+#: picture's and the words' boxes.
+LAYOUT = """<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="page.css">
+<style>body { margin: 0; padding: 20px; } .box { margin-bottom: 40px; }</style>
+</head><body><pre id="out">pending</pre>
+<script type="module">
+import { scaleLegend, figureStill } from "./lib/figures.js";
+const FIGS = __FIGS__;
+const pic = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="160">' +
+  '<rect width="1600" height="160" fill="#3a6"/></svg>');
+const out = [];
+for (const width of [1000, 300]) {
+  for (const fig of FIGS) {
+    const box = document.createElement("div");
+    box.className = "box";
+    box.style.width = width + "px";
+    document.body.appendChild(box);
+    const still = figureStill(fig, pic);
+    box.appendChild(still);
+    box.appendChild(scaleLegend(fig.scale));
+    const img = still.querySelector("img");
+    await img.decode();
+    const r = img.getBoundingClientRect();
+    const ramp = box.querySelector(".fig-ramp").getBoundingClientRect();
+    const ticks = [...box.querySelectorAll(".fig-tick")].map((t, i) => {
+      const at = fig.scale.ticks[i].at;
+      const mark = t.getBoundingClientRect().left
+        + parseFloat(getComputedStyle(t, "::before").left)
+        + parseFloat(getComputedStyle(t, "::before").borderLeftWidth) / 2;
+      const words = t.querySelector(".fig-tick-text").getBoundingClientRect();
+      return { at, mark, want: ramp.left + at * ramp.width, left: words.left,
+               right: words.right };
+    });
+    const marks = [...still.querySelectorAll(".fig-mark")].map((m, i) => {
+      const at = fig.marks[i].at;
+      const line = m.getBoundingClientRect().left
+        + parseFloat(getComputedStyle(m, "::after").left)
+        + parseFloat(getComputedStyle(m, "::after").borderLeftWidth) / 2;
+      const words = m.querySelector(".fig-mark-text").getBoundingClientRect();
+      return { at, line, want: r.left + at * r.width, top: words.top, bottom: words.bottom,
+               left: words.left, right: words.right };
+    });
+    out.push({ width, img: { left: r.left, right: r.right, top: r.top },
+               ramp: { left: ramp.left, right: ramp.right }, ticks, marks });
+  }
+}
+document.getElementById("out").textContent = JSON.stringify(out);
+</script></body></html>
+"""
+
+#: The two baseline stills' marks and scales, as page.json bakes them: the
+#: speed's ticks at both ends of the ramp, the pressure's inside it.
+LAYOUT_FIGS = [
+    {"marks": [{"at": 0.2619, "text": "upstream plane"},
+               {"at": 0.7381, "text": "downstream plane"}],
+     "scale": {"quantity": "speed", "units": "m/s", "stops": [{"at": 0, "colour": "#440154"},
+                                                              {"at": 1, "colour": "#fde725"}],
+               "over": "#ff00ff", "ticks": [{"at": a, "text": t} for a, t in (
+                   (0.0, "0.000"), (0.25, "0.005"), (0.5, "0.010"), (0.75, "0.015"),
+                   (1.0, "0.020"))]}},
+    {"marks": [{"at": 0.2619, "text": "upstream plane"},
+               {"at": 0.7381, "text": "downstream plane"}],
+     "scale": {"quantity": "static pressure", "units": "Pa",
+               "stops": [{"at": 0, "colour": "#440154"}, {"at": 1, "colour": "#fde725"}],
+               "over": "#ff00ff", "under": "#808080",
+               "ticks": [{"at": 0.165, "text": "0.0"}, {"at": 0.4845, "text": "0.5"},
+                         {"at": 0.804, "text": "1.0"}]}},
+]
+
+
+@unittest.skipIf(_browser() is None, "not walked: no headless Chromium under "
+                                     "~/.cache/ms-playwright/ (build 1228)")
+class TheLegendAndTheMarksSitOnTheirValues(_env.EnvCase):
+    """(review of P2) In a real browser, with the real ``page.css``: each
+    tick's mark on a still's legend is at its value's place on the ramp
+    within 1 px, at an end of the ramp and inside it, in a box 1000 px and
+    300 px wide; each plane's words sit above the picture, never on it, with
+    their line at the plane's place within 1 px, and inside the box. What
+    slipped through: the first and last ticks' marks moved with their words,
+    17 px off on the speed legend and 9.5 px on the pressure's; and the plane
+    words sat on a strip 29 px high on a phone, hiding most of it."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        site = tempfile.mkdtemp(prefix="nopekit-layout-")
+        cls.addClassCleanup(shutil.rmtree, site, True)
+        os.makedirs(os.path.join(site, "lib"))
+        for rel, text in _template.template_files(".js").items():
+            if rel.startswith("lib/"):
+                with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        with open(os.path.join(site, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write(_template.template_files(".css")["page.css"])
+        with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write(LAYOUT.replace("__FIGS__", json.dumps(LAYOUT_FIGS)))
+        handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+        server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.server_close)
+        cls.addClassCleanup(server.shutdown)
+        browser = _browser()
+        profile = tempfile.mkdtemp(prefix="nopekit-layout-profile-")
+        cls.addClassCleanup(shutil.rmtree, profile, True)
+        shell = browser.endswith("chrome-headless-shell")
+        done = _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+                         "--force-device-scale-factor=1", "--window-size=1200,1600",
+                         "--virtual-time-budget=5000", f"--user-data-dir={profile}",
+                         "--dump-dom",
+                         f"http://127.0.0.1:{server.server_address[1]}/index.html"],
+                        cwd=profile, timeout=120)
+        import html
+        import re
+        found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
+        cls.measured = json.loads(html.unescape(found.group(1))) if found else None
+        cls.dom = done.stdout[-2000:]
+
+    def setUp(self):
+        super().setUp()
+        self.assertIsInstance(self.measured, list, self.dom)
+        self.assertEqual(len(self.measured), 4)
+
+    def test_each_tick_mark_is_at_its_value(self):
+        for box in self.measured:
+            for tick in box["ticks"]:
+                with self.subTest(width=box["width"], at=tick["at"]):
+                    self.assertAlmostEqual(tick["mark"], tick["want"], delta=1.0)
+                    # Its words stay inside the legend's ramp.
+                    self.assertGreaterEqual(tick["left"], box["ramp"]["left"] - 1)
+                    self.assertLessEqual(tick["right"], box["ramp"]["right"] + 1)
+
+    def test_each_plane_word_is_above_the_picture_over_its_line(self):
+        for box in self.measured:
+            for mark in box["marks"]:
+                with self.subTest(width=box["width"], at=mark["at"]):
+                    self.assertAlmostEqual(mark["line"], mark["want"], delta=1.0)
+                    self.assertLessEqual(mark["bottom"], box["img"]["top"] + 0.5)
+                    self.assertGreaterEqual(mark["left"], box["img"]["left"] - 1)
+                    self.assertLessEqual(mark["right"], box["img"]["right"] + 1)
+            words = sorted(box["marks"], key=lambda m: m["left"])
+            for a, b in zip(words, words[1:]):
+                self.assertLessEqual(a["right"], b["left"], "two plane words overlap")
+
+
+#: A page that mounts `figureLegends` from ``lib/figures.js`` with
+#: ``page.css`` in the dark theme, for a figure of two scales (design P2), in
+#: a box 1000 px wide and in one of a phone's column (390 px less two 16 px
+#: gutters), and writes each legend's box, its glyph and the box's overflow
+#: into ``#out``.
+LEGENDS = """<!doctype html>
+<html data-theme="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="page.css">
+<style>body { margin: 0; padding: 16px; } .box { margin-bottom: 40px; }</style>
+</head><body><pre id="out">pending</pre>
+<script type="module">
+import { figureLegends } from "./lib/figures.js";
+const FIG = __FIG__;
+const out = [];
+for (const width of [1000, 358]) {
+  const box = document.createElement("div");
+  box.className = "box";
+  box.style.width = width + "px";
+  document.body.appendChild(box);
+  box.appendChild(figureLegends(FIG));
+  const rect = (e) => { const r = e.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  const legends = [...box.querySelectorAll(".fig-legend")].map((l) => ({ ...rect(l),
+    glyph: (l.querySelector(".fig-on") || {}).className || "",
+    hidden: (l.querySelector(".fig-on") || { getAttribute: () => "" }).getAttribute("aria-hidden"),
+    label: (l.querySelector(".fig-on") || { getAttribute: () => "" }).getAttribute("aria-label"),
+    title: (l.querySelector(".fig-legend-title") || {}).textContent || "" }));
+  out.push({ width, box: rect(box), legends, overflow: box.scrollWidth - box.clientWidth,
+             page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+             ink: getComputedStyle(box.querySelector(".fig-legend-title")).color });
+}
+document.getElementById("out").textContent = JSON.stringify(out);
+</script></body></html>
+"""
+
+#: The two scales as `page.figure_row` bakes them: each with its ``on`` and
+#: the words of its glyph.
+LEGENDS_FIG = {"scales": [
+    {**LAYOUT_FIGS[1]["scale"], "on": "surface", "on_word": "On the surface"},
+    {**LAYOUT_FIGS[0]["scale"], "on": "lines", "on_word": "On the lines"}]}
+
+
+@unittest.skipIf(_browser() is None, "not walked: no headless Chromium under "
+                                     "~/.cache/ms-playwright/ (build 1228)")
+class TheLegendsOfSeveralScalesFit(_env.EnvCase):
+    """(design P2) A figure's two legends, in a real browser with the real
+    ``page.css`` in the dark theme: side by side in a wide box, stacked in a
+    phone's column, never past the box's edge, each with its glyph (a swatch
+    for the surface, a line for the lines) and the words that name it."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        site = tempfile.mkdtemp(prefix="nopekit-legends-")
+        cls.addClassCleanup(shutil.rmtree, site, True)
+        os.makedirs(os.path.join(site, "lib"))
+        for rel, text in _template.template_files(".js").items():
+            if rel.startswith("lib/"):
+                with open(os.path.join(site, *rel.split("/")), "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        with open(os.path.join(site, "page.css"), "w", encoding="utf-8") as fh:
+            fh.write(_template.template_files(".css")["page.css"])
+        with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as fh:
+            fh.write(LEGENDS.replace("__FIG__", json.dumps(LEGENDS_FIG)))
+        handler = lambda *a, **kw: _Quiet(*a, directory=site, **kw)  # noqa: E731
+        server = socketserver.TCPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        cls.addClassCleanup(server.server_close)
+        cls.addClassCleanup(server.shutdown)
+        browser = _browser()
+        profile = tempfile.mkdtemp(prefix="nopekit-legends-profile-")
+        cls.addClassCleanup(shutil.rmtree, profile, True)
+        shell = browser.endswith("chrome-headless-shell")
+        done = _env.run([browser, *([] if shell else ["--headless=new"]), "--no-sandbox",
+                         "--force-device-scale-factor=1", "--window-size=1200,1200",
+                         "--virtual-time-budget=5000", f"--user-data-dir={profile}",
+                         "--dump-dom",
+                         f"http://127.0.0.1:{server.server_address[1]}/index.html"],
+                        cwd=profile, timeout=120)
+        import html
+        import re
+        found = re.search(r'<pre id="out">(.*?)</pre>', done.stdout, re.S)
+        cls.measured = json.loads(html.unescape(found.group(1))) if found else None
+        cls.dom = done.stdout[-2000:]
+
+    def setUp(self):
+        super().setUp()
+        self.assertIsInstance(self.measured, list, self.dom)
+        self.wide, self.phone = self.measured
+
+    def test_side_by_side_when_wide_and_stacked_on_a_phone(self):
+        first, second = self.wide["legends"]
+        self.assertAlmostEqual(first["top"], second["top"], delta=1.0)
+        self.assertLessEqual(first["right"], second["left"])
+        first, second = self.phone["legends"]
+        self.assertGreaterEqual(second["top"], first["bottom"])
+
+    def test_nothing_runs_past_the_box(self):
+        for box in self.measured:
+            with self.subTest(width=box["width"]):
+                self.assertLessEqual(box["overflow"], 0)
+                self.assertLessEqual(box["page"], 0)
+                for legend in box["legends"]:
+                    self.assertLessEqual(legend["right"], box["box"]["right"] + 0.5)
+
+    def test_each_legend_names_where_it_is_drawn(self):
+        for box in self.measured:
+            surface, lines = box["legends"]
+            self.assertIn("fig-on--surface", surface["glyph"])
+            self.assertIn("fig-on--lines", lines["glyph"])
+            # The words say where, once: the glyph beside them is hidden from
+            # a screen reader (review of P2: an image labelled with the same
+            # words had it read twice).
+            self.assertEqual((surface["hidden"], lines["hidden"]), ("true", "true"))
+            self.assertEqual((surface["label"], lines["label"]), (None, None))
+            self.assertTrue(surface["title"].strip().startswith("On the surface: static pressure"),
+                            surface["title"])
+            self.assertTrue(lines["title"].strip().startswith("On the lines"), lines["title"])
+
+    def test_the_dark_theme_reaches_the_legend(self):
+        """The legend's words are the dark theme's ink (page.css's ``--ink-2``
+        under ``data-theme="dark"``), not the light theme's."""
+        self.assertEqual(self.phone["ink"], "rgb(195, 194, 183)")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,17 @@
+{
+  "statement": "The box around the bike is large enough for the flow and the wake",
+  "kind": "measurable",
+  "tags": [
+    "domain-size"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.domain measures the body with OpenFOAM's surfaceCheck and the box with the blockMeshDict, against COST 732 (Franke et al. 2007) in heights of the body: inlet, sides and top at least 5 H, outlet at least 15 H, blockage at most 3%",
+    "evaluators": [
+      "aero.domain"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

@@ -1,0 +1,28 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2606                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+//
+// "system/decomposeParDict"
+//
+FoamFile
+{
+    version         2;
+    format          ascii;
+    class           dictionary;
+    object          decomposeParDict;
+}
+
+numberOfSubdomains 6;
+
+method          hierarchical;
+
+coeffs
+{
+    n               ( 3 2 1 );
+    order           xyz;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //

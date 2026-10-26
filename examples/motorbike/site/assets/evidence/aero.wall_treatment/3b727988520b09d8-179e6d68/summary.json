@@ -1,0 +1,31 @@
+{
+  "area_m2": 11.243501346809955,
+  "cells": 358654,
+  "faces": 44153,
+  "fields": {
+    "sha256": {
+      "postProcessing/surfaces1/500/bodyYPlus.vtp": "e5cde869c6374b523fe68c2cc4961a3b6b50370abecef60a71ce4fbd76c50df6"
+    },
+    "stage": "<out>/aero-openfoam/aero_wall_treatment/case",
+    "time": "500"
+  },
+  "iterations": 500,
+  "layer_coverage_pct": 56.1740281622,
+  "mesh_level": "base",
+  "pack_default": [
+    "aero_max_global_cells"
+  ],
+  "ranks": 6,
+  "u_i_pct": 0.6032395412662438,
+  "u_inf_m_s": 20.0,
+  "yplus_bands_pct": {
+    "30_to_300": 72.26028174356463,
+    "5_to_30": 23.772653167276,
+    "above_300": 3.6755711188332705,
+    "below_5": 0.29149397032609864
+  },
+  "yplus_in_pct": 96.32442888116674,
+  "yplus_mean": 90.46800377001887,
+  "yplus_mean_openfoam": 90.46800419386,
+  "yplus_top": 300.0
+}

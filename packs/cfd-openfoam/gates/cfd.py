@@ -19,7 +19,9 @@ guard that did not pass.
 output on a copy of the project's case staged under the gate's out directory:
 checkMesh's text, simpleFoam's log, and the values of two ``surfaceFieldValue``
 function objects THIS PACK writes into the copy (the project's own function
-objects are removed, so a project cannot hand the gate its number). The pack also
+objects are removed, so a project cannot hand the gate its number);
+``cfd.pressure_drop``'s ladder also writes OpenFOAM's speed and static pressure
+fields, which the site's pictures draw (``MAG_U``). The pack also
 writes its own residual targets into the copy. They read inside a subprocess the
 trace cannot see into, so they are opaque and re-run on every check where
 OpenFOAM exists. The GCI arithmetic (``_gci.py``) is the standard library's and is
@@ -64,6 +66,12 @@ was written, on v2606):
   found the convergence estimate fooled by an earlier oscillation and by a
   round-off floor applied too soon, and boundary conditions evaluated at run
   time (``exprFixedValue``, a ``uniformFixedValue`` table) let through.
+- ``cfd.converged`` and ``cfd.mesh_independence`` (GitHub #15, Phase 0): the
+  convergence estimate, the contraction of the last two windows of 10
+  iterations, read real v2606 histories settled up to 23.4% from converged (a
+  laminar pitzDaily under slow relaxation); ``_iter.py`` replaces it. The same
+  phase found any ``upwind`` in divSchemes, even for a field a laminar run never
+  solves, setting the formal order to 1, so a second-order ladder failed.
 
 **Missing inputs skip; they never default**, except the limits marked
 ``[pack default]`` in a verdict. Which case, which planes, how fast, what density,
@@ -72,6 +80,8 @@ project's to say.
 """
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
 import math
 import os
@@ -85,6 +95,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 F = _load_path(os.path.join(_HERE, "_foam.py"))
 T = _load_path(os.path.join(_HERE, "_tool.py"))
 G = _load_path(os.path.join(_HERE, "_gci.py"))
+I = _load_path(os.path.join(_HERE, "_iter.py"))
 
 PACK = "cfd-openfoam"
 
@@ -115,6 +126,21 @@ RE_LAMINAR_MAX = 2300.0
 #: (a 0.1 mm air passage at Re 2000 runs at about Mach 0.9).
 MACH_MAX = 0.3
 
+#: The units each guard reports its value in: the quantity its own arithmetic
+#: computes, never "fraction of limit" (issue #15, D3). A dimensionless number is
+#: named by its symbol, as fluids-analytic's ``fluid.flow_regime`` names "Re" and
+#: "e/D", so a tile reads "20 Re against a limit of 2300 Re" and a reader sees
+#: which number and which limit. What slipped through before it: cfd.regime and
+#: cfd.mesh_quality reported the worst value divided by its limit, so the page
+#: read "0.008696 fraction of limit" for Re 20, and the number a person checks
+#: against a textbook (Re, degrees) was only in the detail. Rejected: an empty
+#: unit (the tile then reads "20 against a limit of 2300" and does not say of
+#: what); the fraction kept beside the value (two values for one verdict; the
+#: margin is already ``claims.margin``'s, from the value and the limit).
+RE_UNITS, MACH_UNITS = "Re", "Mach"
+NON_ORTHO_UNITS, SKEWNESS_UNITS, ASPECT_RATIO_UNITS = "deg", "skewness", "aspect ratio"
+ITERATIVE_ERROR_UNITS = "%"
+
 #: The loosest residual target cfd.converged will write: OpenFOAM's residuals
 #: are normalised, start near 1, and Celik et al. 2008 (p. 2) ask for "at least
 #: three (preferably four) orders of magnitude decrease"; 1e-4 is the fourth. A
@@ -123,26 +149,15 @@ MACH_MAX = 0.3
 #: third digit).
 RESIDUAL_TARGET_MAX = 1e-4
 
-#: The window the pressure drop's settling is judged over, and how settled: its
-#: estimated remaining change (``_remaining``, from the last two windows of 10
-#: iterations) at most 1e-3 of itself. Residuals measure the equations'
-#: imbalance, not the number a claim is about. Rejected: a window as a fraction
-#: of the run (a 30-iteration run would judge 3); the change over one window
-#: taken as the error (it passed a run 9.7% from converged; see _remaining).
-STABLE_WINDOW = 10
+#: How settled the pressure drop must be: its estimated remaining change
+#: (``_iter.remaining``, Eca & Hoekstra's iterative-error estimate read
+#: pessimistically; GitHub #15, Phase 0) at most 1e-3 of itself. Residuals
+#: measure the equations' imbalance, not the number a claim is about. Rejected: the
+#: change over one window of 10 iterations taken as the error (it passed a run
+#: 9.7% from converged); the contraction of the last two windows of 10 (until
+#: P0.1: on real v2606 histories it read settled up to 23.4% from converged; see
+#: _iter.py).
 STABLE_TOL = 1e-3
-
-#: A monotone movement whose steps do not shrink is taken as round-off, with
-#: nothing still to come, below 1e-6 of the pressure drop over a window: there
-#: its rate can no longer be measured. Measured: the baseline's last steps are
-#: round-off at about 3e-8 of itself per window, monotone and not shrinking.
-#: Applied only after the steps are seen not to shrink: a slowly shrinking creep
-#: goes by its contraction however small it is (the first draft applied the
-#: floor before looking, and a creep relaxed to U 1e-4 passed with 0.2% to
-#: come). What it lets through: a steady drift under 1e-6 per window, which
-#: would take 1000 windows to move by STABLE_TOL. Rejected: 1e-9 (the
-#: baseline's own round-off read as never settling).
-SETTLED_FLOOR = 1e-6
 
 #: How far the mean velocity through the upstream plane may sit from the one
 #: the project states (cfd_velocity_m_s), which cfd.regime judged the Reynolds
@@ -195,6 +210,81 @@ DEFAULT_TIMEOUT_S = 600.0
 #: What the pack's function objects are called in the staged copy.
 UPSTREAM, DOWNSTREAM = "nopekit_upstream", "nopekit_downstream"
 
+#: The two field function objects cfd.pressure_drop's ladder adds (GitHub #15,
+#: Phase 2): OpenFOAM's own ``mag`` of U and ``pressure`` in static mode, which
+#: multiplies the kinematic p by ``rhoInf`` (cfd_density_kg_m3), so ``mag(U)``
+#: in m/s and ``static(p)`` in Pa are written at the final time. The pictures on
+#: the site draw these fields, so every number a picture shows is OpenFOAM's.
+#: Rejected: computing |U| and Pa in ParaView (a calculator in the drawing
+#: script would be arithmetic no gate checks: the issue's rule is that OpenFOAM
+#: computes every drawn field); adding them to every ladder and to cfd.converged
+#: (the pressure object reads the density, so a density edit would re-key the
+#: guards for a picture: design O3).
+MAG_U, STATIC_P = "nopekit_magU", "nopekit_static"
+
+#: The files of the finest level whose sha256 cfd.pressure_drop's summary
+#: holds (``fields``): the solved fields at the last time, the two fields the
+#: objects above wrote, and the mesh blockMesh wrote. A picture binds these
+#: digests (``BoundContext.bind``), so it draws the run of its result and no
+#: other. The digests are not part of a verdict: the files stay in the out
+#: directory and are never cited as evidence (each is up to megabytes, and the
+#: site copies cited evidence).
+FIELD_FILES = ("U", "p", "mag(U)", "static(p)")
+MESH_FILES = ("points", "faces", "owner", "neighbour", "boundary")
+
+#: The precision the pack's function objects write their values at: 12, so 13
+#: significant digits (they write in scientific notation). The convergence
+#: estimate needs a change of ``_iter.ROUNDOFF`` (1e-8) of the value resolved,
+#: and refuses a history printed in steps of one quantum (``_iter.STAIRS``).
+#: Measured in GitHub #15 Phase 0: a converged laminar pitzDaily (nu 1e-3, ESI
+#: v2606) read settled at 1702 cut points printed to 13 digits and at 18 printed
+#: to 7. Rejected: the case's own writePrecision, which set it until P0.1 (6 when
+#: the case states none, OpenFOAM's default: 7 digits, so a converged run almost
+#: never reads settled, a false fail; the baseline states 10, but a project's
+#: case need not).
+WRITE_PRECISION = 12
+
+#: The tag cfd.pressure_drop reads its limit by (``ctx.acceptance``): the claim
+#: tagged ``pressure-drop``, which every gate of this pack covers. A limit lives
+#: in claims/, never in the pack's parameters (issue #15, D2). What slipped
+#: through before it:
+#: the gate judged against ``cfd_dp_max_pa``, a parameter beside the claim's
+#: limit, and a claim at 0.5 Pa with the parameter at 0.6 read "An evaluator
+#: passed. Its value does not meet the acceptance condition." at 0.52 Pa.
+#: Rejected: a parameter naming the claim's id (a second place to state which
+#: claim, and a pack tied to a project's numbering); a tag of this gate alone
+#: (every project would add one more tag to the one claim it already tags).
+#: Two claims tagged so with different limits make the gate error: state one
+#: such claim per case.
+#:
+#: It is also the one broad tag every gate here covers (each guard adds its
+#: own quantity's tag), so the claim whose limit cfd.pressure_drop reads is
+#: the claim it settles. What slipped through (review of issue #15's D2): each
+#: gate also covered ``cfd``, ``fluid-dynamics`` and ``internal-flow``, so a
+#: claim tagged ``cfd`` alone, "static pressure drop <= 0.5 Pa", read Checked
+#: and ``check`` said ready on a pass judged against another claim's 5 Pa —
+#: S-35's second home for one number, now another claim. Without those tags
+#: such a claim is covered by no gate here and reads Gap. *Rejected:* erroring
+#: when a covered claim states a Pa condition the gate did not read (the gate
+#: would read every claim of the ledger, a channel no control holds);
+#: narrowing cfd.pressure_drop alone (the claim read Checked on the guards).
+DP_CLAIM_TAG = "pressure-drop"
+
+#: The units cfd.pressure_drop computes in, and the only units of a limit it
+#: judges: rho x OpenFOAM's kinematic pressure is in Pa. A claim in kPa is
+#: refused before any run, never compared. Rejected: converting kPa or bar (a
+#: units table for one gate; the spine compares units as written, so a pass in
+#: Pa against a kPa claim would error anyway); comparing whatever the claim
+#: states (0.52 Pa against "0.5 kPa" fails a design that is 1000 times inside).
+DP_UNITS = "Pa"
+
+#: The comparators cfd.pressure_drop judges: an upper limit. The value judged is
+#: the top of the GCI band, the mesh's share of the error on the side that
+#: fails, and that is the failing side only for an upper limit. Rejected: the
+#: band's bottom for ">=" (no claim of this pack has needed a lower limit, and
+#: a second branch is a second thing to qualify).
+DP_COMPARATORS = ("<=", "<")
+
 
 def _skip(gid: str, reason: str) -> Verdict:
     return Verdict(gate=gid, passed=False, skipped=True, skip_reason=reason)
@@ -214,6 +304,31 @@ def _case(ctx: GateContext) -> str | None:
         return None
     rel = str(rel)
     return rel if os.path.isabs(rel) else os.path.join(ctx.root, rel)
+
+
+#: The significant digits a verdict's value is reported to: as many as a
+#: double's decimal form needs to stay itself in all but the last ulps, and no
+#: more, so a value reads ``0.522182`` and not ``0.52218199999999996``.
+#: Significant digits, never decimal places. What slipped through (review of
+#: issue #15's D2 and D3): cfd.pressure_drop reported ``round(top, 9)``, so a
+#: band top of 6.0e-13 Pa read 0.0 and passed a limit of 1e-13 Pa; and
+#: cfd.regime judged the raw Re but reported 9 digits, so Re 2299.9999999 read
+#: a pass at "2300 Re" against "< 2300". *Rejected:* decimal places (a small
+#: quantity rounds to zero); the raw value always (17 digits on every tile).
+REPORTED_DIGITS = 9
+
+
+def _shown(value: float, holds, passed: bool, digits: int = REPORTED_DIGITS):
+    """``value`` as the verdict reports it: rounded to ``digits`` significant
+    digits when the rounded value is on the same side of the limit as the
+    verdict (``holds(rounded) == passed``), else the value whole, else ``None``
+    (no value that agrees with the verdict: none is reported). The judgment is
+    the caller's, made on the value whole; this only keeps the number shown
+    from contradicting it."""
+    for candidate in (float(f"{value:.{digits}g}"), float(value)):
+        if bool(holds(candidate)) == bool(passed):
+            return candidate
+    return None
 
 
 def _number(ctx: GateContext, key: str):
@@ -236,6 +351,39 @@ def _evidence(ctx: GateContext, gid: str, payload: dict) -> str:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
     return path
+
+
+def _history(ctx: GateContext, gid: str, name: str, dp: list, rho=None) -> str:
+    """Write a pressure drop's history beside summary.json, as ``name``: one row per
+    iteration (counted from 1), the value (``dp_pa`` when ``rho`` is given, else the
+    solver's ``dp_m2_s2``) and ``change_pct``, 100 x |change from the iteration
+    before| / |last value| (empty on the first row): the changes the estimate reads.
+    A chart of the history and its estimate (GitHub #15, Phase 2) draws these
+    numbers and computes none. A CSV, never a list in summary.json: the site's
+    prose scan reads every number of a JSON evidence file as a match for a number
+    in any unit, and a history is thousands of them (until P0.2, cfd.converged's
+    summary held its whole history as a list)."""
+    vals = dp if rho is None else [rho * v for v in dp]
+    last = abs(vals[-1]) if vals else 0.0
+    path = ctx.out_path(PACK, gid.replace(".", "_"), name)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        out = csv.writer(fh, lineterminator="\n")
+        out.writerow(["iteration", "dp_m2_s2" if rho is None else "dp_pa", "change_pct"])
+        for i, v in enumerate(vals):
+            ok = i and 0 < last < math.inf
+            out.writerow([i + 1, repr(v), repr(100.0 * abs(v - vals[i - 1]) / last) if ok else ""])
+    return path
+
+
+def _error_pct(dp: list):
+    """The estimated remaining change as a percentage of the last value, for the
+    evidence: None when there is no estimate (too few values, no steady decay, a
+    value that is not finite; JSON holds no inf). The gate judges ``_settled``, not
+    this number."""
+    rem = I.remaining(dp)
+    if rem is None or rem == math.inf or not (dp and 0 < abs(dp[-1]) < math.inf):
+        return None
+    return 100.0 * rem / abs(dp[-1])
 
 
 # --------------------------------------------------------------------------- #
@@ -269,7 +417,24 @@ IGNORED_DIRS = ("constant/polyMesh",)
 #: pack's own function objects, so every gate passed at half the pressure drop;
 #: and an include through a symlinked ``$FOAM_CASE`` that read a file outside
 #: the case.
-ALLOWED_DIRECTIVE = ("#includeEtc", '"caseDicts/setConstraintTypes"')
+#: The argument is compared as the reader holds it: one string token, quoted in
+#: the file, its text without the quotes. What slipped through: the first
+#: version compared the token's text with the quoted spelling, which no token
+#: holds, so the one directive PACK.md allows was refused in every 0/ file ESI
+#: writes (the motorBike tutorial's included). An unquoted argument, another
+#: install file (``"caseDicts/setConstraintType"`` too) or a second token stays
+#: refused.
+#: It must also be the first entry of its ``boundaryField``, where ESI writes it:
+#: a dictionary entry read later merges into an earlier one of the same name, so
+#: the case's own patch entries, read after it, win on every keyword they state.
+#: What slipped through review of P1: OpenFOAM looks the name up in the user
+#: directory (``$HOME/.OpenFOAM/<api>/``, then ``$HOME/.OpenFOAM/``) before the
+#: install's, so a ``caseDicts/setConstraintTypes`` planted in the gate's HOME,
+#: included after the inlet, made ``foamDictionary -expand`` read a
+#: ``uniformFixedValue`` inlet at another value where this reader read
+#: ``fixedValue``. ``_tool.home`` now holds only its controlDict; this rule keeps
+#: the case's patches the case's even if a HOME ever held more.
+ALLOWED_DIRECTIVE = ("#includeEtc", "caseDicts/setConstraintTypes")
 
 #: Where a quoted (regular-expression) keyword may stand: under patch names and
 #: field names. Anywhere else it could stand for a keyword the pack decides on:
@@ -344,16 +509,25 @@ def _tokens(value):
             yield from _tokens(v)
 
 
+def _allowed_directive(e) -> bool:
+    """Whether a directive entry is :data:`ALLOWED_DIRECTIVE`, spelled as
+    PACK.md spells it: the keyword, then one quoted string and nothing else."""
+    value = e.value if isinstance(e.value, list) else []
+    return (e.key == ALLOWED_DIRECTIVE[0] and len(value) == 1
+            and isinstance(value[0], F.Tok) and value[0].kind == "string"
+            and value[0].text == ALLOWED_DIRECTIVE[1])
+
+
 def _check(d, rel: str, problems: list[str], parent: str = "", macros: bool = False) -> None:
     """Everything in a dictionary the reader cannot vouch for: a directive, a
     dictionary expansion, a macro (outside blockMeshDict), a computed value, a
     quoted keyword where a keyword the pack decides on could stand, a ``type``
     that is not a literal word, and every spelling of compiled code."""
-    for e in d.entries:
+    for i, e in enumerate(d.entries):
         where = f"{rel}: {parent + '/' if parent else ''}{e.key}"
         if e.directive:
-            if not (e.key == ALLOWED_DIRECTIVE[0] and F.words(e) == [ALLOWED_DIRECTIVE[1]]
-                    and parent == "boundaryField" and rel.startswith("0/")):
+            if not (_allowed_directive(e) and parent == "boundaryField"
+                    and rel.startswith("0/") and i == 0):
                 problems.append(f"{rel}: {e.key}, a directive OpenFOAM evaluates and this "
                                 f"pack's reader does not")
             continue
@@ -607,7 +781,8 @@ class Case:
             isinstance(v, F.FoamList) and len(v) > 0 for v in edges.value)
         self.blocks = _blocks(bmd, len(verts))
         self.patches = _patches(bmd)
-        self.dim, self.thin = _thin_directions(verts, self.blocks, self.patches)
+        self.dim, self.thin, self.thin_normal = _thin_directions(verts, self.blocks,
+                                                                self.patches)
 
     def cells(self) -> int:
         return sum(a * b * c for _l, (a, b, c), _ids, _g in self.blocks)
@@ -633,14 +808,24 @@ class Case:
 
 
 def _formal_order(schemes) -> int:
-    """1 when any convection scheme is first-order upwind, else 2."""
+    """1 when the momentum convection scheme is first-order upwind, else 2: the
+    scheme of ``div(phi,U)``, or ``default`` where the case gives none (the entry
+    OpenFOAM uses for it). What slipped through until P0.1: any ``upwind`` in any
+    divSchemes entry gave order 1, so a leftover ``div(phi,k)`` for a field a
+    laminar run never solves set the band to 0.95-1.05, and a second-order run
+    failed at its observed order 2."""
     div = schemes.sub("divSchemes")
-    words = [w for e in (div.entries if div else []) for w in F.words(e)]
-    return 1 if "upwind" in words else 2
+    entry = None if div is None else div.entry("div(phi,U)") or div.entry("default")
+    return 1 if entry is not None and "upwind" in F.words(entry) else 2
 
 
 def _thin_directions(verts, blocks, patches):
-    """``(mesh dimension, [the one-cell direction of each block, or None])``.
+    """``(mesh dimension, [the one-cell direction of each block, or None], the
+    unit normal of the empty patches or None)``. The normal goes into
+    cfd.pressure_drop's summary as ``thin_normal``: the stills cut the case
+    across it. What slipped through (review of P2): the stills always cut
+    across z, so a 2D case thin along y was drawn as one row of cells, under a
+    caption that said "at the middle of its thickness".
 
     2D only when the empty patches have faces, all parallel, and every block is
     one cell thick across them: the direction is found from the geometry, never
@@ -664,7 +849,7 @@ def _thin_directions(verts, blocks, patches):
                 raise CaseProblem("system/blockMeshDict: an empty face of no area")
             normals.append(n)
     if not normals:
-        return 3, [None] * len(blocks)
+        return 3, [None] * len(blocks), None
     axis = normals[0]
     if any(abs(_dot(n, axis)) < 0.999 for n in normals):
         raise CaseProblem("the empty patches are not parallel: not a planar 2D case")
@@ -680,7 +865,7 @@ def _thin_directions(verts, blocks, patches):
             raise CaseProblem("a 2D case whose blocks are not one cell thick across the empty "
                               "patches")
         thin.append(k)
-    return 2, thin
+    return 2, thin, list(axis)
 
 
 def _planes(ctx: GateContext):
@@ -721,7 +906,7 @@ def _planes(ctx: GateContext):
     id="cfd.case_readable",
     basis="model-only",
     title="The OpenFOAM case is one this pack can run and vouch for",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow"],
+    claims=[DP_CLAIM_TAG],
     tier=Tier.INSTANT,
     settles="cfd case readability",
     negative_control=NegativeControl(
@@ -765,7 +950,7 @@ def case_readable(ctx: GateContext) -> Verdict:
     id="cfd.regime",
     basis="sourced",
     title="The flow is laminar and incompressible: Reynolds and Mach numbers",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "flow-regime"],
+    claims=[DP_CLAIM_TAG, "flow-regime"],
     tier=Tier.INSTANT,
     settles="cfd flow regime",
     needs=["cfd.case_readable"],
@@ -778,7 +963,9 @@ def case_readable(ctx: GateContext) -> Verdict:
 def regime(ctx: GateContext) -> Verdict:
     """Re = U Dh / nu below 2300 and Ma = U / c below 0.3, with nu read from the
     case and U, Dh and c as the project states them. cfd.converged then holds
-    the stated U to the velocity the run actually carried."""
+    the stated U to the velocity the run actually carried. The value is the
+    Reynolds number against 2300 (units ``Re``), or the Mach number against 0.3
+    (``Mach``) when that is nearer its limit."""
     gid = "cfd.regime"
     path = _case(ctx)
     if path is None:
@@ -810,14 +997,22 @@ def regime(ctx: GateContext) -> Verdict:
     if not ma < MACH_MAX:
         problems.append(f"Mach {ma:.3g} is not below {MACH_MAX:g}: an incompressible solver on "
                         f"a flow whose density changes")
-    # The value is the worse of the two as a fraction of its limit, so a Mach
-    # fail never reports a Reynolds number inside its limit (the first draft did).
-    worst = max(re_ / RE_LAMINAR_MAX, ma / MACH_MAX)
-    return Verdict(gate=gid, passed=not problems, measured=round(worst, 9),
-                   limit=1.0, comparator="<", units="fraction of limit",
-                   detail=("; ".join(problems) if problems else
-                           f"Re {re_:.4g} (U {u:g} m/s, Dh {dh:g} m, nu {case.nu:g} m^2/s) "
-                           f"below {RE_LAMINAR_MAX:g}; Mach {ma:.3g} below {MACH_MAX:g}"))
+    # The value is the number nearer its own limit, in its own units: the
+    # Reynolds number, or the Mach number when that is nearer. So a Mach fail
+    # never reports a Reynolds number inside its limit (the first draft did), and
+    # a pass never shows more margin than the gate has.
+    if ma / MACH_MAX > re_ / RE_LAMINAR_MAX:
+        measured, limit, units = ma, MACH_MAX, MACH_UNITS
+    else:
+        measured, limit, units = re_, RE_LAMINAR_MAX, RE_UNITS
+    said = (f"Re {re_:.4g} = U Dh / nu: mean velocity U {u:g} m/s through the upstream "
+            f"plane, hydraulic diameter Dh {dh:g} m, nu {case.nu:g} m^2/s from the case; "
+            f"limit {RE_LAMINAR_MAX:g}, the onset of transition in a pipe. Mach {ma:.3g} = "
+            f"U / c, c {c:g} m/s; limit {MACH_MAX:g}")
+    return Verdict(gate=gid, passed=not problems,
+                   measured=_shown(measured, lambda x: x < limit, not problems),
+                   limit=limit, comparator="<", units=units,
+                   detail="; ".join(problems) + f" ({said})" if problems else said)
 
 
 # --------------------------------------------------------------------------- #
@@ -827,7 +1022,7 @@ def _open(ctx: GateContext, gid: str):
     """``(install, environment)`` or a skip/error Verdict."""
     try:
         inst = T.locate()
-        env = T.environment(inst, T.home(ctx.out_dir, inst.api))
+        env = T.environment(inst, T.home(ctx.out_dir, inst.api, PACK))
     except T.Unavailable as exc:
         return _skip(gid, str(exc))
     except T.Timeout as exc:
@@ -851,7 +1046,9 @@ def _stage_dir(ctx: GateContext, gid: str, name: str) -> str:
     return os.path.dirname(marker)
 
 
-def _function_objects(planes) -> str:
+def _function_objects(planes, rho=None) -> str:
+    """The pack's function objects: the two planes, and with ``rho`` (only
+    cfd.pressure_drop's ladder) the ``mag`` and ``pressure`` fields (MAG_U)."""
     def one(name, point, normal):
         return f"""    {name}
     {{
@@ -859,6 +1056,7 @@ def _function_objects(planes) -> str:
         libs            (fieldFunctionObjects);
         writeControl    timeStep;
         writeInterval   1;
+        writePrecision  {WRITE_PRECISION};
         log             false;
         writeFields     false;
         regionType      sampledSurface;
@@ -878,20 +1076,38 @@ def _function_objects(planes) -> str:
         fields          (p U);
     }}
 """
+    fields = "" if rho is None else f"""    {MAG_U}
+    {{
+        type            mag;
+        libs            (fieldFunctionObjects);
+        field           U;
+        writeControl    writeTime;
+    }}
+    {STATIC_P}
+    {{
+        type            pressure;
+        libs            (fieldFunctionObjects);
+        mode            static;
+        rho             rhoInf;
+        rhoInf          {float(rho)!r};
+        writeControl    writeTime;
+    }}
+"""
     (p0, n0), (p1, n1) = planes
     return ("// Written by nopekit's cfd-openfoam pack: the case's own function objects\n"
             "// were removed from this copy, so the numbers below are the pack's.\n"
-            "functions\n{\n" + one(UPSTREAM, p0, n0) + one(DOWNSTREAM, p1, n1) + "}\n")
+            "functions\n{\n" + one(UPSTREAM, p0, n0) + one(DOWNSTREAM, p1, n1) + fields
+            + "}\n")
 
 
-def _prepare(stage: str, case: Case, planes, target: float, counts=None) -> None:
+def _prepare(stage: str, case: Case, planes, target: float, counts=None, rho=None) -> None:
     """The pack's edits to a staged copy: its residual targets, its function
-    objects, and (for a refined level) its cell counts. Every other byte is the
-    project's."""
+    objects (with the two field objects when ``rho`` is given), and (for a
+    refined level) its cell counts. Every other byte is the project's."""
     cd = F.case_file(stage, "system/controlDict")
     with open(cd, encoding="utf-8") as fh:
         text = fh.read()
-    text = F.put_entry(text, "functions", _function_objects(planes))
+    text = F.put_entry(text, "functions", _function_objects(planes, rho))
     with open(cd, "w", encoding="utf-8") as fh:
         fh.write(text)
     fs = F.case_file(stage, "system/fvSolution")
@@ -961,7 +1177,8 @@ def _expanded(env, stage: str, rel: str, timeout: float):
         raise T.RunError(f"foamDictionary's expansion of {rel} does not parse: {exc}", [run.log])
 
 
-def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float) -> None:
+def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float,
+             rho=None) -> None:
     """OpenFOAM's own reading of the staged copy, held to what the pack wrote
     into it and what cfd.case_readable read from it; T.RunError on any
     difference. The tier-0 reader refuses what it cannot evaluate, and this is
@@ -970,10 +1187,10 @@ def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float)
     edit cannot see a merge), and an ``#if`` that set the nu the solver ran."""
     problems = []
     cd = _expanded(env, stage, "system/controlDict", timeout)
-    want = F.parse(_function_objects(planes)).sub("functions")
+    want = F.parse(_function_objects(planes, rho)).sub("functions")
     if cd.sub("functions") is None or _canon(cd.sub("functions")) != _canon(want):
-        problems.append("system/controlDict's functions are not exactly the pack's two "
-                        "function objects")
+        problems.append(f"system/controlDict's functions are not exactly the pack's "
+                        f"{'two' if rho is None else 'four'} function objects")
     if cd.entry("libs") is not None:
         problems.append("system/controlDict loads libraries")
     try:
@@ -1012,14 +1229,15 @@ def _as_read(env, stage: str, case: Case, planes, target: float, timeout: float)
                          "read it: " + "; ".join(problems))
 
 
-def _solve(stage: str, case: Case, planes, target: float, env, timeout: float) -> Solve:
+def _solve(stage: str, case: Case, planes, target: float, env, timeout: float,
+           rho=None) -> Solve:
     """blockMesh, checkMesh and simpleFoam in ``stage``, after OpenFOAM's own
     reading of it is held to the pack's: a Solve, or T.RunError / T.Timeout.
 
     No memo: the spine empties only functools caches before a run, so a
     module-level memo of runs would outlive the gate that filled it (the first
     draft's did, and ``doctor`` named it)."""
-    _as_read(env, stage, case, planes, target, timeout)
+    _as_read(env, stage, case, planes, target, timeout, rho)
     mesh = T.run(env, stage, ["blockMesh"], timeout)
     cells = T.block_mesh_cells(mesh.stdout)
     check = T.run(env, stage, ["checkMesh"], timeout)
@@ -1101,45 +1319,6 @@ def _settings(ctx: GateContext, gid: str):
     return case, planes, target, note, timeout
 
 
-
-def _remaining(dp: list[float]):
-    """How much the pressure drop may still move: None with fewer than
-    2 x STABLE_WINDOW + 1 iterations; else, over the last two windows of
-    STABLE_WINDOW iterations, with d1 the largest movement within the last:
-
-    - not monotone (an oscillation, or round-off): d1, what it still swings by;
-    - monotone: a geometric tail. Its per-iteration contraction q is the larger
-      of each window's (last step / first step)^(1/(w-1)), and what is still to
-      come is the last step x q / (1 - q), never less than d1; infinite when the
-      steps do not shrink, unless d1 is round-off.
-
-    What slipped through, in order. The first draft took the change over 10
-    iterations as the error: U relaxed to 0.03 passed a run 9.7% from converged.
-    The second compared only each window's two ends: a 2-iteration oscillation
-    read as still. The third took rho from the windows' spreads: an earlier
-    oscillation filling the window before made a run that had just moved 0.17%
-    pass, 0.22% from converged; its round-off floor, applied before rho, let a
-    creep relaxed to U 1e-4 pass with 0.2% to come; and a window holding a
-    turning point read a smoothly converged run as never settling. What it
-    still cannot see: a slow mode hidden under a fast one inside the last 20
-    iterations."""
-    w = STABLE_WINDOW
-    if len(dp) < 2 * w + 1:
-        return None
-    d1 = max(abs(v - dp[-1]) for v in dp[-1 - w:])
-    steps = [b - a for a, b in zip(dp[-1 - 2 * w:-1], dp[-2 * w:])]
-    if not (all(x > 0 for x in steps) or all(x < 0 for x in steps)):
-        return d1
-
-    def contraction(seg):
-        return (abs(seg[-1]) / abs(seg[0])) ** (1.0 / (len(seg) - 1))
-
-    q = max(contraction(steps[:w]), contraction(steps[w:]))
-    if not q < 1:
-        return d1 if d1 <= SETTLED_FLOOR * abs(dp[-1]) else math.inf
-    return max(d1, abs(steps[-1]) * q / (1.0 - q))
-
-
 def _settled(solve: Solve, target: float, budget: int) -> list[str]:
     """Why a run is not converged, or [] when it is: the converged line; p and
     U both solved at the last iteration, each initial residual at or below the
@@ -1158,21 +1337,27 @@ def _settled(solve: Solve, target: float, budget: int) -> list[str]:
         why.append("initial residual above the target " + f"{target:g}: " + ", ".join(
             f"{k} {v:.3g}" for k, v in sorted(over.items())))
     dp = solve.dp()
-    rem = _remaining(dp)
-    if rem is None:
-        why.append(f"{len(dp)} iterations: fewer than the {2 * STABLE_WINDOW + 1} needed to "
+    rem = I.remaining(dp)
+    if not all(math.isfinite(v) for v in dp):
+        # What slipped through until P0.1 (found by reading, in GitHub #15 Phase 0):
+        # inf <= STABLE_TOL * abs(inf) is True, so a last value of inf read settled.
+        why.append("the pressure drop is not a finite number at every iteration")
+    elif rem is None:
+        why.append(f"{len(dp)} iterations: fewer than the {2 * I.WINDOW_MIN + 1} needed to "
                    f"see the pressure drop settle")
+    elif rem == math.inf:
+        why.append("the pressure drop is still moving: its changes do not decrease at a "
+                   "steady rate, so the gate cannot estimate the change still to come")
     elif not rem <= STABLE_TOL * abs(dp[-1]):
-        why.append(f"the pressure drop is still moving: by its last {2 * STABLE_WINDOW} "
-                   f"iterations, about {rem:.3g} m^2/s^2 is still to come, more than "
-                   f"{STABLE_TOL:g} of its value")
+        why.append(f"the pressure drop is still moving: an estimated {rem:.3g} m^2/s^2 is "
+                   f"still to come, more than {STABLE_TOL:g} of its value")
     return why
 
 
 def _noise(solve: Solve) -> float:
     """The pressure drop's estimated remaining change: the iterative error the
     GCI is compared with."""
-    return _remaining(solve.dp())
+    return I.remaining(solve.dp())
 
 
 # --------------------------------------------------------------------------- #
@@ -1182,7 +1367,7 @@ def _noise(solve: Solve) -> float:
     id="cfd.mesh_quality",
     basis="established",
     title="checkMesh finds the case's mesh sound, inside stated limits",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "mesh-quality"],
+    claims=[DP_CLAIM_TAG, "mesh-quality"],
     tier=Tier.BUILD,
     settles="cfd mesh quality",
     requires_tools=list(T.WRAPPERS),
@@ -1197,8 +1382,10 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     """blockMesh, then checkMesh, on a staged copy. Passes only on checkMesh's
     ``Mesh OK.`` with the worst non-orthogonality, skewness and aspect ratio each
     inside the project's limit (``cfd_max_non_ortho_deg``, ``cfd_max_skewness``,
-    ``cfd_max_aspect_ratio``). The verdict's value is the worst of the three as a
-    fraction of its limit. checkMesh's exit code is never read: it is 0 on a
+    ``cfd_max_aspect_ratio``). The verdict's value is the one of the three
+    nearest its own limit, in its own units (``deg``, ``skewness``, ``aspect
+    ratio``), against that limit; a failed check with every value inside its
+    limit reports no value. checkMesh's exit code is never read: it is 0 on a
     failed mesh."""
     gid = "cfd.mesh_quality"
     path = _case(ctx)
@@ -1247,16 +1434,23 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     if mc.directions != case.dim:
         return _error(gid, f"checkMesh finds {mc.directions} geometric directions; the case "
                            f"reads as {case.dim}D", logs)
-    ratios = {"non-orthogonality": (mc.non_ortho_deg, limits["cfd_max_non_ortho_deg"], " deg"),
-              "skewness": (mc.skewness, limits["cfd_max_skewness"], ""),
-              "aspect ratio": (mc.aspect_ratio, limits["cfd_max_aspect_ratio"], "")}
-    worst = max(v / lim for v, lim, _u in ratios.values())
+    ratios = {"non-orthogonality": (mc.non_ortho_deg, limits["cfd_max_non_ortho_deg"],
+                                    NON_ORTHO_UNITS),
+              "skewness": (mc.skewness, limits["cfd_max_skewness"], SKEWNESS_UNITS),
+              "aspect ratio": (mc.aspect_ratio, limits["cfd_max_aspect_ratio"],
+                               ASPECT_RATIO_UNITS)}
+    # The value is the one of the three nearest its own limit, in its own
+    # units: on a failing value, the one that fails most. Ties go to the first
+    # (non-orthogonality).
+    binding = max(ratios, key=lambda n: ratios[n][0] / ratios[n][1])
     over = [n for n, (v, lim, _u) in ratios.items() if not v <= lim]
     ev = _evidence(ctx, gid, {"cells": mc.cells, "directions": mc.directions,
                               "mesh_ok": mc.ok, "failed_checks": mc.failed,
                               "values": {n: v for n, (v, _l, _u) in ratios.items()},
                               "limits": limits, "pack_default": marks})
-    said = ", ".join(f"{n} {v:.4g}{u} of {lim:g}" for n, (v, lim, u) in ratios.items())
+    deg = {"non-orthogonality": " deg"}
+    said = ", ".join(f"{n} {v:.4g}{deg.get(n, '')} of {lim:g}{deg.get(n, '')}"
+                     for n, (v, lim, _u) in ratios.items())
     default = f" [pack default: {', '.join(marks)}]" if marks else ""
     if not mc.ok:
         detail = (f"checkMesh failed {len(mc.failed)} check(s): "
@@ -1265,8 +1459,16 @@ def mesh_quality(ctx: GateContext) -> Verdict:
         detail = f"checkMesh said Mesh OK, but {', '.join(over)} past the limit: {said}{default}"
     else:
         detail = f"checkMesh: Mesh OK, {mc.cells} cells; {said}{default}"
-    return Verdict(gate=gid, passed=mc.ok and not over, measured=round(worst, 6), limit=1.0,
-                   comparator="<=", units="fraction of limit", detail=detail,
+    if not mc.ok and not over:
+        # A failed check with every value inside its limit has no one-sided
+        # value: the value nearest its limit would read inside it under a fail,
+        # and the margin would disagree with the verdict (with the fraction of
+        # limit, this read "0.002 fraction of limit" under Failing).
+        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, *logs])
+    v, lim, units = ratios[binding]
+    return Verdict(gate=gid, passed=mc.ok and not over,
+                   measured=_shown(v, lambda x: x <= lim, mc.ok and not over),
+                   limit=lim, comparator="<=", units=units, detail=detail,
                    evidence=[ev, *logs])
 
 
@@ -1277,7 +1479,7 @@ def mesh_quality(ctx: GateContext) -> Verdict:
     id="cfd.converged",
     basis="established",
     title="simpleFoam met the pack's residual targets, and the pressure drop settled",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "convergence"],
+    claims=[DP_CLAIM_TAG, "convergence"],
     tier=Tier.SOLVE,
     settles="cfd solver convergence",
     requires_tools=list(T.WRAPPERS),
@@ -1294,9 +1496,10 @@ def converged(ctx: GateContext) -> Verdict:
     the two planes. Passes only when the log says ``SIMPLE solution converged``,
     p and U were both solved at the last iteration, each initial residual at or
     below the target, and the pressure drop's estimated remaining change
-    (``_remaining``, from its last 20 iterations) is under 0.1% of it. The value
-    is the iteration it converged at, against the case's own budget (endTime /
-    deltaT).
+    (``_iter.remaining``, from its whole history) is under 0.1% of it. The value
+    is that estimate in % of the pressure drop, against 0.1 %; the iteration it
+    converged at, against the case's own budget (endTime / deltaT), is in the
+    detail.
 
     A run that dies on SIGFPE (divergence, with trapping on), exits non-zero or
     never prints End is an error. So is a run whose mean velocity through the
@@ -1340,25 +1543,43 @@ def converged(ctx: GateContext) -> Verdict:
     log = solve.log
     at = log.converged_in if log.converged_in is not None else log.last_iteration
     dp = solve.dp()
+    pct = _error_pct(dp)
     ev = _evidence(ctx, gid, {"converged_in": log.converged_in, "last_iteration":
                               log.last_iteration, "budget": case.budget, "target": target,
-                              "residuals": log.residuals, "dp_last": dp[-STABLE_WINDOW - 1:],
+                              "residuals": log.residuals, "dp_m2_s2": dp[-1] if dp else None,
+                              "iterative_error_pct": pct,
+                              "convergence_tol_pct": STABLE_TOL * 100.0,
                               "u_upstream": u_run, "cells": solve.cells,
                               "install": inst.root, "build": inst.build})
+    hist = _history(ctx, gid, "history.csv", dp)
+    share = "" if pct is None else f" ({pct:.2g}% of it)"
     detail = ("; ".join(why) if why else
               f"converged at iteration {at} of {case.budget} to residual target {target:g}"
-              f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, at most "
-              f"{_remaining(dp):.2g} still to come by its last {2 * STABLE_WINDOW} "
-              f"iterations; {solve.cells} cells")
+              f"{note}; pressure drop {dp[-1]:.6g} m^2/s^2, an estimated "
+              f"{I.remaining(dp):.2g} m^2/s^2 still to come{share}, tolerance "
+              f"{STABLE_TOL * 100.0:g}%; {solve.cells} cells")
     if why:
         # No one-sided value: a run that stopped short, a residual over target and a
         # number still moving fail on different readings, and none is "iterations
         # past the budget" (with "<", the first draft's pass at 91 < 91 contradicted
         # itself; with "<=", its control's 5 <= 5 read inside the limit and failed).
-        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, *logs])
-    # "<=": a run that converges on the last iteration of its budget converged.
-    return Verdict(gate=gid, passed=True, measured=float(at), limit=float(case.budget),
-                   comparator="<=", units="iterations", detail=detail, evidence=[ev, *logs])
+        return Verdict(gate=gid, passed=False, detail=detail, evidence=[ev, hist, *logs])
+    # The value is the judged one: the pressure drop's estimated remaining
+    # change in % of itself, against STABLE_TOL in %, "<=" as `_settled` judges
+    # it. Rounded to 6 significant digits, so a run settled at exactly the
+    # tolerance never reads 0.1000000001 % under a pass. Until D3 it was the
+    # iteration the run converged at against the case's budget: a number the
+    # converged line already implies, so the page read "80 iterations against a
+    # limit of 2000 iterations, 96% inside the limit", a margin on no judgment
+    # the gate made. Rejected: both (one value per verdict); the iterations
+    # (kept in the detail and the evidence). A pass whose last value is 0 has no
+    # percentage and reports no value.
+    if pct is None:
+        return Verdict(gate=gid, passed=True, detail=detail, evidence=[ev, hist, *logs])
+    return Verdict(gate=gid, passed=True,
+                   measured=_shown(pct, lambda x: x <= STABLE_TOL * 100.0, True, 6),
+                   limit=STABLE_TOL * 100.0, comparator="<=", units=ITERATIVE_ERROR_UNITS,
+                   detail=detail, evidence=[ev, hist, *logs])
 
 
 # --------------------------------------------------------------------------- #
@@ -1448,10 +1669,12 @@ def _lattice(case: Case, planes, r: float) -> list[str]:
     return why
 
 
-def _ladder(ctx: GateContext, gid: str):
+def _ladder(ctx: GateContext, gid: str, rho=None):
     """The project's mesh and two refinements of it, each solved: ``(case,
     planes, target, note, ratio, rnote, [Level coarse..fine])`` or a Verdict.
-    A level that does not converge is a fail of mesh independence, named."""
+    A level that does not converge is a fail of mesh independence, named. With
+    ``rho`` (cfd.pressure_drop), each level also writes OpenFOAM's speed and
+    static pressure fields (MAG_U)."""
     got = _settings(ctx, gid)
     if isinstance(got, Verdict):
         return got
@@ -1484,9 +1707,9 @@ def _ladder(ctx: GateContext, gid: str):
         counts = case.counts(r, k)
         stage = _stage_dir(ctx, gid, f"level{k}")
         T.stage(case.path, stage, case.files)
-        _prepare(stage, case, planes, target, counts if k else None)
+        _prepare(stage, case, planes, target, counts if k else None, rho)
         try:
-            solve = _solve(stage, case, planes, target, env, timeout)
+            solve = _solve(stage, case, planes, target, env, timeout, rho)
         except T.Timeout as exc:
             return _skip(gid, f"level {k}: {exc}")
         except (T.RunError, ValueError) as exc:
@@ -1537,24 +1760,108 @@ def _gci(case: Case, levels: list, target: float):
     return res, why, noise
 
 
-def _ladder_evidence(ctx, gid, case, levels, res, noise, extra) -> list[str]:
-    payload = {"dim": case.dim, "formal_order": case.formal_order,
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _last_time(stage: str):
+    """The name of the latest time directory a run wrote in ``stage`` (not
+    ``0``), or None: the converged iteration, where simpleFoam writes its
+    fields and the field objects write theirs."""
+    best = None
+    for name in os.listdir(stage):
+        try:
+            t = float(name)
+        except ValueError:
+            continue
+        if t > 0 and math.isfinite(t) and os.path.isdir(os.path.join(stage, name)) \
+                and (best is None or t > best[0]):
+            best = (t, name)
+    return None if best is None else best[1]
+
+
+def _fields(ctx: GateContext, stage: str):
+    """``{stage, time, sha256}`` for the finest level's fields and mesh
+    (FIELD_FILES, MESH_FILES), or None when the run wrote no time directory.
+    ``stage`` is written ``<out>/...``, relative to the gate's out directory, as
+    ``BoundContext.bind`` reads it. A file the run did not write is left out:
+    the picture that needs it says so, and no verdict depends on it."""
+    time = _last_time(stage)
+    if time is None:
+        return None
+    rel = os.path.relpath(stage, ctx.out_path()).replace(os.sep, "/")
+    sha = {}
+    for name in FIELD_FILES:
+        path = os.path.join(stage, time, name)
+        if os.path.isfile(path):
+            sha[f"{time}/{name}"] = _sha256(path)
+    for name in MESH_FILES:
+        path = os.path.join(stage, "constant", "polyMesh", name)
+        if os.path.isfile(path):
+            sha[f"constant/polyMesh/{name}"] = _sha256(path)
+    return {"stage": f"<out>/{rel}", "time": time, "sha256": sha}
+
+
+def _ladder_evidence(ctx, gid, case, levels, res, noise, extra, rho=None,
+                     planes=None) -> list[str]:
+    """summary.json, a ``history_level{k}.csv`` per level (``_history``; in Pa when
+    ``rho`` is given) and the logs. Each level holds its estimate as
+    ``iterative_error_pct``, beside the ``convergence_tol_pct`` it was held to.
+
+    With ``rho`` (cfd.pressure_drop) the summary also holds what the site's
+    pictures draw (GitHub #15, Phase 2), each number the gate's or OpenFOAM's,
+    so a picture computes none: ``thin_normal`` (the unit normal of a 2D case's
+    empty patches, the axis a still looks along; None in 3D); per level
+    ``h_rel`` (its cell size relative to
+    the finest, (cells_fine / cells)^(1/dim), Celik's h) and ``dp_pa``;
+    ``h_rel_ext``, zero, where the Richardson value sits on that axis; and, on
+    the finest level at its last iteration, ``u_upstream_m_s`` (the mean
+    velocity along the upstream plane's normal, the one cfd.converged holds to
+    cfd_velocity_m_s), ``p_up_pa`` and ``p_down_pa`` (rho x each plane's
+    average p), the ``planes`` and the ``fields`` with their sha256. A
+    picture's colour range is a pack factor times one of these, never a
+    limit: the summary holds none."""
+    payload = {"dim": case.dim, "thin_normal": case.thin_normal,
+               "formal_order": case.formal_order,
                "levels": [{"k": lv.k, "cells": lv.solve.cells, "counts": lv.counts,
                            "converged_in": lv.solve.log.converged_in,
-                           "dp_m2_s2": lv.solve.dp()[-1]} for lv in levels],
-               "noise_m2_s2": noise}
+                           "dp_m2_s2": lv.solve.dp()[-1],
+                           "iterative_error_pct": _error_pct(lv.solve.dp())} for lv in levels],
+               "noise_m2_s2": noise, "convergence_tol_pct": STABLE_TOL * 100.0}
+    if rho is not None and levels:
+        finest = levels[-1]
+        for lv, row in zip(levels, payload["levels"]):
+            row["h_rel"] = (finest.solve.cells / lv.solve.cells) ** (1.0 / case.dim)
+            row["dp_pa"] = rho * lv.solve.dp()[-1]
+        payload["h_rel_ext"] = 0.0
+        up, down = finest.solve.up, finest.solve.down
+        ip, jp = up.columns.index("areaAverage(p)"), down.columns.index("areaAverage(p)")
+        last = up.rows[-1]
+        downs = {row[0]: row[jp] for row in down.rows}
+        payload["p_up_pa"] = rho * last[ip]
+        payload["p_down_pa"] = rho * downs[last[0]] if last[0] in downs else None
+        if planes is not None:
+            payload["u_upstream_m_s"] = finest.solve.u_normal(planes[0][1])
+            payload["planes"] = [{"point": list(p), "normal": list(n)} for p, n in planes]
+        payload["fields"] = _fields(ctx, finest.stage)
     if res is not None:
         payload["gci"] = {k: v for k, v in vars(res).items()}
     payload.update(extra)
+    hists = [_history(ctx, gid, f"history_level{lv.k}.csv", lv.solve.dp(), rho)
+             for lv in levels]
     logs = [p for lv in levels for p in lv.solve.logs]
-    return [_evidence(ctx, gid, payload), *logs]
+    return [_evidence(ctx, gid, payload), *hists, *logs]
 
 
 @gate(
     id="cfd.mesh_independence",
     basis="sourced",
     title="Three meshes agree: the grid convergence index (Celik et al. 2008) is inside its limit",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow", "mesh-independence"],
+    claims=[DP_CLAIM_TAG, "mesh-independence"],
     tier=Tier.SOLVE,
     settles="cfd mesh independence",
     requires_tools=list(T.WRAPPERS),
@@ -1599,7 +1906,8 @@ def mesh_independence(ctx: GateContext) -> Verdict:
         return Verdict(gate=gid, passed=False, detail="; ".join(why)[:400] + f" ({cells} cells)",
                        evidence=ev)
     passed = gci_pct <= lim
-    return Verdict(gate=gid, passed=passed, measured=round(gci_pct, 6), limit=lim,
+    return Verdict(gate=gid, passed=passed,
+                   measured=_shown(gci_pct, lambda x: x <= lim, passed, 6), limit=lim,
                    comparator="<=", units="%",
                    detail=f"GCI {gci_pct:.3g}% {'within' if passed else 'past'} "
                           f"{lim:g}%: {cells} cells (ratio {r:g}{rnote}), monotone at observed "
@@ -1615,7 +1923,7 @@ def mesh_independence(ctx: GateContext) -> Verdict:
     id="cfd.pressure_drop",
     basis="established",
     title="The static pressure drop between two planes, with its GCI band, is under the limit",
-    claims=["cfd", "fluid-dynamics", "pressure-drop", "internal-flow"],
+    claims=[DP_CLAIM_TAG],
     tier=Tier.SOLVE,
     settles="pressure drop from cfd",
     requires_tools=list(T.WRAPPERS),
@@ -1630,50 +1938,66 @@ def pressure_drop(ctx: GateContext) -> Verdict:
     """The area-averaged static pressure on the upstream plane minus that on the
     downstream plane, on the finest of the three meshes, times
     ``cfd_density_kg_m3`` (an incompressible solver's p is kinematic, m^2/s^2).
-    The value judged is the top of its GCI band, dp x (1 + GCI), against
-    ``cfd_dp_max_pa``: a pressure drop is a claim about at most, and the mesh's
-    share of the error goes on the side that fails."""
+    The value judged is the top of its GCI band, dp x (1 + GCI), in Pa, against
+    the limit of the claim tagged ``pressure-drop`` (``ctx.acceptance``): a
+    pressure drop is a claim about at most, and the mesh's share of the error
+    goes on the side that fails. The claim's units must be Pa and its comparator
+    ``<=`` or ``<``, or the gate errors before it runs a mesh."""
     gid = "cfd.pressure_drop"
-    vals = {}
-    for key, what in (("cfd_density_kg_m3", "the fluid's density, which turns the solver's "
-                                            "kinematic pressure into pascals"),
-                      ("cfd_dp_max_pa", "the largest pressure drop the claim allows, Pa")):
-        v = _number(ctx, key)
-        if v is None:
-            return _skip(gid, f"no {key}: {what}")
-        if isinstance(v, str):
-            return _error(gid, v)
-        if not v > 0:
-            return _error(gid, f"{key} is {v:g}; it must be positive")
-        vals[key] = v
-    got = _ladder(ctx, gid)
+    rho = _number(ctx, "cfd_density_kg_m3")
+    if rho is None:
+        return _skip(gid, "no cfd_density_kg_m3: the fluid's density, which turns the "
+                          "solver's kinematic pressure into pascals")
+    if isinstance(rho, str):
+        return _error(gid, rho)
+    if not rho > 0:
+        return _error(gid, f"cfd_density_kg_m3 is {rho:g}; it must be positive")
+    acc = ctx.acceptance(DP_CLAIM_TAG)
+    comparator = acc.comparator.value
+    if str(acc.units or "").strip() != DP_UNITS:
+        return _error(gid, f"the claim tagged {DP_CLAIM_TAG} states its limit in "
+                           f"{str(acc.units or '')!r}; this gate computes the pressure drop "
+                           f"in {DP_UNITS}: state the limit in {DP_UNITS}")
+    if comparator not in DP_COMPARATORS:
+        return _error(gid, f"the claim tagged {DP_CLAIM_TAG} states {comparator} "
+                           f"{acc.limit:g} {DP_UNITS}; this gate judges only an upper limit "
+                           f"({' or '.join(DP_COMPARATORS)}): the top of the GCI band is "
+                           f"the failing side only there")
+    got = _ladder(ctx, gid, rho)
     if isinstance(got, Verdict):
         return got
-    case, _planes_, target, _note, r, _rnote, levels = got
+    case, planes, target, _note, r, _rnote, levels = got
     res, why, noise = _gci(case, levels, target)
     if res is None or res.gci_fine21 is None or why:
         # cfd.mesh_independence passed on these same meshes, or this gate would
         # not have run: a GCI that does not hold here is the two disagreeing.
         return _error(gid, "the meshes give no GCI band: " + "; ".join(why)[:300],
-                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}))
-    rho, limit = vals["cfd_density_kg_m3"], vals["cfd_dp_max_pa"]
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho, planes))
     if not res.phi[0] > 0:
         # What slipped through the first draft: the drop was taken as a
         # magnitude, so a pressure RISE between the planes (a pump, a diffuser,
         # the planes named in the wrong order) read as a drop under the limit.
         return _error(gid, f"the pressure on the downstream plane is not below the upstream "
                            f"one ({rho * res.phi[0]:.5g} Pa): a rise, or the planes in the "
-                           f"wrong order", _ladder_evidence(ctx, gid, case, levels, res, noise, {}))
+                           f"wrong order",
+                      _ladder_evidence(ctx, gid, case, levels, res, noise, {}, rho, planes))
     dp_pa = rho * res.phi[0]
     top = dp_pa * (1.0 + res.gci_fine21)
+    # No limit in the summary: the verdict carries the limit it judged against,
+    # and a picture's scale is never taken from one (until issue #15 D2 it
+    # held ``limit_pa``, the parameter's, which nothing read).
     ev = _ladder_evidence(ctx, gid, case, levels, res, noise,
                           {"density_kg_m3": rho, "dp_pa": dp_pa, "band_top_pa": top,
-                           "dp_ext_pa": rho * res.phi_ext21, "limit_pa": limit})
-    passed = top <= limit
-    return Verdict(gate=gid, passed=passed, measured=round(top, 9), limit=limit,
-                   comparator="<=", units="Pa",
+                           "dp_ext_pa": rho * res.phi_ext21}, rho, planes)
+    # Judged on the band top whole; reported in significant digits on its
+    # side of the limit (`_shown`). Until review of D2 it was judged on
+    # `round(top, 9)`: a top under 5e-10 Pa read 0.0 and passed every limit.
+    passed = acc.holds(top)
+    measured = _shown(top, acc.holds, passed)
+    return Verdict(gate=gid, passed=passed, measured=measured, limit=acc.limit,
+                   comparator=comparator, units=DP_UNITS,
                    detail=f"pressure drop {dp_pa:.5g} Pa on the finest mesh "
                           f"({levels[-1].solve.cells} cells) + GCI {res.gci_fine21 * 100:.3g}% "
-                          f"= {top:.5g} Pa, {'within' if passed else 'past'} {limit:g} Pa; "
+                          f"= {top:.5g} Pa, {'within' if passed else 'past'} {acc.limit:g} Pa; "
                           f"{rho * res.phi_ext21:.5g} Pa extrapolated",
                    evidence=ev)

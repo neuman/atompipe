@@ -31,19 +31,24 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p test_cfd_openfoam.
 """
 from __future__ import annotations
 
+import csv
 import json
+import math
 import os
+import re
 import shutil
 import stat
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import _env
+from nopekit import claims as claims_mod
 from nopekit import gates as gates_mod
 from nopekit import packs as packs_mod
 from nopekit.modelio import load_path
-from nopekit.models import Ledger, ProjectMeta
+from nopekit.models import Comparator, Ledger, ProjectMeta
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACK = os.path.join(REPO, "packs", "cfd-openfoam")
@@ -53,6 +58,8 @@ STANDIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cfd_standin
 F = load_path(os.path.join(PACK, "gates", "_foam.py"))
 G = load_path(os.path.join(PACK, "gates", "_gci.py"))
 T = load_path(os.path.join(PACK, "gates", "_tool.py"))
+I = load_path(os.path.join(PACK, "gates", "_iter.py"))
+HISTORIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cfd_histories")
 
 
 def _baseline() -> dict:
@@ -70,11 +77,26 @@ def _registry() -> gates_mod.Registry:
     return registry
 
 
-def _run(registry, gid: str, root: str, params: dict, *, tier: int = 2):
+def _claims(limit=None, **acceptance) -> list:
+    """The baseline's own claims (``_claims``), as the pack's controls read
+    them; ``limit`` and ``acceptance`` move the pressure-drop claim's
+    condition."""
+    with open(os.path.join(PACK, "selftest", "baseline.json"), encoding="utf-8") as fh:
+        claims = packs_mod.baseline_claims(json.load(fh))
+    if limit is not None:
+        acceptance["limit"] = limit
+    for claim in claims:
+        for key, value in acceptance.items():
+            setattr(claim.acceptance, key, value)
+    return claims
+
+
+def _run(registry, gid: str, root: str, params: dict, *, tier: int = 2, claims=None):
     spec_fn = registry.get(gid)
     assert spec_fn is not None, f"{gid} is not in the pack"
     ctx = gates_mod.GateContext(
-        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd")), model=None,
+        root=root, ledger=Ledger(meta=ProjectMeta(name="cfd"),
+                                 claims=_claims() if claims is None else claims), model=None,
         params=dict(params), out_dir=os.path.join(root, "out", gid.replace(".", "_")),
         tier=tier, log=lambda _m: None, extra={})
     return gates_mod.run_gate(*spec_fn, ctx)
@@ -91,6 +113,36 @@ def _edit(case: str, rel: str, entry: str, value: str) -> None:
         text = fh.read()
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(F.set_entry(text, entry, value))
+
+
+# --------------------------------------------------------------------------- #
+# what the gates cover
+# --------------------------------------------------------------------------- #
+class EachGateCoversOnlyWhatItJudges(unittest.TestCase):
+    """Review of issue #15's D2: every gate also covered ``cfd``,
+    ``fluid-dynamics`` and ``internal-flow``, so a claim tagged ``cfd`` alone,
+    "static pressure drop <= 0.5 Pa", read Checked — `check` said ready — on
+    cfd.pressure_drop's pass against the 5 Pa of the claim tagged
+    ``pressure-drop``. Now no gate here covers those tags: such a claim reads
+    Gap, and the claim tagged ``pressure-drop`` keeps all six."""
+
+    def test_a_claim_tagged_only_broadly_reads_gap(self):
+        from nopekit.models import Acceptance, Claim, Verdict
+        registry = _registry()
+        broad = Claim(id="C2", statement="The static pressure drop is at most 0.5 Pa",
+                      acceptance=Acceptance(quantity="static pressure drop",
+                                            comparator=Comparator.LE, limit=0.5, units="Pa"),
+                      tags=["cfd", "fluid-dynamics", "internal-flow"], critical=True)
+        claims = [*_claims(5.0), broad]
+        verdicts = [Verdict(gate=spec.id, claims=["C1"], passed=True)
+                    for spec in (spec for spec, _fn in (registry.get(g)
+                                                        for g in registry.ids()))]
+        ledger = Ledger(meta=ProjectMeta(name="cfd"), claims=claims, verdicts=verdicts)
+        cover = claims_mod.effective_gates(ledger, registry)
+        self.assertEqual(list(cover.get("C2") or ()), [])
+        self.assertEqual(sorted(cover.get("C1") or ()), sorted(registry.ids()))
+        found = claims_mod.compositions(ledger, registry=registry)
+        self.assertEqual(found["C2"].status, claims_mod.ClaimStatus.UNCLAIMED)
 
 
 # --------------------------------------------------------------------------- #
@@ -234,30 +286,227 @@ class TheReaderReadsWhatOpenFOAMReads(unittest.TestCase):
         finally:
             os.remove(d)
 
-    def test_the_remaining_change_is_estimated_from_the_tail(self):
+    def test_the_formal_order_is_the_momentum_schemes(self):
+        """The order is ``div(phi,U)``'s, or ``default``'s where the case gives
+        none. What slipped through until P0.1: any ``upwind`` in any divSchemes
+        entry gave order 1 (``AFinishedLookingRunIsNotAPass`` holds the ladder
+        that failed)."""
         C = _registry().get("cfd.converged")[1].__globals__
-        settled = [1.0] * 25
-        self.assertEqual(C["_remaining"](settled), 0.0)
-        self.assertIsNone(C["_remaining"]([1.0] * 20))
-        creeping = [1.0 + 0.1 * 0.97 ** i for i in range(200)]
-        rem = C["_remaining"](creeping)
-        self.assertAlmostEqual(rem, 0.1 * 0.97 ** 199, delta=0.1 * 0.97 ** 199 * 0.05)
-        # An oscillation: what it still swings by, whatever its period.
-        self.assertAlmostEqual(C["_remaining"]([1.0 + 1e-3 * (-1) ** i for i in range(25)]),
-                               2e-3, places=12)
-        # Moving one way and not slowing: never settled.
-        self.assertEqual(C["_remaining"]([1.0 + 1e-3 * i for i in range(25)]), float("inf"))
-        # A run that just moved 0.17% after a larger oscillation: at least that.
-        tail = [1.0 + 0.02 * (-1) ** i for i in range(10)] + [1.0 + 1e-3 * 0.7 ** i
-                                                              for i in range(21)]
-        self.assertGreaterEqual(C["_remaining"](tail), 0.0)
-        self.assertGreaterEqual(C["_remaining"]([1.0 + 0.0017 * (20 - i) / 20 + 1e-7 * i * i
-                                                 for i in range(21)]), 0.0017)
+        order = lambda text: C["_formal_order"](F.parse("divSchemes { " + text + " }"))
+        self.assertEqual(order("default none; div(phi,U) bounded Gauss linearUpwind grad(U); "
+                               "div(phi,k) bounded Gauss upwind;"), 2)
+        self.assertEqual(order("default none; div(phi,U) bounded Gauss upwind;"), 1)
+        self.assertEqual(order('default none; "div\\(phi,.*\\)" bounded Gauss upwind;'), 1)
+        self.assertEqual(order("default Gauss upwind;"), 1)
+        self.assertEqual(order("default Gauss upwind; div(phi,U) Gauss linear;"), 2)
 
     def test_a_malformed_file_is_refused_whole(self):
         for text in ("a 1", "a { b 1;", "a (1 2;", "}"):
             with self.subTest(text=text), self.assertRaises(F.FoamFormatError):
                 F.parse(text)
+
+
+# --------------------------------------------------------------------------- #
+# the iterative-error estimate
+# --------------------------------------------------------------------------- #
+def _histories(name: str) -> dict:
+    """Real pressure-drop histories (``tests/cfd_histories``, each file's
+    ``_provenance`` names the case, the solver and how it was run)."""
+    with open(os.path.join(HISTORIES, name), encoding="utf-8") as fh:
+        return json.load(fh)["histories"]
+
+
+def _settles(s, cut: int) -> bool:
+    """The gate's line on the first ``cut`` values: estimate <= STABLE_TOL x |last|."""
+    rem = I.remaining(s[:cut])
+    return rem is not None and rem <= 1e-3 * abs(s[cut - 1])
+
+
+def _from_changes(change, n: int, extra: int = 40000) -> list:
+    """phi_n = 1 + the sum of change(k) for k > n: a monotone history converging
+    to 1 (GitHub #15 Phase 0's construction, the sum taken from the far end)."""
+    d = [change(k) for k in range(n + extra)]
+    tail = [0.0] * (len(d) + 1)
+    for i in range(len(d) - 1, -1, -1):
+        tail[i] = tail[i + 1] + d[i]
+    return [1.0 + tail[i + 1] for i in range(n)]
+
+
+class TheIterativeErrorEstimate(unittest.TestCase):
+    """``_iter.remaining`` against the negative controls of GitHub #15 Phase 0
+    (the judge's section 9). Each "never" is a history the estimator it
+    replaced (``cfd._remaining`` until P0.1) read settled while more than 0.1%
+    from its limit, at the cut points named in each test; each "must settle" is
+    one it read settled too, kept so a stricter estimator cannot fail a converged
+    run. The long histories are read at every cut point of a stride (the
+    estimate costs a few milliseconds a cut on 6000 values)."""
+
+    N = 3000
+
+    def never(self, s, cuts, truth=None):
+        """Not settled at any of ``cuts`` where the value is more than 0.1% from
+        ``truth`` (every cut when there is none: a history that never converges)."""
+        bad = [c for c in cuts if (truth is None or abs(s[c - 1] - truth) > 1e-3 * abs(truth))
+               and _settles(s, c)]
+        self.assertEqual(bad, [], "read settled at these cut points")
+
+    # -- the plain readings ---------------------------------------------------
+    def test_the_plain_readings(self):
+        self.assertEqual(I.remaining([1.0] * 25), 0.0)
+        self.assertIsNone(I.remaining([1.0] * 16))
+        self.assertIsNotNone(I.remaining([1.0] * 17))
+        creeping = [1.0 + 0.1 * 0.97 ** i for i in range(200)]
+        # At least what is still to come, 0.1 x 0.97^199, and not twice it: C&F's
+        # 1.25 and the slope's bound on a fit with no scatter.
+        to_come = 0.1 * 0.97 ** 199
+        self.assertGreaterEqual(I.remaining(creeping), to_come)
+        self.assertLess(I.remaining(creeping), 2 * to_come)
+        # An oscillation that does not decay, and a ramp: no decay to extrapolate.
+        # (The estimator P0.1 replaced read the oscillation as its swing, 2e-3.)
+        self.assertEqual(I.remaining([1.0 + 1e-3 * (-1) ** i for i in range(25)]), math.inf)
+        self.assertEqual(I.remaining([1.0 + 1e-3 * i for i in range(25)]), math.inf)
+        # A run that just moved 0.17%: at least that (an earlier draft passed one
+        # 0.22% from converged).
+        self.assertGreaterEqual(I.remaining([1.0 + 0.0017 * (20 - i) / 20 + 1e-7 * i * i
+                                             for i in range(21)]), 0.0017)
+
+    def test_a_flat_tail_with_too_little_before_it_reads_inf(self):
+        """A flat tail after an exact repeat is a print step, not round-off, and
+        goes to the fit; with fewer than WINDOW_MIN changes before it there is no
+        decay to fit. What slipped through until the P0 review: that came back as
+        None, and the gate said "fewer than the 17 needed" of 31 iterations."""
+        s = [1.0, 1.0, 1.1, 1.2, 1.25, 1.27] + [1.27] * 25
+        self.assertEqual(I.remaining(s), math.inf)
+        C = _registry().get("cfd.converged")[1].__globals__
+        solve = SimpleNamespace(log=SimpleNamespace(converged_in=31, last_iteration=31,
+                                                    residuals={"p": 1e-7, "Ux": 1e-7}),
+                                dp=lambda: s)
+        self.assertEqual(C["_settled"](solve, 1e-6, 2000),
+                         ["the pressure drop is still moving: its changes do not decrease at "
+                          "a steady rate, so the gate cannot estimate the change still to come"])
+
+    def test_a_value_that_is_not_a_number_is_never_settled(self):
+        """The estimator P0.1 replaced read a NaN 11 values from the end as 0.0."""
+        self.assertEqual(I.remaining([1.0] * 10 + [math.nan] + [1.0] * 20), math.inf)
+        self.assertEqual(I.remaining([1.0] * 30 + [math.inf]), math.inf)
+
+    def test_the_gate_refuses_a_last_value_of_inf(self):
+        """inf <= STABLE_TOL x abs(inf) is True: without its own refusal the gate
+        read a run whose last value is inf as settled."""
+        C = _registry().get("cfd.converged")[1].__globals__
+        for series in ([1.0] * 30 + [math.inf], [1.0] * 10 + [math.nan] + [1.0] * 20):
+            with self.subTest(last=series[-1]):
+                solve = SimpleNamespace(
+                    log=SimpleNamespace(converged_in=31, last_iteration=31,
+                                        residuals={"p": 1e-7, "Ux": 1e-7}),
+                    dp=lambda s=series: s)
+                why = C["_settled"](solve, 1e-6, 2000)
+                self.assertEqual(why, ["the pressure drop is not a finite number at every "
+                                       "iteration"])
+
+    # -- synthetic: the limit is known ----------------------------------------
+    def test_a_slow_mode_under_a_fast_one(self):
+        """Two modes: the old estimator read it settled at cuts 28-43 and 220, up
+        to 0.29% out; eh-faithful (no rate-change test) at cuts 21-37."""
+        s = [1 + 0.3 * 0.7 ** n + 0.003 * 0.995 ** n for n in range(self.N)]
+        self.never(s, range(17, 221), truth=1.0)
+
+    def test_an_overshoot_before_its_turning_point(self):
+        """Not settled at cuts 21-30, which the one-sided rate test read settled
+        (the old estimator at 28-52), nor at 31-34, which SPEED_FLOOR 1e-5 let
+        through until the P0 review. Cuts 35 and 36, just past the turning point,
+        are the documented miss (``_iter.remaining``)."""
+        s = [1 + 0.05 * 0.8 ** n - 0.003 * 0.997 ** n for n in range(self.N)]
+        self.never(s, range(21, 35), truth=1.0)
+
+    def test_a_slow_overshoot_before_its_turning_point(self):
+        """SPEED_FLOOR's control (P0 review): two slow modes of opposite sign
+        change by less than 1e-5 of the value per iteration long before
+        round-off. Under the judged floor (1e-5) the dive test never fired, and
+        these read settled near their extremum, 2.2% and 3.6% from the limit, at
+        cuts 233-248 and 510-514. The cuts at the turning point itself (246 and
+        248, 511-514) are the documented miss."""
+        s = [1 + 0.05 * 0.995 ** n - 0.06 * 0.998 ** n for n in range(250)]
+        self.never(s, range(17, 246), truth=1.0)
+        s = [1 + 0.1 * 0.998 ** n - 0.12 * 0.999 ** n for n in range(520)]
+        self.never(s, range(17, 511), truth=1.0)
+
+    def test_a_power_law_creep(self):
+        """1 + 0.05/sqrt(n+1) never decays geometrically: never settled. The old
+        estimator read it settled from cut 266 on; without the rate test, or with
+        a 5% slack on it, 2071 cuts."""
+        s = [1 + 0.05 / math.sqrt(n + 1) for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_creep_under_a_fast_oscillation(self):
+        """The model-free reading's control: not settled at cuts 73-109 but 76
+        (every one of them settled by the old estimator, and without the reading,
+        up to 0.44% out)."""
+        s = [1 + 0.005 * 0.998 ** n + 0.05 * 0.9 ** n * (-1) ** n for n in range(self.N)]
+        self.never(s, [c for c in range(73, 110) if c != 76], truth=1.0)
+
+    def test_a_creep_printed_to_seven_digits(self):
+        """STAIRS: 1 + 0.002 x 0.99995^n printed as OpenFOAM's default
+        writePrecision 6 prints it moves one quantum about every ten iterations,
+        always 0.17-0.20% from its limit. The old estimator read it settled at
+        2980 of 2984 cuts; a round-off rule without the staircase test at 767."""
+        s = [float("%.7g" % (1 + 0.002 * 0.99995 ** n)) for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_drift_above_the_round_off_floor(self):
+        """1 + 2e-8 n never converges. The old estimator read it settled at 2980
+        of 2984 cuts, ROUNDOFF 1e-7 at 187. (A drift of 5e-9 per iteration, under
+        ROUNDOFF, is the documented miss.)"""
+        s = [1 + 2e-8 * n for n in range(self.N)]
+        self.never(s, range(17, self.N + 1, 13))
+
+    def test_a_rate_that_slows(self):
+        """eh-faithful's control: changes 0.05 x 0.85^k, then from k = 40 at
+        0.995 per iteration. Not settled from cut 44 until the value is within
+        0.1% (the old estimator read cuts 45 and 46 settled, 1.4% out). Cuts 39-43
+        are the documented miss."""
+        a2 = 0.05 * 0.85 ** 40
+        s = _from_changes(lambda k: 0.05 * 0.85 ** k if k < 40 else a2 * 0.995 ** (k - 40),
+                          self.N)
+        self.never(s, range(44, 700), truth=1.0)
+
+    # -- real v2606 histories -------------------------------------------------
+    def test_the_packs_own_runs_settle(self):
+        """Every history the selftest's cfd.converged judges must read settled at
+        its stop. The coarse channel (the known-bad of cfd.mesh_independence)
+        ends accelerating from 7e-6 to 5e-11 of its value, which SPEED_FLOOR lets
+        through; the baseline's level 1 decays through troughs of 8e-9 of its
+        value, which STAIRS reads as round-off; at ROUNDOFF 1e-9 the thicker
+        fluid's level 1 read inf."""
+        for fixture in ("case_baseline.json", "case_thicker_fluid.json", "coarse.json"):
+            for name, s in _histories(fixture).items():
+                with self.subTest(fixture=fixture, history=name):
+                    self.assertTrue(_settles(s, len(s)), f"{name}: {I.remaining(s)}")
+
+    def test_an_oscillation_that_decays_settles(self):
+        """The running maximum's control: 1 + 0.1 x 0.995^n cos(2n) first reads
+        settled at cut 2136 and reads settled at cut 3000 (between them, about
+        half of the cuts read not settled). Fitted on the changes themselves, a
+        window that starts in a trough reads as growing, and it never settled in
+        3000 iterations."""
+        s = [1 + 0.1 * 0.995 ** n * math.cos(2 * n) for n in range(self.N)]
+        self.assertTrue(_settles(s, self.N))
+
+    def test_real_turbulent_histories_never_settle(self):
+        """The v2606 tutorials pitzDaily and pitzDailyExptInlet, 2000 iterations
+        each, still moving: the old estimator read them settled at 94 and 234 of
+        their cuts while more than 0.1% from their last values (up to 1.04% and
+        2.46% from it)."""
+        for name, s in _histories("pitz_dev.json").items():
+            with self.subTest(name):
+                self.never(s, range(17, len(s) + 1, 5))
+
+    def test_a_laminar_pitzdaily_under_slow_relaxation_never_settles(self):
+        """The strongest real control: laminar pitzDaily (nu 1e-3, U relaxed to
+        0.3), the flow a laminar gate decides alone. The old estimator read it
+        settled at cut points up to 23.4% from the converged value."""
+        s = _histories("lam_nu1e-3_r.json")["lam_nu1e-3_r"]
+        self.never(s, range(20, len(s) + 1, 20))
 
 
 # --------------------------------------------------------------------------- #
@@ -310,6 +559,116 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         v = self._readable(case)
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("#include, a directive OpenFOAM evaluates", v.detail)
+
+    def _with_directive(self, line: str, *, rels=("0/U", "0/p"), where="boundaryField"):
+        """A copy of the baseline with ``line`` written where ESI writes it:
+        the first entry of each 0/ file's ``boundaryField`` (or at the top of
+        the file, ``where=""``)."""
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        for rel in rels:
+            path = os.path.join(case, *rel.split("/"))
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            if where == "boundaryField, last":
+                head = "boundaryField\n{\n"
+                self.assertEqual(text.count(head), 1, rel)
+                at = text.index("\n}\n", text.index(head)) + 1
+                text = text[:at] + "    " + line + "\n" + text[at:]
+            elif where:
+                head = "boundaryField\n{\n"
+                self.assertEqual(text.count(head), 1, rel)
+                text = text.replace(head, head + "    " + line + "\n\n")
+            else:
+                text = text.rstrip("\n") + "\n\n" + line + "\n"
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        return self._readable(case)
+
+    def test_the_one_allowed_directive_is_allowed(self):
+        """What slipped through: the comparison held the quoted spelling and the
+        reader's token holds none, so the include PACK.md allows, in every 0/
+        file ESI writes, was refused."""
+        v = self._with_directive('#includeEtc "caseDicts/setConstraintTypes"')
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertNotIn("#includeEtc", v.detail)
+
+    def test_every_other_include_etc_is_refused(self):
+        cases = {
+            "one letter short": ('#includeEtc "caseDicts/setConstraintType"', "boundaryField",
+                                 ("0/U",)),
+            "one letter long": ('#includeEtc "caseDicts/setConstraintTypess"', "boundaryField",
+                                ("0/U",)),
+            "another file": ('#includeEtc "caseDicts/mesh/generation/meshQualityDict"',
+                             "boundaryField", ("0/p",)),
+            "unquoted": ("#includeEtc caseDicts/setConstraintTypes", "boundaryField",
+                         ("0/U",)),
+            "a path to it": ('#includeEtc "../caseDicts/setConstraintTypes"', "boundaryField",
+                             ("0/U",)),
+            "outside boundaryField": ('#includeEtc "caseDicts/setConstraintTypes"', "",
+                                      ("0/U",)),
+            "outside 0/": ('#includeEtc "caseDicts/setConstraintTypes"', "",
+                           ("system/controlDict",)),
+            "another directive": ('#include "caseDicts/setConstraintTypes"', "boundaryField",
+                                  ("0/U",)),
+            # Review of P1: read after the patches, an etc file found first in
+            # the user's directory merged into them at run time.
+            "after the patches": ('#includeEtc "caseDicts/setConstraintTypes"',
+                                  "boundaryField, last", ("0/U",)),
+        }
+        for name, (line, where, rels) in cases.items():
+            with self.subTest(name):
+                v = self._with_directive(line, rels=rels, where=where)
+                self.assertEqual(v.outcome, "fail", v.render())
+                self.assertIn("a directive OpenFOAM evaluates", v.detail)
+
+    def test_the_gates_home_holds_only_its_control_dict(self):
+        """Review of P1: OpenFOAM finds ``#includeEtc "caseDicts/
+        setConstraintTypes"`` in ``$HOME/.OpenFOAM/<api>/`` (then
+        ``$HOME/.OpenFOAM/``) before the install, and the gate's HOME outlives
+        its run. Whatever was planted there, a run's HOME holds the controlDict
+        alone, with the pack's text."""
+        out = self.tmp()
+        root = os.path.join(out, "cfd-openfoam", "home")
+        user = os.path.join(root, ".OpenFOAM")
+        planted = {
+            os.path.join(user, "2606", "caseDicts", "setConstraintTypes"):
+                "inlet { type uniformFixedValue; uniformValue constant (2 0 0); }\n",
+            os.path.join(user, "caseDicts", "setConstraintTypes"): "inlet { }\n",
+            os.path.join(user, "controlDict"): "InfoSwitches { allowSystemOperations 1; }\n",
+            os.path.join(root, ".bashrc"): "export FOAM_SIGFPE=false\n",
+        }
+        for path, text in planted.items():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        elsewhere = os.path.join(self.tmp(), "elsewhere")
+        with open(elsewhere, "w", encoding="utf-8") as fh:
+            fh.write("InfoSwitches { allowSystemOperations 1; }\n")
+        cfg = os.path.join(user, "2606", "controlDict")
+        os.symlink(elsewhere, cfg)
+        for _ in range(2):
+            self.assertEqual(T.home(out, 2606, "cfd-openfoam"), root)
+            found = sorted(os.path.relpath(os.path.join(d, f), root)
+                           for d, dirs, files in os.walk(root) for f in files + [
+                               x for x in dirs if os.path.islink(os.path.join(d, x))])
+            self.assertEqual(found, [os.path.join(".OpenFOAM", "2606", "controlDict")])
+            self.assertFalse(os.path.islink(cfg))
+            with open(cfg, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), T._USER_CONTROLDICT)
+        with open(elsewhere, encoding="utf-8") as fh:
+            self.assertIn("allowSystemOperations 1", fh.read())
+        # A link where the user directory belongs is removed, never followed.
+        shutil.rmtree(user)
+        target = os.path.join(self.tmp(), "target")
+        os.makedirs(os.path.join(target, "2606", "caseDicts"))
+        with open(os.path.join(target, "2606", "caseDicts", "setConstraintTypes"), "w") as fh:
+            fh.write("inlet { }\n")
+        os.symlink(target, user)
+        T.home(out, 2606, "cfd-openfoam")
+        self.assertFalse(os.path.islink(user))
+        self.assertTrue(os.path.exists(os.path.join(target, "2606", "caseDicts",
+                                                    "setConstraintTypes")))
+        self.assertFalse(os.path.exists(os.path.join(user, "2606", "caseDicts")))
 
     def _appended(self, rel: str, text: str):
         case = _copy_case(os.path.join(self.tmp(), "case"))
@@ -458,7 +817,37 @@ class TheGuardRefusesWhatItCannotVouchFor(_env.EnvCase):
         v = _run(self.registry, "cfd.regime", self.tmp(), params, tier=0)
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("Mach", v.detail)
-        self.assertAlmostEqual(v.measured, 1.15, places=6)
+        # The Mach number in its own units against 0.3 (D3), never a fraction.
+        self.assertEqual((v.units, v.limit, v.comparator), ("Mach", 0.3, "<"))
+        self.assertAlmostEqual(v.measured, 0.3 * 1.15, places=9)
+
+    def test_the_value_is_the_reynolds_number_against_its_limit(self):
+        """(issue #15, D3) The value is Re in units ``Re`` against 2300, and the
+        detail says on which speed and length it was computed. What slipped
+        through before: "0.008696 fraction of limit" for Re 20."""
+        v = _run(self.registry, "cfd.regime", self.tmp(), self.params, tier=0)
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.limit, v.comparator), ("Re", 2300.0, "<"))
+        self.assertAlmostEqual(v.measured, 0.01 * 0.02 / 1e-5, places=6)
+        for said in ("U Dh / nu", "0.01 m/s", "0.02 m", "onset of transition"):
+            self.assertIn(said, v.detail)
+        self.assertGreater(claims_mod.margin(v).fraction, 0.99)
+
+    def test_a_value_a_hair_under_its_limit_never_reads_at_it(self):
+        """Review of issue #15's D3: regime judged the raw Re and reported nine
+        digits, so Re 2299.9999999 read a pass at "2300 Re" against "< 2300"
+        (Mach 0.3 the same): a pass at a value its own condition rejects."""
+        cases = (("Re", dict(self.params, cfd_velocity_m_s=(2300 - 1e-7) * 1e-5 / 0.02),
+                  2300.0),
+                 ("Mach", dict(self.params, cfd_velocity_m_s=(0.3 - 1e-11) * 1400.0,
+                               cfd_length_m=1e-9), 0.3))
+        for units, params, limit in cases:
+            with self.subTest(units):
+                v = _run(self.registry, "cfd.regime", self.tmp(), params, tier=0)
+                self.assertEqual((v.outcome, v.units, v.limit), ("pass", units, limit),
+                                 v.render())
+                self.assertLess(v.measured, limit)
+                self.assertNotEqual(claims_mod.margin(v).why, "disagrees")
 
     def test_a_plane_with_no_normal_is_an_error(self):
         params = dict(self.params)
@@ -478,31 +867,43 @@ def _exe(path: str, text: str) -> None:
     os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def install_standin(directory: str) -> tuple[str, str]:
+    """The stand-in OpenFOAM installed under ``directory``: ``(install root,
+    bin)``, where ``bin`` holds only the ``openfoam2606`` wrapper, to put on
+    PATH. Its mode is ``<install root>/standin.json`` (``{}`` here), and each
+    tool it runs is appended to ``<install root>/calls``."""
+    root = os.path.join(directory, "openfoam2606")
+    appbin = os.path.join(root, "platforms", "linux64GccDPInt32Opt", "bin")
+    os.makedirs(appbin)
+    os.makedirs(os.path.join(root, "etc"))
+    os.makedirs(os.path.join(root, "META-INFO"))
+    with open(os.path.join(root, "etc", "bashrc"), "w") as fh:
+        fh.write('root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n'
+                 'export WM_PROJECT_DIR="$root"\n'
+                 'export FOAM_APPBIN="$root/platforms/linux64GccDPInt32Opt/bin"\n')
+    with open(os.path.join(root, "META-INFO", "api-info"), "w") as fh:
+        fh.write("api=2606\npatch=0\n")
+    for tool in ("blockMesh", "checkMesh", "simpleFoam", "foamDictionary"):
+        _exe(os.path.join(appbin, tool),
+             f"#!{sys.executable}\nimport os, runpy\nos.environ['STANDIN_TOOL'] = "
+             f"{tool!r}\nrunpy.run_path({STANDIN!r}, run_name='__main__')\n")
+    bin_dir = os.path.join(directory, "bin")
+    os.makedirs(bin_dir)
+    # v2606's wrapper, quote and all.
+    _exe(os.path.join(bin_dir, "openfoam2606"),
+         f'#!/bin/sh\nexec "{root}"/etc/openfoam "$@"\n')
+    with open(os.path.join(root, "standin.json"), "w") as fh:
+        json.dump({}, fh)
+    return root, bin_dir
+
+
 @unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
 class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     """Through the stand-in OpenFOAM: every way a run looks finished and is not."""
 
     def setUp(self):
         self.dir = self.tmp()
-        self.root = os.path.join(self.dir, "openfoam2606")
-        appbin = os.path.join(self.root, "platforms", "linux64GccDPInt32Opt", "bin")
-        os.makedirs(appbin)
-        os.makedirs(os.path.join(self.root, "etc"))
-        os.makedirs(os.path.join(self.root, "META-INFO"))
-        with open(os.path.join(self.root, "etc", "bashrc"), "w") as fh:
-            fh.write('root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"\n'
-                     'export WM_PROJECT_DIR="$root"\n'
-                     'export FOAM_APPBIN="$root/platforms/linux64GccDPInt32Opt/bin"\n')
-        self.api_info("api=2606\npatch=0\n")
-        for tool in ("blockMesh", "checkMesh", "simpleFoam", "foamDictionary"):
-            _exe(os.path.join(appbin, tool),
-                 f"#!{sys.executable}\nimport os, runpy\nos.environ['STANDIN_TOOL'] = "
-                 f"{tool!r}\nrunpy.run_path({STANDIN!r}, run_name='__main__')\n")
-        self.bin = os.path.join(self.dir, "bin")
-        os.makedirs(self.bin)
-        # v2606's wrapper, quote and all.
-        _exe(os.path.join(self.bin, "openfoam2606"),
-             f'#!/bin/sh\nexec "{self.root}"/etc/openfoam "$@"\n')
+        self.root, self.bin = install_standin(self.dir)
         self.registry = _registry()
         self.params = _baseline()
         self.mode({})
@@ -515,7 +916,8 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         with open(os.path.join(self.root, "standin.json"), "w") as fh:
             json.dump(mode, fh)
 
-    def gate(self, gid: str, params: dict | None = None, *, runs: bool = True):
+    def gate(self, gid: str, params: dict | None = None, *, runs: bool = True,
+             claims=None):
         calls = os.path.join(self.root, "calls")
         if os.path.exists(calls):
             os.remove(calls)
@@ -523,7 +925,8 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         # sourced etc/bashrc puts the real install's bin on PATH.
         env = {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}
         with mock.patch.dict(os.environ, env):
-            v = _run(self.registry, gid, self.tmp(), dict(self.params, **(params or {})))
+            v = _run(self.registry, gid, self.tmp(), dict(self.params, **(params or {})),
+                     claims=claims)
         # A stand-in that never ran (a noexec temp dir) would skip or error the
         # gate for the wrong reason; the count keeps that from reading as a test.
         if v.outcome in ("pass", "fail") and runs:
@@ -553,8 +956,14 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     def test_a_converged_run_passes(self):
         v = self.gate("cfd.converged")
         self.assertEqual(v.outcome, "pass", v.render())
-        self.assertEqual(v.measured, 60.0)
-        self.assertEqual(v.limit, 2000.0)
+        # The judged value (D3): the estimated remaining change in % of the
+        # pressure drop, against 0.1 %; the iteration is in the detail.
+        self.assertEqual((v.units, v.limit, v.comparator), ("%", 0.1, "<="))
+        summary = next(p for p in v.evidence if p.endswith("summary.json"))
+        with open(summary, encoding="utf-8") as fh:
+            self.assertEqual(v.measured, float(f"{json.load(fh)['iterative_error_pct']:.6g}"))
+        self.assertLessEqual(v.measured, v.limit)
+        self.assertIn("converged at iteration 60 of 2000", v.detail)
 
     def test_out_of_iterations_with_exit_0_and_end_fails(self):
         self.mode({"simpleFoam": {"converge_at": 5000}})
@@ -636,13 +1045,16 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("checkMesh failed", v.detail)
+        # Every value inside its limit: no value, so none reads inside under a fail.
+        self.assertEqual((v.measured, v.limit), (None, None))
 
     def test_mesh_ok_past_the_projects_limit_fails(self):
         self.mode({"checkMesh": {"non_ortho": 72.0}})
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("checkMesh said Mesh OK, but non-orthogonality", v.detail)
-        self.assertAlmostEqual(v.measured, 72.0 / 65.0, places=5)
+        # Degrees against degrees (D3), never "fraction of limit".
+        self.assertEqual((v.measured, v.limit, v.units, v.comparator), (72.0, 65.0, "deg", "<="))
 
     def test_a_value_checkmesh_did_not_print_is_an_error(self):
         self.mode({"checkMesh": {"omit": ["non_ortho"]}})
@@ -654,7 +1066,21 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         self.mode({"checkMesh": {"aspect": 5000.0, "ok": False}})
         v = self.gate("cfd.mesh_quality")
         self.assertEqual(v.outcome, "fail", v.render())
-        self.assertAlmostEqual(v.measured, 5.0)
+        self.assertEqual((v.measured, v.limit, v.units), (5000.0, 1000.0, "aspect ratio"))
+
+    def test_a_pass_reports_the_value_nearest_its_limit(self):
+        """(D3) A pass reports the one of the three nearest its own limit, in
+        its own units, so it never shows more margin than the gate has: the
+        aspect ratio when that is nearer, the non-orthogonality in degrees when
+        that is."""
+        v = self.gate("cfd.mesh_quality")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.units, v.limit), ("aspect ratio", 1000.0))
+        self.mode({"checkMesh": {"non_ortho": 60.0}})
+        v = self.gate("cfd.mesh_quality")
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertEqual((v.measured, v.limit, v.units), (60.0, 65.0, "deg"))
+        self.assertAlmostEqual(claims_mod.margin(v).fraction, 5.0 / 65.0)
 
     # -- mesh independence ---------------------------------------------------
     def test_a_poiseuille_ladder_passes(self):
@@ -697,12 +1123,63 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
     def test_the_band_top_is_judged_not_the_value(self):
         """A limit between the pressure drop and its band's top fails."""
         dp_pa = 870.0 * 6.0e-4 / (1 + 2.0 / 40 ** 2)
-        v = self.gate("cfd.pressure_drop", {"cfd_dp_max_pa": dp_pa * 1.0005})
+        v = self.gate("cfd.pressure_drop", claims=_claims(dp_pa * 1.0005))
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertGreater(v.measured, dp_pa * 1.0005)
         v = self.gate("cfd.pressure_drop")
         self.assertEqual(v.outcome, "pass", v.render())
         self.assertEqual(v.units, "Pa")
+
+    def test_the_limit_is_the_claims(self):
+        """Issue #15 D2: the gate judges against the claim tagged pressure-drop, and
+        reports that claim's limit and side. Until then it judged against
+        cfd_dp_max_pa: a claim at 0.5 Pa beside the parameter at 0.6 read a
+        pass at 0.52 Pa that the claim's own condition rejected."""
+        good = self.gate("cfd.pressure_drop")
+        self.assertEqual((good.outcome, good.limit, good.comparator), ("pass", 0.6, "<="))
+        v = self.gate("cfd.pressure_drop", claims=_claims(0.5))
+        self.assertEqual((v.outcome, v.limit, v.measured), ("fail", 0.5, good.measured),
+                         v.render())
+        self.assertIn("past 0.5 Pa", v.detail)
+        v = self.gate("cfd.pressure_drop", claims=_claims(0.6, comparator=Comparator.LT))
+        self.assertEqual((v.outcome, v.comparator), ("pass", "<"), v.render())
+        # A stray parameter of the old name moves nothing.
+        v = self.gate("cfd.pressure_drop", {"cfd_dp_max_pa": 0.1})
+        self.assertEqual((v.outcome, v.limit), ("pass", 0.6), v.render())
+
+    def test_a_limit_the_gate_cannot_judge_errors_before_a_run(self):
+        """Another unit, a lower limit, or no claim tagged pressure-drop: an
+        error, and no OpenFOAM tool runs."""
+        calls = os.path.join(self.root, "calls")
+        cases = (("kPa", _claims(units="kPa"), "states its limit in 'kPa'"),
+                 ("no units", _claims(units=""), "states its limit in ''"),
+                 ("lower limit", _claims(comparator=Comparator.GE), "only an upper limit"),
+                 ("no claim", [], "no claim is named or tagged 'pressure-drop'"))
+        for label, claims, said in cases:
+            with self.subTest(label):
+                v = self.gate("cfd.pressure_drop", claims=claims)
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                self.assertFalse(os.path.exists(calls), "a tool ran")
+
+    def test_a_tiny_drop_is_judged_whole(self):
+        """Review of issue #15's D2: the gate judged ``round(top, 9)``, so a band
+        top of 6.0e-13 Pa read 0.0 and passed a limit of 1e-13 Pa, its own
+        detail saying "6.0021e-13 Pa, within 1e-13 Pa"."""
+        v = self.gate("cfd.pressure_drop", {"cfd_density_kg_m3": 1e-9},
+                      claims=_claims(1e-13))
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertGreater(v.measured, 1e-13)
+        v = self.gate("cfd.pressure_drop", {"cfd_density_kg_m3": 1e-9},
+                      claims=_claims(1e-11))
+        self.assertEqual(v.outcome, "pass", v.render())
+        self.assertAlmostEqual(v.measured / 6.0e-13, 1.0, places=2)
+        self.assertNotEqual(claims_mod.margin(v).why, "disagrees")
+
+    def test_the_summary_holds_no_limit(self):
+        v = self.gate("cfd.pressure_drop")
+        summary = self.evidence(v, "summary.json")
+        self.assertFalse([k for k in summary if "limit" in k.lower()], sorted(summary))
 
     def test_a_ladder_past_the_gci_limit_fails_without_openfoam(self):
         """In CI the selftest skips this control: the stand-in holds the
@@ -718,6 +1195,89 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         v = self.gate("cfd.mesh_independence")
         self.assertEqual(v.outcome, "fail", v.render())
         self.assertIn("observed order 0.7", v.detail)
+
+    def test_an_upwind_entry_for_an_unsolved_field_leaves_the_order_second(self):
+        """A divSchemes entry for a field a laminar run never solves (the
+        turbulent tutorials carry ``div(phi,k) bounded Gauss upwind``) leaves the
+        formal order 2. Until P0.1 it set the band to 0.95-1.05, and this ladder,
+        which converges at order 2, failed."""
+        case = _copy_case(os.path.join(self.tmp(), "case"))
+        _edit(case, "system/fvSchemes", "divSchemes",
+              "default none; div(phi,U) bounded Gauss linearUpwind grad(U); "
+              "div((nuEff*dev2(T(grad(U))))) Gauss linear; div(phi,k) bounded Gauss upwind;")
+        v = self.gate("cfd.mesh_independence", {"cfd_case": case})
+        self.assertEqual(v.outcome, "pass", v.render())
+
+    # -- the evidence a chart draws (GitHub #15, P0.2) ------------------------
+    def evidence(self, v, name: str):
+        """The evidence file ``name`` of ``v``: a dict for JSON, rows for a CSV."""
+        path = next(p for p in v.evidence if os.path.basename(p) == name)
+        with open(path, encoding="utf-8", newline="") as fh:
+            return json.load(fh) if name.endswith(".json") else list(csv.DictReader(fh))
+
+    def assert_history(self, rows, column: str, error_pct, n: int | None = None, places=12):
+        """The rows are the history the estimate read: iterations 1.., change_pct
+        100 x |change| / |last| (none on the first row), and error_pct the
+        estimate's reading of the same values as a percentage of the last. In Pa
+        the values are the solver's times the density, each product rounded: where
+        the reading is a round-off swing of about 3e-8 of the value (the real
+        baseline), that moves it by up to about 1e-8 of itself. error_pct is the
+        reading the gate judged, on the solver's own values."""
+        vals = [float(r[column]) for r in rows]
+        if n is not None:
+            self.assertEqual(len(vals), n)
+        self.assertEqual([int(r["iteration"]) for r in rows], list(range(1, len(vals) + 1)))
+        self.assertEqual(rows[0]["change_pct"], "")
+        for i in range(1, len(vals)):
+            self.assertEqual(float(rows[i]["change_pct"]),
+                             100.0 * abs(vals[i] - vals[i - 1]) / abs(vals[-1]))
+        rem = I.remaining(vals)
+        if rem is None or rem == math.inf:
+            self.assertIsNone(error_pct)
+        else:
+            self.assertAlmostEqual(error_pct / (100.0 * rem / abs(vals[-1])), 1.0,
+                                   places=places)
+
+    def test_the_converged_run_writes_its_history_and_estimate(self):
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        summary = self.evidence(v, "summary.json")
+        rows = self.evidence(v, "history.csv")
+        self.assertNotIn("dp", summary)          # the history is the CSV, never JSON
+        self.assertEqual(summary["convergence_tol_pct"], 0.1)   # STABLE_TOL 1e-3
+        self.assertEqual(float(rows[-1]["dp_m2_s2"]), summary["dp_m2_s2"])
+        self.assertLessEqual(summary["iterative_error_pct"], summary["convergence_tol_pct"])
+        self.assert_history(rows, "dp_m2_s2", summary["iterative_error_pct"], n=60)
+
+    def test_an_unsettled_run_writes_its_estimate_too(self):
+        self.mode({"simpleFoam": {"settle_tail": 0.05}})
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "fail", v.render())
+        summary = self.evidence(v, "summary.json")
+        self.assertGreater(summary["iterative_error_pct"], summary["convergence_tol_pct"])
+        self.assert_history(self.evidence(v, "history.csv"), "dp_m2_s2",
+                            summary["iterative_error_pct"])
+        self.mode({"simpleFoam": {"converge_at": 8}})
+        v = self.gate("cfd.converged")
+        self.assertEqual(v.outcome, "fail", v.render())
+        self.assertIsNone(self.evidence(v, "summary.json")["iterative_error_pct"])
+
+    def test_each_level_writes_its_history_and_estimate(self):
+        for gid, column in (("cfd.mesh_independence", "dp_m2_s2"), ("cfd.pressure_drop", "dp_pa")):
+            with self.subTest(gid=gid):
+                v = self.gate(gid)
+                self.assertEqual(v.outcome, "pass", v.render())
+                summary = self.evidence(v, "summary.json")
+                self.assertEqual(summary["convergence_tol_pct"], 0.1)   # STABLE_TOL 1e-3
+                rho = summary.get("density_kg_m3", 1.0)
+                for lv in summary["levels"]:
+                    rows = self.evidence(v, f"history_level{lv['k']}.csv")
+                    self.assertEqual(rows[0].keys(), {"iteration", column, "change_pct"})
+                    self.assertAlmostEqual(float(rows[-1][column]) / (rho * lv["dp_m2_s2"]),
+                                           1.0, places=12)
+                    self.assertLessEqual(lv["iterative_error_pct"], summary["convergence_tol_pct"])
+                    self.assert_history(rows, column, lv["iterative_error_pct"],
+                                        n=lv["converged_in"], places=12 if rho == 1.0 else 6)
 
     # -- what the run itself says -------------------------------------------
     def test_the_converged_line_beside_a_residual_over_target_fails(self):
@@ -736,7 +1296,7 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
         self.mode({"simpleFoam": {"converge_at": 8}})
         v = self.gate("cfd.converged")
         self.assertEqual(v.outcome, "fail", v.render())
-        self.assertIn("fewer than the 21", v.detail)
+        self.assertIn("fewer than the 17", v.detail)
 
     def test_a_run_to_other_criteria_is_an_error(self):
         self.mode({"simpleFoam": {"criteria": {"p": 0.05, "U": 1e-6}}})
@@ -817,6 +1377,77 @@ class AFinishedLookingRunIsNotAPass(_env.EnvCase):
                 self.assertIn("checkMesh said Mesh OK, but", v.detail)
 
 
+@unittest.skipIf(os.name == "nt", "the stand-in OpenFOAM is a #! script and a bash rc")
+class ALogKeepsNoMachineDetail(_env.EnvCase):
+    """Every log a gate writes, the bytes its verdict cites and a site copies,
+    names no host, no home, no absolute path of this machine and no banner
+    date, time or PID (``_tool.kept``), and a banner without its safety lines
+    is still an error. What slipped through: a committed demo's evidence (the
+    motorbike's, aero-openfoam's copy of ``_tool.py``) carried the author's
+    home path and host name in 34 logs."""
+
+    HOST = "frodo-laptop-7f3a"
+
+    def setUp(self):
+        self.root, self.bin = install_standin(self.tmp())
+        self.registry = _registry()
+
+    def run_gate(self, gid: str, **mode):
+        with open(os.path.join(self.root, "standin.json"), "w") as fh:
+            json.dump(dict({"host": self.HOST,
+                            "say": ['Reading "/home/frodo/work/channel.stl"'],
+                            "say_err": [f"[{self.HOST}] a warning about /home/frodo/.ssh"]},
+                           **mode), fh)
+        work = self.tmp()
+        with mock.patch.dict(os.environ, {"PATH": self.bin + os.pathsep + "/usr/bin:/bin"}):
+            v = _run(self.registry, gid, work, _baseline())
+        logs = {}
+        for dirpath, _dirs, files in os.walk(work):
+            for name in files:
+                if name.startswith("log."):
+                    with open(os.path.join(dirpath, name), encoding="utf-8") as fh:
+                        logs[os.path.relpath(os.path.join(dirpath, name), work)] = fh.read()
+        return v, work, logs
+
+    def details(self, text: str, work: str) -> list[str]:
+        return [what for what, hit in (
+            ("the host", self.HOST in text),
+            ("a home directory", re.search(r"(?<![\w.~/-])/(?:home|Users)/", text)),
+            ("the out directory", work in text),
+            ("a date", re.search(r"^Date\s*:\s*(?!<date>$)\S", text, re.M)),
+            ("a time", re.search(r"^Time\s*:\s*(?!<time>$)\S", text, re.M)),
+            ("a PID", re.search(r"^PID\s*:\s*(?!<pid>$)\S", text, re.M))) if hit]
+
+    def test_a_run_leaves_no_machine_detail_in_its_logs(self):
+        v, work, logs = self.run_gate("cfd.converged")
+        self.assertEqual(v.outcome, "pass", v.render())
+        names = {os.path.basename(p) for p in logs}
+        self.assertTrue({"log.blockMesh", "log.checkMesh", "log.simpleFoam"} <= names, names)
+        self.assertTrue([p for p in v.evidence or ()
+                         if os.path.basename(str(p)).startswith("log.")],
+                        "the verdict cites no log")
+        for rel, text in sorted(logs.items()):
+            self.assertEqual(self.details(text, work), [], rel)
+        solver = next(t for p, t in logs.items() if p.endswith("log.simpleFoam"))
+        for line in ("Date   : <date>", "Time   : <time>", "Host   : <host>", "PID    : <pid>",
+                     "Case   : <out>/cfd-openfoam/", '"~/work/channel.stl"',
+                     "[<host>] a warning about ~/.ssh",
+                     "trapFpe: Floating point exception trapping enabled",
+                     "allowSystemOperations : Disallowing"):
+            self.assertIn(line, solver)
+
+    def test_a_bad_banner_is_still_an_error_and_its_log_keeps_no_machine_detail(self):
+        for omit, said in (("no-fpe", "floating-point trapping"),
+                           ("allowing", "system operations allowed")):
+            with self.subTest(said):
+                v, work, logs = self.run_gate("cfd.mesh_quality", omit=[omit])
+                self.assertEqual(v.outcome, "error", v.render())
+                self.assertIn(said, v.error)
+                self.assertTrue(logs)
+                for rel, text in sorted(logs.items()):
+                    self.assertEqual(self.details(text, work), [], rel)
+
+
 # --------------------------------------------------------------------------- #
 # the real OpenFOAM
 # --------------------------------------------------------------------------- #
@@ -846,14 +1477,39 @@ class TheRealOpenFOAM(_env.EnvCase):
             ny = lv["counts"][0][1]
             # The uniform inlet's entrance reaches the planes at 3e-6 of the value.
             self.assertAlmostEqual(lv["dp_m2_s2"] / (exact / (1 + 2 / ny ** 2)), 1.0, places=5)
+            # The history a chart draws, and the estimate beside it (P0.2).
+            path = next(p for p in v.evidence if p.endswith(f"history_level{lv['k']}.csv"))
+            with open(path, encoding="utf-8", newline="") as fh:
+                dp_pa = [float(r["dp_pa"]) for r in csv.DictReader(fh)]
+            self.assertEqual(len(dp_pa), lv["converged_in"])
+            self.assertLessEqual(lv["iterative_error_pct"], data["convergence_tol_pct"])
+            # In Pa each value is rounded once more (assert_history says why).
+            self.assertAlmostEqual(lv["iterative_error_pct"] / (
+                100 * I.remaining(dp_pa) / dp_pa[-1]), 1.0, places=6)
         self.assertAlmostEqual(data["gci"]["phi_ext21"] / exact, 1.0, places=3)
+
+    def test_the_pack_writes_its_values_to_13_digits(self):
+        """WRITE_PRECISION reaches the files the gate reads: the estimate needs a
+        change of 1e-8 of the value resolved. Until P0.1 the case's own
+        writePrecision set it (the baseline's 10: 11 digits)."""
+        root = self.tmp()
+        v = _run(self.registry, "cfd.converged", root, self.params)
+        self.assertEqual(v.outcome, "pass", v.render())
+        dats = [os.path.join(d, f) for d, _dirs, files in os.walk(root) for f in files
+                if f == "surfaceFieldValue.dat"]
+        self.assertEqual(len(dats), 2, dats)
+        for dat in dats:
+            with open(dat, encoding="utf-8") as fh:
+                row = [line for line in fh if not line.startswith("#")][-1].split()
+            digits = row[1].lstrip("-").split("e")[0].replace(".", "")
+            self.assertEqual(len(digits), 13, row)
 
     def test_calc_is_stopped_at_run_time_too(self):
         """Past cfd.case_readable (run directly): the private HOME's
         allowSystemOperations 0 stops the compile."""
         inst = T.locate()
         out = self.tmp()
-        env = T.environment(inst, T.home(out, inst.api))
+        env = T.environment(inst, T.home(out, inst.api, "cfd-openfoam"))
         stage = _copy_case(os.path.join(out, "case"))
         _edit(stage, "system/controlDict", "endTime", '#calc "1000*2"')
         with self.assertRaises(T.RunError) as cm:
@@ -866,7 +1522,7 @@ class TheRealOpenFOAM(_env.EnvCase):
         C = self.registry.get("cfd.converged")[1].__globals__
         inst = T.locate()
         out = self.tmp()
-        env = T.environment(inst, T.home(out, inst.api))
+        env = T.environment(inst, T.home(out, inst.api, "cfd-openfoam"))
         case = C["Case"](CHANNEL)
         planes = C["_planes"](gates_mod.GateContext(root=out, params=self.params, out_dir=out))
         stage = os.path.join(out, "stage")

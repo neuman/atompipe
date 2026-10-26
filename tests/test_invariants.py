@@ -560,6 +560,9 @@ def _every_status_ledger() -> tuple[Ledger, _Reg, dict, frozenset]:
         # P2.5a: the physical path and expert judgment (R-6: eleven more causes
         # the report must place, and VERIFIED reachable at last).
         *_physical_claims(c),
+        # Issue #15, D1: a pass Stale only for a channel nopekit cannot see
+        # (`EVERY_STATUS_UNSEEN`, which a caller hands `compose`).
+        c("K32", gates=["g.k32"]),
     ]
     verdicts = [
         Verdict(gate="g.k1", claims=["K1"], passed=True),
@@ -577,12 +580,21 @@ def _every_status_ledger() -> tuple[Ledger, _Reg, dict, frozenset]:
                 units="mm", comparator="<=", settles="deflection"),
         Verdict(gate="g.k19", claims=["K19"], passed=True, unqualified=_OUTSIDE),
         Verdict(gate="g.k20", claims=["K20"], passed=True, unqualified=_OUTSIDE),
+        Verdict(gate="g.k32", claims=["K32"], passed=True),
     ]
     reg = _Reg([gate(g) for g in ("g.k1", "g.k2", "g.k4", "g.k5", "g.k7", "g.k11", "g.k12",
-                                  "g.k16", "g.k17", "g.k18", "g.k19", "g.k20")])
+                                  "g.k16", "g.k17", "g.k18", "g.k19", "g.k20", "g.k32")])
     owners = {"K15": claims_mod.Attribution("Ana", "carried on purpose"),
               "K20": claims_mod.Attribution("Bo", "linear past the range")}
-    return _ledger(*claims, verdicts=verdicts), reg, owners, frozenset({"g.k12"})
+    return (_ledger(*claims, verdicts=verdicts), reg, owners,
+            frozenset({"g.k12"}) | EVERY_STATUS_UNSEEN)
+
+
+#: The every-status ledger's gate that is Stale only for a channel nopekit
+#: cannot see (issue #15, D1): in its stale set, and what a caller passes as
+#: ``unseen_gates`` to reach `ClaimCause.UNSEEN`. A caller that does not reads
+#: it `invalidated`, as every reader did before D1.
+EVERY_STATUS_UNSEEN = frozenset({"g.k32"})
 
 
 def listing_problems(md: str, composed: dict) -> list[str]:
@@ -633,8 +645,10 @@ class EveryUnresolvedClaimIsListed(unittest.TestCase):
             patches.append(mock.patch.object(report_mod, "_section_gaps", gaps))
         with patches[0], (patches[1] if len(patches) > 1 else mock.patch.object(
                 report_mod, "_section_gaps", report_mod._section_gaps)):
-            md = report_mod.render_markdown(ledger, reg, stale_gates=stale)
-            composed = owned(ledger, registry=reg, stale_gates=stale)
+            md = report_mod.render_markdown(ledger, reg, stale_gates=stale,
+                                            unseen_gates=EVERY_STATUS_UNSEEN)
+            composed = owned(ledger, registry=reg, stale_gates=stale,
+                             unseen_gates=EVERY_STATUS_UNSEEN)
         return md, composed
 
     def test_every_status_and_cause_is_reached(self):

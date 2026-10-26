@@ -1,0 +1,234 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.reference",
+  "rho": "6a9a99d006ea813361d2d3dabcbe0ee3ba1f3ca5e701a601603a4757aa692e10",
+  "static": "e516e78b09980380cd2e7da595c36b1729234afea39e95ab9df7469c9921cbcc",
+  "static_parts": {
+    "spine": "b9c5046a0430346c084cc073ce23a13dab1788c34c118bdc75b3a3aabc9cee29",
+    "code": {
+      "digest": "7228cfb227a378c2ae4f5657484a78d5c7ee30cb9d2647ce8cb760cd6fff2e58",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_gci.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "248e7b2db2af03fc80023cf48ce78b880f188b80c5b18eefc12f4af15eb53d1e",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8",
+        "selftest/baseline.json": "ca30b6597cef7e72197ba79e9e8b75ebc3759c240aa858bc480e784453a4916a"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:wrong_speed",
+      "expect": "fail",
+      "note": "the baseline spheroid with its inlet velocity 15% above the stated free stream",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "6017ca1ce2b826d9d8e8aa59b4b4347991e0eed09b9751174683dc9f51bb89c3",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+      "<pack:aero-openfoam>/gates/_par.py": "1ffc51cc44227370b05fab77ea97219948cffb575d2961ddfd5ecf3e68eb3a3b",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_body_group"
+        ],
+        "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+        "bodyGroup"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "204a7390399497567fa2149dd15b3ba7bc333ff43c53ba75a0804c4cbede5fb2",
+        "<out:controls>/aero.reference/aero-openfoam/known-bad/wrong_speed/case"
+      ],
+      [
+        [
+          "aero_u_inf_m_s"
+        ],
+        "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+        20.0
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": []
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_body_group"
+          ],
+          "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+          "bodyGroup"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ],
+        [
+          [
+            "aero_u_inf_m_s"
+          ],
+          "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+          20.0
+        ]
+      ],
+      "files": {},
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": []
+    },
+    "extra": [],
+    "measured": null,
+    "limit": null,
+    "units": "",
+    "detail": "inlet patch inlet at 20 m/s along +x, aero_u_inf_m_s 20; body group bodyGroup, 1 wall patch(es), bodyGroup still",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:wrong_speed (the baseline spheroid with its inlet velocity 15% above the stated free stream): the inlet velocity is 23 m/s, but aero_u_inf_m_s says 20: every coefficient is made dimensionless by the stated speed (inlet patch inlet at 23 m/s along +x, aero_u_inf_m_s 20; body group bodyGroup)",
+  "measured": null,
+  "limit": null,
+  "units": "",
+  "digest": "9a0aad8145c79643e3b9dc37880f903507d3de962c21cb3d6d2b4b5a24522bbf"
+}

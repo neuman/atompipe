@@ -1,0 +1,9 @@
+{
+  "kind": "board",
+  "title": "Did it settle",
+  "line": "The solver stopped at a drag area that no longer changes.",
+  "members": [
+    "C5"
+  ],
+  "order": 3
+}

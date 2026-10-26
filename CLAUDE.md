@@ -337,7 +337,11 @@ one place a pass nothing earned costs money. Enforced in `tests/test_export.py`,
     `report --milestone` said the boundary's *ready* over a forged cache and `status`
     listed no milestone at all.) Amber — a Checked claim that a ±10% move of an
     unconfirmed assumption's choice flips — is said beside Checked and moves no status,
-    exit code, readiness, JUnit outcome or export (phase 3b).
+    exit code, readiness, JUnit outcome or export (phase 3b). A claim Stale only
+    because its evaluators read inputs nopekit cannot see (a solver's subprocess) has
+    its own cause, `unseen` — never "the design changed" — which moves no status or
+    readiness, and `check` says on the line after its *ready* that this ready is its
+    own (issue #15, D1: `claims.unseen_gates`).
 
 One more came with architecture phase 2, when a decision's losers gained types and a
 person's preference a channel — a new place to pass the agent's choice off as a
@@ -362,8 +366,9 @@ person's. Enforced in `tests/test_preferences.py`:
     `docs/SPINE_CONTRACT.md`.)
 
 One more came with architecture phase 5, when the site gained a map and the agent's
-prose: where the site persuades, with the marketing page beside it from SPEC 40.
-Enforced in `tests/test_site_truth.py`:
+prose: where the site persuades, with the marketing page beside it from SPEC 40, and
+pictures of results with issue #15. Enforced in `tests/test_site_truth.py` and
+`tests/test_figures.py`:
 
 14. **The site never says more than the resolution, and stamped prose is flagged when
     behind.** Every status, word, count, order, margin and *ready* that `site build` bakes
@@ -384,15 +389,26 @@ Enforced in `tests/test_site_truth.py`:
     digest of the tokens of its board's claims and of every claim it names now; otherwise
     the page says it was written before the latest results, unstamped text included; and
     every number in it that no number the page keeps matches at its precision, in its
-    unit, is marked. (What slipped through: the reference page decided its go/no-go in the
-    browser from a hand-kept claim list, so a claim added to a board never reached it; the
+    unit, is marked. A figure on the page (issue #15) is the evidence of one named
+    verdict entry, bound by content: it reads current only beside the fresh served
+    entry, and otherwise says it is stale or another result's, with that result's own
+    outcome; it sits beside the chips of every claim its gate covers; its colour scale
+    is a pack constant, never a limit; a chart's limit and margin are the floor's and
+    its other numbers its evidence's; a renderer that is missing or fails moves no
+    status; and no file the page links is deleted by the build that links it. (What
+    slipped through: the reference page decided its go/no-go in the browser from a
+    hand-kept claim list, so a claim added to a board never reached it; the
     template ranked anchored verdicts by their `passed` flag beside the resolver's word,
     sorted verdict rows by a status table of its own and subtracted a chart's limit from
     its value; and nothing kept prose from saying a claim passes after it failed; and, in
     review of phase 5, a Failing claim read "99% inside the limit" (the evaluator's margin
     beside the claim's limit), a stamp missed a claim its text named from another board,
     "3 mm" matched a count of claims, and an evidence copy the same build deleted vouched
-    for a number.)
+    for a number; and, before issue #15, the evidence copy was bound by name, so a design
+    that went A, B, A published B's files under A, a viewgen whose tool was missing
+    deleted its committed picture, and a prose figure under `assets/` read present and
+    was deleted; and, in review of its figures, the sentence beside an older picture
+    called it "an earlier result" when after A, B, A it was B's, the later run.)
 
 One more came with checkpoint P2.3, numbered 15 before 14 landed (14 was reserved for
 the site, which landed in architecture phase 5). Enforced in `tests/test_mutation.py`,
@@ -446,17 +462,17 @@ named.)
 | 1 | `test_invariants.SkipIsNotPass`, `test_invariants.CheckedMeansEveryEvaluatorPassed` |
 | 2 | `test_invariants.ErrorIsNotPass`, `test_louder.ErrorIsLouder`, `test_invariants.UnqualifiedIsTheSpinesWord`, `test_prerequisites.AnErroredPrerequisiteStaysLouder` |
 | 3 | `test_invariants.RegistryRefusesLoggers`, `test_proposers.AProposerIsNeverAnEvaluator` |
-| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus` |
+| 4 | `test_invariants.ReportNeverOverclaims`, `test_status_table.UnqualifiedBesideAPassIsNeverChecked`, `test_invariants.CheckedMeansEveryEvaluatorPassed`, `test_goalposts.APassMustMeetTheAcceptanceItRead`, `test_goalposts.AValueOutsideTheAcceptanceIsNeverChecked`, `test_goalposts.AnEvaluatorStatesItsOwnUnits`, `test_physical.TheCheckedSectionHoldsOnlyBoundResults`, `test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims`, `test_mechanism.AMechanismNeverMovesAStatus`, `test_basis.ABasisNeverChangesAStatus`, `test_aero_openfoam.NoGuardSpeaksForTheDragArea`, `test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand`, `test_aero_openfoam.TheDragGateStatesItsOwnUnits` |
 | 5 | `test_packs.ControlsAreSealed` |
 | 6 | `test_packs.NegativeControlsFire` |
 | 7 | `test_staleness.StaleIsNotCurrent`, `test_goalposts.TheGoalpostLivesInClaims`, `test_physical.AMovedArticleReadsStale`, `test_fig4.TwoArticlesExactly`, `test_mechanism.TheMechanismMovesNoKey`, `test_basis.ABasisIsNeverAKey`, `test_round.ABehindRoundRecordSaysSo`, `test_derivation.TheTraceIsKeyedToItsDesign` |
-| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository`, `test_derivation.TheTraceIsWrittenOnce` |
-| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies` |
+| 8 | `test_records.IndexNeverDisagreesWithRecords`, `test_records.NoCommandWritesARecord`, `test_records.MilestonesAreRecords`, `test_records.TheExportRecordIsSealedAndChained`, `test_records.RequirementsAreRecords`, `test_records.PreferencesAreRecords`, `test_proposers.ProposeWritesOnlyItsInputs`, `test_round.OnlyRoundWritesTheRoundRecord`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_records.GroupsAreRecords`, `test_round.TheRoundCommitStagesOnlyTheProjectsPaths`, `test_round.RoundsCommitOnlyAsAListedPerson`, `test_record_commands.InitStartsARepository`, `test_derivation.TheTraceIsWrittenOnce`, `test_figures.TheEvidenceManifestIsScratch` |
+| 9 | `test_admission.AdmissionIsDemonstrated`, `test_admission.QualificationIsPaired`, `test_admission.EveryConclusiveMutationMustFail`, `test_admission.TheCheckRunTakesTheQualifiedPath`, `test_context.OutsideTheContextAPassDoesNotCount`, `test_context.AFailOutsideStillCounts`, `test_context.KnownGoodOutsideIsUnqualified`, `test_context.AMutationPassingOutsideStillCounts`, `test_goalposts.AGoalpostIsNeverAKey`, `test_basis.ABasisNeverQualifies`, `test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse` |
 | 10 | `test_prerequisites.PrerequisiteFailureIsNeverAPass`, `test_prerequisites.ACachedPassNeverSurvivesAFailedPrerequisite`, `test_prerequisites.NeedsCycleRefused`, `test_prerequisites.TierInversionRefused` |
 | 11 | `test_owner.AnOwnerWrittenByHandNeverCounts`, `test_signing.HumanChannelOnly`, `test_signing.WhoAndWhenAreNeverTyped`, `test_signing.TheResultsFileIsSealedAndChained`, `test_signing.AnOwnerOnlyThroughTheChannel`, `test_physical.SignedMeansSomething`, `test_physical.APhysicalFailNeverLosesItsPowerToFail`, `test_physical.AContradictionGoesOnTheEvaluatorsTrackRecord`, `test_physical.AnExpertJudgmentStaysWithItsAuthority`, `test_physical.AResultBindsToAnExportedArticle`, `test_physical.AFailIsSupersededOnlyOnAnotherExportedArticle`, `test_mechanism.TheSealSurvivesTheNewSpelling` |
-| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus` |
+| 12 | `test_physical.RenderersAgreeOnPhysicalClaims`, `test_export.ReadyIsOnePredicate`, `test_export.TheBoundaryReExecutes`, `test_export.ACacheThatLiesIsCaughtAtTheBoundary`, `test_export.DryRunIsTheSamePath`, `test_export.GoingAheadIsAPersonsDecision`, `test_vocabulary.TheHardwareClauseIsAlwaysSaid`, `test_export.EveryCacheReaderSaysAsLastEvaluated`, `test_requirements.EveryReaderAgreesOnARequirement`, `test_requirements.ReadinessStaysTheClaims`, `test_returns.AConditionReadsOnlyACheckedClaim`, `test_returns.MayReturnNeverMovesTheExitCode`, `test_returns.EveryReaderAgreesOnAReturnCondition`, `test_round.TheRoundRecordSaysWhatTheCompositionSays`, `test_round.NothingReadsTheRoundRecordForTruth`, `test_graph.AnEdgeChangesNoStatus`, `test_site_truth.NextStepsAreThePredicate`, `test_derivation.AmberChangesNoStatus`, `test_unseen.UnseenMovesNoStatus`, `test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess` |
 | 13 | `test_preferences.APreferenceIsAPersonsAct`, `test_preferences.ANomineeAloneNeverCounts`, `test_preferences.ThePreferenceFileIsSealedAndChained`, `test_preferences.APreferenceIsBoundToWhatThePersonRead` |
-| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved` |
+| 14 | `test_site_truth.TheSiteNeverSaysMoreThanTheResolution`, `test_site_truth.StampedProseIsFlaggedWhenBehind`, `test_site_truth.ANumberNoBakedFileHoldsIsFlagged`, `test_site_truth.TheBrowserComputesNoTruth`, `test_derivation.TheMapDrawsWhatTheTraceObserved`, `test_figures.EvidenceIsBoundByContent`, `test_figures.NothingTheBuildDeletesIsLinked`, `test_figures.AMissingRendererMovesNoStatus`, `test_figures.AFigureIsItsEntrysEvidence`, `test_figures.AFigureSaysWhichResultItIs`, `test_figures.TheClaimsStatusSitsBesideEveryFigure`, `test_figures.TheScaleIsAPackConstant` |
 | 15 | `test_mutation.MutationIsSealed`, `test_derivation.TheTraceBuildsInACopy`, `test_derivation.AnAmberRunWritesNothing` |
 | 16 | `test_derivation.UntracedIsNeverIndependent`, `test_derivation.APartialTraceIsNeverWritten`, `test_derivation.AmberOnlyWhileCurrent` |
 
@@ -516,12 +532,16 @@ Each fact has one home; everything else that shows it is an output of that home.
 - **Outputs, ignored** — `.nopekit/ledger.json` (the index of every record, rebuilt
   after each command), `.nopekit/cache/last_check.json` (statuses, counts and the
   parameter view as the last full `check` saw them), `.nopekit/obs/` (what each run
-  cost), `.nopekit/out/` (scratch and evidence), `REPORT.md` (the readiness report,
-  `report --write`), `out/<milestone>/` (the package `export` wrote),
+  cost), `.nopekit/out/` (scratch and evidence), `.nopekit/cache/evidence/` (the
+  bytes each recorded run cited, so the page copies evidence by content),
+  `REPORT.md` (the readiness report, `report --write`), `out/<milestone>/` (the
+  package `export` wrote),
   `.nopekit/cache/trace/` (a trace's resumable scratch), `.nopekit/out/trace.log`
   (a background trace's log), `.nopekit/out/serve.json`, `serve.lock` and `serve.log`
-  (a detached live server's address, the lock it holds for its life, and its log) and
-  `site/data/build.json` (the page's build time and each result's age). The index
+  (a detached live server's address, the lock it holds for its life, and its log),
+  `site/data/build.json` (the page's build time, each result's age and the live 3D
+  files it names), `site/assets/live/` (a bound figure's 3D file for a result no
+  export re-ran) and `.nopekit/out/figures/` (a bound viewgen's scratch). The index
   and `last_check.json` are the whole project in two reads; nothing reads either for
   truth.
 - **Outputs, tracked** — `.nopekit/round.json`, the round record: the resolution at
@@ -561,6 +581,8 @@ layout in full, with each writer.
 | `tests/` | the honesty invariants and the pack gate-on-the-gates |
 | `tests/_env.py` | the one environment every test subprocess runs in (`_env.run`): a temp `HOME`, no user packs, git isolated from the machine, the tools still visible |
 | `tests/_projects.py` | test projects built once: a bracket copy (the legacy bracket by default, the committed one with `migrated=True`), and a pack's baseline wrapped as a project |
+| `tests/_draw_standin.py` | a stand-in renderer for bound figures: installed as `nopekit-test-draw` on a temporary PATH, it writes committed fixture bytes (a PNG Pillow made, a GLB trimesh made) and logs each call; it plants a crash, a hang, an oversize file and inputs moved mid-draw |
+| `tests/test_field_browser.py` | the field viewer in a headless Chromium (issue #15): a trimesh GLB's vertex colours read back within 2; skipped, saying not walked, where the browser, trimesh, Pillow or three.js is absent |
 | `tests/bracket_legacy/` | a fixture: the bracket's `.nopekit/` as it stood before its 1.3 migration (ledger, run history, ignore file), which `_projects.bracket_copy` puts back around today's sources. Never edited to make a test pass |
 | `tests/_transcript.py` | Phase 1's target transcript as data: replayed on a fresh clone by `test_fresh_clone.py`, its lines held to their shapes by `test_shapes.py` |
 | `tests/oracle/` | scripts, not tests: CI's bracket failure signature (`bracket_signature.py`) and the R-8 differential oracle run at phase review (`r8_statuses.py`) |

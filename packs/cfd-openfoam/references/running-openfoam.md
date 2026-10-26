@@ -14,7 +14,14 @@ Every line here was measured on ESI OpenFOAM v2606 while the pack was written.
      two `surfaceFieldValue` function objects, `nopekit_upstream` and
      `nopekit_downstream`: `areaAverage` of `p` and `U` on a sampled plane
      (`planeType pointAndNormal`, the point inside `pointAndNormalDict`, as v2606
-     requires; `interpolate true`), written every iteration;
+     requires; `interpolate true`), written every iteration at `writePrecision
+     12` (13 significant digits, whatever the case's own controlDict says);
+   - in `cfd.pressure_drop`'s ladder only, add `nopekit_magU` (`type mag` of
+     `U`) and `nopekit_static` (`type pressure`, `mode static`, `rho rhoInf`,
+     `rhoInf` the project's `cfd_density_kg_m3`), each written at the write time:
+     OpenFOAM writes `mag(U)` in m/s and `static(p)` in Pa beside `U` and `p` at
+     the last iteration. Measured on v2606: `static(p)` is the density times
+     `p`, cell for cell. The other gates do not read the density;
    - replace `SIMPLE/residualControl` in `system/fvSolution` with `p` and `U` at
      `cfd_residual_target`;
    - for a refined level, multiply each block's cell counts in
@@ -95,14 +102,134 @@ End
 
 The gate reads the converged line, the first `Initial residual` of each field in
 the last iteration (p and a U component must both be there), and the pack's
-`.dat` files. A converged line is not enough: the pressure drop's remaining
-change must be under 0.1% of it. Over the last 20 iterations, a pressure drop
-that is not monotone may still swing by its largest movement in the last 10; a
-monotone one is a geometric tail, its contraction per iteration read from the
-step sizes in each window of 10 (the slower of the two), and what is to come is
-the last step x q / (1 - q), never less than the last window's movement. U
-relaxed to 0.03 makes the normalised residuals tiny while the number creeps: one
-such run passed a 10-iteration stillness test 9.7% from its converged value.
+`.dat` files. A converged line is not enough: the pressure drop's estimated
+remaining change must be under 0.1% of it.
+
+U relaxed to 0.03 makes the normalised residuals tiny while the number creeps:
+one such run passed a 10-iteration stillness test 9.7% from its converged value.
+The estimate that replaced that test read real v2606 histories as settled up to
+23.4% from their converged value (a laminar pitzDaily under slow relaxation).
+The current estimate reads no point of those histories as settled more than
+0.1% from converged.
+
+### The estimate
+
+The estimate is Eca and Hoekstra's (Computers & Fluids 38, 2009, Eq. 9). A
+least-squares line through the log of the change per iteration gives the rate.
+The sum of the geometric tail at that rate, times 1.25, is the change still to
+come. `gates/_iter.py` adds these rules, each with the history that made it
+necessary:
+
+- The rate is the upper 95% bound of the fitted rate. A fit has 8 changes or
+  more.
+- The gate fits windows of 8, 16, 32, ... changes and the whole history, each
+  to the last change above round-off, and uses the largest result.
+- Each window fits the largest change from each iteration to the end. Thus a
+  decaying oscillation reads as a decay.
+- The rate of the last 8 changes must agree with the rate of the last 16, within
+  two combined standard errors. A slower rate gives no estimate, and the run fails. A
+  faster rate also gives no estimate while the last change is above 1e-7 of the
+  value, if it is faster by more than 0.1% of the rate.
+- A change under 1e-8 of the value is round-off. When the last 8 changes or more
+  are round-off, the estimate is the largest swing in that tail. This rule does
+  not apply when one of the 16 changes before the tail is exactly zero: the
+  history then moves in steps of one printed digit.
+- A second reading uses no model of the single changes. It continues the drift
+  of the means of the last three sixths of the run, and of the slopes of its
+  last two quarters, and the gate uses the larger value.
+- A value that is not a finite number gives no estimate. The gate refuses a
+  last value of inf before it compares, because inf is less than 0.1% of inf.
+
+The estimate needs at least 17 values. A converged run with OpenFOAM's default
+precision (7 significant digits) can fail here, because its last changes are
+steps of one printed digit. That is why the pack sets `writePrecision 12`.
+
+### What the estimate cannot see
+
+Each of these histories reads settled at some iterations while it is more than
+0.1% from the value it converges to. The numbers are from the synthetic
+histories of GitHub #15, Phase 0, and from its review. Each item gives every
+measured history of its kind, so its largest error is the largest that was
+measured.
+
+- **An overshoot at its turning point.** Two modes of opposite sign cancel, and
+  the value stops at an extremum before it turns back. At the extremum the value
+  does not move, and no estimate from the history can tell it from the limit.
+  The error is then the distance from the extremum to the limit. The three
+  overshoots of Phase 0 read settled at 2 points up to 0.27%, at 1 point at
+  0.70% and at 2 points up to 0.20%. In the review, 37 of 84 overshoots with
+  rates from 0.7 to 0.9995 per iteration read settled at 187 points, from 62
+  iterations before the extremum to 4 after it, up to 29%
+  (`1 + 0.25 x 0.7^n - 0.3 x 0.999^n` at iteration 19).
+- **A slow mode under a fast oscillation.** The fit follows the peaks of the
+  fast mode. `1 + 0.005 x 0.998^n + 0.05 x 0.9^n (-1)^n` reads settled at 1
+  point at 0.43%. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.003 x 0.995^n` reads settled
+  at 12 points up to 0.25%. `1 + 0.5 x 0.8^n cos(0.9 n) + 0.002 x 0.999^n` reads
+  settled at 23 points from iteration 40 to 70, up to 0.20%.
+  `1 + 0.005 x 0.998^n + 0.01 x 0.99^n sin(0.7 n)` reads settled at 2 points up
+  to 0.10%.
+- **A rate that becomes slower in the last few iterations.** The shortest
+  window does not see it yet. A rate that changes from 0.85 to 0.995 per
+  iteration at iteration 40 reads settled at 5 points up to 1.51%. A rate that
+  changes from 0.7 to 0.998 at iteration 30 reads settled at 13 points up to
+  0.39%.
+- **A drift under 1e-8 of the value per iteration.** The estimate calls it
+  round-off. A ramp of 5e-9 per iteration reads settled at its first 787
+  points. At that rate, the value needs 200 000 iterations to move 0.1%.
+- **A change after the last iteration.** No estimate made from the history can
+  see it. A decay that later rises (MARIN's df_iter1537) reads settled at 14
+  points, up to 1.36%.
+- **A fixed point that moves with the under-relaxation.** The estimate gives
+  the distance to the value this run converges to. It cannot tell if another
+  relaxation gives another value.
+
+Two costs are on the safe side (a run that has settled reads not settled). A
+history printed to 7 significant digits almost never reads settled. The
+turbulent pitzDaily runs never read settled, even after they settle; this pack
+is laminar only.
+
+### Against the authors' tool
+
+MARIN's `iterative_error` (closed) adds a correction from Eca and Hoekstra's
+2006 paper in SNH. That paper was not read for this pack, so the comparison is
+of the numbers only, and the formula is not the tool's. On the tool manual's
+Table 1, this estimate is 0.71 to 2.00 times the tool's (median 0.93) on the 8
+items with 8 changes or more. It is below the tool on items 1, 2, 3 and 6. Eq. 9
+without the rules above is 0.32 to 0.70 times the tool's.
+
+### What the evidence holds
+
+`cfd.converged` writes `history.csv` beside its `summary.json`.
+`cfd.mesh_independence` and `cfd.pressure_drop` write `history_level0.csv`,
+`history_level1.csv` and `history_level2.csv`, one for each mesh. Each row holds
+`iteration` (from 1), the pressure drop (`dp_m2_s2`; `dp_pa` in
+`cfd.pressure_drop`) and `change_pct`: the change from the iteration before, as
+a percentage of the last value. The first row has no `change_pct`.
+
+`summary.json` holds the estimate as `iterative_error_pct`, a percentage of the
+last value (in `levels` for a ladder, one for each mesh), and the tolerance as
+`convergence_tol_pct` (0.1). `iterative_error_pct` is `null` when there is no
+estimate. A chart of the history uses these numbers and calculates none. The
+history is a CSV file because the site's prose check reads each number in a
+JSON evidence file as a match for a number in the text, in any unit.
+
+`cfd.pressure_drop`'s `summary.json` also holds what the site's pictures draw,
+so that a picture calculates nothing:
+
+- in each item of `levels`: `h_rel`, the cell size relative to the finest mesh,
+  (cells of the finest / cells)^(1/dim), and `dp_pa`, the pressure drop in Pa;
+- `h_rel_ext`: 0, the cell size of the Richardson value `dp_ext_pa`;
+- `u_upstream_m_s`: the mean velocity along the upstream plane's normal, on the
+  finest mesh at its last iteration (the value `cfd.converged` holds to
+  `cfd_velocity_m_s`);
+- `p_up_pa` and `p_down_pa`: the density times each plane's average `p`, on the
+  same row;
+- `planes`: the two planes, each a point and a unit normal;
+- `fields`: the finest level's stage (`<out>/cfd-openfoam/cfd_pressure_drop/level2`),
+  its last time directory, and the sha256 of `U`, `p`, `mag(U)` and `static(p)`
+  there and of the five `constant/polyMesh` files. A picture draws these files
+  only while their bytes are these. They are not cited as evidence, so the site
+  never copies them.
 
 ## Where the planes sit
 
@@ -118,11 +245,12 @@ every level, and fails, naming the plane and the level, before it runs anything.
 With r = 2 or 3, a plane on a face or a centre of the first mesh stays on one.
 
 ```
-# Region type :   sampledSurface nopekit_upstream
-# Faces           : 20
-# Area            : 1.0000000000e-05
-# Time            	areaAverage(p)    	areaAverage(U)
-91                	8.8235294768e-04  	(1.0000e-02 1.2e-09 0)
+# Region type :     sampledSurface nopekit_upstream
+# Faces             : 20
+# Area              : 1.000000000000e-05
+# Scale factor      : 1.000000000000e+00
+# Time              	areaAverage(p)	areaAverage(U)
+91                  	8.823530330387e-04	(9.999996662583e-03 8.756808141046e-14 0.000000000000e+00)
 ```
 
 A plane whose area is 0 or not a number cuts no part of the mesh: an error. So is

@@ -1,0 +1,272 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.regime",
+  "rho": "b95cbd51f2b2640dd61a7448e8872c5035327e5bd4f11b54dedc0a4c08561256",
+  "static": "dd7810880118e2480a320efc695c04e2297100b49fee9c7b80da22451a60ba93",
+  "static_parts": {
+    "spine": "b9c5046a0430346c084cc073ce23a13dab1788c34c118bdc75b3a3aabc9cee29",
+    "code": {
+      "digest": "4dc267e8b7c4318970b047546515e6e0d07d6098733bdb8c2e1f28e9a5817c3c",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_gci.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "248e7b2db2af03fc80023cf48ce78b880f188b80c5b18eefc12f4af15eb53d1e",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8",
+        "selftest/baseline.json": "ca30b6597cef7e72197ba79e9e8b75ebc3759c240aa858bc480e784453a4916a"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:thick_air",
+      "expect": "fail",
+      "note": "the baseline spheroid in a fluid viscous enough that its Reynolds number is 15% below 5e5",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "dabefc62fb1877bdd3d51b61049a9be36c1a0fcb406fd7a07c4d587ada9ef7c8",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "eefc995a755356622b439a121366bda3d7c4d0acab142053822cd4c8c27a617f",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_gci.py": "b4399356e926b73dea406d1c815bdc631e2dbbadc5dbaa85c37ab0e02b23568d",
+      "<pack:aero-openfoam>/gates/_par.py": "8f8fd4b267254a039e510678e41421d73a78246234ef779baa91220924f1a92b",
+      "<pack:aero-openfoam>/gates/_tool.py": "e90022db4ec57a7267f3ecb158533058e0d0c1a178ce59401668ae4f46dbce75",
+      "<pack:aero-openfoam>/gates/aero.py": "c9587865d6c2b862e7eae8cfd299be94039af29c11b3e2d25759876aa93c5190",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "cada5562debb27b606fbd3b710c892c08cd10c5c042c6afeaa3580892ce702a8"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ref_length_m"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_sound_speed_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ref_length_m"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_sound_speed_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "490a7b857dadcb67cfd7190d407534e0f00e3ce7ec8c6741f3c5f5d555acfee9",
+        "<out:controls>/aero.regime/aero-openfoam/known-bad/thick_air/case"
+      ],
+      [
+        [
+          "aero_ref_length_m"
+        ],
+        "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+        1.0
+      ],
+      [
+        [
+          "aero_sound_speed_m_s"
+        ],
+        "02878bfb8f39b2d41521453f16c78256eca2e608c367573215417404cc24b83b",
+        343.0
+      ],
+      [
+        [
+          "aero_u_inf_m_s"
+        ],
+        "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+        20.0
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": []
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_ref_length_m"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_sound_speed_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_ref_length_m"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_sound_speed_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ],
+        [
+          [
+            "aero_ref_length_m"
+          ],
+          "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+          1.0
+        ],
+        [
+          [
+            "aero_sound_speed_m_s"
+          ],
+          "02878bfb8f39b2d41521453f16c78256eca2e608c367573215417404cc24b83b",
+          343.0
+        ],
+        [
+          [
+            "aero_u_inf_m_s"
+          ],
+          "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+          20.0
+        ]
+      ],
+      "files": {},
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": []
+    },
+    "extra": [],
+    "measured": 1333333.33,
+    "limit": 500000.0,
+    "units": "Re",
+    "detail": "Re 1.333e+06 = U L / nu: U 20 m/s, L 1 m (the body runs 1 m along the flow), nu 1.5e-05 m^2/s from the case; limit 500000, flat-plate transition. Mach 0.0583 = U / c, c 343 m/s; limit 0.3",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:thick_air (the baseline spheroid in a fluid viscous enough that its Reynolds number is 15% below 5e5): Re 4.348e+05 is below 500000: k-omega SST without a transition model makes laminar wall layers turbulent (Re 4.348e+05 = U L / nu: U 20 m/s, L 1 m (the body runs 1 m along the flow), nu 4.6e-05 m^2/s from the case; limit 500000, flat-plate transition. Mach 0.0583 = U / c, c 343 m/s; limit 0.3)",
+  "measured": 434782.609,
+  "limit": 500000.0,
+  "units": "Re",
+  "digest": "f2a6c38a3690f45adcd0cf79356427a8b00edd5d3b10879010128fa960fc6fb6"
+}

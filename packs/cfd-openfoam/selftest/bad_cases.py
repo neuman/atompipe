@@ -7,8 +7,16 @@ own fixture is broken, and a green verdict from it means nothing.
 
 **Sealed.** Every fixture starts from this pack's own ``selftest/baseline.json``
 and ``selftest/assets/channel``, never from the host's projection or the host's
-case, and hands the gate an empty ledger. A control whose severity depended on
-the host's case would fire in some projects and not in others.
+case, and hands the gate a ledger of the baseline's own claims (``_claims``, the
+ones the known-good control reads) and nothing of the host's. A control whose
+severity depended on the host's case, or on the host's limit, would fire in
+some projects and not in others. Built with ``Claim.from_dict``, as a project's
+``selftest/known_good.py`` builds its ``CLAIMS``. What slipped through with
+``from nopekit.packs import baseline_claims`` here: ``tests/test_packs.py``,
+run whole, loaded this file again and ran ``cfd.py`` again into a registry
+that held it (``gate id 'cfd.case_readable' is already registered``), and
+every control of the pack errored; each class alone passed. ``pack validate``
+checks ``_claims`` with ``packs.baseline_claims``.
 
 **One edit, made with the pack's own writer.** Each bad case is the baseline
 case copied under the CALLER's ``out_dir``
@@ -31,7 +39,7 @@ import os
 import shutil
 
 from nopekit.modelio import load_path
-from nopekit.models import Ledger
+from nopekit.models import Claim, Ledger
 
 _PACK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BASELINE_PATH = os.path.join(_PACK_DIR, "selftest", "baseline.json")
@@ -43,11 +51,20 @@ C = load_path(os.path.join(_PACK_DIR, "gates", "cfd.py"))
 MARGIN = 1.15
 
 
+def _read() -> dict:
+    with open(_BASELINE_PATH, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _claims() -> list:
+    """The claims the baseline states, fresh each call."""
+    return [Claim.from_dict(row) for row in _read().get("_claims") or ()]
+
+
 def _baseline() -> dict:
     """The baseline projection, documentation keys stripped and the case path
     made absolute against this pack."""
-    with open(_BASELINE_PATH, encoding="utf-8") as fh:
-        params = {k: v for k, v in json.load(fh).items() if not k.startswith("_")}
+    params = {k: v for k, v in _read().items() if not k.startswith("_")}
     params["cfd_case"] = os.path.join(_PACK_DIR, str(params["cfd_case"]))
     return params
 
@@ -74,7 +91,8 @@ def _variant(ctx, name: str, edits: dict | None = None, params_edit=None):
     params["cfd_case"] = dst
     if params_edit is not None:
         params_edit(params)
-    return dataclasses.replace(ctx, params=params, ledger=Ledger())
+    return dataclasses.replace(ctx, params=params,
+                               ledger=Ledger(claims=_claims()))
 
 
 def coded_inlet(ctx):
@@ -136,5 +154,6 @@ def coarse(ctx):
 def thicker_fluid(ctx):
     """cfd.pressure_drop — a fluid twice as viscous, 20 cSt. A laminar pressure
     drop is proportional to viscosity: 0.522 Pa becomes 1.04 Pa, past the 0.6 Pa
-    limit. Still laminar (Re 10), still converged, still mesh-independent."""
+    limit of the baseline's own claim. Still laminar (Re 10), still converged,
+    still mesh-independent."""
     return _variant(ctx, "thicker_fluid", {"constant/transportProperties": [("nu", "2e-05")]})

@@ -1,0 +1,11 @@
+{
+  "kind": "board",
+  "title": "Drag",
+  "line": "The bike and the rider push through the air with a drag area of at most 0.35 m^2.",
+  "members": [
+    "C1",
+    "A1",
+    "A2"
+  ],
+  "order": 1
+}

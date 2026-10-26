@@ -92,6 +92,7 @@ from .util import NopekitError, iter_suffix_unique, seal
 
 
 __all__ = [
+    "OPAQUE_REASON", "unseen_gates", "unseen_reason",
     "ClaimCause",
     "Attribution",
     "Composed",
@@ -286,6 +287,19 @@ class ClaimCause(StrEnum):
     for a prerequisite skip ("blocked" and "unknown" are both GLOSSARY
     Never-says for Skipped); splitting the count by cause (`N skipped (k
     prerequisite)`: a number no decision reads; the crash is already split out).
+
+    `unseen` (issue #15, D1: "own word, keep stale") — Stale: every covering
+    evaluator that is not current is not current ONLY because it read through
+    a channel nopekit cannot see (a solver's own reads in a subprocess:
+    `verdicts.Unknown`, ``opaque inputs``), so no reader but the check run
+    that ran it can say its result is current (`unseen_gates`). What slipped
+    through without it: right after `check` said *ready*, `status`, the
+    report, `doctor` and both pages said "The design changed after the result"
+    of a design nobody had touched. *Rejected:* serving such an entry Fresh
+    (a solver's own input edited by hand would keep a pass it never saw);
+    `invalidated` with other words beside it (one cause, two stories). Where
+    one covering evaluator moved and another is unseen, `invalidated` leads:
+    the design changed, the bigger fact.
     """
 
     FAILED = "failed"
@@ -301,6 +315,7 @@ class ClaimCause(StrEnum):
     NO_REASON = "no-reason"
     UNRUN = "unrun"
     INVALIDATED = "invalidated"
+    UNSEEN = "unseen"
     NO_ARTICLE = "no-article"
     OWNED = "owned"
     PHYSICAL_PASS = "physical-pass"
@@ -349,6 +364,71 @@ class ClaimCause(StrEnum):
 AWAITS_A_PERSON: frozenset = frozenset({ClaimCause.ARTICLE_MOVED, ClaimCause.CLAIM_MOVED,
                                          ClaimCause.JUDGMENT_MOVED,
                                          ClaimCause.ARTICLE_UNJUDGED})
+
+
+#: The head of the resolver's reason for an entry that read through a channel
+#: the tracer cannot see — ``verdicts._judge``'s ``Unknown`` (``"opaque inputs:
+#: " + channels``), and the prerequisite mark it travels under
+#: (``gates.PREREQUISITE_INVALIDATED`` + ``": " + why``). Spelled here because
+#: this module imports no spine module but `models`; `test_unseen` holds it to
+#: what a real resolution says, so a rewording there turns it red.
+OPAQUE_REASON = "opaque inputs: "
+_PREREQUISITE_MARK = re.compile(r"^prerequisite \S+ invalidated: ")
+
+
+def unseen_reason(why: str) -> bool:
+    """Is ``why`` — a resolver's stale reason, as `Resolution.rows[g].stale_reason`
+    and every reader's ``stale_reasons`` hold it — the reason of an entry not
+    current only for a channel nopekit cannot see: ``OPAQUE_REASON``, alone or
+    at the end of a chain of prerequisite marks? The words-only half of
+    `unseen_gates`, for a reader that holds the reason and not the row
+    (`report.reason`'s Failing branch). What slipped through without it (review
+    of issue #15's D1): a fail on such an entry read "(invalidated: opaque
+    inputs: <21 solver paths>)" in `status`, the report, `check`'s BLOCKING row
+    and ``state.json`` — "invalidated" of a design nobody touched, and the 2 KB
+    list D1 had taken off every other line."""
+    text = str(why or "")
+    while _PREREQUISITE_MARK.match(text):
+        text = _PREREQUISITE_MARK.sub("", text, count=1)
+    return text.startswith(OPAQUE_REASON)
+
+
+def unseen_gates(resolution: Any) -> frozenset:
+    """The gates the resolver calls not current ONLY because they read through
+    a channel nopekit cannot see: each in ``resolution.stale_gates`` whose row's
+    stale reason is ``OPAQUE_REASON`` — on an ``unknown`` row whose entry
+    recorded that channel — or a chain of prerequisite marks that ends in one.
+    What `compose` reads as `ClaimCause.UNSEEN` (issue #15, D1); a status it
+    never moves. Duck-typed over `verdicts.Resolution` (rows with ``state``,
+    ``stale_reason`` and ``entry``), so this module stays pure.
+
+    Why the reason and the entry together: the reason is the spine's own word
+    (no gate writes a stale reason), and the entry's recorded ``opaque`` list is
+    what that word stands on. *Rejected:* the recorded list alone (an entry with
+    an opaque channel whose spine cannot digest itself reads Unknown for that,
+    the louder reason); a field on `Verdict` or `Resolution` (both are spine
+    modules: every verdict cache entry in every project would re-key, as
+    `ClaimCause`'s home avoids). Named residual: an opaque entry whose own
+    parameters moved reads `unseen` too — the resolver judges no rho for it —
+    and still reads Stale, with a check run as its remedy, which is true."""
+    rows = getattr(resolution, "rows", None) or {}
+    stale = frozenset(getattr(resolution, "stale_gates", None) or ())
+    out: set[str] = set()
+    for gid, row in rows.items():
+        why = str(getattr(row, "stale_reason", "") or "")
+        if gid not in stale or not why:
+            continue
+        if _PREREQUISITE_MARK.match(why):
+            # A dependent under such a prerequisite: the mark carries the
+            # root's own reason, as `verdicts.apply_prerequisites` writes it.
+            if unseen_reason(why):
+                out.add(gid)
+            continue
+        reads = getattr(getattr(row, "entry", None), "reads", None)
+        if (why.startswith(OPAQUE_REASON) and getattr(row, "state", "") == "unknown"
+                and isinstance(reads, Mapping) and reads.get("opaque")):
+            out.add(gid)
+    return frozenset(out)
 
 
 class Attribution(NamedTuple):
@@ -650,6 +730,7 @@ def compose(
     stale: bool = False,
     stale_gates: Collection[str] = (),
     owners: Mapping[str, Any] | None = None,
+    unseen_gates: Collection[str] = (),
 ) -> Composed:
     """Resolve one claim to its status AND the fact that set it — GLOSSARY §3's
     composition, one ladder for every kind, first match wins.
@@ -691,7 +772,9 @@ def compose(
        reason, or an owner the channel did not attribute (`no-owner`,
        `no-reason`, `owner-unattributed`).
     4. **Open** — a covering gate unrun (`unrun`), even beside a pass.
-    5. **Stale** — `stale`, or a covering gate in `stale_gates` (`invalidated`).
+    5. **Stale** — `stale`, or a covering gate in `stale_gates` (`invalidated`;
+       `unseen` when every such gate is in `unseen_gates`, `unseen_gates`'s
+       reading of the resolution — never with `stale=True`).
     6. **Pending build** — a claim whose terminal is a measurement and no
        article settles: no result (`no-article`), or a pass that does not count
        (`physical-pass`: from an agent session, a pipe, before results were
@@ -871,6 +954,15 @@ def compose(
                                     or (judgment and judged)):
         return Composed(ClaimStatus.STALE, _PERSON_STATES[state], tuple(moved), first)
     if moved:
+        # Issue #15, D1: a gate not current only for a channel nopekit cannot
+        # see has its own cause, and a moved one leads it — cited first, under
+        # `invalidated` — because the design changing is the bigger fact.
+        unseen = set(unseen_gates or ()) if not stale else set()
+        seen = [g for g in moved if g not in unseen]
+        if not seen:
+            return Composed(ClaimStatus.STALE, ClaimCause.UNSEEN, tuple(moved), first)
+        moved = seen + [g for g in moved if g in unseen]
+        first = next((v for v in mine if v.gate == moved[0]), None)
         return Composed(ClaimStatus.STALE, ClaimCause.INVALIDATED, tuple(moved), first)
     if stale and state == "current":
         # The all-stale override (critique 8 of the P2.5a design): a counted
@@ -929,13 +1021,14 @@ def resolve_status(
     stale: bool = False,
     stale_gates: Collection[str] = (),
     owners: Mapping[str, Any] | None = None,
+    unseen_gates: Collection[str] = (),
 ) -> ClaimStatus:
     """`compose(...).status` — the contract's name for the one producer of a
     claim's status (R-5). Everything about the ladder is `compose`'s docstring;
     `stale=True` is the all-gates alias `StatusPrecedence.test_stale_is_not_pass`
     pins (R-6), and `owners` the additive keyword the signing channel will use."""
     return compose(claim, verdicts, stale=stale, stale_gates=stale_gates,
-                   owners=owners).status
+                   owners=owners, unseen_gates=unseen_gates).status
 
 
 #: The verdicts `explaining_verdict` may cite, most explanatory first —
@@ -1348,6 +1441,7 @@ def compositions(
     stale: bool = False,
     stale_gates: Collection[str] = (),
     owners: Mapping[str, Any] | None = None,
+    unseen_gates: Collection[str] = (),
 ) -> dict[str, Composed]:
     """`compose` for every claim in the ledger: claim id -> `Composed`.
 
@@ -1355,17 +1449,19 @@ def compositions(
     status needs its cause too, and asking for both here keeps one producer
     (R-5). Coverage as `statuses` judges it — with `registry`, the union of the
     claim's cached gates and live coverage (`effective_gates`); without one,
-    `claim.gates` alone, a cached opinion. `owners` as for `compose`.
+    `claim.gates` alone, a cached opinion. `owners` and `unseen_gates` as for
+    `compose`.
     """
     gates_for = effective_gates(ledger, registry) if registry is not None else None
     stale_set = frozenset(stale_gates or ())
+    unseen_set = frozenset(unseen_gates or ())
     out: dict[str, Composed] = {}
     for claim in ledger.claims:
         if gates_for is not None:
             # `replace` copies; the ledger is never mutated by a derivation.
             claim = replace(claim, gates=gates_for.get(claim.id, []))
         out[claim.id] = compose(claim, ledger.verdicts, stale=stale, stale_gates=stale_set,
-                                owners=owners)
+                                owners=owners, unseen_gates=unseen_set)
     return out
 
 

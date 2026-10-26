@@ -1,0 +1,37 @@
+{
+ "judged": false,
+ "legend": false,
+ "series": [
+  {
+   "key": "meshes",
+   "label": "each mesh",
+   "labels": [
+    "358654 cells",
+    "926215 cells",
+    "2674337 cells"
+   ],
+   "points": [
+    [
+     1.9536502534736022,
+     0.29924988022349497
+    ],
+    [
+     1.4239719712337393,
+     0.29624534190569596
+    ],
+    [
+     1.0,
+     0.302057448025212
+    ]
+   ]
+  }
+ ],
+ "x": {
+  "label": "relative cell size"
+ },
+ "y": {
+  "label": "drag area",
+  "units": "m^2",
+  "zero": false
+ }
+}

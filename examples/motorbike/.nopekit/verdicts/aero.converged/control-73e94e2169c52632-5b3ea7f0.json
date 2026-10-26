@@ -1,0 +1,423 @@
+{
+  "schema": 1,
+  "kind": "control",
+  "gate": "aero.converged",
+  "rho": "73e94e2169c52632eccadca17a4ed59e272b0a12058bcc3e7fa2cd8df2c542bd",
+  "static": "1558368d58b048d8d04457056695abb2f5760cedc364a87805338a75e90921c7",
+  "static_parts": {
+    "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+    "code": {
+      "digest": "1fb76fc4b7cbebcb0914f10ab109fb91247b9b10d0a52295e108e19a3f229939",
+      "files": [
+        "<pack:aero-openfoam>/gates/_fo.py",
+        "<pack:aero-openfoam>/gates/_foam.py",
+        "<pack:aero-openfoam>/gates/_par.py",
+        "<pack:aero-openfoam>/gates/_tool.py",
+        "<pack:aero-openfoam>/gates/aero.py"
+      ]
+    },
+    "selftest": {
+      "digest": "0588cdb41e94bc2af3d020ba6197a29a810156c1ec0d79e697c05a6466bbba1f",
+      "files": {
+        "selftest/assets/spheroid/0/U": "066a9b29c4bc85ed271ce309f61dacdcd45cbda8025f559f6f7301b0cb1175c3",
+        "selftest/assets/spheroid/0/k": "d82553a646f9d65c63f3380343dc31f1622fa3b70a7f753e937251aad570d2ed",
+        "selftest/assets/spheroid/0/nut": "af5f3af77f66b43733dfef3c9322a225a9b5793ef23c20652b34fbf8d4b8114d",
+        "selftest/assets/spheroid/0/omega": "d5e58d481a2295a51f3508c1588b3ad5e487a47dc64d2ce69ac18029067a8c68",
+        "selftest/assets/spheroid/0/p": "35f2bb047d8ca3e73c2b991beeafbae0a1bbfc4b157da1a35be998fcb6743d2a",
+        "selftest/assets/spheroid/constant/transportProperties": "4e349da2a220132042d0f7fbe36318fe54aa45ac6d0476312c8f75d2a6e7096f",
+        "selftest/assets/spheroid/constant/turbulenceProperties": "74cba94a145d33521b86ac3b1c02a6554407fc8016ab717cc6323325ece7453f",
+        "selftest/assets/spheroid/system/blockMeshDict": "fb1e5cc8bb7360f3855bfda318ded3d89b617cd3a01a563d0204f08a6d9ac73e",
+        "selftest/assets/spheroid/system/controlDict": "40fcca5bedb8dbfe5c3521accc11336dfe0df06701e0983370af7e48a6053e10",
+        "selftest/assets/spheroid/system/fvSchemes": "a453141a8857f351b3edc80c87487c0f5826999fbceb1bfcf6a00d79c35df485",
+        "selftest/assets/spheroid/system/fvSolution": "61ebeca28f850ae900d5c3b60c66742d30e16f6e2b1de322468e85b06513ff33",
+        "selftest/assets/spheroid/system/snappyHexMeshDict": "510fceaf1388d3a615c0391fd820d126362a64e58e4e82cb6462b31d8fd024f4",
+        "selftest/bad_cases.py": "f3acd6a4c879b5f73eaf77f600c9cd7d34680161c633cde9a03336a5fca552db",
+        "selftest/baseline.json": "5495f596c06b5380ea5dca7d344b74ef315ba7dedf7da6c122529b4df322cff2"
+      }
+    },
+    "nc": {
+      "fixture": "selftest/bad_cases.py:cut_short",
+      "expect": "fail",
+      "note": "the baseline spheroid with endTime 110: the window of 100 iterations closes inside the start-up, and the drag area still swings by about 11%",
+      "good": "",
+      "mutation": false
+    }
+  },
+  "host": "live",
+  "fixture": {
+    "digest": "f13c1aa7cec5df693a810496930ee94be2e778664cd4eaf8169a7d06d1b95ed6",
+    "files": {
+      "<pack:aero-openfoam>/gates/_fo.py": "40d0aa2ffac7a5048d2b8010a9a1c0b2392145d17a436782522d9f4c7c32b048",
+      "<pack:aero-openfoam>/gates/_foam.py": "cd0fd7ddddf168f828fe931e279b62f5b56b9e39c690818f7a5a472f272497ee",
+      "<pack:aero-openfoam>/gates/_par.py": "600633dcfd300713dae6a3fef09080543c7f0e8ac8ca73d6909b8c6cc47c8415",
+      "<pack:aero-openfoam>/gates/_tool.py": "adfcfdaab8c50a91cbcbb76251f6891453efd224cc524c0663adda73fb970866",
+      "<pack:aero-openfoam>/gates/aero.py": "c02e6ff36eae4a2b5ceabf05423cf69e7c009a52e2a40f630cc84a2d5489077d",
+      "<pack:aero-openfoam>/selftest/bad_cases.py": "f3acd6a4c879b5f73eaf77f600c9cd7d34680161c633cde9a03336a5fca552db"
+    }
+  },
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_body_group"
+        ],
+        "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+        "bodyGroup"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "aaa84c9e6134d323e45c22ba47fb098cc5e939d55221be05d58f5377f1981e14",
+        "<out:controls>/aero.converged/aero-openfoam/known-bad/cut_short/case"
+      ],
+      [
+        [
+          "aero_iter_unc_max_pct"
+        ],
+        "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+        1.0
+      ],
+      [
+        [
+          "aero_max_global_cells"
+        ],
+        "1e22a0800e5be1298b30683a9575cbea3858424aef0bf17202588aeee566537f",
+        20000000
+      ],
+      [
+        [
+          "aero_ranks"
+        ],
+        "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+        4
+      ],
+      [
+        [
+          "aero_timeout_s"
+        ],
+        "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+        900.0
+      ],
+      [
+        [
+          "aero_u_inf_m_s"
+        ],
+        "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+        20.0
+      ]
+    ],
+    "files": {},
+    "dirs": {},
+    "ledger": {},
+    "host": [],
+    "opaque": [
+      "file-outside-project:/bin/sh",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/sets/tracksCentre/110/track0.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/sets/tracksFar/110/track0.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1 (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110 (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110/body.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110/wakeCut1.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110/wakeCut2.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110/wakeCut3.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/postProcessing/surfaces1/110/wakeIso.vtp (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/aero_converged/case/system/surfaceFeatureExtractDict (not written by this gate)",
+      "out:controls/aero.converged/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+      "subprocess:bash",
+      "subprocess:blockMesh",
+      "subprocess:decomposePar",
+      "subprocess:foamDictionary",
+      "subprocess:mpirun",
+      "subprocess:rm"
+    ]
+  },
+  "bad": "fail",
+  "bad_extra": [],
+  "good": {
+    "outcome": "pass",
+    "reads": {
+      "params": [
+        [
+          [
+            "aero"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_iter_unc_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero-openfoam.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_body_group"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_case"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_iter_unc_max_pct"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_max_global_cells"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_ranks"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_timeout_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero.aero_u_inf_m_s"
+          ],
+          "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+        ],
+        [
+          [
+            "aero_body_group"
+          ],
+          "a945c92d3753d4298535201b931f55d7b9f6f528cc5271f09b1018a2ca278e3a",
+          "bodyGroup"
+        ],
+        [
+          [
+            "aero_case"
+          ],
+          "cf7e5b4e6f9cb30ea03a41def925e067c6e8b30751dde5d08f46f63c4b4c5a0e",
+          "selftest/assets/spheroid"
+        ],
+        [
+          [
+            "aero_iter_unc_max_pct"
+          ],
+          "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+          1.0
+        ],
+        [
+          [
+            "aero_max_global_cells"
+          ],
+          "1e22a0800e5be1298b30683a9575cbea3858424aef0bf17202588aeee566537f",
+          20000000
+        ],
+        [
+          [
+            "aero_ranks"
+          ],
+          "0c8af53f03a602f4527855fceeacacb71355f284d121d5615dc7df5f933a1b13",
+          4
+        ],
+        [
+          [
+            "aero_timeout_s"
+          ],
+          "ae7ed6c2f6a89b330ff2be313bb5527d0c82f9d31ba86f42c6bc083f64b91518",
+          900.0
+        ],
+        [
+          [
+            "aero_u_inf_m_s"
+          ],
+          "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+          20.0
+        ]
+      ],
+      "files": {},
+      "dirs": {},
+      "ledger": {},
+      "host": [],
+      "opaque": [
+        "file-outside-project:/bin/sh",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/sets/tracksCentre/300/track0.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/sets/tracksFar/300/track0.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1 (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1/300/body.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1/300/wakeCut1.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1/300/wakeCut2.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1/300/wakeCut3.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/postProcessing/surfaces1/300/wakeIso.vtp (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/aero_converged/case/system/surfaceFeatureExtractDict (not written by this gate)",
+        "out:controls/aero.converged.good/aero-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+        "subprocess:bash",
+        "subprocess:blockMesh",
+        "subprocess:decomposePar",
+        "subprocess:foamDictionary",
+        "subprocess:mpirun",
+        "subprocess:rm"
+      ]
+    },
+    "extra": [],
+    "measured": 0.0148426,
+    "limit": 1.0,
+    "units": "%",
+    "detail": "U_I 0.0148% of the drag area 0.00443257 m^2 over iterations 201-300 (within 1%); drift -0.0601% from the window before (reported, not judged); 41574 cells (base mesh), layers on 100% of the body's faces; nothing bounded (reported, not judged)",
+    "goalpost": []
+  },
+  "mutation": null,
+  "admitted": "paired",
+  "detail": "correctly failed on selftest/bad_cases.py:cut_short (the baseline spheroid with endTime 110: the window of 100 iterations closes inside the start-up, and the drag area still swings by about 11%): U_I 11.1% of the drag area 0.00442119 m^2 over iterations 11-110 (past 1%); drift not computed (fewer than two windows); 41574 cells (base mesh), layers on 100% of the body's faces; nothing bounded (reported, not judged)",
+  "measured": 11.1494,
+  "limit": 1.0,
+  "units": "%",
+  "digest": "b1b4c84905e509a0acfbd27892d94498c98bc30182727f7db4c2cad5e02828f0"
+}

@@ -1,0 +1,17 @@
+{
+  "statement": "The drag area does not depend on the mesh: three meshes converge, and the mesh error band (GCI) of the finest is at most 5%",
+  "kind": "measurable",
+  "tags": [
+    "mesh-independence"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.mesh_independence: three meshes, each block 1.5 times finer, each meshed, guarded and solved; Celik et al. 2008's GCI on the drag area, at the formal order with a safety factor of 3 where the observed order is above it (Eca and Hoekstra 2014). Measured on the tutorial's own ladder (2026-10-23): 0.3075, 0.2964 and 0.3007 m^2, a drag area that does not converge in one direction",
+    "evaluators": [
+      "aero.mesh_independence"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

@@ -25,6 +25,9 @@
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --drawer-w: 520px;
+  /* A figure's frame (design P2): its radius, and the border of a lit
+     picture, whose light sky would otherwise run into the page. */
+  --fig-radius: 10px; --fig-border: #c9cfd6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -42,6 +45,7 @@
     --skip: #6b7580; --line: #4b5561; --line-strong: #c3cbd4;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.6);
+    --fig-border: #3a424c;
   }
 }
 :root[data-theme="dark"] {
@@ -59,6 +63,7 @@
   --skip: #6b7580; --line: #4b5561; --line-strong: #c3cbd4;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --fig-border: #3a424c;
 }
 
 * { box-sizing: border-box; }
@@ -174,6 +179,11 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
 .rep-flat img, .rep-flat svg { display: block; max-width: 100%; height: auto; border-radius: 14px;
   box-shadow: 0 0 0 1px var(--ring); background: var(--surface); }
 .rep-caption { margin: 8px 2px 0; color: var(--muted); }
+/* A figure as the hero (issue #15): the still fills the column at any pixel
+   size, as on its card; a solver's picture is small or wide, never a photo. */
+.rep-figure img, .mk-figure img.view-image { width: 100%; height: auto; }
+.mk-flat.mk-figure { width: 100%; justify-items: stretch; }
+.rep-figure .image-wrap, .mk-figure .image-wrap { width: 100%; }
 
 /* ---- sections -------------------------------------------------------------- */
 .nk-sec { padding: 56px 0 8px; border-top: 1px solid var(--grid); scroll-margin-top: 12px; }
@@ -200,6 +210,103 @@ code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border
 .nk-figure { margin: 16px 0; }
 .nk-figure img { display: block; max-width: 100%; border-radius: 12px; box-shadow: 0 0 0 1px var(--ring); }
 .nk-figure figcaption { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
+
+/* ---- a claim's figures (issue #15): one card a claim, before the prose ----- */
+/* One column on a phone and at most two stills side by side; every block may
+   shrink (min-width: 0) and a picture scales to its box, so nothing scrolls
+   sideways at 390 px. A picture of another result, or of a result that is not
+   current, has a dashed frame (`.fig-card--other`, `.fig.currency-older`): it
+   never looks like the result beside it. The colours of a still and of its
+   legend are the scale's, never a tone. */
+.fig-card { margin: 18px 0 8px; display: grid; gap: 12px; min-width: 0; }
+.fig-card--other { box-shadow: none; border: 2px dashed var(--axis); }
+.fig-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+.fig-card-head h3 { margin: 0; font-size: 17px; min-width: 0; overflow-wrap: anywhere; }
+.fig-verdict p { margin: 0; }
+.fig-cause { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+/* The evaluator's own words (`page.card_reason`): the fact the cause sentence leads to. */
+.fig-reason, .cb-reason { margin: 0; font-size: 14px; color: var(--ink); font-family: var(--mono); overflow-wrap: anywhere; }
+.fig-value { font-size: 22px; line-height: 1.3; font-weight: 700; color: var(--tone-ink, var(--ink)); overflow-wrap: anywhere; }
+.fig-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 8px; }
+.fig-tile { background: var(--surface-2); border-radius: 10px; padding: 8px 12px; min-width: 0; }
+.fig-tile p { margin: 0; overflow-wrap: anywhere; }
+.fig-tile-value { font-size: 14.5px; font-weight: 600; }
+.fig-notice { margin: 0; }
+.fig-charts, .fig-stills { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 720px) { .fig-stills { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.fig { margin: 0; min-width: 0; display: grid; gap: 8px; align-content: start; }
+.fig.currency-older, .fig.currency-stale, .fig.currency-unseen { border: 2px dashed var(--axis); border-radius: 12px; padding: 8px; }
+.fig-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.fig-title { font-weight: 650; font-size: 15px; }
+.fig-chips { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--ink-2); }
+.fig-chip { display: inline-flex; align-items: center; gap: 4px; }
+.fig-none { margin: 0; font-size: 14px; color: var(--ink-2); }
+.fig-none .nk-glyph { color: var(--tone-ink); }
+.fig-chart { min-width: 0; width: 100%; min-height: 120px; }
+.fig-chart .vega-embed { width: 100%; }
+.fig-chart summary { display: none; }
+.fig-table { min-width: 0; }
+.fig-table-scroll { max-width: 100%; overflow-x: auto; }
+.fig-table table { border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.fig-table th, .fig-table td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--grid); }
+.fig-still-box { min-width: 0; }
+.fig-still { position: relative; display: block; line-height: 0; border-radius: var(--fig-radius); overflow: hidden;
+  box-shadow: 0 0 0 1px var(--ring); background: var(--surface-2); }
+.fig-still img { display: block; width: 100%; height: auto; image-rendering: auto; }
+/* A plane's words in a row above the picture, over its baked position, with a
+   short line down to the picture's edge. Nothing covers the picture: on a
+   phone a 10 to 1 strip is about 29 px high, and words on it hid it (review
+   of P2). Each mark is a box of no width at its position; its words are
+   centred on it, or run inward near an end. */
+.fig-marks { position: relative; height: 24px; }
+.fig-mark { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none; }
+.fig-mark::after { content: ""; position: absolute; left: -1px; bottom: 0; height: 6px; border-left: 2px solid var(--ink-2); }
+.fig-mark-text { position: absolute; top: 0; left: 0; transform: translateX(-50%); white-space: nowrap;
+  font: 600 12px/1.4 var(--sans); color: var(--ink-2); }
+.fig-mark--start .fig-mark-text { transform: translateX(-6px); }
+.fig-mark--end .fig-mark-text { transform: translateX(calc(-100% + 6px)); }
+.fig-legend { display: grid; gap: 4px; min-width: 0; }
+.fig-legend p { margin: 0; }
+.fig-legend-title { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.fig-legend-bar { display: flex; align-items: stretch; gap: 4px; padding-bottom: 20px; }
+.fig-ramp { position: relative; flex: 1 1 auto; height: 14px; border-radius: 3px; box-shadow: 0 0 0 1px var(--ring); }
+/* A tick is a box of no width at its baked position; its mark is drawn at
+   that position, always, and its words are centred on it or run inward near
+   an end of the ramp (`tickEnd` in lib/figures.js). What slipped through
+   (review of P2): rules on the first and last tick moved the words and the
+   mark together, up to 17 px off the value. */
+.fig-tick { position: absolute; top: 0; bottom: 0; width: 0; }
+.fig-tick::before { content: ""; position: absolute; left: -0.5px; top: 14px; height: 4px; border-left: 1px solid var(--ink-2); }
+.fig-tick-text { position: absolute; top: 18px; left: 0; transform: translateX(-50%); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.fig-tick--start .fig-tick-text { transform: none; }
+.fig-tick--end .fig-tick-text { transform: translateX(-100%); }
+.fig-swatch { flex: none; width: 14px; height: 14px; border-radius: 3px; box-shadow: 0 0 0 1px var(--ring); }
+.fig-swatch-sm { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px;
+  box-shadow: 0 0 0 1px var(--ring); }
+.fig-legend-words { color: var(--ink-2); }
+/* Several scales on one figure (design P2): side by side where each legend
+   has 300 px, else stacked, so nothing scrolls sideways on a phone. Each
+   legend's title starts with its glyph: a filled swatch for a surface, a
+   line for lines (the colours are the scale's, so the glyph is ink). */
+.fig-legends { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px 24px; min-width: 0; }
+.fig-on { display: inline-block; vertical-align: middle; margin-right: 2px; }
+.fig-on--surface { width: 14px; height: 10px; border-radius: 2px; background: var(--ink-2); }
+.fig-on--lines { width: 18px; height: 0; border-top: 3px solid var(--ink-2); border-radius: 2px; }
+/* A lit picture (``light: "scene"``) and its 3D view have a border. */
+.fig-lit .fig-still, .fig-lit .fig-viewer { box-shadow: 0 0 0 1px var(--fig-border); border-radius: var(--fig-radius); }
+.fig-flat { justify-self: start; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface);
+  border-radius: 999px; padding: 4px 12px; font-size: 13.5px; cursor: pointer; }
+.fig-flat[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.fig-caption { margin: 0; font-size: 14px; color: var(--ink-2); }
+.fig-turn { justify-self: start; border: 1px solid var(--accent); color: var(--accent); background: var(--surface);
+  border-radius: 999px; padding: 5px 14px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.fig-3d { display: grid; gap: 6px; }
+.fig-viewer { height: 320px; }
+.fig-binding { margin: 0; color: var(--ink-2); border-top: 1px solid var(--grid); padding-top: 10px; overflow-wrap: anywhere; }
+.fig-tag { display: grid; gap: 4px; margin: 8px 2px 0; }
+.fig-currency { margin: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.fig-currency .nk-glyph { color: var(--tone-ink); }
+.cb-figs { font-size: 14px; overflow-wrap: anywhere; }
 
 details.floor { margin-top: 14px; }
 details.floor > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--ink-2); padding: 6px 0; }

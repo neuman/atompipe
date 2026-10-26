@@ -964,7 +964,8 @@ def _why_text(root: str, ledger: Ledger, registry: gates.Registry, model: Any,
     # A requirement's status from the view as `status` judges it (SPEC
     # decision 12): the caller's compositions, never the raw opinion.
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     # SPEC 14, 38: each rejection's condition and preference from the same
     # view and compositions, and each input's basis from its proposer.
     # Architecture phase 5: each prose file's stamp state, for a board's line.
@@ -1235,7 +1236,7 @@ def _never_run(resolution: verdicts.Resolution, registry: gates.Registry | None)
 
 
 def _stale_lines(resolution: verdicts.Resolution, registry: gates.Registry | None, *,
-                 model_error: str = "") -> list[str]:
+                 model_error: str = "", spend: bool = False) -> list[str]:
     """`status`'s `invalidated:` block (spec §3.13): one line per gate whose
     verdict is not current, with its reasons, continuation lines indented under
     the head, and the counts on the last — `(N verdicts current[, n unrun])`, a
@@ -1260,14 +1261,23 @@ def _stale_lines(resolution: verdicts.Resolution, registry: gates.Registry | Non
     stale = _stale_gate_list(resolution)
     if not stale:
         return [f"invalidated: none{counts}"]
+    # Issue #15, D1: the gates not current only for a channel nopekit cannot
+    # see share ONE line in their own words — a count and one example, the
+    # full channel list being `doctor`'s. What slipped through: one line per
+    # gate, each its whole channel list, ~2 KB above the counts, every one
+    # under "invalidated" for a design nobody had touched.
+    unseen = claims.unseen_gates(resolution)
     lines = []
-    for index, gate_id in enumerate(stale):
+    for gate_id in [g for g in stale if g not in unseen]:
         row = resolution.rows.get(gate_id)
         why = (row.stale_reason if row is not None else "") or "invalidated"
         if model_error:
             why = why.replace(f": {model_error}", "")
         why = (why.splitlines() or ["invalidated"])[0]
-        lines.append(f"{'invalidated: ' if index == 0 else '             '}{gate_id} — {why}")
+        lines.append(f"{'invalidated: ' if not lines else '             '}{gate_id} — {why}")
+    if unseen:
+        lines.append(report.unseen_words("status", resolution, unseen, registry=registry,
+                                         spend=spend))
     lines[-1] += counts
     return lines
 
@@ -1390,8 +1400,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     params = _shown_params(root, ledger, model, model_error, resolution, registry,
                            projection=projection)
     undefended = modelio.undefended_params(params)
+    unseen = claims.unseen_gates(resolution)
     summary = claims.summarise(view, registry, stale_gates=stale_gates)
-    composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+    composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                   unseen_gates=unseen)
     resolved = {cid: c.status for cid, c in composed.items()}
     stale_reasons = _stale_reasons(resolution)
     site_info = _site_state(root, resolved=(view, registry, resolution, params, model,
@@ -1468,7 +1480,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
     sys.stdout.write(report.render_terminal(view, registry, stale_gates=stale_gates,
-                                            params=params, stale_reasons=stale_reasons))
+                                            params=params, stale_reasons=stale_reasons,
+                                            unseen_gates=unseen))
     if view.milestones:
         # Each milestone's line, as last evaluated (D17; review of P2.5b,
         # finding 5: SPINE_CONTRACT and the skill said `status` listed them, and
@@ -1476,7 +1489,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         _say(report.HUMAN["milestone"]["report_head"])
         for milestone_ in view.milestones:
             _say("  " + report.milestone_line(view, composed, milestone_))
-    for line in _stale_lines(resolution, registry, model_error=model_error):
+    for line in _stale_lines(resolution, registry, model_error=model_error,
+                             spend=bool(getattr(view, "milestones", None))):
         _say(line)
     # "last check run" (GLOSSARY §6: one invocation of `check` is a check run):
     # `last check:` read as a noun for an evaluator one line under the claims.
@@ -1942,9 +1956,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         projection, elapsed = ran.projection, ran.elapsed
 
         stale_gates = resolution.stale_gates
+        unseen = claims.unseen_gates(resolution)
         blockers = claims.blocking(view, registry, stale_gates=stale_gates)
         summary = claims.summarise(view, registry, stale_gates=stale_gates)
-        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                       unseen_gates=unseen)
 
     rows = list(result.rows)
     selected = {row.verdict.gate for row in rows}
@@ -1989,12 +2005,24 @@ def cmd_check(args: argparse.Namespace) -> int:
     # review). Each once, in the order they arose.
     notes = [str(note) for note in dict.fromkeys(result.notes)]
 
+    # Invariant 12: every reader but `export` says *ready* as last evaluated.
+    # A ready that rests on evaluators nopekit cannot see into holds in this run
+    # only — `status`, the report and the site read those claims Stale the
+    # moment it ends — so every channel of this run says so: the line under
+    # `ready:`, the JSON and the JUnit file (issue #15, D1; the JUnit file and
+    # the JSON in its review: a CI reader saw `ready=true` and nothing that
+    # joined it to the NOT ready every other reader said a second later).
+    rests = _unseen_in_run(rows, view, composed) if (view.claims and not blockers) else []
+    ready_note = (report.unseen_words("ready", resolution, rests, registry=registry)
+                  if rests and claims.unresolved(view, composed).ready else "")
+
     spine = verdicts.spine_digest()
     written = _junit_write(junit, lambda: report.render_junit(
         view, [row.verdict for row in rows], registry, tier=tier, ready=ready,
         exit_code=code, when=now, not_run=result.not_run,
         cached={row.verdict.gate for row in rows if row.cached}, spine=spine,
-        stale_gates=stale_gates, stale_reasons=stale_reasons))
+        stale_gates=stale_gates, stale_reasons=stale_reasons, unseen_gates=unseen,
+        ready_note=ready_note))
 
     if args.json:
         _dump({
@@ -2019,6 +2047,9 @@ def cmd_check(args: argparse.Namespace) -> int:
             # project waiting for an article as ready).
             "ready": ready,
             "all_required_checked": bool(summary["all_required_checked"]),
+            # Additive (review of issue #15's D1): the note `check` prints under
+            # `ready:` when that ready holds for this run only; "" otherwise.
+            "ready_note": ready_note.removeprefix("note: "),
             "claims_recorded": len(view.claims),
             # Stale BEFORE the sweep (cli:H19): after a recorded full sweep
             # everything it touched is current by construction, so "stale" read
@@ -2092,9 +2123,15 @@ def cmd_check(args: argparse.Namespace) -> int:
     if carried:
         shown = ", ".join(v.gate for v in carried[:4])
         more = f", +{len(carried) - 4}" if len(carried) > 4 else ""
-        stale_n = sum(1 for v in carried if v.gate in stale_gates)
+        # Issue #15, D1: one not current only for a channel nopekit cannot see
+        # is counted in its own words, never as "invalidated".
+        unseen_n = sum(1 for v in carried if v.gate in stale_gates and v.gate in unseen)
+        stale_n = sum(1 for v in carried if v.gate in stale_gates) - unseen_n
+        tail = [f"{stale_n} of them invalidated"] if stale_n else []
+        tail += [f"{unseen_n} of them with {report.HUMAN['lead'][claims.ClaimCause.UNSEEN]}"
+                 ] if unseen_n else []
         _say(f"note: {len(carried)} gate(s) outside this sweep keep their last verdict "
-             f"({shown}{more})" + (f" — {stale_n} of them invalidated" if stale_n else ""))
+             f"({shown}{more})" + (f" — {', '.join(tail)}" if tail else ""))
 
     if not view.claims:
         # "ready" on a project that has never stated what must be true is the
@@ -2110,6 +2147,11 @@ def cmd_check(args: argparse.Namespace) -> int:
         # `ready: no critical claim is blocking` printed while a claim waited
         # for an article and an assumption had no owner.
         _say(report.not_ready_line(view, composed))
+        # The note on the next line (`ready_note`, above). What slipped
+        # through before it (issue #15, D1): `check` said ready and every
+        # other reader, a second later, NOT ready, with nothing to join them.
+        if ready_note:
+            _say(ready_note)
     else:
         # In severity order (P2.1-D16): what slipped through (P2.0 F-2), record
         # order put a missing tool's `[skip ]` above a crash's row.
@@ -2118,7 +2160,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             found = composed[claim.id]
             _say(_blocking_line(claim, found.status,
                                 _blocking_reason(view, claim, found.status,
-                                                 stale=stale_reasons),
+                                                 stale=stale_reasons, unseen=unseen),
                                 errored=found.errored))
     # The rebuild prediction (P2.5a-D16), after the claim rows: one line per
     # article whose design moved — a prediction, never a refusal.
@@ -2489,7 +2531,8 @@ def _round_run(root: str, *, commit: bool, wait_s: float, now: str) -> RoundOutc
                                                shown=shown, built=built, traced=traced)
             done = rounds.write(root, content)
             composed = claims.compositions(view, registry=registry,
-                                           stale_gates=resolution.stale_gates)
+                                           stale_gates=resolution.stale_gates,
+                                           unseen_gates=claims.unseen_gates(resolution))
             text = report.round_paragraph(
                 _round_shape(done), done.round, done.changes, view=view, composed=composed,
                 check=check, site=site_info, wrote=done.written,
@@ -2767,8 +2810,28 @@ def _blocking_line(claim: Claim, status: ClaimStatus, reason: str, *,
             f"{report._one(claim.statement)} — {reason}")
 
 
+def _unseen_in_run(rows: Iterable[verdicts.SweepRow], view: Ledger,
+                   composed: Mapping[str, Any]) -> list[str]:
+    """The gates of this sweep, in its row order, that settled a required claim
+    on a current verdict whose reads went through a channel nopekit cannot see
+    — the ones every reader after this run will read Stale (issue #15, D1;
+    `claims.unseen_gates` is the same fact read back from the cache). From the
+    row's own reads: the run's `Reads` or the served entry's block."""
+    cited = {g for cid in claims.required_ids(view) if cid in composed
+             for g in composed[cid].cites}
+    out = []
+    for row in rows:
+        reads = row.reads
+        channels = (reads.get("opaque") if isinstance(reads, Mapping)
+                    else getattr(reads, "opaque", None))
+        if row.fresh and channels and row.verdict.gate in cited:
+            out.append(row.verdict.gate)
+    return out
+
+
 def _blocking_reason(ledger: Ledger, claim: Claim, status: ClaimStatus, *,
-                     stale: Mapping[str, str] | None = None) -> str:
+                     stale: Mapping[str, str] | None = None,
+                     unseen: Iterable[str] = ()) -> str:
     """The shortest true sentence about why one claim blocks: `report.reason`,
     in full, for the claim composed over `ledger` — the one producer every
     channel's reason comes from (P2.1-D15; `ReasonsAgree` holds this and
@@ -2789,10 +2852,11 @@ def _blocking_reason(ledger: Ledger, claim: Claim, status: ClaimStatus, *,
     `stale` is `{gate: why}` for the gates whose verdict is not current (the
     resolution's). A FAIL whose inputs moved stays FAIL (D-08) and says so —
     `gate : body (invalidated: why)` — and a Stale claim names its moved gate
-    with what moved.
+    with what moved. `unseen` is `claims.unseen_gates` of that resolution.
     """
     stale = dict(stale or {})
-    found = claims.compose(claim, ledger.verdicts, stale_gates=set(stale))
+    found = claims.compose(claim, ledger.verdicts, stale_gates=set(stale),
+                           unseen_gates=set(unseen or ()))
     return report.reason(found, ledger, claim, cut=False, stale_reasons=stale)
 
 
@@ -2853,7 +2917,8 @@ def _export_list(root: str, ledger: Ledger, *, as_json: bool) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     said = report.HUMAN["milestone"]
     declared = list(view.milestones)
     if as_json:
@@ -2994,7 +3059,8 @@ def _export_locked(args: argparse.Namespace, root: str, ledger: Ledger, mileston
     view, resolution = _resolved(root, ledger, registry, projection, model_error, now=now,
                                  model=model, sweep=result)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     found = milestones.disagreements(before, result, set(closure)) if result is not None \
         else []
     extra = list(preconditions)
@@ -3173,7 +3239,8 @@ def _export_build(root: str, ledger: Ledger, milestone: Any, view: Ledger, regis
                                        milestone=milestone,
                                        stale_reasons=_stale_reasons(resolution),
                                        boundary=True, article=built.article["hash"],
-                                       test_card=card)
+                                       test_card=card,
+                                       unseen_gates=claims.unseen_gates(resolution))
     required = claims.required_ids(view, milestone)
     manifest = {"milestone": name, "revision": built.article.get("revision", ""),
                 "records_digest": store.records_digest(root, exclude=("exports",)),
@@ -3846,7 +3913,8 @@ def cmd_claim_list(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     resolved = {cid: c.status for cid, c in composed.items()}
     cover = claims.coverage(view, registry)
     stale_reasons = _stale_reasons(resolution)
@@ -3929,7 +3997,8 @@ def cmd_claim_show(args: argparse.Namespace) -> int:
     # no registry at all — `claim list` said PENDING while `claim show` said
     # UNCLAIMED for the same claim, one command apart.
     claim = view.claim(args.id)
-    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates)
+    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates,
+                           unseen_gates=claims.unseen_gates(resolution))
     status = found.status
 
     why = _why_text(root, ledger, registry, model, model_error, view, resolution, claim.id,
@@ -4255,7 +4324,8 @@ def cmd_claim_physical(args: argparse.Namespace) -> int:
         view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                      now=now, model=model)
         current = view.claim(claim.id)
-        reads = claims.compose(current, view.verdicts, stale_gates=resolution.stale_gates)
+        reads = claims.compose(current, view.verdicts, stale_gates=resolution.stale_gates,
+                               unseen_gates=claims.unseen_gates(resolution))
         required = said["required"] if claim.critical else said["not_required"]
         head = [f"{claim.id} {report._one(claim.statement)}",
                 "  " + said["prompt_status"].format(terminal=report.terminal_word(claim),
@@ -4301,7 +4371,8 @@ def cmd_claim_physical(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=now, model=model)
     claim = view.claim(args.id)
-    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates)
+    found = claims.compose(claim, view.verdicts, stale_gates=resolution.stale_gates,
+                           unseen_gates=claims.unseen_gates(resolution))
     shown = report.status_view(found, view, claim, stale_reasons=_stale_reasons(resolution))
     contradicts = [item for item in entry.get("contradicts") or ()
                    if item.get("inside") is True]
@@ -4593,7 +4664,8 @@ def cmd_gap(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=utcnow_iso(), model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     stale_reasons = _stale_reasons(resolution)
     waiting = report.in_severity(view, composed, claims.yet_to_run(view, composed))
     gaps = claims.find_gaps(view, registry)
@@ -4932,10 +5004,20 @@ def _qualification_rows(gate_id: str, spec: Any, admission: verdicts.Admission, 
     elif state == "not-admitted":
         rows = [f"  qualification: "
                 f"{report.qualification_reason(admission.reason, pruned_by=pruned_by)}"]
+    elif report.unseen_qualification(admission):
+        rows = [f"  qualification: {report.HUMAN['unseen']['qualification']}"]
     else:
+        # With the tier that reaches it: a plain `check` is tier 0 (review of
+        # issue #15's D1).
         rows = [f"  qualification: "
-                f"{report.qualification_reason(verdicts.NOT_YET, pruned_by=pruned_by)}"]
+                f"{report.qualification_reason(_not_yet_token(spec), pruned_by=pruned_by)}"]
     return rows + report.qualification_detail(entry, spec, facts=facts)
+
+
+def _not_yet_token(spec: Any) -> str:
+    """`verdicts.NOT_YET` with ``spec``'s tier, as `verdicts._not_yet` writes it,
+    so the words name the check run that reaches the evaluator."""
+    return f"{verdicts.NOT_YET}|{int(getattr(spec, 'tier', 0) or 0)}"
 
 
 def cmd_gate_show(args: argparse.Namespace) -> int:
@@ -5754,7 +5836,8 @@ def cmd_report(args: argparse.Namespace) -> int:
                 f"written into its package by `nopekit export {milestone.id}`")
 
     if args.json:
-        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates)
+        composed = claims.compositions(view, registry=registry, stale_gates=stale_gates,
+                                       unseen_gates=claims.unseen_gates(resolution))
         extra: dict[str, Any] = {}
         if milestone is not None:
             # The milestone's own predicate (review of P2.5b, finding 10: the
@@ -5801,7 +5884,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             store.ensure_ignore_blocks(root)
             path = report.write_report(root, view, registry, stale_gates=stale_gates,
                                        model_error=model_error, params=params,
-                                       stale_reasons=stale_reasons, amber=amber_lines)
+                                       stale_reasons=stale_reasons, amber=amber_lines,
+                                       unseen_gates=claims.unseen_gates(resolution))
             if view.decisions:
                 decisions.write_log(root, view)
         _say(rel(path, root))
@@ -5815,7 +5899,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         report.render_markdown(view, registry, stale_gates=stale_gates,
                                model_error=model_error, root=root, params=params,
                                stale_reasons=stale_reasons, milestone=milestone,
-                               amber=amber_lines), banner))
+                               amber=amber_lines,
+                               unseen_gates=claims.unseen_gates(resolution)), banner))
     return 0
 
 
@@ -6157,7 +6242,8 @@ def cmd_prefer(args: argparse.Namespace) -> int:
     view, resolution = _resolved(root, ledger, registry, projection, model_error,
                                  now=now, model=model)
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=resolution.stale_gates)
+                                   stale_gates=resolution.stale_gates,
+                                   unseen_gates=claims.unseen_gates(resolution))
     row = next(r for r in claims.rejection_rows(view, composed)
                if r.decision == args.id and r.index == index)
     ledger = view
@@ -6629,121 +6715,9 @@ def cmd_model_trace(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def _load_viewgens(directory: str, registry: Any, *,
                    pack: str, root: str) -> list[Any]:
-    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
-
-    Deliberately the same shape as `gates.load_project_gates`, because a viewgen is a
-    gate's twin: same directory convention, same `sys.path` handling, same
-    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
-    problem and must not print as a spine traceback". A pack author who has
-    written `gates/clash.py` writes `views/assembly.py` with nothing new to
-    learn, which is the whole reason `site.py` mirrors `gates.py` field for
-    field.
-
-    Two details carry weight:
-
-    * **Module names are salted with a hash of the file's absolute path**, so a
-      pack's `views/assembly.py` and a project's `views/assembly.py` are
-      different modules. Without the salt the second one to load silently reuses
-      the first one's code while every message names the second file.
-    * **Already-imported modules are re-registered from `fn.view_spec`**, not
-      re-executed. Python will not run a module twice, so a second build in one
-      process (a test, an agent that builds after every edit, `site status`
-      after `site build`) would decorate nothing and find an EMPTY registry —
-      reporting "this project has no views" about a project with six. The
-      decorator attaches `view_spec` to the function precisely so a loader can
-      recover the registration without re-running the module.
-
-    Registering the same function under the same id twice is a no-op in
-    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
-    the two paths stay one path rather than two that can drift.
-    """
-    if not os.path.isdir(directory):
-        return []
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError as exc:
-        raise NopekitError(f"cannot read {rel(directory, root)}: {exc}") from exc
-    files = [os.path.join(directory, name) for name in names
-             if name.endswith(".py") and not name.startswith("_")]
-    if not files:
-        return []
-
-    where = f"pack {pack!r}: " if pack else ""
-    before = set(registry.ids())
-    # The directory ABOVE views/ — the pack root, or the project root. On
-    # sys.path so a viewgen can `import _geom` and share the helper the gate
-    # next door already uses, and set as PACK_DIR so pack-relative fixtures
-    # resolve the same way they do for gates.
-    base = os.path.dirname(directory)
-    sys.path.insert(0, base)
-    try:
-        with site.use_view_registry(registry):
-            for path in files:
-                module = _import_viewgen_module(
-                    path, pack=pack, base=base, root=root, where=where)
-                # The attribute walk, always — see the docstring. On a fresh
-                # import it re-registers what the decorator just registered
-                # (a no-op); on a reused one it is the only thing that registers
-                # anything at all.
-                for value in list(vars(module).values()):
-                    spec = getattr(value, "view_spec", None)
-                    if not isinstance(spec, site.ViewSpec) or not callable(value):
-                        continue
-                    try:
-                        registry.register(spec, value)
-                    except NopekitError as exc:
-                        raise NopekitError(
-                            f"{where}{rel(path, root)}: {exc}") from exc
-    finally:
-        try:
-            sys.path.remove(base)       # removes OUR insertion (the first match)
-        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
-            pass
-    return [spec for spec in registry.specs() if spec.id not in before]
-
-
-def _import_viewgen_module(path: str, *, pack: str, base: str,
-                           root: str, where: str) -> Any:
-    """Import one `views/*.py`, or raise an NopekitError naming the file."""
-    stem = os.path.splitext(os.path.basename(path))[0]
-    module_name = f"nopekit_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
-    existing = sys.modules.get(module_name)
-    if existing is not None:
-        return existing                 # ordinary import semantics; see _load_viewgens
-
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:         # pragma: no cover - defensive
-        raise NopekitError(f"{where}{rel(path, root)}: no import machinery accepted this file")
-    module = importlib.util.module_from_spec(spec)
-    # Set BEFORE execution, which `module_from_spec` makes possible by handing
-    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
-    # defining module at decoration time so twenty decorators do not each retype
-    # the pack name — a mistyped one orphans a view in the site's grouping with
-    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
-    # that has to find a template or a material table shipped beside it; for a
-    # project's `views/` it is the project root, which is where those things are.
-    module.PACK = pack
-    module.PACK_DIR = base
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except NopekitError as exc:
-        # A registry refusal (duplicate view id, unknown kind) is already phrased
-        # for a human. Keep the phrasing and add the location.
-        sys.modules.pop(module_name, None)
-        raise NopekitError(f"{where}{rel(path, root)}: {exc}") from exc
-    except KeyboardInterrupt:
-        sys.modules.pop(module_name, None)
-        raise
-    except BaseException as exc:
-        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
-        # module whose exporter guards its own absence with `sys.exit()` at
-        # import time must not be able to end the command with that exit code.
-        sys.modules.pop(module_name, None)
-        raise NopekitError(
-            f"{where}{rel(path, root)} failed to import: {type(exc).__name__}: {exc}"
-        ) from exc
-    return module
+    """`site.load_viewgens`: moved there so `pack validate` (`packs.validate`)
+    loads a pack's views through the same code as a build."""
+    return site.load_viewgens(directory, registry, pack=pack, root=root)
 
 
 def _view_registry(root: str, ledger: Ledger, *,
@@ -6852,6 +6826,8 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         "stale_reason": "",
         "verdicts_stale": False,
         "verdicts_stale_reason": "",
+        "verdicts_stale_check": "",
+        "verdicts_stale_unseen": False,
         "assets": 0,
         "asset_bytes": 0,
         "vendored": False,
@@ -6926,6 +6902,10 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
     info["locator_problems"] = list(payload.get("locator_problems") or [])
     info["verdicts_stale"] = bool(meta.get("stale"))
     info["verdicts_stale_reason"] = str(meta.get("stale_reason") or "")
+    # The command the build baked, with the tier that reaches the stale gates
+    # (a page from before it: a plain `nopekit check`, as it said then).
+    info["verdicts_stale_check"] = str(meta.get("stale_check") or "nopekit check")
+    info["verdicts_stale_unseen"] = bool(meta.get("stale_unseen"))
     info["claims"] = len(payload.get("claims") or [])
     info["verdicts"] = len(payload.get("verdicts") or [])
 
@@ -6948,7 +6928,8 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         return stale(f"what the page would show now cannot be worked out "
                      f"({exc}) — fix that, then `nopekit site build`")
     composed = claims.compositions(view, registry=registry,
-                                   stale_gates=frozenset(resolution.stale_gates))
+                                   stale_gates=frozenset(resolution.stale_gates),
+                                   unseen_gates=claims.unseen_gates(resolution))
     tokens = graph.tokens(view, resolution, registry, composed=composed)
     try:
         info["prose"] = [{"file": row["file"], "subject": row["subject"], "stamp": row["stamp"]}
@@ -6969,6 +6950,13 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
         if isinstance(doc, dict) and doc.get("self") != page.seal(doc):
             info["edited"].append(f"data/{name} was edited by hand: a build writes it again")
     map_doc, page_doc = docs.get(site.MAP_NAME), docs.get(site.PAGE_NAME)
+    # Each view row and view file at the bytes the build sealed into page.json
+    # (review of P1): a payload edited by hand reads so, whether or not prose
+    # names one of its numbers.
+    if isinstance(page_doc, dict) and page_doc.get("self") == page.seal(page_doc):
+        info["edited"].extend(f"{problem}: edited by hand, a build writes it again"
+                              for problem in site.view_problems(
+                                  site_dir, payload, page_doc))
     if isinstance(map_doc, dict):
         info["map"] = {"lines": len(map_doc.get("lines") or ()),
                        "boards": sum(1 for n in map_doc.get("nodes") or ()
@@ -7007,10 +6995,16 @@ def _site_state(root: str, *, resolved: tuple | None = None) -> dict:
                     as_of[subject] = prose.parse_front_matter(fh.read()).as_of
             except OSError:
                 continue
+        # The figures (issue #15, B.5) against the disk: each file the page
+        # links hashed against its sidecar, the currency read again from the
+        # served entry, a chart's limit against the floor.
         found = page.status_problems(map_doc, page_doc, view, composed, tokens,
                                      prose_as_of=as_of,
                                      pool=site.baked_pool(root, map_doc, page_doc),
-                                     amber=live_amber, feeds=live_feeds)
+                                     amber=live_amber, feeds=live_feeds,
+                                     figures=page.figure_facts(
+                                         root, resolution, now, view, composed, registry,
+                                         baked_views=payload.get("views") or ()))
         if found:
             info["edited"].append(f"the page data (data/{site.PAGE_NAME}, "
                                   f"data/{site.MAP_NAME}) was edited by hand: {found[0]}")
@@ -7310,7 +7304,10 @@ def cmd_site_build(args: argparse.Namespace) -> int:
              f"that thinks it is drawing and is not looks exactly like a gate that found "
              f"nothing — fix the gate's locator or the view's node names.")
     if summary["stale"]:
-        _say(f"verdicts are STALE: {summary['stale_reason']} — `nopekit check`")
+        # The tier that reaches the gates it names: a plain `nopekit check` is
+        # tier 0, and advised it for a solver's results (issue #15, D1).
+        command = "nopekit check" + report._tier_flag(registry, resolution.stale_gates)
+        _say(f"verdicts are STALE: {summary['stale_reason']} — `{command}`")
     return 0
 
 
@@ -7964,7 +7961,8 @@ def cmd_site_stamp(args: argparse.Namespace) -> int:
         view, resolution = _resolved(root, ledger, registry, projection, "", now=utcnow_iso(),
                                      model=model)
         composed = claims.compositions(view, registry=registry,
-                                       stale_gates=resolution.stale_gates)
+                                       stale_gates=resolution.stale_gates,
+                                       unseen_gates=claims.unseen_gates(resolution))
         tokens = graph.tokens(view, resolution, registry, composed=composed)
         boards = page.boards_of(view)
         known = page.subjects(boards)
@@ -8330,7 +8328,10 @@ def cmd_site_status(args: argparse.Namespace) -> int:
         _say(f"{_tag('warn')} {site.OLD_LAYOUT_WARNING}")
     if info["verdicts_stale"]:
         _say(f"{_tag('warn')} the verdicts on the page are stale: "
-             f"{info['verdicts_stale_reason']} — `nopekit check`, then rebuild")
+             f"{info['verdicts_stale_reason']} — `{info['verdicts_stale_check']}`"
+             # Unseen only: the rebuild after a check run reads the same, so
+             # it is not promised (review of issue #15's D1).
+             + ("" if info["verdicts_stale_unseen"] else ", then rebuild"))
     if info["locator_problems"]:
         _say(f"{_tag('warn')} {len(info['locator_problems'])} dangling locator(s):")
         for problem in info["locator_problems"][:6]:
@@ -8860,9 +8861,16 @@ def _doctor_cache_rows(results: list[dict], root: str, registry: gates.Registry,
                          "installed here")
 
     found = notes.get("opaque-inputs", [])
+    # The full channel list lives here and nowhere else (issue #15, D1):
+    # `status`, `site build` and the page print a count and one example.
+    n_opaque = len(found)
     _check(results, "opaque-inputs", "warn" if found else "ok",
-           _listed(found) + " — never served from the cache: re-run on every check, "
-                            "stale between checks"
+           report.HUMAN["unseen"]["doctor"].format(
+               n=n_opaque, evaluators=report._plural(n_opaque, "evaluator"),
+               read=report._plural(n_opaque, "reads", "read"),
+               their=report._plural(n_opaque, "its", "their"),
+               results=report._plural(n_opaque, "result"),
+               are=report._plural(n_opaque, "is", "are"), rows=_listed(found))
            if found else "no cached verdict read through a channel the tracer cannot see")
 
     found = notes.get("cache-entries", [])
@@ -8956,6 +8964,7 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
     q = report.HUMAN["qualification"]["doctor"]
     unqualified: list[str] = []
     waiting: list[str] = []
+    unseen: list[str] = []
     pruned = {v.gate: (list(v.blocked_by or ()) or [""])[0] for v in resolution.verdicts
               if getattr(v, "blocked_by", None)}
     for gate_id in registry.ids():
@@ -8968,9 +8977,15 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
             admission = verdicts.admission_state(root, spec, fn, projection=projection,
                                                  ledger=ledger, anchors=resolution.anchors)
         kind = verdicts.parse_token(admission.reason)[0]
-        if admission.state == "undemonstrated" or (admission.state == "not-admitted"
-                                                   and kind == verdicts.NOT_YET):
-            token = admission.reason if kind == verdicts.NOT_YET else verdicts.NOT_YET
+        if report.unseen_qualification(admission):
+            # Issue #15, review of D1: qualified by the check run that ran its
+            # controls, which read inputs nopekit cannot see — never "the next
+            # check run qualifies it", which every check run since had.
+            unseen.append(gate_id)
+        elif admission.state == "undemonstrated" or (admission.state == "not-admitted"
+                                                     and kind == verdicts.NOT_YET):
+            spec_, _fn = registry.get(gate_id)
+            token = admission.reason if kind == verdicts.NOT_YET else _not_yet_token(spec_)
             how = report.qualification_reason(token, pruned_by=pruned.get(gate_id, ""))
             waiting.append(f"{gate_id} ({how})")
         elif admission.state == "not-admitted":
@@ -8980,9 +8995,15 @@ def _doctor_qualification_rows(results: list[dict], root: str, registry: gates.R
         if waiting:
             text += q["also_waiting"].format(n=len(waiting))
         _check(results, "qualification", "FAIL", text)
-    elif waiting:
-        _check(results, "qualification", "warn",
-               q["not_yet"].format(n=len(waiting), list=_listed(waiting, ", ")))
+    elif waiting or unseen:
+        said = ([q["not_yet"].format(n=len(waiting), list=_listed(waiting, ", "))]
+                if waiting else [])
+        if unseen:
+            n = len(unseen)
+            said.append(report.HUMAN["unseen"]["doctor_q"].format(
+                n=n, evaluators="evaluator" if n == 1 else "evaluators",
+                their="its" if n == 1 else "their", rows=_listed(unseen, ", ")))
+        _check(results, "qualification", "warn", "; ".join(said))
     else:
         _check(results, "qualification", "ok", q["ok"])
     missing = [] if os.path.isfile(os.path.join(root, "selftest", "known_good.py")) else [
@@ -9851,6 +9872,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         found = shutil.which(tool)
         _check(results, "tool", "ok" if found else "warn",
                f"{tool}: {found or 'not on PATH — gates needing it will SKIP, not fail'}")
+    # The tools the views draw with (issue #15, B.7): a missing one leaves a
+    # picture out and moves no status, and its row says so. What slipped
+    # through before: `doctor` named only the gates' tools, so a person with
+    # no ParaView read every row ok beside a CFD card with no pictures.
+    view_registry, view_problems = _view_registry(root, ledger, strict=False)
+    for problem in view_problems:
+        _check(results, "views", "warn", problem)
+    for ok, words in site.view_tool_rows(view_registry, root,
+                                         skip=summary["requires_tools"]):
+        _check(results, "view-tool", "ok" if ok else "warn", words)
 
     model = None
     projection = None

@@ -17,6 +17,7 @@ Run:  PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_map.py'
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
 import shutil
@@ -224,6 +225,25 @@ class ARebuildThatJudgedNothingChangesNothing(_env.EnvCase):
             self.assertNotEqual(proc.returncode, 0, "map.json is ignored")
 
 
+def _sha(path: str) -> str:
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def _bound(root: str, evidence: list):
+    """A manifest reader holding the bytes each `<out>/` path has NOW, in
+    `verdicts.evidence_manifest`'s shape, for the one entry `_plan` serves: the
+    run that wrote the entry, as it would have recorded them."""
+    out = store.out_dir(root)
+    files = {}
+    for text in evidence:
+        if text.startswith("<out>/") and ".." not in text:
+            path = os.path.join(out, *text[len("<out>/"):].split("/"))
+            if os.path.isfile(path):
+                files[text] = {"sha256": _sha(path), "bytes": os.path.getsize(path)}
+    return lambda gate, entry: files if (gate, entry) == ("g.one", "abc123-def456") else None
+
+
 # --------------------------------------------------------------------------- #
 class EvidenceReachesThePage(_env.EnvCase):
     """(SPEC 30) Evidence a verdict names is planned for the page from where it
@@ -231,7 +251,9 @@ class EvidenceReachesThePage(_env.EnvCase):
     clone the earlier copy is kept; outside the project, out of `.nopekit/out/`
     through `..` or a link, hidden, ignored by git, too large or a directory it
     is named and never copied; clashing names get their own file; and the words
-    baked beside one that is not copied never read this machine's disk."""
+    baked beside one that is not copied never read this machine's disk. A file
+    is copied only as the bytes the entry's manifest holds (issue #15): other
+    bytes, or no manifest, keep an earlier copy or show none."""
 
     def _plan(self, root: str, evidence: list, **kw) -> list:
         verdict = Verdict(gate="g.one", claims=["C1"], passed=True, evidence=evidence)
@@ -243,6 +265,7 @@ class EvidenceReachesThePage(_env.EnvCase):
         class Row:
             entry = Entry()
 
+        kw.setdefault("manifest", _bound(root, evidence))
         return page.evidence_plan(root, view, _Res(stale_gates=frozenset(),
                                                    rows={"g.one": Row()}), **kw)
 
@@ -331,6 +354,41 @@ class EvidenceReachesThePage(_env.EnvCase):
         self.assertTrue(all(dests), dests)
         self.assertEqual(len({d.casefold() for d in dests}), len(names), dests)
 
+    def test_only_the_bytes_the_entry_cited(self):
+        """(Issue #15) The manifest holds A's bytes and `.nopekit/out` B's: not
+        copied, and an earlier copy kept; no manifest at all: not copied either.
+        What slipped through: the plan copied by name, so a cache hit on A
+        published B's file under A's entry, over A's copy."""
+        root = _projects.bracket_copy(os.path.join(self.tmp(), "bracket"), migrated=True)
+        out = store.out_dir(root)
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, "sag.json")
+        with open(path, "w") as fh:
+            fh.write('{"sag": 0.7}\n')
+        bound_a = _bound(root, ["<out>/sag.json"])
+        [item] = self._plan(root, ["<out>/sag.json"], manifest=bound_a)
+        self.assertEqual((item.action, item.sha256), ("copy", _sha(path)))
+        with open(path, "w") as fh:
+            fh.write('{"sag": 0.9}\n')
+        said = page._site_words()["evidence"]
+        [item] = self._plan(root, ["<out>/sag.json"], manifest=bound_a)
+        self.assertEqual((item.action, item.href, item.missing),
+                         ("none", None, said["not_copied"]))
+        self.assertIn("from another run", item.reason)
+        [item] = self._plan(root, ["<out>/sag.json"], manifest=lambda gate, entry: None)
+        self.assertEqual((item.action, item.href), ("none", None))
+        self.assertIn("no recorded run", item.reason)
+        [item] = self._plan(root, ["<out>/sag.json"], manifest=None)
+        self.assertEqual(item.action, "none", "no manifest reader bound a file")
+        dest = "assets/evidence/g.one/abc123-def456/sag.json"
+        target = os.path.join(root, "site", *dest.split("/"))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w") as fh:
+            fh.write('{"sag": 0.7}\n')
+        [item] = self._plan(root, ["<out>/sag.json"], manifest=bound_a)
+        self.assertEqual((item.action, item.source, item.href), ("keep", None, dest))
+        self.assertIn("from another run", item.reason)
+
     def test_through_a_build(self):
         """A verdict names `<out>/sag.json`: the build copies it to the href
         page.json and state.json link, a second build moves no byte, and a
@@ -344,6 +402,12 @@ class EvidenceReachesThePage(_env.EnvCase):
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, "sag.json"), "w") as fh:
             fh.write('{"sag": 0.7, "units": "mm"}\n')
+        # The manifest the run that wrote the served entry left (issue #15):
+        # without it the build copies nothing.
+        served = resolved(root, fresh=True)[1].rows["bracket.deflection"].entry.name
+        verdicts_mod.write_evidence_manifest(root, "bracket.deflection", served,
+                                             [os.path.join(out, "sag.json")],
+                                             verdicts_mod.Anchors(root=root, out=out))
         real = verdicts_mod.view
 
         def with_evidence(*a, **kw):
@@ -386,6 +450,15 @@ class EvidenceReachesThePage(_env.EnvCase):
         self.assertTrue(os.path.isfile(copy), "a fresh clone lost the copy")
         after = {k: v for k, v in _snapshot(site_dir).items() if not k.endswith("build.json")}
         self.assertEqual(after, before, "a fresh clone baked other bytes")
+        # Another run's file under the same name: the copy stays the entry's.
+        with open(os.path.join(out, "sag.json"), "w") as fh:
+            fh.write('{"sag": 0.9, "units": "mm"}\n')
+        summary = build()
+        self.assertEqual((summary["evidence"]["copied"], summary["evidence"]["kept"]), (0, 1))
+        self.assertTrue(any("from another run" in w for w in summary["warnings"]),
+                        summary["warnings"])
+        after = {k: v for k, v in _snapshot(site_dir).items() if not k.endswith("build.json")}
+        self.assertEqual(after, before, "another run's bytes reached the page")
 
 
 # --------------------------------------------------------------------------- #

@@ -103,11 +103,22 @@ export function staleBanner(state) {
   return el("aside", { class: "banner banner-stale", role: "status" },
     el("span", { class: "banner-glyph", "aria-hidden": "true", text: "≈" }),
     el("div", {},
-      el("b", { text: "Some results are older than the design." }),
+      // True of both of Stale's evaluator causes (issue #15, D1): a design that
+      // moved, and an evaluator whose inputs nopekit cannot see; the baked
+      // `meta.stale_reason` beside it says which.
+      el("b", { text: "Some results are not shown as current." }),
       " ",
       el("span", { text: meta.stale_reason || "The inputs of a verdict changed after it ran." }),
-      el("p", { class: "banner-fix" }, "Run ", code("nopekit check"),
-        ", then ", code("nopekit site build"), ". The check runs those evaluators on the design as it is now.")));
+      // The command is baked (`meta.stale_check`), with the tier that reaches
+      // the stale evaluators: a plain `nopekit check` is tier 0 and runs no
+      // solver (review of issue #15's D1). When every one reads inputs nopekit
+      // cannot see, a rebuild after the check reads the same, so none is
+      // promised (`meta.stale_unseen`).
+      meta.stale_unseen
+        ? el("p", { class: "banner-fix" }, "Only the output of a check run can show them as current: ",
+            code(meta.stale_check || "nopekit check"), ".")
+        : el("p", { class: "banner-fix" }, "Run ", code(meta.stale_check || "nopekit check"),
+            ", then ", code("nopekit site build"), ". The check runs those evaluators on the design as it is now.")));
 }
 
 /** Locator problems: a gate that believes it is drawing and is not.
@@ -366,7 +377,9 @@ function verdictRow(v, app) {
       // hit this result, else the commit that brought it. Neither known: said so.
       ...field("Recorded", ages.when ? `${stamp(ages.when)} · ${age(ages.age_s)}`
         : "No date is recorded for this result."),
-      ...(v.stale_reason ? field(capital(phrase("invalidated")), v.stale_reason) : []),
+      // The resolver's word for the row: `unseen inputs` for one not current
+      // only for inputs nopekit cannot see (review of issue #15's D1).
+      ...(v.stale_reason ? field(capital(phrase(v.unseen ? "unseen" : "invalidated")), v.stale_reason) : []),
       ...(v.claims || []).length
         ? field("Settles", ...v.claims.map((c) => el("button", {
             class: "linkish mono", type: "button", text: c,
@@ -408,7 +421,7 @@ function verdictRow(v, app) {
         el("span", { class: "verdict-line", text: detail }),
         v.stale_reason
           ? el("span", { class: "stale-flag", title: v.stale_reason,
-              text: `≈ ${phrase("invalidated")}` })
+              text: `≈ ${phrase(v.unseen ? "unseen" : "invalidated")}` })
           : null,
         anchored.length
           ? el("span", { class: "pin-count", title: "Highlights the part that this verdict is about" },

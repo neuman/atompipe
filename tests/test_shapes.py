@@ -954,7 +954,12 @@ class _CloneTranscript:
         steps["porcelain-after-edit"] = porcelain()
         empty = os.path.join(cls.base, "empty")
         os.makedirs(empty)
-        steps["pack-selftest"] = _env.nopekit(["gate", "selftest"], cwd=empty, home=home)
+        # Pack mode demonstrates every bundled pack with this machine's tools:
+        # where OpenFOAM v2606 is installed, aero-openfoam's mesh ladders take
+        # about 20 min (packs/aero-openfoam/references/selftest.md), and the
+        # default 180 s killed it mid-ladder in the motorBike design's P6.
+        steps["pack-selftest"] = _env.nopekit(["gate", "selftest"], cwd=empty, home=home,
+                                              timeout=3600.0)
         steps["check-junit"] = run("check", "--junit")
         cls.steps = steps
         return steps
@@ -1059,7 +1064,8 @@ class TranscriptShapes(unittest.TestCase):
         self.assertEqual(summary.group("unqualified"), "0")
         row = next(line for line in text.splitlines() if PACK_ROW.fullmatch(line))
         for label, mutant in (
-                ("the time removed", sub_line(text, T.QUALIFIED_SUMMARY, r" in \S+:", ":")),
+                ("the time removed", sub_line(text, T.QUALIFIED_SUMMARY, r" in (?:\d+m )?\S+:",
+                                              ":")),
                 ("prose after the summary", text + PROSE + "\n"),
                 ("a pack row the summary disagrees with", text.replace(
                     row, re.sub(r"(\d+) qualified",
@@ -1292,10 +1298,10 @@ class GoalpostAndContextLinesShape(unittest.TestCase):
                 self.assertIsNone(T.UNQUALIFIED_ROW.fullmatch(bad))
                 self.assertIsNone(T.CONTEXT_LINE.fullmatch(bad))
         self.assertRegex("  acceptance condition not met: bracket.bearing : 0.195 MPa against "
-                         "C3's bearing stress <= 0.1 MPa (its own limit 15 MPa)",
+                         "C3's bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)",
                          T.ACCEPTANCE_REASON)
         for bad in ("acceptance condition not met: bracket.bearing : 0.195 MPa against C3's "
-                    "bearing stress <= 0.1 MPa (its own limit 15 MPa)",
+                    "bearing stress <= 0.1 MPa (its limit when it ran: 15 MPa)",
                     "  [ok  ] bracket.bearing : 0.19 MPa on 77 mm^2 across 2 bolt(s)"):
             with self.subTest(bad=bad):
                 self.assertIsNone(T.ACCEPTANCE_REASON.fullmatch(bad))
@@ -1558,8 +1564,8 @@ EXPORT_SENTENCE = re.compile(
     r"^\S+ is (?:NOT )?ready for \S+: .+ (?:Checked on an article: \d+ \([^)]+\)\."
     r"|No claim is checked on any article\.)$")
 LIMITS = re.compile(r"^Checked does not mean true: its evaluators have shown they can "
-                    r"fail, not that they are right or enough, and nothing outside these \d+ "
-                    r"claims? has been evaluated\.$")
+                    r"fail, not that they are right or enough, and nothing outside the \d+ "
+                    r"claims? here has been evaluated\.$")
 DECIDED = re.compile(r"^(?:decided by .+: go ahead over .+|nothing to decide: every required "
                      r"claim is checked)$")
 OUTCOME = re.compile(

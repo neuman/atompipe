@@ -73,6 +73,16 @@ _FLIP = "BED_FIT_FLIP"
 _PRISTINE = ".pristine"
 
 
+#: How long one cold check of a corpus project may run: an hour. Where ESI
+#: OpenFOAM v2606 is installed, aero-openfoam's wrapped baseline solves its
+#: mesh ladders and qualifies its three ladder gates in one cold check, about
+#: 20 min (packs/aero-openfoam/references/selftest.md). What slipped through
+#: the motorBike design's P6: the default 180 s killed that check mid-ladder.
+#: Rejected: leaving aero-openfoam out of the corpus where its tools are (the
+#: entries of the ladder gates are the newest whose bytes could move).
+COLD_CHECK_TIMEOUT_S = 3600.0
+
+
 def _bundled_packs() -> list[str]:
     return sorted(name for name in os.listdir(_projects.PACKS)
                   if os.path.isfile(os.path.join(_projects.PACKS, name, "pack.json")))
@@ -119,7 +129,8 @@ class EntriesAreDeterministic(_env.EnvCase):
         """Restore ``project`` from its pristine copy, then one fresh ``check``."""
         shutil.rmtree(project)
         shutil.copytree(project + _PRISTINE, project, symlinks=True)
-        proc = _env.nopekit(["check", "--tier", "3", "--json"], cwd=project)
+        proc = _env.nopekit(["check", "--tier", "3", "--json"], cwd=project,
+                            timeout=COLD_CHECK_TIMEOUT_S)
         self.assertIn(proc.returncode, (0, 1), f"check crashed in {project}:\n"
                                                f"{proc.stdout}\n{proc.stderr}")
         return proc.returncode, json.loads(proc.stdout)

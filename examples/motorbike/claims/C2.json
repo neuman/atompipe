@@ -1,0 +1,19 @@
+{
+  "statement": "The run is the stated flow: air at 20 m/s along +x past the body group, with a Reynolds number in the turbulent range and a Mach number far below 0.3",
+  "kind": "measurable",
+  "tags": [
+    "flow-reference",
+    "flow-regime"
+  ],
+  "mechanism": {
+    "by": "solver",
+    "how": "aero.reference reads the case's inlet against aero_u_inf_m_s and finds the body group; aero.regime computes Re and Mach from the case's viscosity and the model's speed, length and speed of sound",
+    "evaluators": [
+      "aero.reference",
+      "aero.regime"
+    ]
+  },
+  "requirements": [
+    "R1"
+  ]
+}

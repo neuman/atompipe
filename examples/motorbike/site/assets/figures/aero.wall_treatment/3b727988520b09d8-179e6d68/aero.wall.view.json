@@ -1,0 +1,86 @@
+{
+  "alt": "The body, coloured in four bands of the wall value y+.",
+  "caption": "The colour shows the wall value y+ on the surface of the body, on the base mesh. Each cell shows its own band. The wall model applies in the bands below the top band.",
+  "entry": "3b727988520b09d8-179e6d68",
+  "files": {
+    "image": {
+      "bytes": 31706,
+      "name": "aero.wall.3970b362cb70.png",
+      "sha256": "3970b362cb70777511a1de5dde86545536315040560a4e12de065d0008bde920"
+    }
+  },
+  "gate": "aero.wall_treatment",
+  "kind": "image",
+  "light": "none",
+  "marks": [],
+  "recipe": "0aca98426dac93eaf4b61efcf11a4baa8011ba901addaecf8160e5bfbd75a61f",
+  "scale": {
+    "over": "",
+    "over_word": "",
+    "quantity": "wall value y+",
+    "source": [],
+    "source_text": "Each colour is one band of y+. The wall model of the solver is made for the bands below 300.",
+    "stops": [
+      {
+        "at": 0.0,
+        "colour": "#466be3"
+      },
+      {
+        "at": 0.25,
+        "colour": "#466be3"
+      },
+      {
+        "at": 0.25,
+        "colour": "#31f299"
+      },
+      {
+        "at": 0.5,
+        "colour": "#31f299"
+      },
+      {
+        "at": 0.5,
+        "colour": "#edd03a"
+      },
+      {
+        "at": 0.75,
+        "colour": "#edd03a"
+      },
+      {
+        "at": 0.75,
+        "colour": "#d23105"
+      },
+      {
+        "at": 1.0,
+        "colour": "#d23105"
+      }
+    ],
+    "ticks": [
+      {
+        "at": 0.25,
+        "text": "5",
+        "value": 5.0
+      },
+      {
+        "at": 0.5,
+        "text": "30",
+        "value": 30.0
+      },
+      {
+        "at": 0.75,
+        "text": "300",
+        "value": 300.0
+      }
+    ],
+    "under": "",
+    "under_word": "",
+    "units": ""
+  },
+  "scales": [],
+  "schema": 2,
+  "title": "The wall value y+",
+  "tool": {
+    "accepted_by": "lock",
+    "identity": "paraview-6.2.0-py312ha24fc4a_1:24e7bc58bea0"
+  },
+  "view": "aero.wall"
+}

@@ -42,7 +42,7 @@ converge at order 2 to the exact answer.
 Each is 6.0e-4 / (1 + 2 / Ny^2) to within 3e-6 of itself: the error is the wall
 cell's half-cell distance alone, with a trace of the uniform inlet's entrance. Observed order 1.97, GCI 0.16%,
 extrapolated 6.0002e-4. The finest mesh gives 0.52135 Pa; with its GCI, 0.52218
-Pa against the 0.6 Pa limit.
+Pa against the 0.6 Pa limit of the claim the baseline states (`_claims`).
 
 ## The known-bad controls (`selftest/bad_cases.py`)
 

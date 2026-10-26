@@ -1,0 +1,81 @@
+{
+  "name": "aero-openfoam",
+  "version": "0.1.0",
+  "description": "The drag area of a body in an open stream, by ESI OpenFOAM v2606 (snappyHexMesh, simpleFoam, k-omega SST) on a three-mesh ladder, behind guards: case, flow, domain, mesh, convergence, y+.",
+  "settles": [
+    "drag area",
+    "drag area from cfd",
+    "cda",
+    "drag coefficient times frontal area",
+    "aerodynamic drag of a body",
+    "drag of a vehicle in still air",
+    "drag force at a speed",
+    "external aerodynamics",
+    "aero mesh quality",
+    "snappyhexmesh mesh quality",
+    "aero solver convergence",
+    "iterative uncertainty",
+    "aero wall treatment",
+    "y+ on the body",
+    "aero mesh independence",
+    "grid convergence index",
+    "aero domain size",
+    "blockage ratio",
+    "aero flow regime",
+    "aero flow reference",
+    "aero case readability"
+  ],
+  "claim_classes": [
+    "aerodynamics",
+    "external-flow",
+    "drag",
+    "drag-area",
+    "cfd",
+    "computational-fluid-dynamics",
+    "mesh-quality",
+    "convergence",
+    "domain-size",
+    "wall-treatment",
+    "mesh-independence"
+  ],
+  "provides_gates": [
+    "aero.case_readable",
+    "aero.reference",
+    "aero.regime",
+    "aero.domain",
+    "aero.mesh_quality",
+    "aero.converged",
+    "aero.wall_treatment",
+    "aero.mesh_independence",
+    "aero.drag_area"
+  ],
+  "provides_views": [
+    "aero.hero",
+    "aero.surface_cp",
+    "aero.history",
+    "aero.wake",
+    "aero.wake_cuts",
+    "aero.wall",
+    "aero.ladder"
+  ],
+  "provides_generators": [],
+  "requires_tools": [
+    "openfoam2606",
+    "pvbatch62"
+  ],
+  "requires_python": [],
+  "max_tier": 2,
+  "lenses": [
+    "the body that was meshed",
+    "the stream that was stated",
+    "a box too small for the wake",
+    "a mesh the mesher gave up on",
+    "convergence that is a limit cycle",
+    "a drag area for the wrong question",
+    "against something that is not this solver"
+  ],
+  "authors": [],
+  "licence": "Apache-2.0",
+  "origin": "written for nopekit (GitHub issue #15, the motorBike design) against ESI OpenFOAM v2606 and Open MPI 4.1.6, run as outside tools. Every log line, output path and failure mode the gates rely on was measured on v2606 in P0 (2026-10-23); its dictionary reader and tool runner are cfd-openfoam's, copied byte for byte under a drift test.",
+  "basis": "established"
+}

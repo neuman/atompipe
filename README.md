@@ -240,7 +240,11 @@ A clean DRC does not say the circuit is right. A wrong pin map or a missing pull
 <img src="docs/img/packs/openmodelica-simulation-result.png" width="560" alt="OpenModelica simulation of a solar Stirling system over 24 hours: heat flows, and the vessel-to-cylinder temperature difference against its 10 °C minimum">
 </p>
 
-`IMAGE TBD: cfd-openfoam — duct or channel flow field showing the pressure drop between two planes`
+<p align="center">
+<img src="docs/img/packs/cfd-openfoam.png" width="900" alt="Oil flow in a channel 10 mm high, as OpenFOAM solved it, in two coloured strips. The speed is low at the walls and high at the middle. The static pressure decreases from the inlet to the outlet. Two lines across each strip are the planes between which the pressure drop is measured">
+</p>
+
+*The pictures that `cfd-openfoam` puts on the site beside a pressure-drop claim, here from the pack's baseline: the speed and the static pressure that OpenFOAM solved on the finest mesh, drawn by ParaView. Each cell shows its own value. Magenta shows a value above the scale: at the corners of the inlet, the pressure is above the top of the scale.*
 
 | Falsifier | What it tries to catch | Basis |
 |---|---|---|
@@ -469,7 +473,7 @@ The basis is shown by `nopekit gate list`, `nopekit gate show <id>`, the report 
 |---|---|---|---|---|
 | `beam-analytic` | Closed-form beam checks with zero dependencies: deflection, bending and shear stress, buckling, bearing, a slenderness guard on the theory itself, and a unit/sign guard on the projection. | 8 | 7 sourced, 1 model-only | nothing |
 | `cad-solid` | Validates that exported solids are real solids, that placed parts do not interfere, and that every part is held by something: watertightness, validity, clash, contact coverage, envelope, wall. | 7 | 1 established, 6 model-only | trimesh, numpy |
-| `cfd-openfoam` | Runs a laminar OpenFOAM case (ESI v2606) behind guards: case readable, laminar regime, checkMesh, convergence, mesh independence by GCI, then the pressure drop. | 6 | 3 established, 2 sourced, 1 model-only | ESI OpenFOAM v2606 (`openfoam2606`) for four gates |
+| `cfd-openfoam` | Runs a laminar OpenFOAM case (ESI v2606) behind guards: case readable, laminar regime, checkMesh, convergence, mesh independence by GCI, then the pressure drop. | 6 | 3 established, 2 sourced, 1 model-only | ESI OpenFOAM v2606 (`openfoam2606`) for four gates; ParaView 6.2.0 (`pvbatch62`) for the pictures on the site only |
 | `fdm-print` | Validates that a part is printable on a filament machine: bed fit with brim, wall thickness, overhang, bridge span, layer-direction loading and print time. | 7 | 7 model-only | trimesh, numpy (mesh gates) |
 | `fluids-analytic` | Closed-form hydrostatics, stability, drag and pipe flow: the analytic answer for boats, floats, ducts and piping, before anyone installs a CFD solver. | 7 | 7 sourced | nothing |
 | `openmodelica` | Validates a Modelica model and the runs recorded from it: parameter units, claim/variable drift, result validity, extracted values, mirror agreement, and equation balance under omc. | 8 | 4 established, 4 model-only | OpenModelica (`omc`) for its three solver gates |

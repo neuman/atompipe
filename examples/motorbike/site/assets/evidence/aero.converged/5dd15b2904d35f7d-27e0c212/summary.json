@@ -1,0 +1,64 @@
+{
+  "body_bbox": [
+    [
+      -0.291665,
+      -0.350289,
+      -4.232e-05
+    ],
+    [
+      1.75115,
+      0.332267,
+      1.35152
+    ]
+  ],
+  "bounding": {
+    "k": 1,
+    "omega": 1
+  },
+  "build": "_481094f-20260618",
+  "cda_last_m2": 0.3009002564846,
+  "cda_mean_m2": 0.29924988022349497,
+  "cells": 358654,
+  "drift_pct": -0.1311305715567731,
+  "fields": {
+    "sha256": {
+      "postProcessing/sets/tracksCentre/500/track0.vtp": "8ea96eba005a066e5ce0f6cf17130bfe1a57b468cfd605d39b4ee58fd5457e00",
+      "postProcessing/sets/tracksFar/500/track0.vtp": "92f5fd30cf84600873f3f6e3c131335f1e929c8588942715069c707022df73e1",
+      "postProcessing/surfaces1/500/body.vtp": "45ed9b8b749a2863d94565a0a6aea84841dd9663234ed4f1e09d7c7c750355ac",
+      "postProcessing/surfaces1/500/wakeCut1.vtp": "085a4bffd604178f7bc5a84818adca90719c45081df898b69b2991c534e4cb5b",
+      "postProcessing/surfaces1/500/wakeCut2.vtp": "596fe026b4a4277d24a68b987887b7291596b2a7566cc9729c1d499b717cc020",
+      "postProcessing/surfaces1/500/wakeCut3.vtp": "91ce7d2723cfb355c779946b8ab29a0621254f1260c4d615c5966d042ab55437",
+      "postProcessing/surfaces1/500/wakeIso.vtp": "be83a3cda648666b0909b12d180e36eaab42adcb918d1e22104d38693629f52d"
+    },
+    "stage": "<out>/aero-openfoam/aero_converged/case",
+    "time": "500"
+  },
+  "flow_dir": [
+    1.0,
+    0.0,
+    0.0
+  ],
+  "ground_z_m": 0.0,
+  "history": "history.csv",
+  "install": "/usr/lib/openfoam/openfoam2606",
+  "iterations": 500,
+  "layer_coverage_pct": 56.1740281622,
+  "mesh_level": "base",
+  "pack_default": [
+    "aero_max_global_cells"
+  ],
+  "ranks": 6,
+  "stage": "<out>/aero-openfoam/aero_converged/case",
+  "time": "500",
+  "u_i_m2": 0.001805193604699995,
+  "u_i_pct": 0.6032395412662438,
+  "u_inf_m_s": 20.0,
+  "up_dir": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "window": 100,
+  "window_hi_m2": 0.3009002564846,
+  "window_lo_m2": 0.2972898692752
+}

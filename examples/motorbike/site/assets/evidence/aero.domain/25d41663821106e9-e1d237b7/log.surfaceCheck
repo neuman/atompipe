@@ -1,0 +1,216 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2606                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : _481094f-20260618 OPENFOAM=2606 version=2606
+Arch   : "LSB;label=32;scalar=64"
+Exec   : <install>/platforms/linux64GccDPInt32Opt/bin/surfaceCheck motorBike.obj.gz
+Date   : <date>
+Time   : <time>
+Host   : <host>
+PID    : <pid>
+I/O    : uncollated
+Case   : <out>/aero-openfoam/aero_domain/surfaceCheck
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+memory pool : not available
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 5, maxFileModificationPolls 20)
+allowSystemOperations : Disallowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Reading surface from "motorBike.obj.gz" ...
+
+Statistics:
+Triangles    : 331653 in 67 region(s)
+Vertices     : 132871
+Bounding Box : (-0.291665 -0.350289 -4.232e-05) (1.75115 0.332267 1.35152)
+
+Index	Region	Size
+-----	------	----
+0	frt-fairing:001%1	47725
+1	windshield:002%2	636
+2	rr-wh-rim:005%5	628
+3	rr-wh-rim:010%10	2382
+4	fr-wh-rim:011%11	4172
+5	fr-wh-brake-disk:012%12	602
+6	frame:016-shadow%13	344
+7	rear-susp:014%14	2799
+8	rear-susp:014-shadow%15	2799
+9	frame:016%16	344
+10	rr-wh-rim:005-shadow%17	628
+11	rr-wh-chain-hub:022%22	700
+12	rearseat%24	1838
+13	frt-fairing%25	7742
+14	windshield%26	3320
+15	headlights%27	2106
+16	driversseat%28	2209
+17	rear-body%29	9247
+18	fuel-tank%30	4984
+19	exhaust%31	14240
+20	rr-wh-rim%32	8750
+21	fr-mud-guard%33	5802
+22	fr-wh-rim%34	5448
+23	fr-wh-brake-disk%35	2355
+24	fr-brake-caliper%36	1832
+25	fr-wh-tyre%37	6987
+26	hbars%38	5564
+27	fr-forks%39	10774
+28	chain%40	2118
+29	rr-wh-tyre%41	8946
+30	square-dial%42	38
+31	round-dial%43	112
+32	dial-holder%44	813
+33	rear-susp%45	7147
+34	rear-brake-lights%46	191
+35	rear-light-bracket%47	709
+36	frame%48	9341
+37	rear-mud-guard%49	1960
+38	rear-susp-spring-damp%50	708
+39	fairing-inner-plate%51	3635
+40	clutch-housing%52	3742
+41	radiator%53	848
+42	water-pipe%54	689
+43	water-pump%55	709
+44	engine%56	10402
+45	rear-shock-link%57	132
+46	rear-brake-fluid-pot-bracket%58	153
+47	rear-brake-fluid-pot%59	210
+48	footpeg%60	839
+49	rr-wh-chain-hub%61	552
+50	rear-brake-caliper%62	1234
+51	rider-helmet%65	9912
+52	rider-visor%66	2260
+53	rider-boots%67	6370
+54	rider-gloves%68	2687
+55	rider-body%69	34547
+56	frame:0%70	137
+57	frt-fairing:001-shadow%74	47725
+58	windshield-shadow%75	3320
+59	fr-mud-guard-shadow%81	5802
+60	fr-wh-brake-disk-shadow%83	2355
+61	rear-mud-guard-shadow%84	1960
+62	rear-susp-spring-damp-shadow%85	708
+63	radiator-shadow%86	848
+64	rear-shock-link-shadow%87	132
+65	rear-brake-fluid-pot-bracket-shadow%88	153
+66	rr-wh-chain-hub-shadow%89	552
+
+
+Surface has 60941 illegal triangles.
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 0 vertices ((63821 63749 64462) 0) has the same vertices as triangle 268098 vertices ((64462 63749 63821) 57) coords:3((0.103075 -0.25693 0.911434) (0.106083 -0.262068 0.909124) (0.1095 -0.25928 0.914666))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 1 vertices ((64490 64462 65118) 0) has the same vertices as triangle 268099 vertices ((65118 64462 64490) 57) coords:3((0.106322 -0.253072 0.917009) (0.1095 -0.25928 0.914666) (0.113314 -0.25619 0.919831))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 2 vertices ((62046 62969 62559) 0) has the same vertices as triangle 268100 vertices ((62559 62969 62046) 57) coords:3((0.100684 -0.266434 0.896745) (0.103134 -0.264493 0.903146) (0.0989882 -0.262243 0.90154))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 3 vertices ((63150 62969 63749) 0) has the same vertices as triangle 268101 vertices ((63749 62969 63150) 57) coords:3((0.10062 -0.260032 0.906099) (0.103134 -0.264493 0.903146) (0.106083 -0.262068 0.909124))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 4 vertices ((79249 79043 79526) 0) has the same vertices as triangle 268102 vertices ((79526 79043 79249) 57) coords:3((0.325761 -0.20686 1.03444) (0.328872 -0.211969 1.03018) (0.330309 -0.207912 1.03563))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 5 vertices ((78697 78100 78566) 0) has the same vertices as triangle 268103 vertices ((78566 78100 78697) 57) coords:3((0.322672 -0.210656 1.02836) (0.319415 -0.215406 1.02172) (0.325441 -0.214798 1.02509))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 6 vertices ((61197 61117 62046) 0) has the same vertices as triangle 268104 vertices ((62046 61117 61197) 57) coords:3((0.0944581 -0.263817 0.8923) (0.0987615 -0.26782 0.890049) (0.100684 -0.266434 0.896745))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 7 vertices ((65118 65712 65083) 0) has the same vertices as triangle 268105 vertices ((65083 65712 65118) 57) coords:3((0.113314 -0.25619 0.919831) (0.117566 -0.253092 0.924599) (0.109941 -0.249389 0.92189))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 8 vertices ((66147 66230 66741) 0) has the same vertices as triangle 268106 vertices ((66741 66230 66147) 57) coords:3((0.119974 -0.246046 0.92992) (0.122183 -0.250069 0.929062) (0.127026 -0.247056 0.933315))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 9 vertices ((65712 66230 66147) 0) has the same vertices as triangle 268107 vertices ((66147 66230 65712) 57) coords:3((0.117566 -0.253092 0.924599) (0.122183 -0.250069 0.929062) (0.119974 -0.246046 0.92992))
+--> FOAM Warning : 
+    From static bool Foam::triSurfaceTools::validTri(const Foam::triSurface&, Foam::label, bool)
+    in file triSurface/triSurfaceTools/triSurfaceTools.C at line 2737
+    triangle 10 vertices ((64462 64490 63821) 0) has the same vertices as triangle 268108 vertices ((63821 64490 64462) 57) coords:3((0.1095 -0.25928 0.914666) (0.106322 -0.253072 0.917009) (0.103075 -0.25693 0.911434))
+Suppressing further warning messages. Use -outputThreshold to increase number of warnings.
+Dumping conflicting face labels to "illegalFaces"
+Paste this into the input for surfaceSubset
+
+Triangle quality (equilateral=1, collapsed=0):
+    0 .. 0.05  : 0
+    0.05 .. 0.1  : 0
+    0.1 .. 0.15  : 1.20608e-05
+    0.15 .. 0.2  : 4.22128e-05
+    0.2 .. 0.25  : 0.00014473
+    0.25 .. 0.3  : 0.000253277
+    0.3 .. 0.35  : 0.000572888
+    0.35 .. 0.4  : 0.000645253
+    0.4 .. 0.45  : 0.00129051
+    0.45 .. 0.5  : 0.00177294
+    0.5 .. 0.55  : 0.00185133
+    0.55 .. 0.6  : 0.00244533
+    0.6 .. 0.65  : 0.00384438
+    0.65 .. 0.7  : 0.00514996
+    0.7 .. 0.75  : 0.00954009
+    0.75 .. 0.8  : 0.0184711
+    0.8 .. 0.85  : 0.0220562
+    0.85 .. 0.9  : 0.0431113
+    0.9 .. 0.95  : 0.0907846
+    0.95 .. 1  : 0.798012
+
+    min 0.101901 for triangle 209128
+    max 1 for triangle 238533
+
+Edges:
+    min 0.00103535 for edge 105937 points (0.0848948 0.0816658 0.73013)(0.0847099 0.0824189 0.729444)
+    max 0.0239451 for edge 396024 points (1.01042 -0.0809681 0.849142)(1.03038 -0.0687388 0.854183)
+
+Checking for points less than 1e-6 of bounding box ((2.04282 0.682556 1.35156) metre) apart.
+Found 0 nearby points.
+
+Surface is not closed since not all edges (397350) connected to two faces:
+    connected to one face : 49
+    connected to >2 faces : 100089
+Conflicting face labels:400535
+
+Number of unconnected parts : 4
+Splitting surface into parts ...
+
+Wrote zoning to "./motorBike.vtp"
+
+writing part 0 size 326215 to "./motorBike_0.obj"
+writing part 1 size 1866 to "./motorBike_1.obj"
+writing part 2 size 1876 to "./motorBike_2.obj"
+writing part 3 size 1696 to "./motorBike_3.obj"
+
+Number of zones (connected area with consistent normal) : 132055
+More than one normal orientation.
+Wrote zoning to "./motorBike.vtp"
+
+Limiting number of files to 10
+writing part 0 size 2 to "./motorBike_normal_0.obj"
+writing part 1 size 2 to "./motorBike_normal_1.obj"
+writing part 2 size 2 to "./motorBike_normal_2.obj"
+writing part 3 size 2 to "./motorBike_normal_3.obj"
+writing part 4 size 2 to "./motorBike_normal_4.obj"
+writing part 5 size 2 to "./motorBike_normal_5.obj"
+writing part 6 size 2 to "./motorBike_normal_6.obj"
+writing part 7 size 2 to "./motorBike_normal_7.obj"
+writing part 8 size 2 to "./motorBike_normal_8.obj"
+writing part 9 size 2 to "./motorBike_normal_9.obj"
+
+
+End
+

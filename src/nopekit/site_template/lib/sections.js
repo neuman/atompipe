@@ -2,10 +2,16 @@
 // sections.js: one section per board, and the next steps (architecture phase 5,
 // SPEC 28, 30).
 //
-// A board's section is a poster. The agent's prose comes first (the one place
-// the site persuades), then the generated floor, collapsed: every claim on the
-// board with its status, its value against its limit, its evaluators and its
-// evidence. The prose arrives from `page.json` already parsed into blocks and
+// A board's section is a poster. A claim whose evaluator left pictures comes
+// first, as an open card (lib/figures.js, issue #15): the claim's chip, its
+// value, which result the pictures are from, the charts and the stills. Then
+// the agent's prose (the one place the site persuades), then the generated
+// floor, collapsed: every claim on the board with its status, its value
+// against its limit, its evaluators and its evidence. The cards come before
+// the prose because they answer the first questions (does it hold, and what
+// does it look like), and the prose can point at them. *Rejected:* the cards
+// between the prose and the floor (a reader reads persuasion before the
+// result it is about). The prose arrives from `page.json` already parsed into blocks and
 // runs, never as HTML, and with its stamp state: text written before the latest
 // results shows the bake's notice above it, and a number that no baked file
 // holds is marked where it stands. This file builds DOM from those runs and
@@ -15,6 +21,7 @@
 import { el } from "./dom.js";
 import { lookOf, tokenChip } from "./format.js";
 import { claimBlocks } from "./drawer.js";
+import { figureCards, disposeFigureViewers } from "./figures.js";
 
 /** A piece of prose: its notice when it is not current, then its blocks. */
 export function renderProse(prose, page, { onClaim } = {}) {
@@ -80,8 +87,10 @@ function pageHref(href) {
   return text.startsWith("#") ? `${location.pathname}${text}` : text;
 }
 
-/** One section per board, in the baked order. */
-export function renderSections(page, { onClaim } = {}) {
+/** One section per board, in the baked order. ``build`` is `build.json` (or
+ *  null): a figure's 3D file on this computer only is listed there. */
+export function renderSections(page, { onClaim, build = null } = {}) {
+  disposeFigureViewers();
   const words = (page && page.words) || {};
   const headings = words.headings || {};
   const rows = (page && page.claims) || {};
@@ -111,6 +120,7 @@ export function renderSections(page, { onClaim } = {}) {
       sec.line ? el("p", { class: "lede", text: sec.line }) : null,
       (sec.marks || []).includes("disagree") && (words.notices || {}).disagree
         ? el("p", { class: "nk-notice tone-bad", role: "note", text: words.notices.disagree }) : null,
+      ...figureCards(sec, page, { build }),
       renderProse(sec.prose, page, { onClaim }),
       floor);
   });

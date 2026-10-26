@@ -1,0 +1,61 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  aero-openfoam's selftest baseline: a prolate spheroid over a moving ground
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// The domain: x -4..10, y -3..3, z 0..4 m, 0.5 m cubes. The body (1 m long,
+// 0.25 m across, its top 0.525 m over the ground) has 7.6 H upstream, 17.1 H
+// downstream, 5.5 H to each side and 6.6 H above it (Franke et al. 2007: 5,
+// 15, 5, 5 H).
+vertices
+(
+    (-4 -3 0) (10 -3 0) (10 3 0) (-4 3 0)
+    (-4 -3 4) (10 -3 4) (10 3 4) (-4 3 4)
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (28 12 8) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    frontAndBack
+    {
+        type patch;
+        faces ((3 7 6 2) (1 5 4 0));
+    }
+    inlet
+    {
+        type patch;
+        faces ((0 4 7 3));
+    }
+    outlet
+    {
+        type patch;
+        faces ((2 6 5 1));
+    }
+    lowerWall
+    {
+        type wall;
+        faces ((0 3 2 1));
+    }
+    upperWall
+    {
+        type patch;
+        faces ((4 5 6 7));
+    }
+);
+
+// ************************************************************************* //

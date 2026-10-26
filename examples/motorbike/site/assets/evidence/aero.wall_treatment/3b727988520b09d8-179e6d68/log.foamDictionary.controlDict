@@ -1,0 +1,125 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2606                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+//
+// "system/controlDict"
+//
+FoamFile
+{
+    version         2;
+    format          ascii;
+    class           dictionary;
+    object          controlDict;
+}
+
+application     simpleFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         500;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   100;
+
+purgeWrite      0;
+
+writeFormat     binary;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+writePrecision  12;
+
+functions
+{
+    forceCoeffs1
+    {
+        type            forceCoeffs;
+        libs            ( forces );
+        writeControl    timeStep;
+        writeInterval   1;
+        writePrecision  12;
+        log             false;
+        patches         ( motorBikeGroup );
+        rho             rhoInf;
+        rhoInf          1;
+        liftDir         ( 0 0 1 );
+        dragDir         ( 1 0 0 );
+        CofR            ( 0 0 0 );
+        pitchAxis       ( 0 1 0 );
+        magUInf         20;
+        lRef            1;
+        Aref            1;
+    }
+    solverInfo1
+    {
+        type            solverInfo;
+        libs            ( utilityFunctionObjects );
+        fields          ( U p k omega );
+        writeResidualFields no;
+        writeControl    timeStep;
+        writeInterval   1;
+    }
+    yPlus1
+    {
+        type            yPlus;
+        libs            ( fieldFunctionObjects );
+        executeControl  onEnd;
+        writeControl    onEnd;
+    }
+    surfaces1
+    {
+        type            surfaces;
+        libs            ( sampling );
+        executeControl  onEnd;
+        writeControl    onEnd;
+        surfaceFormat   vtk;
+        formatOptions
+        {
+            vtk
+            {
+                format          binary;
+            }
+        }
+        fields          ( yPlus );
+        surfaces
+        {
+            bodyYPlus
+            {
+                type            patch;
+                patches         ( motorBikeGroup );
+                interpolate     false;
+            }
+        }
+    }
+    yPlusArea
+    {
+        type            surfaceFieldValue;
+        libs            ( fieldFunctionObjects );
+        regionType      patch;
+        names           ( motorBikeGroup );
+        operation       areaAverage;
+        fields          ( yPlus );
+        writeFields     false;
+        writePrecision  12;
+        executeControl  onEnd;
+        writeControl    onEnd;
+    }
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //

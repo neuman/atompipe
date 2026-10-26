@@ -37,6 +37,7 @@ is `cli.py`'s.
 | a crash or a self-skip, remembered — never evidence | `.nopekit/cache/last_outcomes.json` | ignored | `check`, `gate selftest` |
 | time savers: file digests, re-verified fixtures | `.nopekit/cache/digests.json`, `controls.json` | ignored | `check`; losing either costs a re-hash or a fixture run, never a verdict |
 | gate scratch and evidence | `.nopekit/out/` (a control's: `out/controls/<gate id>/`) | ignored | gates |
+| which bytes a recorded run cited as its evidence, per entry it wrote (issue #15) — never a verdict | `.nopekit/cache/evidence/<gate id>/<rho16>-<out8>.json` | ignored | a recorded `check` (and `export`'s re-runs), beside each entry it writes; never `--no-record`, a control or a mutation |
 | a milestone: a named spend and the claims it requires (P2.5b) | `milestones/<name>.json` | tracked | a human or the agent, editing the file |
 | a requirement: what the person asked for, in their words (architecture phase 1) | `requirements/<id>.json` (`R1`, `R2`, …); a claim names the ones it serves (`"requirements"`) | tracked | a human or the agent, editing the file |
 | an export: what was required, checked, re-run, decided and built (P2.5b) | `exports/<name>.json`, append-only, sealed and chained | tracked | `export <milestone>` |
@@ -49,6 +50,8 @@ is `cli.py`'s.
 | the trace: which derived values each choice moved at ±10% (architecture phase 3b) | `.nopekit/trace/<k16>.json`, one per traced design, keyed by its instructions, choices and the data its build read, never rewritten | tracked | `model trace` (`derivation.run`); `round` only starts it |
 | amber: each automated claim's evaluators on designs an assumption-sourced choice moved | `.nopekit/trace/<k16>.amber.<s16>.json`, one per evaluation, never rewritten | tracked | `model trace` |
 | a trace's progress, resumable; a background trace's log; its lock | `.nopekit/cache/trace/<k16>/`, `.nopekit/out/trace.log`, `.nopekit/trace.lock` | ignored | `model trace` |
+| a figure a bound viewgen drew from one verdict entry, with its sidecar (`<view>.view.json`: each file's sha256, the recipe digest, the caption, the colour scale) (issue #15) | `site/assets/figures/<gate id>/<rho16>-<out8>/` | tracked | `site build` (`site._bound_pass`), once the spine checked it |
+| a bound figure's 3D file for an entry no export re-ran, and a bound viewgen's scratch (issue #15) | `site/assets/live/<gate id>/<entry>/`, `.nopekit/out/figures/<gate id>/<entry>/<view>/` | ignored | `site build`; the live file is named only in `site/data/build.json`'s `live_figures` |
 | a detached live server: its pid, address and URL; the lock it holds for its life; its log (the acceptance run after phase 3b) | `.nopekit/out/serve.json`, `.nopekit/out/serve.lock`, `.nopekit/out/serve.log` | ignored | the server `site serve --detach` starts, which removes its record as it stops; `site serve --stop` removes a stale one |
 
 The index and `last_check.json` are the whole project in two reads (D-06); neither
@@ -1535,6 +1538,14 @@ def remembered(root) -> dict      # {key: {input_rho: {"input_rho", "kind", "ver
 def forget(root, key, input_rhos) -> bool    # only the records at those rhos
 def record_obs(root, gate_id, *, entry, when, duration_s, cpu_s, control=False) -> None
 def read_obs(root, gate_id, *, control=False) -> list[dict]   # [{"entry", "when", "duration_s", "cpu_s"}]
+# issue #15: which bytes a recorded run cited (untracked scratch)
+EVIDENCE_MANIFEST_SCHEMA = 1
+def write_evidence_manifest(root, gate_id, entry_name, evidence, anchors) -> str
+                                             # the path; {portable path: {sha256, bytes}}
+                                             #   of each regular file the run cited
+def evidence_manifest(root, gate_id, entry_name) -> dict | None
+                                             # {portable path: {sha256, bytes}}, or None:
+                                             #   no recorded run here, junk, another gate/entry
 def last_read_sets(root) -> dict[str, set[tuple]]    # {gate: {param path}}: Param.gates and why, never rho
 ```
 **The code digest.** `code_digest(spec, fn)` is sha256 of canonical JSON of the
@@ -1742,6 +1753,23 @@ crash superseded.
 and no latency reader filtered them (S-31). A file naming another gate or kind — gate
 `x`'s control and a gate called `x.control` share one name — reads as no runs and is
 replaced on the next write: never a mixed series.
+
+**The evidence manifest** — `.nopekit/cache/evidence/<gate>/<rho16>-<out8>.json`
+(untracked, issue #15): `{"schema": 1, "gate", "entry", "files": {portable path:
+{"sha256", "bytes"}}}`, written atomically by `_sweep_one`'s step 4 right after
+`write_entry`, only when the sweep records and the outcome is measured. The keys are
+the entry's own `evidence` spellings (`Anchors.portable_path`); a directory, a missing
+file or a path under no anchor is left out. A later recorded run of the same entry
+name (same rho, same outcome tuple) replaces it, since its files are as much that
+entry's evidence. A cache hit, `--no-record`, an error, a skip, a control and a
+mutation write none. `evidence_manifest` reads it back strictly: a file that does not
+parse, has other keys, or names another gate or entry is `None`. The site copies a
+file as an entry's evidence only when its bytes are the manifest's
+(`page.evidence_plan`). *Rejected:* the digests in the tracked entry (`out8` hashes
+the outcome only and the body is kept-first, so a timestamped log would warn on every
+forced run); obs rows (`read_obs` refuses other keys, obs is never truth, and it
+keeps 20 rows); writing it from `cli.check` after the sweep (a later gate's write
+would land in an earlier gate's manifest).
 
 **Part three: freshness, admission state, the one resolver.** None of it runs a gate
 or a fixture; all of it reads the cache and what is on disk now.
@@ -2513,6 +2541,14 @@ class ClaimCause(StrEnum): FAILED | PHYSICAL_FAIL | ERRORED | PREREQUISITE_ERROR
                          | CONTRADICTION | JUDGED_FAIL | NO_AUTHORITY | AUTHORITY_UNATTRIBUTED
                          | ARTICLE_MOVED | CLAIM_MOVED | JUDGMENT_MOVED | ARTICLE_UNJUDGED
                          | AWAITING_JUDGMENT | ON_ARTICLE | JUDGED      # P2.5a
+                         | UNSEEN       # issue #15 D1: Stale for an opaque channel alone
+OPAQUE_REASON = "opaque inputs: "    # the head of the resolver's reason for an opaque entry
+def unseen_gates(resolution) -> frozenset    # stale ONLY through a channel nopekit cannot see
+                                             #   (the row's reason and its entry's opaque list,
+                                             #   or a prerequisite mark that ends in one)
+def unseen_reason(why) -> bool               # the words-only half: OPAQUE_REASON, alone or
+                                             #   after prerequisite marks (`report.reason`'s
+                                             #   Failing suffix: "from the last check run")
 class Attribution(NamedTuple): owner: str; reason: str     # the signing channel's record of an owner
 @dataclass(frozen=True)
 class Composed: status: ClaimStatus; cause: ClaimCause; cites: tuple; verdict: Verdict | None
@@ -2527,10 +2563,13 @@ def outcome_key(verdict) -> str                              # phase 3a: its OUT
                                                              #   for None — the round record's
 def covers(spec, claim) -> bool                              # claim id OR any claim tag in spec.claims
 def covering_verdicts(claim, verdicts) -> list[Verdict]      # the same id-or-tag rule, on verdicts
-def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None) -> Composed
-def compositions(ledger, *, registry=None, stale=False, stale_gates=(), owners=None) -> dict[str, Composed]
+def compose(claim, verdicts, *, stale=False, stale_gates=(), owners=None,
+            unseen_gates=()) -> Composed     # unseen_gates: unseen_gates(resolution); words only
+def compositions(ledger, *, registry=None, stale=False, stale_gates=(), owners=None,
+                 unseen_gates=()) -> dict[str, Composed]
 def resolve_status(claim, verdicts, *, stale: bool = False,
-                   stale_gates: Collection[str] = (), owners=None) -> ClaimStatus  # compose(...).status
+                   stale_gates: Collection[str] = (), owners=None,
+                   unseen_gates=()) -> ClaimStatus  # compose(...).status
 def explaining_verdict(claim, verdicts) -> Verdict | None    # failed > errored > skipped > unqualified
 def statuses(ledger, *, stale=False, registry=None, stale_gates=(), owners=None) -> dict[str, ClaimStatus]
 def coverage(ledger, registry) -> dict[str, list[str]]       # claim id -> LIVE gate ids
@@ -2856,6 +2895,8 @@ SKILLS_DIR = "skills"; SKILL_NAME = "SKILL.md"             # phase 6 (SPEC 37): 
 def skill_files(pack_dir) -> list[tuple[str, str]]         # (name, path) of skills/<name>/SKILL.md
 def validate(pack_dir, *, tier=Tier.BUILD, notes=None) -> list[str]   # problems; empty = ok
 def baseline_context(pack_dir, *, out_dir) -> GateContext  # the ONE sealed baseline context
+BASELINE_CLAIMS = "_claims"                                # issue #15 D2: the claims a baseline states
+def baseline_claims(baseline) -> list[Claim]               # ... read, strictly: the known-good ledger
 def demonstrate(pack_dir, *, tier=Tier.BUILD, out_dir=None) -> Demonstration
 @dataclass
 class Demonstration:                         # what `demonstrate` saw, gate by gate
@@ -2939,8 +2980,11 @@ into the pack — including a wheel's site-packages; a given `out_dir` holds
 `<gate id>/{baseline,control,sealed}`, each emptied before its run. `baseline_context(pack_dir, *,
 out_dir)` is the one sealed baseline context everything builds from: the raw
 `baseline.json` **including `_notes` and `_aliases`**, exactly as the test oracle
-builds it, `root=pack_dir`, an empty `Ledger`, `extra={}`, the given `out_dir`, tier
-`EXTERNAL`. `validate(pack_dir, *, tier=Tier.BUILD, notes=None)` calls `demonstrate`
+builds it, `root=pack_dir`, a `Ledger` of the claims the baseline states under
+`_claims` (`baseline_claims`, which `validate` also runs) and nothing of the
+host's, `extra={}`, the given `out_dir`, tier `EXTERNAL`. A pack gate reads its limit
+from those through `ctx.acceptance` on its controls (issue #15 D2: cfd.pressure_drop,
+whose limit had been a parameter beside the claim's). `validate(pack_dir, *, tier=Tier.BUILD, notes=None)` calls `demonstrate`
 once the gates load; a missing-tool skip, and the gates above `tier` that were not
 run, are appended to `notes` when a list is given and **never** to the returned
 problems, so `validate(dir) == []` on a CI runner
@@ -3061,18 +3105,28 @@ def result_facts(claim, entry, *, register="cli") -> dict  # {counts, token, why
 def latency_words(claim, exports) -> str     # "measured 26 h on article <a12> (expected 1 day)" |
                                              #   "expected 1 day (declared)" | that none is declared
 def not_ready_line(ledger, composed) -> str  # `check`'s line when nothing blocks it
+def unseen_words(key, resolution, unseen, *, registry=None, rows="", spend=False) -> str
+                                            # issue #15 D1: HUMAN["unseen"][key] for the gates
+                                            #   claims.unseen_gates found: a count, one example;
+                                            #   spend: name `export` (a milestone exists)
+OPAQUE_CONTROL_REASON = "control inputs moved: opaque control inputs: "
+def unseen_qualification(admission) -> bool  # qualified at this version, its controls opaque:
+                                             #   `gate show` and `doctor` say so, never "the
+                                             #   next check run qualifies it"
 RATIONALE_UNKNOWN = "Parameter rationales are not known"  # + ": <why>" — no view, or no model
 def render_terminal(ledger, registry, *, stale=False, stale_gates=(), params=None,
-                    stale_reasons=None) -> str
+                    stale_reasons=None, unseen_gates=()) -> str
 def render_markdown(ledger, registry, *, stale=False, stale_gates=(), model_error="",
                     title="", root="", params=None, stale_reasons=None,
-                    milestone=None) -> str  # milestone: the report for that spend (P2.5b)
+                    milestone=None, unseen_gates=()) -> str  # milestone: that spend's (P2.5b)
 def write_report(root, ledger, registry, *, stale=False, stale_gates=(), model_error="",
-                 params=None, stale_reasons=None) -> str   # REPORT.md, ignored (P2.5b)
+                 params=None, stale_reasons=None, unseen_gates=()) -> str  # REPORT.md (P2.5b)
 def render_junit(ledger, verdicts, registry, *, tier, ready, exit_code, when,
                  not_run=None, cached=frozenset(), stale=False, spine="",
-                 stale_gates=(), stale_reasons=None) -> str
-    # `check --junit`: suites gates / claims.critical / claims.not-critical
+                 stale_gates=(), stale_reasons=None, unseen_gates=(),
+                 ready_note="") -> str
+    # `check --junit`: suites gates / claims.critical / claims.not-critical;
+    #   ready_note: the property that says a ready holds for this check run only
 def render_selftest_junit(results, *, exit_code, when, baselines=None) -> str
     # `gate selftest --junit`: suite controls, plus baselines in pack mode
 def junit_safe(text) -> str                  # XML-1.0-illegal code points -> visible "\xNN" / "\uNNNN"
@@ -3503,17 +3557,50 @@ class ViewContext:                           # a viewgen's one argument, mirrori
     def asset_path(self, name) -> str        # where an asset would land; creates nothing
     def write_asset(self, name, data) -> str # writes it; returns the site-relative path for View.src
 @dataclass
+class BoundEntry:                            # the verdict entry a bound viewgen draws
+    gate; name; fresh; files; withheld       # files: {portable: absolute}, ONLY the bytes
+    def path(self, basename) -> str | None   #   the entry's manifest names; withheld: why not
+@dataclass
+class BoundContext(ViewContext):             # a bound viewgen's argument: no model, no params,
+    entry: BoundEntry; scratch; view_id      #   no claim's acceptance (issue #15)
+    def bind(self, inputs) -> dict | None    # {path: sha256} -> {path: absolute}; each digest
+                                             #   held by a verified evidence file, each file
+                                             #   at it; re-hashed after the call
+    def write_asset(self, name, data) -> str # into .nopekit/out/figures/<g>/<E>/<view>/; a PNG
+    def write_live(self, name, data) -> str  #   or a 3D file, at most 2 MiB (raises over it)
+    def note(self, text) -> None             # a build warning, under the view's id
+    def asset_path(self, name)               # raises: nothing reaches site/ unchecked
+@dataclass
 class ViewSpec:                              # registration record for one viewgen
     id; kind: ViewKind; title; description; requires_python; requires_tools; pack; order; gates
+    evidence_of: str = ""                    # the gate whose served entry it draws (issue #15)
+    recipe: tuple = ()                       # files whose bytes key the memo, with the module's
+FIGURE_SCRATCH = ".nopekit/out/figures"; FIGURE_RECIPE_SALT = "nopekit-figure-v1"
+BOUND_KINDS = (IMAGE, CHART, MODEL3D, FIELD) # what a bound viewgen draws
+CHART_FORBIDDEN_KEYS = {"limit", "limits", "current", "marker", "now"}   # a bound chart's
+CHART_NUMBER_KEYS = ("series", "band", "estimates", "rule")  # every number: in the evidence
+CAPTION_STATUS_PHRASES: tuple                # with every status word: never in a caption
 class ViewRegistry:                          # register / unregister / clear / get / specs / ids / pairs
+    def add_tool_check(self, tool, fn, *, pack="") -> None   # a module's TOOL_CHECKS entry
+    def tool_checks(self) -> dict            # {tool: (pack, check)}
+    def view_tools(self) -> list[str]        # every requires_tools of a view, then each checked tool
 VIEW_REGISTRY: ViewRegistry                  # module-level default
 def active_view_registry() -> ViewRegistry   # the registry `@viewgen` decorates into right now
 def use_view_registry(registry)              # context manager, as gates.use_registry
+def load_viewgens(directory, registry, *, pack, root) -> list[ViewSpec]   # import views/*.py:
+                                             #   the one loader of a build, `site status`,
+                                             #   `doctor` and `pack validate` (P2.2)
+TOOL_CHECKS_NAME = "TOOL_CHECKS"             # a view module's {tool: check(root) -> (ok, words)}
+NO_STATUS_WORDS = "No status depends on them."
+def view_tool_rows(registry, root, *, skip=()) -> list[tuple[bool, str]]   # doctor's rows for
+                                             #   the tools the views draw with
 def viewgen(*, id, kind, title="", description="", requires_python=(), requires_tools=(),
-            pack="", order=100, gates=(), registry=None)   # decorator -> registers, returns fn
+            pack="", order=100, gates=(), registry=None, evidence_of="", recipe=())
+                                                            # decorator -> registers, returns fn
 def availability(spec: ViewSpec) -> tuple[bool, str]       # as gates.availability, for a viewgen
 def run_viewgen(spec, fn, ctx) -> tuple[View | None, str]  # never raises; None is "nothing to draw"
-def run_all_viewgens(registry, ctx, *, only=None) -> tuple[list, list]   # (views, notes)
+def run_all_viewgens(registry, ctx, *, only=None) -> tuple[list, list]   # (views, notes);
+                                                            #   unbound viewgens only
 def derive_explode(bounds, *, overrides=None) -> dict      # a FIRST DRAFT explode manifest
 def locator_problems(views, verdicts) -> list[dict]         # every locator that cannot be drawn
 def scaffold(root, *, force=False) -> list                  # copy the template; the shells only
@@ -3530,8 +3617,9 @@ def old_layout(root) -> bool                                # the root index.htm
 def page_urls(url) -> dict                                  # {name: address} of the two pages
 def pages_line(url) -> str                                  # `site serve`'s line after the ready
                                                             #   line; never matches SERVE_READY_RE
-def ensure_site_ignore(root) -> bool                        # data/build.json in site/.gitignore,
-                                                            #   created with it alone when absent
+def ensure_site_ignore(root, *, live=False) -> bool        # data/build.json in site/.gitignore,
+                                                            #   created with it alone when absent;
+                                                            #   with live, assets/live/ too
 def prose_pool(docs, assets=()) -> Pool                      # what prose numbers are matched to
 def baked_pool(root, map_doc, page_doc) -> Pool              # the same, over a built site on disk
 def build(root, ledger, registry, view_registry, *, model=None, projection=None, now="",
@@ -3542,11 +3630,14 @@ def resolution_digest(payload) -> str                       # sha256 of what a s
 def resolution_moved(shown, now) -> list[str]               # "C1 pass -> fail": what a rebuild would change
 def ages(resolution, now) -> dict                           # {gate: {when, age_s, aged}}
 def write_build_json(root, *, now, id, ok=True, error="", live=False, verdicts=None,
-                     mixed_age=None) -> str                 # site/data/build.json, ignored
+                     mixed_age=None, tracing=False,
+                     live_figures=None) -> str              # site/data/build.json, ignored
 def watch_snapshot(root) -> dict                            # {relpath: (size, mtime_ns)} over WATCH_DIRS
 def clean_assets(root, keep) -> list                        # delete unreferenced site/assets/ files
 def vendor_urls() -> dict                                   # {site-relative path: URL} for `site vendor`;
-                                                            #   three's meshopt decoder too (SPEC 40)
+                                                            #   three's meshopt decoder too (SPEC 40),
+                                                            #   and vega/ (issue #15)
+VEGA_VERSIONS: dict                                         # vega, vega-lite, vega-embed, pinned
 ```
 **Two pages** (SPEC 40). `build` writes an absent `engineering/index.html`,
 `marketing/index.html` or `technical.html` (making its directory), and never the root
@@ -3614,6 +3705,57 @@ A locator is never dropped for being undrawable: it stays on its verdict, and
 `locator_problems` publishes the problem beside it in `state.json`, because a gate
 that believes it is drawing and is not looks exactly like a gate that found nothing. `clean_assets` deletes only what
 it can prove is unreferenced, which is why every asset arrives through `write_asset`.
+A viewgen that is unavailable or crashes keeps the row its id had in the last
+`state.json`, with its `src` and its `data_url` payload, while every file the row names
+is on disk; the build warns `view <id>: kept from the last build: <reason>`, and adds
+nothing to the row, so a clone without the tool bakes the same `state.json` (issue #15:
+such a viewgen returned no view, so the cleaner deleted the picture it drew last time).
+The row is kept only at the bytes the last build wrote: its digest with its view file
+(`site.view_digest`) must be the one the last `page.json` holds under its seal
+(`meta.views`); otherwise the build warns `view <id>: ... is not what the last build
+wrote, so it is not kept`, and `site status` reads the row as edited by hand (review of
+P1: a number added by hand to `data/views/<id>.json` was baked into the next page and
+vouched for prose). A view no viewgen declares, or one that has nothing to draw, is not
+kept.
+
+**Bound viewgens** (issue #15). A viewgen with `evidence_of` draws its gate's served
+verdict entry. `build` resolves and plans the evidence first, then runs the unbound
+viewgens, then the bound pass (`_bound_pass`), in registry order: no served entry draws
+nothing; a valid sidecar under the served entry at the current recipe digest
+(`_recipe_digest`: the module's bytes, each `recipe` file's, `FIGURE_RECIPE_SALT`; never
+the tool's identity) is the memo, and the viewgen is not called; else, when it is
+available, it is called with a `BoundContext` whose `entry.files` are only the evidence
+files whose bytes the entry's manifest names (`verdicts.evidence_manifest`). What it
+returns is refused, with a warning and nothing published, when (`_figure_refusal`): an
+output is over 2 MiB; a still is no PNG (its signature and IHDR), a `.glb` no GLB, or a
+`.gltf` no glTF 2.0 JSON whose every buffer and image is a `data:` URI (`_solid_problem`,
+`SOLID_SUFFIXES`; the spine checks no accessor: the Khronos validator does, in the
+tests); a
+bound picture carries a payload, or its `src` names no file it wrote; a chart holds a
+key of `CHART_FORBIDDEN_KEYS`, or a number under `CHART_NUMBER_KEYS` that no verified
+JSON leaf or CSV cell of the entry holds; a bound input or a verified file moved during
+the call; a colour range's end equals a limit of a claim the gate covers or the entry's
+verdict limit (relative 1e-9), or a `scale.source` key names a limit; a caption holds a
+status word. Else it is published (`_publish_figure`) under
+`assets/figures/<gate>/<entry>/` as `<view>.<sha12>.<ext>` beside the tracked sidecar
+`<view>.view.json` (`page.read_sidecar`), and a 3D file of an entry no export re-ran (or
+written with `write_live`) under the ignored `assets/live/<gate>/<entry>/`, named only
+in `build.json`'s `live_figures`; once an export re-ran the entry, the next build copies
+it into the committed folder. The figure the page shows is then read from the disk
+(`page.figure_for`): current or stale under the served entry, else the one older folder
+of the gate (several: none), and its files, sidecar and the served entry's live file
+are the only bound files the cleaner keeps; an older folder goes once the served one is
+drawn. Its `state.json` row has `src` (the still, or the 3D file of a 3D view),
+`data_url` (the chart's series file), `field_src` (a committed 3D file beside a still),
+`binding`
+(`{gate, entry, currency, currency_word}`) and `data` empty. A bound viewgen that is
+unavailable, crashes, hangs past its own timeout, returns nothing or is refused moves
+no status (no view reaches the resolution) and deletes no picture; a picture of the
+served entry kept from an older recipe is said in the warnings. `_kept_json` leaves
+`assets/figures/` and `assets/live/` out of the prose pool, and `prose` excludes a
+row's `scale`, `marks` and `binding`. *Rejected:* rendering in `check` (a 2.7 GB
+optional tool on the judging path); a render on every build (seconds per scene per
+edit); `write_asset` into `site/` (published before checked).
 
 ### `page.py`  (deps: models, util, store, claims, report, graph, prose)
 The two pages' baked data (architecture phase 5, SPEC 28-33, 40): `map.json` and
@@ -3633,6 +3775,8 @@ OTHER = "other"                              # the generated board and zone
 IMPLICIT_STATIONS_WARN = 8                   # generated stations past this warn
 EVIDENCE_MAX_BYTES = 2 * 1024 * 1024         # the largest evidence file copied
 EVIDENCE_DIR = "assets/evidence"; PROSE_SUBJECTS = ("intro", "next", "story")
+PROSE_FIGURE_DIR = "content/img"; ASSETS_PREFIX = "assets/"   # where prose figures go,
+                                             #   and the folder the build cleans
 DECISIONS_SHOWN = 5                          # the marketing page's featured decisions on show
 VIEWER_KINDS = ("model3d", "field")          # the view kinds an alternate may be
 WORD_KEYS: frozenset; RECORD_KEYS: frozenset # every string key of page.json and map.json:
@@ -3645,17 +3789,68 @@ class Layout(NamedTuple): boards; zones; stations; board_of; zone_of; station_of
                           station_depth; traced; ties; zone_rank; station_rank;
                           requirement_rank; idle; crossings; trace_key
 class Evidence(NamedTuple): gate; entry; path; name; source; dest; href; missing; action;
-                            reason   # why it is not on the page: the build's warning, never baked
+                            reason;  # why it is not on the page: the build's warning, never baked
+                            sha256   # a `copy`'s verified digest; the build checks it again
 def token_of(composed) -> str                # STATUS_KEY, or errored
 def boards_of(view) -> tuple                 # board records, then the generated `other`
 def layout(view, built, *, projection, params=(), registry=None, resolution=None) -> Layout
 def value_text(measured, units, limit_text, margin) -> str   # "0.6997 mm against a limit of
                                              #   0.5 mm, 40% past the limit"
 def words_block() -> dict                    # page.json's words
-def evidence_plan(root, view, resolution, registry=None, *, ignored=None) -> list
-                                             # [Evidence]; plans only; `ignored(relpath)`
-                                             #   is git's ignore rule (site build's)
+def evidence_plan(root, view, resolution, registry=None, *, ignored=None,
+                  manifest=None) -> list     # [Evidence]; plans only; `ignored(relpath)`
+                                             #   is git's ignore rule (site build's);
+                                             #   `manifest(gate, entry)` the bytes the
+                                             #   entry's run cited (issue #15): `copy` only
+                                             #   at those bytes, else `keep` an earlier
+                                             #   copy or `none`; no reader copies nothing
 def evidence_assets(plan) -> dict            # {gate: [href or "", ...]} for state.json
+def evidence_source(root, text, *, ignored=None) -> tuple   # (source, outside, reason):
+                                             #   one evidence path, as evidence_plan resolves it
+FIGURES_DIR = "assets/figures"; LIVE_DIR = "assets/live"     # a bound figure's folders
+SIDECAR_SUFFIX = ".view.json"; SIDECAR_SCHEMA = 2; SIDECAR_KEYS: tuple
+SIDECAR_KEYS_BY_SCHEMA: dict                 # {1: the keys, 2: + scales, light} (design P2):
+                                             #   both read, each with its exact key set
+SCALE_ON = ("surface", "lines"); LIGHTS = ("scene", "none")
+def sidecar_schema(meta) -> int              # 2 when meta states scales or light, else 1:
+                                             #   a one-scale figure's sidecar keeps its bytes
+def scales_problem(scale, scales, light) -> str   # why the colour keys are not of their
+                                             #   shape, or "": the build's refusal and the
+                                             #   reader's, one rule
+FIGURE_ROLES = ("image", "field", "chart")
+FIGURE_CURRENCIES = ("current", "stale", "unseen", "older", "none")
+class Figure(NamedTuple): view; gate; served; entry; currency; sidecar; problems
+def figure_folder(gate, entry) -> str        # assets/figures/<gate>/<entry>
+def live_folder(gate, entry) -> str          # assets/live/<gate>/<entry>
+def figure_currency_word(currency) -> str    # HUMAN["site"]["figure"][currency]
+def read_sidecar(root, gate, entry, view) -> tuple   # (sidecar | None, why): its folder's,
+                                             #   an entry the cache holds, each file's bytes
+def figure_for(root, gate, view, served, fresh, unseen=False) -> Figure
+                                             # current | stale | unseen | older | none
+CAPTION_STATUS_PHRASES: tuple; FIGURE_CONTROLS = ("spin",)
+def caption_status(caption) -> str           # the status word a caption says, or ""
+class BoundFigure(NamedTuple): view; kind; gate; title; provenance; figure
+def entry_verdict(root, gate, entry) -> dict | None   # a cache entry's verdict
+def entry_outcome(verdict) -> str            # error | pass | fail | unrun
+def drawn_text(verdict) -> str               # an older figure's line about its result
+def binding_text(figures) -> str             # which result each gate's figures are of
+def margin_text(margin) -> str               # the margin's words alone
+def chart_block(claim, row, payload) -> tuple   # ({limit, current, spec, table}, warning): the floor's
+def chart_spec(payload, limit, current, *, locators=()) -> dict   # P1.5: a chart's whole Vega-Lite spec
+def chart_table(payload) -> dict | None      # review of P2: {head, rows}, the chart's numbers as text
+def view_chart(row, payload, anchored=()) -> dict   # P2.5: {limit, current, spec, table} of a chart view on the record
+CHART_CURRENT_KEYS = ("current", "marker", "now", "markers")   # an unbound view's point, first present
+CHART_PAD = 14                               # px a continuous axis keeps inside each end
+CHART_TABLE_ROWS = 8                         # rows of one series in a chart's table
+VEGA_FORBIDDEN_KEYS: frozenset               # keys a baked spec never holds (Vega computes)
+def vega_forbidden(spec) -> list             # the forbidden keys a spec holds, sorted
+CHART_HEIGHT = 260                           # the chart's CSS height; its width is the card's
+def figure_chips(cids, toks, marks) -> list  # the chips beside a figure
+def figure_row(root, bound, *, claim, floor_row, chips, outcome, warnings=None) -> dict
+def gate_cover(cover) -> dict                # {gate: [claim ids]}: effective_gates inverted
+class FigureFacts(NamedTuple): root; served; outcomes; floor; cover; claims; shown; kept
+def figure_facts(root, resolution, payload, view, composed, registry, *, kept=None,
+                 shown=None) -> FigureFacts  # what _figure_problems holds a figure against
 def settle(claim, composed, *, milestone=None, cover=(), tiers=None) -> dict  # {text, commands}
 def subject_tokens(subject, boards, toks, named=()) -> dict   # what a piece of prose is
                                              #   stamped against: a board's claims, and
@@ -3668,7 +3863,9 @@ def stamp_state(as_of, current) -> str       # current | stale | unstamped
 def stamp_states(root, view, toks) -> list   # [{file, subject, stamp, as_of, current_as_of}]
 def content_digest(root) -> str              # a seal over site/content/
 def seal(doc) -> str                         # map.json's and page.json's `self`
-def representation(views) -> dict            # the first model3d, else image or diagram
+def representation(views, root="", figures=()) -> dict   # the first model3d, else a
+                                             #   figure with a committed 3D file, else a
+                                             #   bound still, else image or diagram
 def alternates(views, root="", first=None) -> list   # [{view, title, bytes}]: model3d and
                                              #   field views, first one first, one per asset
 def requirement_nodes(view, lay, toks, marks) -> list   # the map's requirement nodes: the one
@@ -3685,10 +3882,15 @@ def bake_map(view, lay, built, toks, composed, *, projection, params=(), registr
              payload=None, name="", records_digest="", resolution_digest="", amber=None,
              trace=None) -> dict
 def bake_page(root, view, lay, built, toks, composed, *, registry=None, payload=None,
-              plan=(), records_digest="", resolution_digest="", amber=None) -> dict
+              plan=(), records_digest="", resolution_digest="", amber=None, figures=(),
+              warnings=None) -> dict
 def bake_prose(root, page_doc, lay, toks, pool) -> list   # fills the prose objects
+def figure_misplaced(path) -> str            # why a prose figure's path is no place for
+                                             #   one ("" if it is): under assets/, it reads
+                                             #   missing, by its path alone
 def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None,
-                    pool=None, amber=None, feeds=None) -> list[str]   # invariant 14: tokens,
+                    pool=None, amber=None, feeds=None,
+                    figures=None) -> list[str]   # invariant 14: tokens,
                                              #   words, marks, ready, amber, feeds,
                                              #   a compared value's words, prose stamps;
                                              #   with prose_as_of and pool, each as_of
@@ -3697,6 +3899,7 @@ def status_problems(map_doc, page_doc, view, composed, toks, *, prose_as_of=None
                                              #   rejection words, the headline, required,
                                              #   the tally, the limits line, and amber on
                                              #   requirement, section, chip and step rows)
+                                             #   and, with figures (FigureFacts), G1-G8
 ```
 **Order is baked, geometry is rendered**: nodes carry a lane, an `order`, a `row` and a
 `column` (greedy interval packing over the rows their lines span), never a position, and
@@ -3731,6 +3934,52 @@ first built in `site.build` after `bake_page`, where the checker had already run
 rejection's reason sat under `why`, a word key, so the scan read record text (the
 bracket's PLA reason has an em-dash). It is `reason` now, a record key.
 
+**Figures on the page** (issue #15, P1.4): `site.build` hands `bake_page` the bound
+figures its bound pass resolved (`BoundFigure`, one per bound viewgen, `none` included),
+and each claim bakes `figures` (`figure_row`, one per figure whose gate covers it) and
+`binding_text`. An older figure's outcome and `drawn_text` are its own cache entry's
+(`entry_verdict`); a chart's limit and point are the floor row's (`chart_block`); the
+chips are `graph.tokens`' with `_marks`. `status_problems` with `figures` (built by
+`figure_facts`) holds each figure (`_figure_problems`, G1-G8): the build passes its keep
+set and the figures it resolved; `cli._site_state` passes neither, so the checker reads
+the disk (`figure_for`, `read_sidecar`) and a swapped file, a forged currency or a
+planted chip reads *edited by hand*. The build's caption refusal and G7 read one rule,
+`caption_status` (moved here from `site`). *What slipped through before it:* a picture
+beside a status said nothing of the result it showed (F10: and a field was never the
+hero).
+
+**A chart is a baked spec** (issue #15, P1.5; rule 0.1 of its design): `chart_block`
+also returns `spec`, `chart_spec`'s whole Vega-Lite spec over the chart file's series
+and the floor's limit and point, which `lib/figures.js` hands to `vegaEmbed` unchanged.
+It holds none of `VEGA_FORBIDDEN_KEYS`, so Vega computes nothing but the axes; G6
+compares the whole block, spec included, and names a forbidden key a hand edit
+planted. The page's theme gives each mark `style` its look; the spec says where a
+label sits (Vega-Lite writes a text mark's alignment into the mark, over a theme's).
+*Rejected:* growing `lib/chart.js` (log y, bands, rules, estimates, hollow points),
+which the author's rule to build as little as possible and draw with a trusted
+library replaces. From P2.5 every chart view on the technical record is a baked spec
+too: `view_chart` reads an unbound view's own limit (y, or x as a vertical line) and
+points in each spelling the hand-drawn chart read, a bound view's chart file's series
+alone, and the verdicts' anchors (a located series drawn heavier, a located x a rule
+in its severity's look), and `chart_spec` takes lists of limits and points and the
+anchors as `locators`. `site.build` puts it in each chart row as `chart`, split into
+`data/views/<id>~chart.json` (`site.CHART_FILE_SUFFIX`, `chart_url`) over
+`VIEW_INLINE_MAX` and sealed with the row (`view_digest`). A layer that places only
+constants draws from one empty row of its own. *What slipped through:* such a layer
+inherited the chart's rows and was drawn once per row, so at 42 rows the shaded side
+of a limit read solid and each label was 42 copies. `lib/chart.js` is deleted.
+In the review of P2: an `older` figure's chart gets no floor row (`figure_row`, and
+G6 the same), so it draws its own run's series alone; the judged point is a ring,
+found at a series point or a band's end (`_series_x`), drawn over the band, whose two
+ends are short bars; a payload's `"legend": false` drops the legend and `"judged":
+false` the limit, the point and the units warning; an estimate that names its
+`series` takes that series' colour; a log y writes one notation (`~e`); and every
+chart carries `table` (`chart_table`), which the card shows where Vega does not
+load.
+*Rejected:* keeping it for the record's unbound charts and their locators, as P1.5
+did (the anchors are a spine fact the bake can carry, and the hand-drawn text was
+about 5 px high on a phone).
+
 ### `prose.py`  (deps: none)
 The agent's text on the site and the scans that hold it (SPEC 30, 34, 35): pure
 functions over strings and JSON values, importable by `site stamp` and the style tests
@@ -3749,7 +3998,9 @@ class Pool(NamedTuple): values; tagged       # every baked number's absolute val
 def parse_front_matter(text) -> FrontMatter
 def stamp_text(text, as_of) -> str           # writes only the as_of line
 def stamp_digest(subject, tokens) -> str     # 16 hex: sha256 over nopekit-stamp-v1
-def parse_markdown(body, *, exists=..., claims=()) -> tuple[list[dict], list[str]]
+def parse_markdown(body, *, exists=..., claims=(), misplaced=...) -> tuple[list[dict], list[str]]
+                                             # misplaced(path): a reason makes the figure
+                                             #   missing, the reason its problem
 def number_pool(docs) -> Pool
 def scan_numbers(blocks, pool) -> tuple[list[dict], list[str]]   # number runs, unmatched
 def matches(text, decimals, percent, pool, unit="") -> bool   # a unit must agree
@@ -5173,6 +5424,23 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
   never scanned: the floor sits under the prose so a reader sees the data beside it.
 - **Evidence over 2 MiB is not copied to the page**, and a viewgen that writes a clock
   into its asset breaks the page's byte stability: every build then rewrites it.
+- **A forged evidence manifest is the forged-cache class (issue #15).** The manifest is
+  scratch under `.nopekit/cache/`, a plain sha256 per file: a process that writes one
+  naming the bytes now in `.nopekit/out/` makes the build copy them as that entry's
+  evidence. `export` re-runs the gates a spend requires, which rewrites the manifest
+  from the re-run; nothing re-checks a copy an earlier build published. A copy made
+  before the manifest existed, or on another computer, is kept as it is: the build
+  binds what it copies, never what it keeps.
+- **A bound figure is bound by bytes, never by what it draws (issue #15).** The spine
+  checks a figure's evidence, its inputs, its format, its size, its chart's numbers,
+  its colour range's ends and its caption's words. It cannot see whether a scene draws
+  what its caption says, or whether the pixels follow the scale; the pack's renderer
+  control and the real-tool tests hold that. A viewgen runs in process and is trusted
+  to read only `ctx.entry.files` and what it bound: one that opens `.nopekit/out/`
+  itself reads whatever run is there. A sidecar and its files forged with matching
+  bytes, under an entry the cache holds, read as drawn (the forged-cache class);
+  `export` re-runs the gates, never the renders. The caption check reads whole words,
+  so a caption that says "gap" or "open" in their plain sense is refused too.
 - **The watcher polls size and mtime over a fixed set of directories**
   (`site.WATCH_DIRS`): an edit outside them, or one that keeps both, is not seen until
   the next build.
@@ -5181,7 +5449,9 @@ after the acceptance run"). No spine module moved, and `site.py`'s code did not 
 - **A forger who reseals a page and keeps its tokens can still change its words.**
   `page.status_problems` compares tokens, *ready*, steps and marks with the
   resolution; a word, a hint or a value text edited by hand and resealed reads
-  current until the next build writes it again.
+  current until the next build writes it again. A view file edited by hand, its new
+  digest written into `meta.views` and the page resealed, reads current too, and a
+  build without that viewgen's tool keeps it, where its numbers vouch for prose.
 
 - **A resealed round record reads as no hand edit (architecture phase 3a).** Its
   self-digest is tamper evidence against a hand edit, not a lock: anyone who can write

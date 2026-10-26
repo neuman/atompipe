@@ -208,11 +208,81 @@ class EveryBakedKeyIsClassified(_env.EnvCase):
             with self.subTest(name):
                 self.assertEqual(baked_word_strings(doc, name)[1], [])
 
+    def test_figure_keys(self):
+        """Every key a bound figure bakes (issue #15, B.4.3) is classified, and
+        its words follow the style: a current still with a 3D file on this
+        computer only and a tool the pack's lock did not accept, an older
+        still with its result's line, and a chart with its limit and point,
+        each from `page.figure_row`, on the bracket's page (F12: the bracket
+        alone bakes no figure, so no key of one was ever read)."""
+        doc = json.loads(json.dumps(self.baked.page_doc))
+        cid = next(iter(doc["claims"]))
+        doc["claims"][cid]["figures"] = rows = _figure_rows(self)
+        doc["claims"][cid]["binding_text"] = page.binding_text(rows)
+        doc["representation"].update(figure=rows[0], controls=list(page.FIGURE_CONTROLS))
+        self.assertEqual({r["currency"] for r in rows}, {"current", "older"})
+        self.assertTrue(all(r[k] for r in rows[:1] for k in ("tool_word", "turn", "scale")))
+        words, loose = baked_word_strings(doc, "page.json")
+        self.assertEqual(loose, [])
+        self.assertEqual(style_problems(words), [])
+        said = {where.rsplit(".", 1)[-1] for where, _text in words}
+        for key in ("currency_word", "drawn_text", "caption", "alt", "binding_text",
+                    "live_word", "margin_text", "over_word", "source_text", "label",
+                    "on_word", "flat_word"):
+            self.assertIn(key, said)
+
     def test_a_planted_key_is_caught(self):
         doc = json.loads(json.dumps(self.baked.page_doc))
         doc["verdict"]["planted_u05"] = "a sentence"
         self.assertEqual(baked_word_strings(doc, "page.json")[1],
                          ["page.json.verdict.planted_u05 (planted_u05)"])
+
+
+def _figure_rows(case: unittest.TestCase) -> list[dict]:
+    """Three figures as `page.figure_row` bakes them, from sidecars and a cache
+    entry written in a temporary root: a current still with a live 3D file,
+    an older still, and a chart beside its floor row."""
+    from test_figures import SCALE, SCALES
+    root = tempfile.mkdtemp(prefix="nopekit-figure-keys-")
+    case.addCleanup(_env._rmtree, root)
+    gate, now, then = "g.one", "1" * 16 + "-" + "a" * 8, "2" * 16 + "-" + "b" * 8
+    entry_dir = os.path.join(root, ".nopekit", "verdicts", gate)
+    os.makedirs(entry_dir)
+    with open(os.path.join(entry_dir, then + ".json"), "w", encoding="utf-8") as fh:
+        json.dump({"verdict": {"passed": True, "measured": 2.5, "units": "Pa"}}, fh)
+    chart = os.path.join(root, "site", *page.figure_folder(gate, now).split("/"),
+                         "g.chart.000000000000.chart.json")
+    os.makedirs(os.path.dirname(chart))
+    with open(chart, "w", encoding="utf-8") as fh:
+        json.dump({"series": {"value": [[1.0, 2.0]]}, "y": {"units": "Pa"}}, fh)
+    row = {"name": "x", "sha256": "0" * 64, "bytes": 70}
+
+    def still(view: str, entry: str, currency: str, lit: bool = False) -> page.BoundFigure:
+        sidecar = {"view": view, "gate": gate, "entry": entry, "kind": "image",
+                   "files": {"image": {**row, "name": view + ".0.png"},
+                             "field": {**row, "name": view + ".0.glb", "live": True}},
+                   "title": "The speed of the flow", "caption": "The speed in the channel.",
+                   "alt": "A strip of colour from blue to yellow.", "scale": SCALE,
+                   "marks": [{"at": 0.25, "text": "the upstream plane"}],
+                   "tool": {"name": "draw", "accepted_by": "environment"}}
+        if lit:
+            # design P2: two scales and a light, with the 3D view's toggle
+            sidecar.update(schema=2, scale={}, scales=SCALES, light="scene")
+        return page.BoundFigure(view, "image", gate, "The speed", "A tool drew it.",
+                                page.Figure(view, gate, now, entry, currency, sidecar, ()))
+
+    chart_fig = page.BoundFigure("g.chart", "chart", gate, "The value", "",
+                                 page.Figure("g.chart", gate, now, now, "current", {
+                                     "files": {"chart": {**row,
+                                                         "name": os.path.basename(chart)}},
+                                     "title": "The value", "caption": "", "alt": "",
+                                     "scale": {}, "marks": [], "tool": {}}, ()))
+    chip = [{"id": "C1", "token": "checked", "word": "checked", "errored": False, "marks": []}]
+    floor = {"gate": gate, "measured": 2.0, "units": "Pa", "limit": 10.0, "comparator": "<=",
+             "compared": False, "margin_text": "80% inside the limit"}
+    return [page.figure_row(root, fig, claim=None, floor_row=floor, chips=chip, outcome="pass")
+            for fig in (still("g.speed", now, "current"), still("g.old", then, "older"),
+                        chart_fig, still("g.hero", now, "current", lit=True))]
 
 
 # --------------------------------------------------------------------------- #

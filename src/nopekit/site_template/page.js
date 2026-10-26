@@ -39,6 +39,7 @@ import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
+import { figureTag, figureLegends, figureStill, flatToggle } from "./lib/figures.js";
 
 const PHONE = window.matchMedia ? window.matchMedia("(max-width: 759px)") : null;
 
@@ -120,9 +121,10 @@ function render({ again = false } = {}) {
   // 1. the name
   mount($("#name"), meta.name || "", meta.revision ? el("span", { class: "rev", text: meta.revision }) : null);
 
-  // 2. the representation (kept across a live rebuild when its view is the same)
+  // 2. the representation (kept across a live rebuild when its view is the same
+  // and, for a figure, the whole baked figure: its chips and its sentence too)
   const rep = doc.representation || {};
-  if (!again || page.repView !== rep.view) representation(rep);
+  if (!again || page.repView !== repKeyOf(rep)) representation(rep, words);
 
   // 3. the verdict, right under the representation
   mount($("#verdict"), ...verdictBlock(doc.verdict || {}, words));
@@ -137,7 +139,7 @@ function render({ again = false } = {}) {
   drawMap();
 
   // 6. one section per board
-  mount($("#boards"), ...renderSections(doc, { onClaim: openClaim }));
+  mount($("#boards"), ...renderSections(doc, { onClaim: openClaim, build: page.build }));
 
   // 7. next steps
   mount($("#next-title"), headings.next || "");
@@ -162,11 +164,21 @@ function description(doc, openClaim) {
 // --------------------------------------------------------------------------- //
 // the representation
 // --------------------------------------------------------------------------- //
-async function representation(rep) {
+const repKeyOf = (rep) => `${rep.view}|${JSON.stringify(rep.figure || null)}`;
+
+/** The hero. A figure as the hero (issue #15) shows which result it is, with
+ *  the chips of the claims its gate covers, under the picture; as a 3D field
+ *  it turns its committed GLB in field mode (the colours as the file holds
+ *  them, `lib/viewer3d.js`), with the scale's legend, and offers only the
+ *  baked `controls`. */
+async function representation(rep, words) {
   const host = $("#representation");
   if (page.viewer) { page.viewer.dispose(); page.viewer = null; }
-  page.repView = rep.view;
-  const view = rep.view ? ((page.state && page.state.views) || []).find((v) => v.id === rep.view) : null;
+  page.repView = repKeyOf(rep);
+  let view = rep.view ? ((page.state && page.state.views) || []).find((v) => v.id === rep.view) : null;
+  const fig = rep.figure || null;
+  if (view && fig && rep.kind === "field") view = { ...view, kind: "field", src: fig.field_src || view.src };
+  const tag = fig ? figureTag(fig, words) : null;
   if (!view) {
     mount(host, el("div", { class: "rep-empty" }, el("p", { text: rep.notice || "" })));
     return;
@@ -175,6 +187,7 @@ async function representation(rep) {
     try { view.data = await fetchJson(view.data_url); } catch (err) { /* drawn without it */ }
   }
   const caption = rep.title ? el("p", { class: "rep-caption small", text: rep.title }) : null;
+  const explodes = !fig || (rep.controls || []).includes("explode");
   if (rep.kind === "model3d" || rep.kind === "field") {
     const frame = el("div", { class: "viewer-host" });
     const slider = el("input", { class: "explode-slider", type: "range", min: "0", max: "100",
@@ -187,10 +200,15 @@ async function representation(rep) {
     pill.hidden = true;
     const box = el("div", { class: "viewer", id: "hero3d" }, frame,
       el("div", { class: "hint", text: "Drag to turn. Scroll to zoom." }), pill);
-    mount(host, box, caption);
+    mount(host, box, caption, tag, fig ? figureLegends(fig) : null);
     page.viewer = createViewer({
-      host: frame, view,
-      onReady: (api) => { pill.hidden = !api.canExplode; },
+      host: frame, view, field: !!fig, light: fig ? (fig.light || "") : undefined,
+      onReady: (api) => {
+        pill.hidden = !(explodes && api.canExplode);
+        // A lit figure's flat colours (design P2), as on its card.
+        const flat = flatToggle(api, fig && (fig.turn || {}).flat_word);
+        if (flat) box.after(flat);
+      },
       onError: (err) => {
         page.viewer = null;
         mount(frame, el("div", { class: "rep-empty" },
@@ -200,8 +218,15 @@ async function representation(rep) {
     });
     return;
   }
+  // A figure still as the hero is drawn as on its card: its plane words over
+  // their lines, and its caption, the one text that says what the lines are.
+  // What slipped through (review of P2): the hero drew the bare picture, two
+  // black lines across it and nothing on the page that named them.
   if (rep.kind === "image") {
-    mount(host, el("div", { class: "rep-flat" }, renderImage(view, [], null)), caption);
+    mount(host, el("div", { class: fig ? "rep-flat rep-figure" : "rep-flat" },
+      fig ? figureStill(fig, view.src) : renderImage(view, [], null)), caption, tag,
+      fig ? figureLegends(fig) : null,
+      fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null);
     return;
   }
   const flat = el("div", { class: "rep-flat" });

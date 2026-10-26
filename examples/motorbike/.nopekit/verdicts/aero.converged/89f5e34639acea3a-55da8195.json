@@ -1,0 +1,286 @@
+{
+  "schema": 1,
+  "gate": "aero.converged",
+  "rho": "89f5e34639acea3aa603eed7b8532703c118bbf91c3278be4efc0d1eb00240b2",
+  "code": {
+    "digest": "e5af7d9fd3c0ab4f037096afd76c91eda859df1e9662f837b40388150196c306",
+    "files": [
+      "<pack:aero-openfoam>/gates/_fo.py",
+      "<pack:aero-openfoam>/gates/_foam.py",
+      "<pack:aero-openfoam>/gates/_par.py",
+      "<pack:aero-openfoam>/gates/_tool.py",
+      "<pack:aero-openfoam>/gates/aero.py"
+    ],
+    "fallback": ""
+  },
+  "spine": "ec8b7fbd661d0a6b1d471a3fe02bf98f089dc07128de4a0386c6787b1ad4810e",
+  "reads": {
+    "params": [
+      [
+        [
+          "aero"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_geometry"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_geometry_sha256"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero-openfoam.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_body_group"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_case"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_geometry"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_geometry_sha256"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_iter_unc_max_pct"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_ranks"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_timeout_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero.aero_u_inf_m_s"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_body_group"
+        ],
+        "690d2510580edc70181f938b60ea576ece36ede31cbc53ee6feff845f24b89f2",
+        "motorBikeGroup"
+      ],
+      [
+        [
+          "aero_case"
+        ],
+        "7c9441fdbc00c690f45e230a442c37a1342f3bb1fbc70a394c04ce58ea2462b4",
+        "case"
+      ],
+      [
+        [
+          "aero_geometry"
+        ],
+        "ca9df9ba48c714d0b34c9cd92b2f740ba0e86bd080319eeb7bd95342fcb936b7",
+        "$FOAM_TUTORIALS/resources/geometry/motorBike.obj.gz"
+      ],
+      [
+        [
+          "aero_geometry_sha256"
+        ],
+        "20f2ee52625999524bcafd0f2a5346bdea5668e20264bb44f05c319cdadb4855",
+        "8ee223c3c3256cd71da52b80eae6569ccf3167eec6f7c3542f83296a0a777aad"
+      ],
+      [
+        [
+          "aero_iter_unc_max_pct"
+        ],
+        "59a62a0c0dcb65be580d30c47169c84f4b74ae5ec925a86a2c7a3fde111a4515",
+        1.0
+      ],
+      [
+        [
+          "aero_max_global_cells"
+        ],
+        "f90507c9e202c31d8d48c448437daae103814dd74a4ef526b3fc2d1d1b998fcb"
+      ],
+      [
+        [
+          "aero_ranks"
+        ],
+        "5b3e6332edccc7fe88fa1ccc73997ff1c1b29ff1b1a02da4b34bd6986ed66f9c",
+        6
+      ],
+      [
+        [
+          "aero_timeout_s"
+        ],
+        "c1de51fe8150196fe7baffa2f5b4e6be73a485c99f3a946e707759d458657781",
+        3600.0
+      ],
+      [
+        [
+          "aero_u_inf_m_s"
+        ],
+        "e32ac4f280eb7e459d2e927d847f6d6220e60e3d283c60e2b2db853a318e92dd",
+        20.0
+      ]
+    ],
+    "files": {
+      "case/0/U": "ec65a2d7e0bb0cedcae817b9710b4b8e8c8baa17aa5ec6fee047291210b050d0",
+      "case/0/k": "5b1377be8f6758985cb0d65c45db6000c48c91daead1d75cc1a8cd4051684558",
+      "case/0/nut": "b2fa71b87ddb7408a41fd0264a3faf1428c26f29f0ae2e5a06f64f2c7c57d544",
+      "case/0/omega": "e95d3db1c6d9e2345677fe0143ee2578e53585ad42885d97371a7e7a746a299f",
+      "case/0/p": "f5675c34a57391470d62bb2204f2b296a95c6f58a7cadbbac9b14dd0958e54b6",
+      "case/constant/transportProperties": "386819f726d77a537453dd7af0029f785717e5ffccdf45bcdd25a2d30202e7ff",
+      "case/constant/turbulenceProperties": "ba09f646975161158a6544d3c1cbe0915d2ee501a444a306312ae68b8d040bdb",
+      "case/system/blockMeshDict": "9d743b7ea09dceab89789d4ff5514ff1e570f3632f0d009ddef514914c42ce84",
+      "case/system/controlDict": "4fb689b5ee09da2cf576efb6fb0c7773e695caa1db9c7ac91878140fc94be796",
+      "case/system/fvSchemes": "dd028d87a22b5f844ce694640b220d87488a509a8cdc31575829d72f51df8085",
+      "case/system/fvSolution": "f72271599aece864955df16ea436690115b1d16bbf2cb1b0c37e48bb5223d747",
+      "case/system/snappyHexMeshDict": "57a41120101c2b252e7630b0b5409ceefdb098448aa1b36f33a813a1729e443b",
+      "case/system/surfaceFeatureExtractDict": "a0b9208683a169e06f0702e7fac678724eb502d995498c58e6d372243360a6d7"
+    },
+    "dirs": {
+      "case": "112d16a980c31814da801e29ec558deaee64fbd22b4f95fbcabab2bb0951a755",
+      "case/0": "c97913058819b0283cfa7ff27dbeb5fca97cb9747c9f363b148cb8321bfbe89f",
+      "case/constant": "6fb165713dde65357b66b990a724ddc4acdc11f329f62435630893d5c84a2621",
+      "case/system": "efdf338ee8545f5a6c4e1875b50d31598e34fc9ddfa8b2996e2c0e2a71979cf0"
+    },
+    "ledger": {},
+    "model": null,
+    "opaque": [
+      "file-outside-project:/bin/sh",
+      "out:aero-openfoam/aero_converged/case/postProcessing/forceCoeffs1/0/coefficient.dat (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/sets/tracksCentre/500/track0.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/sets/tracksFar/500/track0.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1 (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1/500/body.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1/500/wakeCut1.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1/500/wakeCut2.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1/500/wakeCut3.vtp (not written by this gate)",
+      "out:aero-openfoam/aero_converged/case/postProcessing/surfaces1/500/wakeIso.vtp (not written by this gate)",
+      "out:cfd-openfoam/home/OpenFOAM/nopekit-v2606/platforms/linux64GccDPInt32Opt/bin/mpirun (not written by this gate)",
+      "subprocess:bash",
+      "subprocess:blockMesh",
+      "subprocess:decomposePar",
+      "subprocess:foamDictionary",
+      "subprocess:mpirun",
+      "subprocess:rm",
+      "subprocess:surfaceCheck",
+      "subprocess:surfaceFeatureExtract"
+    ]
+  },
+  "instruments": {},
+  "verdict": {
+    "passed": true,
+    "measured": 0.883396,
+    "limit": 1.0,
+    "units": "%",
+    "comparator": "<=",
+    "settles": "aero solver convergence",
+    "detail": "U_I 0.883% of the drag area 0.297779 m^2 over iterations 401-500 (within 1%) [pack default: aero_max_global_cells]; drift -0.928% from the window before (reported, not judged); 351753 cells (base mesh), layers on 42.3% of the body's faces; omega bounded in 1 iterations (reported, not judged)",
+    "evidence": [
+      "<out>/aero-openfoam/aero_converged/summary.json",
+      "<out>/aero-openfoam/aero_converged/history.csv",
+      "<out>/aero-openfoam/aero_converged/surfaceCheck/log.surfaceCheck",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.controlDict",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSchemes",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.fvSolution",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.snappyHexMeshDict",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.transportProperties",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.turbulenceProperties",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.surfaceFeatureExtractDict",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.meshQualityDict",
+      "<out>/aero-openfoam/aero_converged/case/log.foamDictionary.decomposeParDict",
+      "<out>/aero-openfoam/aero_converged/case/log.blockMesh",
+      "<out>/aero-openfoam/aero_converged/case/log.surfaceFeatureExtract",
+      "<out>/aero-openfoam/aero_converged/case/log.decomposePar",
+      "<out>/aero-openfoam/aero_converged/case/log.rankProbe",
+      "<out>/aero-openfoam/aero_converged/case/log.snappyHexMesh",
+      "<out>/aero-openfoam/aero_converged/case/log.checkMesh",
+      "<out>/aero-openfoam/aero_converged/case/log.potentialFoam",
+      "<out>/aero-openfoam/aero_converged/case/log.simpleFoam"
+    ],
+    "locators": [],
+    "claims": [
+      "convergence"
+    ],
+    "tier": 2,
+    "pack": "aero-openfoam"
+  },
+  "digest": "89eef6d6712c281af5b305aa610cbcc1603b30e36125fc233e69dd049b7868f3"
+}

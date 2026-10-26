@@ -35,6 +35,7 @@ export function claimBlocks(row, page, { onClaim } = {}) {
       row.kind_word ? el("span", { class: "cb-kind", text: row.kind_word }) : null,
       row.critical === false ? el("span", { class: "cb-kind", text: "Not required" }) : null),
     row.cause_text ? el("p", { class: "cb-cause", text: row.cause_text }) : null,
+    row.reason ? el("p", { class: "cb-reason", text: row.reason }) : null,
     (row.marks || []).includes("disagree") && notices.disagree
       ? el("p", { class: "nk-notice tone-bad", text: notices.disagree }) : null,
     values.length
@@ -60,6 +61,7 @@ export function claimBlocks(row, page, { onClaim } = {}) {
           el("h4", { text: "Evaluators" }),
           el("ul", { class: "cb-evals" }, ...row.evaluators.map((ev) => evaluatorItem(ev, words))))
       : null,
+    figuresLine(row, words),
     row.amber ? amberBlock(row.amber) : null,
     row.physical ? physicalBlock(row.physical) : null,
     (row.rests_on || []).length
@@ -83,6 +85,20 @@ export function claimBlocks(row, page, { onClaim } = {}) {
             : null)
       : null,
   ];
+}
+
+/** One line, no images (issue #15, C14): how many pictures the claim has and
+ *  a link to its card on the board, with the bake's sentence of which result
+ *  they come from. A figure with no file is not a picture, and is not counted.
+ *  *Rejected:* the cards repeated here (the drawer stays text, and two copies
+ *  of a picture can disagree). */
+function figuresLine(row, words) {
+  const drawn = (row.figures || []).filter((f) => f.src || f.data_src || f.field_src);
+  const said = (words && words.figure) || {};
+  if (!drawn.length || !said.pictures) return null;
+  return el("p", { class: "cb-figs" },
+    el("a", { href: `${location.pathname}#fig-${row.id}`, text: said.pictures.replace("{n}", String(drawn.length)) }),
+    row.binding_text ? ` ${row.binding_text}` : "");
 }
 
 function evaluatorItem(ev, words) {

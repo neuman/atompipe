@@ -85,18 +85,24 @@ rots, and the spine is standard-library only for exactly the same reason.
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
 import fnmatch
+import hashlib
+import importlib.util
 import json
+import math
 import os
 import posixpath
+import re
 import shutil
+import struct
 import sys
 import tempfile
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, NamedTuple
 
 from . import claims as claim_logic
 from . import decisions as decision_logic
@@ -110,13 +116,15 @@ from . import store
 from . import vcs
 from . import verdicts as verdict_logic
 from .gates import availability as _gate_availability
-from .models import Ledger, Locator, Verdict, View, ViewKind
+from .models import Acceptance, Ledger, Locator, Verdict, View, ViewKind
 from .util import (
     NopekitError,
     atomic_write_json,
     atomic_write_text,
     ensure_dir,
+    rel,
     sha256_text,
+    short_hash,
     write_json_if_changed,
 )
 
@@ -134,6 +142,8 @@ __all__ = [
     "viewgen",
     "active_view_registry",
     "use_view_registry",
+    "load_viewgens",
+    "view_tool_rows",
     "availability",
     "run_viewgen",
     "run_all_viewgens",
@@ -155,6 +165,9 @@ __all__ = [
     # the two pages: the engineering and marketing pages
     "PAGES", "VIEWS_MARKER", "VIEWS_MARKER_RE", "OLD_LAYOUT_WARNING", "outline_file",
     "outline_problem", "old_layout", "page_urls", "pages_line",
+    # issue #15: viewgens bound to a verdict entry
+    "BoundEntry", "BoundContext", "FIGURE_SCRATCH", "FIGURE_RECIPE_SALT", "BOUND_KINDS",
+    "CHART_FORBIDDEN_KEYS", "CHART_NUMBER_KEYS", "CAPTION_STATUS_PHRASES",
 ]
 
 
@@ -252,11 +265,83 @@ AGED_SECONDS = 24 * 3600
 #: What `nopekit site serve --watch` polls (SPEC 33): the records, the project
 #: file, the model and the project's evaluators, views and generators, the packs
 #: copied in, the verdict cache, the trace, and the page's own text and
-#: authored pins. `__pycache__` and `*.pyc` are left out.
+#: authored pins. `__pycache__` and `*.pyc` are left out. And the evidence
+#: manifests (issue #15): a `check --force` that solves an entry again writes
+#: a new manifest and no new entry file, and that is the run a bound figure
+#: can now be drawn from, so the watcher must wake on it.
 WATCH_DIRS: tuple[str, ...] = (*store.RECORD_DIRS, ".nopekit/project.json", "model", "gates",
                                "selftest", "views", "generators", ".nopekit/packs",
-                               ".nopekit/verdicts", ".nopekit/trace", "site/content",
-                               "site/annotations.json", "site/explode.json")
+                               ".nopekit/verdicts", ".nopekit/trace", ".nopekit/cache/evidence",
+                               "site/content", "site/annotations.json", "site/explode.json")
+
+#: Where a bound viewgen writes (issue #15, B.1.3), relative to the project:
+#: ``<gate>/<entry>/<view>/`` under ``.nopekit/out/``, which git ignores. The
+#: spine checks what lands here and only then publishes it under
+#: ``site/assets/figures/`` (`page.FIGURES_DIR`). *Rejected:* ``site/`` (a file
+#: is published before it is checked); ``.nopekit/cache/`` (a gate never
+#: writes there, and scratch a viewgen fills is not a cache).
+FIGURE_SCRATCH = ".nopekit/out/figures"
+
+#: The salt of a bound viewgen's recipe digest (`_recipe_digest`), the memo's
+#: key: a new salt draws every figure again, which is what a change to how a
+#: figure is checked or published needs.
+FIGURE_RECIPE_SALT = "nopekit-figure-v1"
+
+#: The kinds a bound viewgen draws: a still (``image``, a PNG), a chart (its
+#: series as its payload) and a 3D field (``model3d`` or ``field``, a GLB or
+#: a self-contained glTF: `SOLID_SUFFIXES`).
+#: *Rejected:* ``table`` (rows are a gate's evidence already, linked as such).
+BOUND_KINDS = (ViewKind.IMAGE, ViewKind.CHART, ViewKind.MODEL3D, ViewKind.FIELD)
+
+#: A bound chart may hold none of these keys, anywhere (B.2.3): a chart's
+#: limit and its current point are the claim's, set by nopekit from the floor
+#: (P1.4). What slipped through before this: `_chart_margins` took a chart's
+#: margin from the view's own limit, so a pack limit beside the claim's was a
+#: second limit on the page. *Rejected:* stripping such a key silently (a pack
+#: bug would read as a working chart).
+#: ``markers`` too, since an unbound view's ``markers`` became its point
+#: (review of P2, `page.CHART_CURRENT_KEYS`).
+CHART_FORBIDDEN_KEYS = frozenset({"limit", "limits", "current", "marker", "now", "markers"})
+
+#: The parts of a bound chart whose every number must be one a verified
+#: evidence file of the entry holds (a JSON leaf or a CSV cell): a chart draws
+#: what the run wrote, never a number its viewgen computed. *Rejected:* every
+#: number of the payload (axis bounds and tick steps are presentation).
+CHART_NUMBER_KEYS = ("series", "band", "estimates", "rule")
+
+#: Phrases a bound figure's caption may not hold: `page.CAPTION_STATUS_PHRASES`,
+#: where the build's refusal and the page's checker (G7) read one rule.
+CAPTION_STATUS_PHRASES = page_logic.CAPTION_STATUS_PHRASES
+
+#: The bytes a PNG and a GLB start with (B.2.3's format check, stdlib).
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+GLB_MAGIC = b"glTF"
+
+#: The 3D files a bound figure may write: a GLB, or a glTF 2.0 JSON whose
+#: every buffer and image is a ``data:`` URI (`_solid_problem`). three.js's
+#: GLTFLoader reads both. Issue #15, P2.4, under the author's rule of
+#: 2026-10-21 (use the trusted tool's output, build as little as possible):
+#: ParaView 6.2 writes glTF and no GLB (``ExportView`` with ``InlineData``),
+#: and its faceted export passes the Khronos validator as it is (measured;
+#: `tests/test_cfd_views.py`), so the page takes ParaView's file unchanged.
+#: What a self-contained glTF closes: one that names a ``.bin`` or a texture
+#: beside it would make the page fetch a file the spine never saw, hashed or
+#: published. *Rejected:* a GLB repacker in the pack (the design's
+#: ``_gltf.py``: a codec of our own between ParaView and three.js); trimesh
+#: to convert (a second tool that rewrites the colours ParaView wrote, for
+#: 25% fewer bytes the 2 MiB cap did not need: 940 KB for the baseline's 8000
+#: cells); checking accessors here (the Khronos validator does that, in the
+#: tests, where node is).
+SOLID_SUFFIXES = (".glb", ".gltf")
+
+#: The line `ensure_site_ignore` adds once a bound viewgen is registered: the
+#: live 3D files of entries no export re-ran (`page.LIVE_DIR`) are on one
+#: computer only (B.2.4).
+_LIVE_IGNORE = (
+    "# `site build` writes the 3D view of a result no export re-ran here. It is\n"
+    "# on this computer only, so git ignores it.\n"
+    "assets/live/\n"
+)
 
 #: The scaffold source, shipped inside the package (see pyproject package-data).
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_template")
@@ -268,6 +353,14 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "site_te
 #: make the file that answers "what is the status of this project?" unreadable
 #: for the 99% of readers who did not want the table.
 VIEW_INLINE_MAX = 8192
+
+#: The suffix of a chart view's spec split out of ``state.json`` (P2.5):
+#: ``data/views/<id>~chart.json``, beside its payload's ``<id>.json``, named
+#: in its row as ``chart_url``. ``~`` is no character of a view id
+#: (`_ID_OK`), so no view's payload file can be another view's chart file.
+#: *Rejected:* ``.chart.json`` (the view ``a.chart``'s payload would be the
+#: view ``a``'s chart); a folder of its own (a second folder to clean).
+CHART_FILE_SUFFIX = "~chart.json"
 
 #: Characters allowed in a view id. Ids become filenames (``data/views/<id>.json``)
 #: and query fragments, and a locator addresses a view by this string, so a slash
@@ -484,6 +577,192 @@ def _atomic_write_bytes(path: str, payload: bytes) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# the context a BOUND viewgen is handed (issue #15, B.1.3)
+# --------------------------------------------------------------------------- #
+@dataclass
+class BoundEntry:
+    """The verdict entry a bound viewgen draws: ``gate``, ``name``
+    (``<rho16>-<out8>``), ``fresh`` (the resolver's word for it), ``files``
+    ``{portable path: absolute path}`` holding ONLY the evidence files whose
+    bytes are the ones the recorded run of this entry cited (its manifest,
+    `verdicts.evidence_manifest`), and ``withheld`` ``{portable path:
+    reason}`` for every other evidence path. A viewgen reads ``files`` and
+    nothing else of the run: a file under the same name with other bytes is
+    another run's, and a picture of it would be published as this result's."""
+
+    gate: str = ""
+    name: str = ""
+    fresh: bool = False
+    files: dict[str, str] = field(default_factory=dict)
+    withheld: dict[str, str] = field(default_factory=dict)
+
+    def path(self, basename: str) -> str | None:
+        """The verified file whose base name is ``basename``, or None (none,
+        or withheld)."""
+        for portable in sorted(self.files):
+            if posixpath.basename(portable) == basename:
+                return self.files[portable]
+        return None
+
+
+@dataclass
+class BoundContext(ViewContext):
+    """What a bound viewgen (``evidence_of``) is handed: a `ViewContext` with no
+    model, no parameters and no claim's acceptance, plus ``entry`` (a
+    `BoundEntry`). It writes into scratch git ignores
+    (``.nopekit/out/figures/<gate>/<entry>/<view>/``), never into ``site/``:
+    the spine validates what it wrote (`_figure_refusal`) and only then
+    publishes it (`_publish_figure`).
+
+    * ``bind({path: sha256})`` declares extra inputs (a solved field the
+      verified summary lists with its digest). Each digest must occur in a
+      verified evidence file of the entry, and each file must hash to it; else
+      it returns None and says why. After the call the spine hashes every
+      bound input and every verified evidence file again, and discards the
+      picture if one moved.
+    * ``write_asset(name, bytes)`` writes a PNG or a 3D file (a GLB, or a
+      glTF that holds its buffers inside it) into the scratch; over
+      `page.EVIDENCE_MAX_BYTES` it raises and writes nothing.
+    * ``write_live(name, bytes)`` the same, for a file published only to the
+      ignored live folder.
+    * ``note(text)`` says something in the build's warnings.
+
+    What it closes (issue #15): the model and the parameters are the design
+    NOW, which may be another design than the served entry's; a picture drawn
+    from them would be published as that entry's evidence. A claim's limit
+    handed to a viewgen is how a colour range gets keyed to a limit, so it is
+    withheld (`_figure_refusal` refuses one that turns up anyway).
+    *Rejected:* `write_asset` straight into ``site/`` (a half-validated or
+    oversize file would be published until the check ran, and an input that
+    moved during the draw would not be seen)."""
+
+    entry: BoundEntry = field(default_factory=BoundEntry)
+    scratch: str = ""
+    view_id: str = ""
+    #: ``{name: (absolute path, live)}`` of what `write_asset` and `write_live`
+    #: wrote, in order. Only these are published.
+    outputs: dict[str, tuple[str, bool]] = field(default_factory=dict, init=False)
+    #: ``{absolute path: sha256}`` of every input `bind` accepted.
+    bound: dict[str, str] = field(default_factory=dict, init=False)
+    #: What the viewgen said (`note`), and why a write or a bind was refused.
+    notes: list[str] = field(default_factory=list, init=False)
+    refused: list[str] = field(default_factory=list, init=False)
+    #: ``{portable path: sha256}`` of ``entry.files``, set by the spine.
+    digests: dict[str, str] = field(default_factory=dict, init=False)
+
+    def note(self, text: str) -> None:
+        """Say ``text`` in the build's warnings, under this view's id."""
+        text = " ".join(str(text or "").split())
+        if text:
+            self.notes.append(text)
+
+    def asset_path(self, name: str) -> str:
+        """Refused: a bound viewgen's files reach the site only through
+        `write_asset`, where the spine sees and checks them."""
+        raise NopekitError(f"view {self.view_id}: a bound viewgen writes its files with "
+                           f"write_asset(name, bytes); a path into site/ would skip the checks "
+                           f"that publish it")
+
+    def write_asset(self, name: str, data: bytes | str) -> str:
+        """Write one output into the scratch folder and return its name (what
+        ``View.src`` names). Over the cap it raises and writes nothing."""
+        return self._write(name, data, live=False)
+
+    def write_live(self, name: str, data: bytes | str) -> str:
+        """`write_asset` for a file published only under ``assets/live/``."""
+        return self._write(name, data, live=True)
+
+    def _write(self, name: str, data: bytes | str, *, live: bool) -> str:
+        safe = _safe_asset_name(name)
+        if "/" in safe:
+            raise NopekitError(f"view {self.view_id}: {name!r} names a folder; a bound "
+                               f"figure's files are plain names in its entry's folder")
+        payload = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+        if len(payload) > page_logic.EVIDENCE_MAX_BYTES:
+            said = (f"{safe} is {len(payload)} bytes, over the 2 MiB cap; nothing was "
+                    f"written")
+            self.refused.append(said)
+            raise NopekitError(f"view {self.view_id}: {said}")
+        target = os.path.join(self.scratch, safe)
+        _atomic_write_bytes(target, payload)
+        self.outputs[safe] = (target, live)
+        return safe
+
+    def bind(self, inputs: Mapping[str, str]) -> dict[str, str] | None:
+        """``{path: absolute path}`` for every input of ``inputs`` (``{path:
+        sha256}``), or None when one does not hold, with the reason noted. A
+        path is ``<out>/...`` (under ``.nopekit/out/``) or relative to the
+        project, and must stay inside it."""
+        if not isinstance(inputs, Mapping):
+            raise TypeError("bind() takes {path: sha256}")
+        text = b"\n".join(_file_bytes(p) or b"" for p in self.entry.files.values())
+        out: dict[str, str] = {}
+        for path, want in inputs.items():
+            why = ""
+            absolute = self._input_path(str(path))
+            want = str(want or "").strip().lower()
+            if absolute is None:
+                why = "it is outside the project"
+            elif not (len(want) == 64 and all(c in "0123456789abcdef" for c in want)):
+                why = "its digest is not a sha256"
+            elif want.encode("ascii") not in text:
+                why = "no evidence file of this result holds its digest"
+            else:
+                found = page_logic._sha256_of(absolute)
+                if found is None:
+                    why = "it is not on this computer"
+                elif found[0] != want:
+                    why = (f"the file on this computer is from another run: `nopekit check "
+                           f"--force --only {self.entry.gate}` solves it again")
+            if why:
+                self.refused.append(f"input {path} is not bound: {why}")
+                self.note(f"input {path} is not bound: {why}")
+                return None
+            out[str(path)] = absolute
+            self.bound[absolute] = want
+        return out
+
+    def _input_path(self, text: str) -> str | None:
+        root = os.path.abspath(self.root or os.curdir)
+        if text.startswith("<out>/"):
+            base = store.out_dir(root)
+            parts = text[len("<out>/"):].replace("\\", "/").split("/")
+        elif text.startswith(("<", "~")) or os.path.isabs(text):
+            return None
+        else:
+            base = root
+            parts = text.replace("\\", "/").split("/")
+        parts = [p for p in parts if p not in ("", ".")]
+        if not parts or ".." in parts:
+            return None
+        candidate = os.path.join(base, *parts)
+        real, top = os.path.realpath(candidate), os.path.realpath(root)
+        return candidate if real.startswith(top + os.sep) else None
+
+    def moved(self) -> list[str]:
+        """The bound inputs and verified evidence files whose bytes are not
+        the ones they were bound at, now."""
+        out = []
+        for absolute, want in sorted(self.bound.items()):
+            found = page_logic._sha256_of(absolute)
+            if found is None or found[0] != want:
+                out.append(absolute)
+        for portable, absolute in sorted(self.entry.files.items()):
+            found = page_logic._sha256_of(absolute)
+            if found is None or found[0] != self.digests.get(portable):
+                out.append(portable)
+        return out
+
+
+def _file_bytes(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # the registration record
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -500,6 +779,15 @@ class ViewSpec:
     this view" without scanning every verdict — and not a constraint: a verdict
     from a gate that is not listed still draws, because a pack that grew a new
     gate must not silently stop rendering.
+
+    ``evidence_of`` (issue #15) binds the viewgen to one gate: it draws that
+    gate's served verdict entry, from the files the entry's run cited, through a
+    `BoundContext`, and its figure is published under the entry's folder.
+    ``recipe`` names the files beside the module (the scene, the scales) whose
+    bytes, with the module's, key the memo (`_recipe_digest`). On ``ViewSpec``,
+    never on ``models.View``: the binding is a property of the drawing code,
+    and a field on ``View`` would be a spine edit and a strict-reader change
+    for one use (C2).
     """
 
     id: str
@@ -511,6 +799,8 @@ class ViewSpec:
     pack: str = ""
     order: int = 100
     gates: tuple = ()
+    evidence_of: str = ""
+    recipe: tuple = ()
 
 
 # --------------------------------------------------------------------------- #
@@ -531,6 +821,8 @@ def _own_copy(spec: ViewSpec) -> ViewSpec:
         requires_python=tuple(spec.requires_python or ()),
         requires_tools=tuple(spec.requires_tools or ()),
         gates=tuple(spec.gates or ()),
+        evidence_of=str(spec.evidence_of or ""),
+        recipe=tuple(str(r) for r in (spec.recipe or ())),
     )
 
 
@@ -546,6 +838,7 @@ class ViewRegistry:
 
     def __init__(self) -> None:
         self._views: dict[str, tuple[ViewSpec, Callable[[ViewContext], Any]]] = {}
+        self._tool_checks: dict[str, tuple[str, Callable[[str], Any]]] = {}
 
     # -- registration ------------------------------------------------------ #
     def register(
@@ -592,6 +885,7 @@ class ViewRegistry:
         view_id = (spec.id or "").strip()
         _require_view_id(view_id)
         spec = dataclasses.replace(spec, id=view_id, kind=_coerce_kind(view_id, spec.kind))
+        _require_binding(spec)
 
         existing = self._views.get(view_id)
         if existing is not None and not replace:
@@ -617,6 +911,28 @@ class ViewRegistry:
     def clear(self) -> None:
         """Empty the registry. Tests and isolated pack validation use a scratch one."""
         self._views.clear()
+        self._tool_checks.clear()
+
+    # -- the tools the views draw with ------------------------------------- #
+    def add_tool_check(self, tool: str, fn: Callable[[str], Any], *, pack: str = "") -> None:
+        """Register a view module's check of one tool it draws with
+        (`TOOL_CHECKS_NAME`). A second check of the same tool from the same
+        function is a no-op; from another, the first stays (``doctor`` shows
+        one row a tool)."""
+        self._tool_checks.setdefault(str(tool), (pack, fn))
+
+    def tool_checks(self) -> dict[str, tuple[str, Callable[[str], Any]]]:
+        """``{tool: (pack, check)}``, in registration order."""
+        return dict(self._tool_checks)
+
+    def view_tools(self) -> list[str]:
+        """Every tool a view draws with: each viewgen's ``requires_tools``,
+        then each tool a module checks, in order, once each."""
+        out: list[str] = []
+        for spec in self.specs():
+            out.extend(t for t in spec.requires_tools if t and t not in out)
+        out.extend(t for t in self._tool_checks if t not in out)
+        return out
 
     # -- lookup ------------------------------------------------------------ #
     def get(self, view_id: str) -> tuple[ViewSpec, Callable[[ViewContext], Any]] | None:
@@ -669,6 +985,28 @@ def _coerce_kind(view_id: str, kind: Any) -> ViewKind:
             f"one artifact whose job is to be trusted cannot depend on code nobody "
             f"reviewed."
         ) from exc
+
+
+def _require_binding(spec: ViewSpec) -> None:
+    """Refuse a bound viewgen (``evidence_of``) the build could not publish: a
+    kind outside `BOUND_KINDS`, or a ``recipe`` path that leaves its pack or
+    project (it is read for the memo's key). Checked at registration, so a
+    pack whose figure could never be shown fails to load instead of drawing
+    nothing on every build."""
+    if not spec.evidence_of and not spec.recipe:
+        return
+    if not str(spec.evidence_of or "").strip():
+        raise NopekitError(f"view {spec.id!r} names a recipe and no evidence_of: a recipe "
+                           f"keys a bound figure, and a figure is bound to one gate's result")
+    if ViewKind(spec.kind) not in BOUND_KINDS:
+        raise NopekitError(
+            f"view {spec.id!r} is bound to {spec.evidence_of} as a {ViewKind(spec.kind).value}; "
+            f"a bound viewgen draws {', '.join(k.value for k in BOUND_KINDS)}")
+    for rel in spec.recipe or ():
+        parts = str(rel).replace("\\", "/").split("/")
+        if not rel or os.path.isabs(str(rel)) or ".." in parts or str(rel).startswith("/"):
+            raise NopekitError(f"view {spec.id!r}: recipe file {rel!r} must be a path inside "
+                               f"its pack or project")
 
 
 def _require_view_id(view_id: str) -> None:
@@ -740,6 +1078,145 @@ def use_view_registry(registry: ViewRegistry):
 
 
 # --------------------------------------------------------------------------- #
+# loading views/*.py
+# --------------------------------------------------------------------------- #
+def _shown(path: str, root: str | None) -> str:
+    """``path`` as a message names it: relative to the project, or whole when
+    there is none (`pack validate` loads a pack with no project)."""
+    return rel(path, root) if root else path
+
+
+def load_viewgens(directory: str, registry: ViewRegistry, *,
+                  pack: str, root: str | None) -> list[ViewSpec]:
+    """Import `<directory>/*.py` into a ViewRegistry; return the specs it added.
+
+    Deliberately the same shape as `gates.load_project_gates`, because a viewgen is a
+    gate's twin: same directory convention, same `sys.path` handling, same
+    `PACK`/`PACK_DIR` globals, same "an exception here is the pack author's
+    problem and must not print as a spine traceback". A pack author who has
+    written `gates/clash.py` writes `views/assembly.py` with nothing new to
+    learn, which is the whole reason `site.py` mirrors `gates.py` field for
+    field.
+
+    Two details carry weight:
+
+    * **Module names are salted with a hash of the file's absolute path**, so a
+      pack's `views/assembly.py` and a project's `views/assembly.py` are
+      different modules. Without the salt the second one to load silently reuses
+      the first one's code while every message names the second file.
+    * **Already-imported modules are re-registered from `fn.view_spec`**, not
+      re-executed. Python will not run a module twice, so a second build in one
+      process (a test, an agent that builds after every edit, `site status`
+      after `site build`) would decorate nothing and find an EMPTY registry —
+      reporting "this project has no views" about a project with six. The
+      decorator attaches `view_spec` to the function precisely so a loader can
+      recover the registration without re-running the module.
+
+    Registering the same function under the same id twice is a no-op in
+    `ViewRegistry`, so the walk is safe on a freshly executed module too, and
+    the two paths stay one path rather than two that can drift.
+    """
+    if not os.path.isdir(directory):
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError as exc:
+        raise NopekitError(f"cannot read {_shown(directory, root)}: {exc}") from exc
+    files = [os.path.join(directory, name) for name in names
+             if name.endswith(".py") and not name.startswith("_")]
+    if not files:
+        return []
+
+    where = f"pack {pack!r}: " if pack else ""
+    before = set(registry.ids())
+    # The directory ABOVE views/ — the pack root, or the project root. On
+    # sys.path so a viewgen can `import _geom` and share the helper the gate
+    # next door already uses, and set as PACK_DIR so pack-relative fixtures
+    # resolve the same way they do for gates.
+    base = os.path.dirname(directory)
+    sys.path.insert(0, base)
+    try:
+        with use_view_registry(registry):
+            for path in files:
+                module = _import_viewgen_module(
+                    path, pack=pack, base=base, root=root, where=where)
+                # The attribute walk, always — see the docstring. On a fresh
+                # import it re-registers what the decorator just registered
+                # (a no-op); on a reused one it is the only thing that registers
+                # anything at all.
+                for value in list(vars(module).values()):
+                    spec = getattr(value, "view_spec", None)
+                    if not isinstance(spec, ViewSpec) or not callable(value):
+                        continue
+                    try:
+                        registry.register(spec, value)
+                    except NopekitError as exc:
+                        raise NopekitError(
+                            f"{where}{_shown(path, root)}: {exc}") from exc
+                checks = getattr(module, TOOL_CHECKS_NAME, None)
+                if checks is None:
+                    continue
+                if not isinstance(checks, Mapping) or not all(
+                        isinstance(t, str) and t and callable(fn) for t, fn in checks.items()):
+                    raise NopekitError(
+                        f"{where}{_shown(path, root)}: {TOOL_CHECKS_NAME} must map each "
+                        f"tool's name to a function of the project root that returns "
+                        f"(ok, words)")
+                for tool, fn in checks.items():
+                    registry.add_tool_check(tool, fn, pack=pack)
+    finally:
+        try:
+            sys.path.remove(base)       # removes OUR insertion (the first match)
+        except ValueError:              # pragma: no cover - a viewgen mangled sys.path
+            pass
+    return [spec for spec in registry.specs() if spec.id not in before]
+
+
+def _import_viewgen_module(path: str, *, pack: str, base: str,
+                           root: str | None, where: str) -> Any:
+    """Import one `views/*.py`, or raise an NopekitError naming the file."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    module_name = f"nopekit_views_{stem}_{short_hash(os.path.abspath(path), 8)}"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing                 # ordinary import semantics; see load_viewgens
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:         # pragma: no cover - defensive
+        raise NopekitError(f"{where}{_shown(path, root)}: no import machinery accepted this file")
+    module = importlib.util.module_from_spec(spec)
+    # Set BEFORE execution, which `module_from_spec` makes possible by handing
+    # the module over before the loader runs it. `@viewgen` reads `PACK` off the
+    # defining module at decoration time so twenty decorators do not each retype
+    # the pack name — a mistyped one orphans a view in the site's grouping with
+    # nothing reporting it. `PACK_DIR` is the pack's own directory, for a viewgen
+    # that has to find a template or a material table shipped beside it; for a
+    # project's `views/` it is the project root, which is where those things are.
+    module.PACK = pack
+    module.PACK_DIR = base
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except NopekitError as exc:
+        # A registry refusal (duplicate view id, unknown kind) is already phrased
+        # for a human. Keep the phrasing and add the location.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(f"{where}{_shown(path, root)}: {exc}") from exc
+    except KeyboardInterrupt:
+        sys.modules.pop(module_name, None)
+        raise
+    except BaseException as exc:
+        # BaseException on purpose, exactly as `packs.load_gates` does it: a view
+        # module whose exporter guards its own absence with `sys.exit()` at
+        # import time must not be able to end the command with that exit code.
+        sys.modules.pop(module_name, None)
+        raise NopekitError(
+            f"{where}{_shown(path, root)} failed to import: {type(exc).__name__}: {exc}"
+        ) from exc
+    return module
+
+
+# --------------------------------------------------------------------------- #
 # the decorator
 # --------------------------------------------------------------------------- #
 def viewgen(
@@ -754,6 +1231,8 @@ def viewgen(
     order: int = 100,
     gates: Iterable[str] = (),
     registry: ViewRegistry | None = None,
+    evidence_of: str = "",
+    recipe: Iterable[str] = (),
 ) -> Callable[[Callable[[ViewContext], Any]], Callable[[ViewContext], Any]]:
     """Declare a viewgen: build its :class:`ViewSpec` and register it.
 
@@ -806,6 +1285,8 @@ def viewgen(
             pack=pack or (str(module_pack) if module_pack else ""),
             order=int(order),
             gates=tuple(str(g) for g in (gates or ())),
+            evidence_of=str(evidence_of or ""),
+            recipe=tuple(str(r) for r in (recipe or ())),
         )
         # Resolved at DECORATION time, not when `viewgen()` was called: the
         # ambient registry is whatever loader is importing this module right now.
@@ -835,6 +1316,51 @@ def availability(spec: ViewSpec) -> tuple[bool, str]:
     not learned any of that yet.
     """
     return _gate_availability(spec)      # type: ignore[arg-type]
+
+
+#: A view module may define ``TOOL_CHECKS = {"<tool>": check}``: ``check(root)``
+#: returns ``(ok, words)``, the words after ``"<tool>: "`` on ``doctor``'s row
+#: for that tool. For a tool whose presence on PATH says too little (the CFD
+#: pack checks that ``pvbatch62`` is the ParaView build it checked, and that
+#: its renderer control passed). A tool with no check reads found or not on
+#: PATH. *Rejected:* a ``ViewSpec`` field (a check is per tool, and a pack
+#: checks its tool before any viewgen needs it); doctor rows from the pack
+#: manifest's ``requires_tools`` alone (that list mixes gate and view tools,
+#: and ``doctor`` already shows the gates').
+TOOL_CHECKS_NAME = "TOOL_CHECKS"
+
+#: What a missing view tool changes, said on its row.
+NO_STATUS_WORDS = "No status depends on them."
+
+
+def view_tool_rows(registry: ViewRegistry, root: str, *,
+                   skip: Iterable[str] = ()) -> list[tuple[bool, str]]:
+    """``[(ok, "<tool>: <words>")]`` for every tool a view draws with, less
+    ``skip`` (the gates' tools, which have rows of their own): ``doctor``'s
+    rows. A check that raises reads as a problem of the check, never as the
+    tool found."""
+    skipped = set(skip)
+    rows: list[tuple[bool, str]] = []
+    checks = registry.tool_checks()
+    for tool in registry.view_tools():
+        if tool in skipped:
+            continue
+        users = [s.id for s in registry.specs() if tool in s.requires_tools]
+        if tool in checks:
+            pack, fn = checks[tool]
+            try:
+                ok, words = fn(root)
+            except Exception as exc:              # noqa: BLE001 - pack code
+                rows.append((False, f"{tool}: {pack or 'the'} check of it raised "
+                                    f"{type(exc).__name__}: {exc}"))
+                continue
+            rows.append((bool(ok), f"{tool}: {' '.join(str(words).split())}"))
+            continue
+        found = shutil.which(tool)
+        rows.append((bool(found), f"{tool}: found at {found}" if found else
+                     f"{tool}: not on PATH. These views are not drawn: "
+                     f"{', '.join(users)}. {NO_STATUS_WORDS}"))
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -1034,6 +1560,10 @@ def run_all_viewgens(
     summary has to be able to answer without the reader re-running anything.
     ``status`` is one of ``ok`` / ``empty`` / ``unavailable`` / ``error``.
 
+    A bound viewgen (``evidence_of``) is not run here: it needs a
+    `BoundContext` of its gate's served entry, and `build` runs it in its own
+    pass (`_bound_pass`), after the resolution.
+
     A viewgen that crashes does not stop the build: the rest of the site —
     every other view, and the entire claims-and-verdicts half of the page — is
     still true, and withholding a true report because one picture failed to draw
@@ -1047,6 +1577,8 @@ def run_all_viewgens(
     views: list[View] = []
     notes: list[dict[str, Any]] = []
     for spec in selected:
+        if spec.evidence_of:
+            continue
         entry = registry.get(spec.id)
         if entry is None:            # concurrent unregister; nothing else can do this
             raise NopekitError(f"view {spec.id!r} disappeared from the registry mid-build")
@@ -1698,14 +2230,21 @@ def pages_line(url: str) -> str:
     return "pages: " + " and ".join(f"{found[name]} ({name})" for name, _path in PAGES)
 
 
-def ensure_site_ignore(root: str) -> bool:
+def ensure_site_ignore(root: str, *, live: bool = False) -> bool:
     """Append the clock file's ignore lines to ``site/.gitignore`` when no line
     equals ``data/build.json`` or ``/data/build.json``, creating the file with
     only those lines when there is none; True when it wrote. Every other byte
     stays as it was. What slipped through (review of phase 5): a missing
     ``site/.gitignore`` (the scaffolded one said to delete it for an offline
     archive) was left missing, so ``build.json``, which changes on every
-    build, dirtied ``git status`` after every rebuild."""
+    build, dirtied ``git status`` after every rebuild.
+
+    With ``live`` (a bound viewgen is registered, issue #15), the live 3D
+    folder's lines too (`_LIVE_IGNORE`), when no line equals ``assets/live/``
+    or ``/assets/live/``. Only then: a project that draws no bound figure
+    keeps its ignore file as it was. *Rejected:* the line in every project's
+    file (every existing project's tracked file would move for a folder it
+    never has)."""
     path = os.path.join(root, SITE_DIR, ".gitignore")
     try:
         with open(path, "r", encoding="utf-8", newline="") as fh:
@@ -1713,19 +2252,27 @@ def ensure_site_ignore(root: str) -> bool:
     except FileNotFoundError:
         if not os.path.isdir(os.path.join(root, SITE_DIR)):
             return False
-        atomic_write_text(path, _BUILD_IGNORE)
-        return True
-    if any(line.strip() in ("data/build.json", "/data/build.json")
-           for line in text.splitlines()):
+        text = ""
+    lines = {line.strip() for line in text.splitlines()}
+    blocks = []
+    if not lines & {"data/build.json", "/data/build.json"}:
+        blocks.append(_BUILD_IGNORE)
+    if live and not lines & {"assets/live/", "/assets/live/", "assets/live", "/assets/live"}:
+        blocks.append(_LIVE_IGNORE)
+    if not blocks:
         return False
     body = text if not text or text.endswith("\n") else text + "\n"
-    atomic_write_text(path, body + ("\n" if body.strip() else "") + _BUILD_IGNORE)
+    for block in blocks:
+        body += ("\n" if body.strip() else "") + block
+    atomic_write_text(path, body)
     return True
 
 
 def _evidence_plan(root: str, view: Any, resolution: Any, registry: Any) -> list:
     """`page.evidence_plan` with git's ignore rules: a path in the project that
-    git ignores and does not track is never published (`vcs.ignored`)."""
+    git ignores and does not track is never published (`vcs.ignored`); and
+    with the evidence manifests `check` wrote (`verdicts.evidence_manifest`),
+    so a file is copied only as the bytes its entry's run cited (issue #15)."""
     asked: dict[str, bool] = {}
 
     def ignored(relpath: str) -> bool:
@@ -1734,12 +2281,22 @@ def _evidence_plan(root: str, view: Any, resolution: Any, registry: Any) -> list
             asked[relpath] = bool(found) and relpath in found
         return asked[relpath]
 
-    return page_logic.evidence_plan(root, view, resolution, registry, ignored=ignored)
+    def manifest(gate_id: str, entry_name: str) -> Any:
+        return verdict_logic.evidence_manifest(root, gate_id, entry_name)
+
+    return page_logic.evidence_plan(root, view, resolution, registry, ignored=ignored,
+                                    manifest=manifest)
 
 
 def _kept_json(site: str, keep: Iterable[str]) -> list:
     """The JSON documents among ``keep`` (paths under ``site/assets/``, as
-    `clean_assets` takes them), read; one that does not parse is left out."""
+    `clean_assets` takes them), read; one that does not parse is left out.
+
+    A bound figure's files (``assets/figures/``, ``assets/live/``) are left out
+    too (issue #15, B.1.4): a sidecar's colour range, a tick, a chart's series
+    are a pack's constants or a run's raw numbers, and none of them is a
+    result a sentence may quote. *Rejected:* pooling them (a colour bound of
+    0.02 m/s would vouch for "0.02 m/s" in prose about anything)."""
     docs: list[Any] = []
     seen: set[str] = set()
     for entry in keep:
@@ -1749,6 +2306,8 @@ def _kept_json(site: str, keep: Iterable[str]) -> list:
         if not text.startswith(ASSETS_DIR + "/"):
             text = posixpath.join(ASSETS_DIR, text)
         text = posixpath.normpath(text)
+        if text.startswith((page_logic.FIGURES_DIR + "/", page_logic.LIVE_DIR + "/")):
+            continue
         if text in seen:
             continue
         seen.add(text)
@@ -1841,17 +2400,22 @@ def _mixed_age(verdicts: Mapping[str, dict]) -> dict:
 def write_build_json(root: str, *, now: str, id: str, ok: bool = True, error: str = "",
                      live: bool = False, verdicts: Mapping[str, dict] | None = None,
                      mixed_age: Mapping[str, Any] | None = None,
-                     tracing: bool = False) -> str:
+                     tracing: bool = False,
+                     live_figures: Mapping[str, str] | None = None) -> str:
     """Write ``site/data/build.json`` (ignored, SPEC 32-33): the build time, the
     live flag the page polls by, an ``id`` over the tracked baked bytes (the
     page reloads its data when it moves), ok and error, each verdict's age, and
     ``tracing`` — a trace holds its lock now (architecture phase 3b), so the
-    live page can say its links are being measured. Returns its site path."""
+    live page can say its links are being measured. And ``live_figures``
+    (issue #15, B.2.4): ``{figure id: site path}`` of each live 3D file on this
+    computer, never in a tracked file, so a static host never shows a 3D
+    button that leads nowhere. Returns its site path."""
     verdicts = dict(verdicts or {})
     doc = {"schema": 1, "built": now, "live": bool(live), "id": id, "ok": bool(ok),
            "error": str(error or ""), "verdicts": verdicts,
            "mixed_age": dict(mixed_age) if mixed_age is not None else _mixed_age(verdicts),
-           "tracing": bool(tracing)}
+           "tracing": bool(tracing),
+           "live_figures": {k: live_figures[k] for k in sorted(live_figures or {})}}
     path = os.path.join(root, SITE_DIR, DATA_DIR, BUILD_NAME)
     ensure_dir(os.path.dirname(path))
     atomic_write_json(path, doc)
@@ -1968,6 +2532,538 @@ def _template_files() -> list[tuple[str, str]]:
 
 
 # --------------------------------------------------------------------------- #
+# bound viewgens: drawn from one verdict entry, checked, published (issue #15)
+# --------------------------------------------------------------------------- #
+def _recipe_digest(spec: ViewSpec, fn: Callable[..., Any]) -> tuple[str, str]:
+    """``(digest, problem)``: sha256 over `FIGURE_RECIPE_SALT`, the viewgen
+    module's bytes and each ``recipe`` file's bytes (resolved against the
+    module's ``PACK_DIR``, the pack or the project). The memo's key with the
+    gate, the entry and the view (B.2.1): a scene edited draws again; a tool
+    installed elsewhere does not (C6: every locked build draws the same
+    bytes). ``problem`` names a recipe file that is not there."""
+    module = sys.modules.get(getattr(fn, "__module__", "") or "")
+    path = str(getattr(module, "__file__", "") or "")
+    base = str(getattr(module, "PACK_DIR", "") or (os.path.dirname(os.path.dirname(path))
+                                                   if path else ""))
+    digest = hashlib.sha256(f"{FIGURE_RECIPE_SALT}\n{spec.id}\n".encode("utf-8"))
+    for label, target in (("module", path), *((rel, os.path.join(base, *rel.split("/")))
+                                               for rel in spec.recipe)):
+        payload = _file_bytes(target) if target else None
+        if payload is None:
+            if label == "module" and not path:
+                continue
+            return "", f"its recipe file {label} is not there"
+        digest.update(f"{label}\n".encode("utf-8"))
+        digest.update(hashlib.sha256(payload).hexdigest().encode("ascii"))
+    return digest.hexdigest(), ""
+
+
+def _exported_entries(ledger: Ledger, gate_id: str) -> set[str]:
+    """The entry names of ``gate_id`` that an export re-ran (``exports/*.json``
+    ``reran`` rows): the only entries whose GLB is committed (B.2.4)."""
+    out: set[str] = set()
+    for record in getattr(ledger, "exports", None) or ():
+        for row in getattr(record, "reran", None) or ():
+            if isinstance(row, Mapping) and row.get("gate") == gate_id and row.get("out8"):
+                out.add(f"{str(row.get('rho') or '')[:verdict_logic.RHO_CHARS]}-{row['out8']}")
+    return out
+
+
+def _bound_entry(root: str, gate_id: str, entry: Any, fresh: bool) -> tuple[BoundEntry, dict]:
+    """The `BoundEntry` of ``entry`` and ``{portable path: sha256}`` of its
+    verified files: an evidence path of the entry's verdict is handed over only
+    when its bytes are the manifest's (`verdicts.evidence_manifest`), the
+    rule `page.evidence_plan` copies by."""
+    found = verdict_logic.evidence_manifest(root, gate_id, entry.name)
+    bound = BoundEntry(gate=gate_id, name=entry.name, fresh=bool(fresh))
+    digests: dict[str, str] = {}
+    for text in (entry.verdict or {}).get("evidence") or ():
+        text = str(text)
+        source, outside, why = page_logic.evidence_source(root, text)
+        if outside or source is None or not os.path.isfile(source):
+            bound.withheld[text] = why or ("it is outside the project" if outside
+                                           else "it is not on this computer")
+            continue
+        sha = page_logic._sha256_of(source)
+        want = found.get(text) if isinstance(found, Mapping) else None
+        if found is None:
+            bound.withheld[text] = page_logic._NO_RECORDED_RUN
+        elif sha is None or not isinstance(want, Mapping) or want.get("sha256") != sha[0]:
+            bound.withheld[text] = page_logic._ANOTHER_RUN.format(gate=gate_id)
+        else:
+            bound.files[text] = source
+            digests[text] = sha[0]
+    return bound, digests
+
+
+def _numbers(node: Any) -> list[float]:
+    """Every finite number under ``node`` (bools are not numbers)."""
+    out: list[float] = []
+    if isinstance(node, bool):
+        return out
+    if isinstance(node, (int, float)):
+        if math.isfinite(node):
+            out.append(float(node))
+    elif isinstance(node, Mapping):
+        for value in node.values():
+            out += _numbers(value)
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            out += _numbers(value)
+    return out
+
+
+def _evidence_numbers(files: Iterable[str]) -> set[float]:
+    """Every number a verified evidence file holds: a JSON file's leaves, a
+    CSV file's cells. Another kind of file holds none."""
+    out: set[float] = set()
+    for path in files:
+        payload = _file_bytes(path)
+        if payload is None:
+            continue
+        lower = path.lower()
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if lower.endswith(".json"):
+            try:
+                out.update(_numbers(json.loads(text)))
+            except ValueError:
+                continue
+        elif lower.endswith(".csv"):
+            for row in csv.reader(text.splitlines()):
+                for cell in row:
+                    try:
+                        value = float(cell)
+                    except ValueError:
+                        continue
+                    if math.isfinite(value):
+                        out.add(value)
+    return out
+
+
+def _keys(node: Any) -> set[str]:
+    """Every key of every object under ``node``."""
+    out: set[str] = set()
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            out.add(str(key))
+            out |= _keys(value)
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            out |= _keys(value)
+    return out
+
+
+def _caption_status(caption: str) -> str:
+    """`page.caption_status`: the first status word or phrase ``caption``
+    holds, or ``""``."""
+    return page_logic.caption_status(caption)
+
+
+def _png_ok(payload: bytes) -> bool:
+    """A PNG signature, then an IHDR chunk of 13 bytes whose width and height
+    are not zero: enough to know the file is the picture it says it is. The
+    pixels are the pack's (its renderer control holds them, Phase 2)."""
+    if len(payload) < 33 or not payload.startswith(PNG_SIGNATURE):
+        return False
+    length, kind = struct.unpack(">I4s", payload[8:16])
+    width, height = struct.unpack(">II", payload[16:24])
+    return length == 13 and kind == b"IHDR" and width > 0 and height > 0
+
+
+def _solid_problem(name: str, payload: bytes) -> str:
+    """Why ``payload`` is not the 3D file its ``name`` says, or ``""``. A
+    ``.glb`` starts with `GLB_MAGIC`. A ``.gltf`` is a JSON object whose
+    ``asset.version`` is ``2.0`` and whose every buffer and image holds its
+    bytes as a ``data:`` URI (`SOLID_SUFFIXES`): the page then fetches this
+    one file and nothing else. The geometry is the tool's; the Khronos
+    validator holds it in the tests."""
+    if name.lower().endswith(".glb"):
+        return "" if payload.startswith(GLB_MAGIC) else f"{name} is not a GLB"
+    try:
+        doc = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return f"{name} is not a glTF: it is not JSON"
+    asset = doc.get("asset") if isinstance(doc, dict) else None
+    if not isinstance(asset, dict) or asset.get("version") != "2.0":
+        return f"{name} is not a glTF 2.0"
+    for group in ("buffers", "images"):
+        rows = doc.get(group) or []
+        if not isinstance(rows, list):
+            return f"{name} is not a glTF: its {group} is not a list"
+        for row in rows:
+            uri = row.get("uri") if isinstance(row, dict) else None
+            if uri is not None and not (isinstance(uri, str) and uri.startswith("data:")):
+                return (f"{name} names a file outside it ({str(uri)[:60]!r}); a glTF on the "
+                        f"page holds its bytes inside it")
+    return ""
+
+
+def _figure_refusal(spec: ViewSpec, view: View, ctx: BoundContext,
+                    limits: Iterable[Any]) -> str:
+    """Why the spine refuses to publish what a bound viewgen returned (B.2.3),
+    or ``""``. Each refusal is a warning and publishes nothing; the page keeps
+    the figure it had (`page.figure_for`)."""
+    if ctx.refused:
+        return ctx.refused[0]
+    for name, (path, _live) in ctx.outputs.items():
+        size = os.path.getsize(path) if os.path.isfile(path) else -1
+        if size > page_logic.EVIDENCE_MAX_BYTES:
+            return f"{name} is over the 2 MiB cap"
+    kind = ViewKind(spec.kind)
+    pngs = [n for n in ctx.outputs if n.lower().endswith(".png")]
+    glbs = [n for n in ctx.outputs if n.lower().endswith(SOLID_SUFFIXES)]
+    others = [n for n in ctx.outputs if n not in pngs and n not in glbs]
+    if others:
+        return (f"{others[0]} is not a PNG, a GLB or a glTF; a bound figure writes nothing "
+                f"else")
+    if len(pngs) > 1 or len(glbs) > 1:
+        return "a bound figure writes at most one PNG and one 3D file (a GLB or a glTF)"
+    for name in pngs:
+        if not _png_ok(_file_bytes(ctx.outputs[name][0]) or b""):
+            return f"{name} is not a PNG"
+        if ctx.outputs[name][1]:
+            return f"{name} is a still written with write_live; only a 3D file is live"
+    for name in glbs:
+        problem = _solid_problem(name, _file_bytes(ctx.outputs[name][0]) or b"")
+        if problem:
+            return problem
+    if kind is ViewKind.CHART:
+        if view.src or pngs:
+            return "a chart names no file; its series are its payload"
+        if not isinstance(view.data, dict) or not view.data:
+            return "a chart with no series"
+        planted = sorted(_keys(view.data) & CHART_FORBIDDEN_KEYS)
+        if planted:
+            return (f"its chart holds {planted[0]!r}: a chart's limit and its point are the "
+                    f"claim's, set by nopekit")
+        held = _evidence_numbers(ctx.entry.files.values())
+        for key in CHART_NUMBER_KEYS:
+            for number in _numbers(view.data.get(key)):
+                if float(json.loads(json.dumps(number))) not in held:
+                    return (f"the chart holds {number!r}, which no evidence file of this "
+                            f"result holds")
+    else:
+        if view.data:
+            return "a bound picture carries no payload; its numbers are its evidence's"
+        want = pngs if kind is ViewKind.IMAGE else glbs
+        if view.src not in want:
+            return (f"its src {view.src!r} names no "
+                    f"{'PNG' if kind is ViewKind.IMAGE else '3D file'} it wrote")
+    moved = ctx.moved()
+    if moved:
+        return f"the inputs moved while the picture was drawn ({moved[0]})"
+    meta = view.meta if isinstance(view.meta, Mapping) else {}
+    scale = meta.get("scale")
+    if scale is not None and not isinstance(scale, Mapping):
+        return "its colour scale is not an object"
+    shape = page_logic.scales_problem(scale, meta.get("scales"), meta.get("light"))
+    if shape:
+        return shape
+    # Every scale the figure states, the one ``scale`` and each of
+    # ``scales`` (design P2), is held to the same rule: no end equals a limit
+    # and no source is keyed to one. What it closes before it could slip
+    # through: a second ramp on the hero, its top at the claim's limit, under
+    # a check that read ``scale`` alone.
+    for each in [scale or {}, *(meta.get("scales") or ())]:
+        ends = [each.get(end) for end in ("lo", "hi")]
+        for end in ends:
+            if isinstance(end, bool) or not isinstance(end, (int, float)):
+                continue
+            for limit in limits:
+                if isinstance(limit, bool) or not isinstance(limit, (int, float)):
+                    continue
+                if math.isclose(float(end), float(limit), rel_tol=1e-9, abs_tol=0.0):
+                    return f"a colour range taken from a limit ({end!r})"
+        for source in each.get("source") or ():
+            if isinstance(source, Mapping) and "limit" in str(source.get("key") or "").lower():
+                return f"a colour range taken from a limit ({source.get('key')!r})"
+    word = _caption_status(str(meta.get("caption") or ""))
+    if word:
+        return f"a caption may not say a status ({word!r})"
+    return ""
+
+
+def _json_safe(value: Any, default: Any) -> Any:
+    """``value`` through a JSON round trip, or ``default`` when it is not JSON."""
+    try:
+        return json.loads(json.dumps(value, allow_nan=False))
+    except (TypeError, ValueError):
+        return default
+
+
+def _put_figure_file(site: str, folder: str, view_id: str, payload: bytes, ext: str,
+                     written: list[str]) -> dict:
+    """Write ``payload`` as ``<folder>/<view>.<sha12>.<ext>`` (when its bytes
+    differ) and return its sidecar row."""
+    sha = hashlib.sha256(payload).hexdigest()
+    name = f"{view_id}.{sha[:12]}.{ext}"
+    target = os.path.join(site, *folder.split("/"), name)
+    if _file_bytes(target) != payload:
+        _atomic_write_bytes(target, payload)
+        written.append(posixpath.join(SITE_DIR, folder, name))
+    return {"name": name, "sha256": sha, "bytes": len(payload)}
+
+
+def _publish_figure(site: str, spec: ViewSpec, view: View, ctx: BoundContext, *,
+                    recipe: str, exported: bool, written: list[str]) -> dict:
+    """Publish what `_figure_refusal` passed into ``assets/figures/<gate>/
+    <entry>/``, with its sidecar, and a 3D file (a GLB or a glTF) of an entry no
+    export re-ran (or one written with `write_live`) into the ignored
+    ``assets/live/<gate>/<entry>/``.
+    Returns the sidecar. Every file is written only when its bytes differ."""
+    gate_id, entry = ctx.entry.gate, ctx.entry.name
+    folder = page_logic.figure_folder(gate_id, entry)
+    files: dict[str, dict] = {}
+    for name, (path, live) in ctx.outputs.items():
+        payload = _file_bytes(path) or b""
+        if name.lower().endswith(".png"):
+            files["image"] = _put_figure_file(site, folder, spec.id, payload, "png", written)
+        else:
+            committed = exported and not live
+            where = folder if committed else page_logic.live_folder(gate_id, entry)
+            files["field"] = {**_put_figure_file(site, where, spec.id, payload,
+                                                 _solid_suffix(name),
+                                                 written if committed else []),
+                              "live": not committed}
+    if ViewKind(spec.kind) is ViewKind.CHART:
+        payload = (json.dumps(view.data, sort_keys=True, indent=1, ensure_ascii=False,
+                              allow_nan=False) + "\n").encode("utf-8")
+        files["chart"] = _put_figure_file(site, folder, spec.id, payload, "chart.json",
+                                          written)
+    meta = view.meta if isinstance(view.meta, Mapping) else {}
+    schema = page_logic.sidecar_schema(meta)
+    sidecar = {
+        "schema": schema, "view": spec.id, "gate": gate_id, "entry": entry,
+        "kind": ViewKind(spec.kind).value, "recipe": recipe, "files": files,
+        "title": str(view.title or spec.title or ""),
+        "caption": " ".join(str(meta.get("caption") or "").split()),
+        "alt": " ".join(str(meta.get("alt") or "").split()),
+        "scale": _json_safe(meta.get("scale") or {}, {}),
+        "marks": _json_safe(meta.get("marks") or [], []),
+        "tool": _json_safe(meta.get("tool") or {}, {}),
+    }
+    if schema >= 2:
+        # Schema 2 (design P2): written only for a figure that states its
+        # scales or its light, so a one-scale figure's sidecar keeps its bytes.
+        sidecar["scales"] = _json_safe(list(meta.get("scales") or []), [])
+        sidecar["light"] = str(meta.get("light") or "")
+    target = os.path.join(site, *folder.split("/"), spec.id + page_logic.SIDECAR_SUFFIX)
+    ensure_dir(os.path.dirname(target))
+    if write_json_if_changed(target, sidecar):
+        written.append(posixpath.join(SITE_DIR, folder, spec.id + page_logic.SIDECAR_SUFFIX))
+    return sidecar
+
+
+def _solid_suffix(name: str) -> str:
+    """``gltf`` for a ``.gltf`` name, else ``glb``: a published 3D file keeps
+    the format the viewgen wrote (`SOLID_SUFFIXES`)."""
+    return "gltf" if name.lower().endswith(".gltf") else "glb"
+
+
+def _promote_live(site: str, sidecar: dict, written: list[str]) -> dict | None:
+    """The sidecar of an entry an export has re-ran since its 3D file was drawn
+    live: the live file copied into the committed folder (``live`` false), or
+    None when the live file is not here with its bytes (draw it again)."""
+    field_row = (sidecar.get("files") or {}).get("field") or {}
+    gate_id, entry, view_id = sidecar["gate"], sidecar["entry"], sidecar["view"]
+    source = os.path.join(site, *page_logic.live_folder(gate_id, entry).split("/"),
+                          str(field_row.get("name") or ""))
+    payload = _file_bytes(source)
+    if payload is None or hashlib.sha256(payload).hexdigest() != field_row.get("sha256"):
+        return None
+    folder = page_logic.figure_folder(gate_id, entry)
+    row = {**_put_figure_file(site, folder, view_id, payload,
+                              _solid_suffix(str(field_row.get("name") or "")), written),
+           "live": False}
+    promoted = {**sidecar, "files": {**sidecar["files"], "field": row}}
+    target = os.path.join(site, *folder.split("/"), view_id + page_logic.SIDECAR_SUFFIX)
+    if write_json_if_changed(target, promoted):
+        written.append(posixpath.join(SITE_DIR, folder, view_id + page_logic.SIDECAR_SUFFIX))
+    return promoted
+
+
+def _gate_limits(ledger: Ledger, registry: Any, gate_id: str, entry: Any) -> list:
+    """Every limit a colour range may not be taken from: each ``limit`` and
+    ``limit_hi`` of the claims ``gate_id`` covers (`claims.effective_gates`),
+    and the entry's verdict limit."""
+    out: list[Any] = []
+    covering = claim_logic.effective_gates(ledger, registry) if registry is not None else {}
+    for claim in ledger.claims:
+        if gate_id in (covering.get(claim.id) or ()):
+            acc = getattr(claim, "acceptance", None)
+            out += [getattr(acc, "limit", None), getattr(acc, "limit_hi", None)]
+    if entry is not None:
+        out.append((entry.verdict or {}).get("limit"))
+    return [v for v in out if v is not None]
+
+
+class _Bound(NamedTuple):
+    """What the bound pass hands `build`: the views, one note row per bound
+    viewgen, the files the cleaner keeps, the live files (``{figure id: site
+    path}``, for ``build.json`` only), each view's extra ``state.json`` keys
+    (``binding``, ``data_url``, ``field_src``), what it wrote, and one
+    `page.BoundFigure` per bound viewgen for ``page.json`` (``found``)."""
+
+    views: list
+    notes: list
+    keep: list
+    live: dict
+    rows: dict
+    written: list
+    found: list
+
+
+def _bound_pass(root: str, site: str, ledger: Ledger, registry: Any, resolution: Any,
+                view_registry: ViewRegistry, warnings: list[str]) -> _Bound:
+    """Each bound viewgen, in registry order (B.2.1, step 4): no served entry
+    draws nothing; a valid sidecar under the served entry at the current recipe
+    is the memo, and the viewgen is not called; else, when it is available, it
+    draws from a `BoundContext` and the spine checks (`_figure_refusal`) and
+    publishes (`_publish_figure`). Then the figure the page shows is read from
+    the disk (`page.figure_for`): current, stale, unseen, older or none. A viewgen that
+    is unavailable, crashes, returns nothing or is refused moves no status (no
+    view reaches the resolution) and deletes no picture: the cleaner keeps the
+    figure it resolved to."""
+    rows = getattr(resolution, "rows", None) or {}
+    unseen = claim_logic.unseen_gates(resolution)
+    stripped = Ledger.from_dict(ledger.to_dict())
+    stripped = dataclasses.replace(stripped, claims=[
+        dataclasses.replace(c, acceptance=Acceptance()) for c in stripped.claims])
+    out = _Bound([], [], [], {}, {}, [], [])
+    for spec, fn in view_registry.pairs():
+        if not spec.evidence_of:
+            continue
+        gate_id = spec.evidence_of
+        row = rows.get(gate_id)
+        entry = getattr(row, "entry", None)
+        served = str(getattr(entry, "name", "") or "")
+        fresh = bool(getattr(row, "fresh", False))
+        status, note = "none", ""
+        recipe, recipe_problem = _recipe_digest(spec, fn)
+        exported = served in _exported_entries(ledger, gate_id) if served else False
+        if not served:
+            note = f"no result of {gate_id} is recorded: run `nopekit check`"
+        else:
+            found, _why = page_logic.read_sidecar(root, gate_id, served, spec.id)
+            memo = found is not None and not recipe_problem and found.get("recipe") == recipe
+            field_row = ((found or {}).get("files") or {}).get("field") or {}
+            if memo and field_row.get("live") is True:
+                live_file = os.path.join(site, *page_logic.live_folder(gate_id, served)
+                                         .split("/"), str(field_row.get("name") or ""))
+                if exported:
+                    memo = _promote_live(site, found, out.written) is not None
+                elif not os.path.isfile(live_file) and availability(spec)[0]:
+                    memo = False
+            if memo:
+                status = "memo"
+            elif recipe_problem:
+                status, note = "error", _NOTE_ERROR + recipe_problem
+            else:
+                ok, reason = availability(spec)
+                if not ok:
+                    status, note = "unavailable", _NOTE_UNAVAILABLE + reason
+                else:
+                    scratch = os.path.join(root, *FIGURE_SCRATCH.split("/"),
+                                           page_logic._component(gate_id),
+                                           page_logic._component(served),
+                                           page_logic._component(spec.id))
+                    shutil.rmtree(scratch, ignore_errors=True)
+                    ensure_dir(scratch)
+                    bound, digests = _bound_entry(root, gate_id, entry, fresh)
+                    ctx = BoundContext(root=root, ledger=stripped, model=None, params={},
+                                       assets_dir=scratch, log=_noop_log, extra={},
+                                       entry=bound, scratch=scratch, view_id=spec.id)
+                    ctx.digests = digests
+                    drawn, note = run_viewgen(spec, fn, ctx)
+                    status = _note_status(drawn, note)
+                    for said in ctx.notes:
+                        warnings.append(f"view {spec.id}: {said}")
+                    if drawn is not None:
+                        refusal = _figure_refusal(spec, drawn, ctx, _gate_limits(
+                            ledger, registry, gate_id, entry))
+                        if refusal:
+                            status, note = "refused", refusal
+                        else:
+                            _publish_figure(site, spec, drawn, ctx, recipe=recipe,
+                                            exported=exported, written=out.written)
+            if (status in ("unavailable", "error", "refused", "empty") and found is not None
+                    and found.get("recipe") != recipe):
+                note += ("; " if note else "") + ("the picture of this result was drawn by an "
+                                                  "older scene and is kept: build where its "
+                                                  "tools are to draw it again")
+        figure = page_logic.figure_for(root, gate_id, spec.id, served, fresh,
+                                       gate_id in unseen)
+        warnings.extend(figure.problems)
+        sidecar = figure.sidecar
+        if sidecar is not None and sidecar.get("kind") != ViewKind(spec.kind).value:
+            warnings.append(f"view {spec.id}: the picture under {gate_id}/{figure.entry} is a "
+                            f"{sidecar.get('kind')}, not a {ViewKind(spec.kind).value}; it is "
+                            f"not shown")
+            sidecar = None
+        if status in ("unavailable", "error", "refused"):
+            warnings.append(f"view {spec.id}: {note}")
+        out.notes.append({"view": spec.id, "pack": spec.pack, "kind": ViewKind(spec.kind).value,
+                          "status": status, "note": note, "gate": gate_id, "entry": served,
+                          "currency": figure.currency if sidecar is not None else "none"})
+        # What page.json bakes (P1.4): the figure as shown, ``none`` when the
+        # disk's sidecar is refused here for its kind.
+        out.found.append(page_logic.BoundFigure(
+            view=spec.id, kind=ViewKind(spec.kind).value, gate=gate_id,
+            title=str(spec.title or ""),
+            provenance=" ".join(str(spec.description or "").split()),
+            figure=figure if sidecar is not None else figure._replace(
+                entry="", currency="none", sidecar=None)))
+        if sidecar is None:
+            continue
+        folder = figure.folder
+        files = sidecar["files"]
+        out.keep.append(posixpath.join(folder, spec.id + page_logic.SIDECAR_SUFFIX))
+        src, extra = "", {}
+        solid = ViewKind(spec.kind) in (ViewKind.MODEL3D, ViewKind.FIELD)
+        if "image" in files:
+            still = posixpath.join(folder, files["image"]["name"])
+            out.keep.append(still)
+            # A 3D view's `src` is its GLB, never its still: with the GLB
+            # live (on this computer only), the row names no file at all.
+            src = "" if solid else still
+        if "field" in files:
+            name = files["field"]["name"]
+            if files["field"].get("live") is not True:
+                committed = posixpath.join(folder, name)
+                out.keep.append(committed)
+                if solid:
+                    src = committed
+                else:
+                    extra["field_src"] = committed
+            elif figure.entry == served:
+                live = posixpath.join(page_logic.live_folder(gate_id, served), name)
+                found_live = page_logic._sha256_of(os.path.join(site, *live.split("/")))
+                if found_live is not None and found_live[0] == files["field"]["sha256"]:
+                    out.keep.append(live)
+                    out.live[f"{gate_id}/{served}/{spec.id}"] = live
+        if "chart" in files:
+            extra["data_url"] = posixpath.join(folder, files["chart"]["name"])
+            out.keep.append(extra["data_url"])
+        extra["binding"] = {"gate": gate_id, "entry": figure.entry,
+                            "currency": figure.currency,
+                            "currency_word": page_logic.figure_currency_word(figure.currency)}
+        meta = {key: sidecar[key] for key in ("caption", "alt", "scale", "marks", "scales",
+                                              "light")
+                if sidecar.get(key)}
+        shown, _note = _stamp_view(View(id=spec.id, kind=spec.kind,
+                                        title=str(sidecar.get("title") or spec.title),
+                                        src=src, description=spec.description,
+                                        gates=[gate_id], data={}, meta=meta, pack=spec.pack,
+                                        order=spec.order), spec)
+        out.views.append(shown)
+        out.rows[spec.id] = extra
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # building
 # --------------------------------------------------------------------------- #
 def build(
@@ -2050,7 +3146,8 @@ def build(
             ensure_dir(os.path.dirname(target))
             shutil.copyfile(source, target)
             pages_written.append(posixpath.join(SITE_DIR, relative))
-    ignore_written = ensure_site_ignore(root)
+    bound_registered = any(spec.evidence_of for spec in view_registry.specs())
+    ignore_written = ensure_site_ignore(root, live=bound_registered)
 
     warnings: list[str] = []
     model_error = ""
@@ -2063,6 +3160,22 @@ def build(
     for conflict in conflicts:
         warnings.append(f"model and build() disagree on {conflict} — views read the "
                         f"config value")
+
+    # The resolution and the evidence plan first (issue #15, B.2.1): a bound
+    # viewgen draws its gate's SERVED entry, so the resolver must have said
+    # which one before any viewgen runs. Safe to move: the resolution reads
+    # the ledger the caller handed in, never a generated view (F5).
+    if resolution is None:
+        resolution = _resolve(root, ledger, registry, projection=projection, model=model,
+                              model_error=model_error, now=now)
+    plan = _evidence_plan(root, verdict_logic.view(ledger, resolution), resolution, registry)
+    for item in plan:
+        if item.reason and item.action == "keep":
+            warnings.append(f"evidence {item.path} of {item.gate} is the copy an earlier "
+                            f"build made, not the file on this computer: {item.reason}")
+        elif item.reason:
+            warnings.append(f"evidence {item.path} of {item.gate} is not on the page: "
+                            f"{item.reason}")
 
     ctx = ViewContext(
         root=root,
@@ -2079,9 +3192,17 @@ def build(
     )
 
     generated, notes = run_all_viewgens(view_registry, ctx)
+    held = _kept_from_last_build(site, view_registry, notes, warnings)
     for note in notes:
         if note["status"] in ("error", "unavailable"):
-            warnings.append(f"view {note['view']}: {note['note']}")
+            kept_word = "kept from the last build: " if note["view"] in held else ""
+            warnings.append(f"view {note['view']}: {kept_word}{note['note']}")
+    figures = _bound_pass(root, site, ledger, registry, resolution, view_registry, warnings)
+    notes.extend(figures.notes)
+    if held or figures.views:
+        order_index = {spec.id: i for i, spec in enumerate(view_registry.specs())}
+        generated = sorted([*generated, *held.values(), *figures.views],
+                           key=lambda v: (int(v.order), order_index.get(v.id, 0), v.id))
 
     merged, conflicts_views = _merge_views(ledger.views, generated)
     warnings.extend(conflicts_views)
@@ -2090,11 +3211,6 @@ def build(
     # an in-memory copy. A `replace`, not a dict round trip: a claim's results
     # and attributions live in memory only (P2.5a, `FORBIDDEN_KEYS`).
     for_state = dataclasses.replace(ledger, views=list(merged))
-    if resolution is None:
-        # Resolved against the LEDGER the caller handed in, not `for_state`:
-        # the generated views are page furniture, never a gate input.
-        resolution = _resolve(root, ledger, registry, projection=projection, model=model,
-                              model_error=model_error, now=now)
     if params is None:
         params = _param_views(ledger, model, model_error, resolution, registry)
     view = verdict_logic.view(for_state, resolution)
@@ -2115,6 +3231,26 @@ def build(
     payload = state(root, for_state, registry, resolution=resolution, params=params,
                     judged=(view, composed),
                     trace=trace_logic.state_payload(traced, built, amber))
+    # A bound view's row (issue #15): the chart file it draws (``data_url``),
+    # its committed 3D file (``field_src``) and which result it is
+    # (``binding``). Views are outside the resolution digest
+    # (`_UNJUDGED_KEYS`), so no row moves what the page judged.
+    for row in payload["views"]:
+        row.update(figures.rows.get(str(row.get("id") or ""), {}))
+    # Every chart view's Vega-Lite spec (issue #15, P2.5): the technical
+    # record draws it as the engineering page's cards do, and the hand-drawn
+    # `lib/chart.js` is gone. A bound view's series are its chart file's.
+    anchored: dict[str, list] = {}
+    for verdict_row in sorted(payload["verdicts"], key=lambda r: r.get("order", 0)):
+        for locator in verdict_row.get("locators") or ():
+            if isinstance(locator, dict) and locator.get("view"):
+                anchored.setdefault(str(locator["view"]), []).append((locator, verdict_row))
+    for row in payload["views"]:
+        if str(row.get("kind") or "") == "chart":
+            source = (page_logic._chart_payload(root, str(row.get("data_url") or ""))
+                      if row.get("binding") else row.get("data"))
+            row["chart"] = page_logic.view_chart(row, source,
+                                                 anchored.get(str(row.get("id") or ""), ()))
     stale = bool(payload["meta"]["stale"])
     stale_reason = str(payload["meta"]["stale_reason"])
 
@@ -2124,11 +3260,6 @@ def build(
     warnings.extend(lay.warnings)
     records = str(payload["meta"].get("records_digest") or "")
     judged = str(payload["meta"].get("resolution_digest") or "")
-    plan = _evidence_plan(root, view, resolution, registry)
-    for item in plan:
-        if item.reason:
-            warnings.append(f"evidence {item.path} of {item.gate} is not on the page: "
-                            f"{item.reason}")
     map_doc = page_logic.bake_map(view, lay, built, tokens, composed, projection=projection,
                                   params=params, registry=registry, payload=payload,
                                   name=str(view.meta.name or ""), records_digest=records,
@@ -2136,17 +3267,24 @@ def build(
     page_doc = page_logic.bake_page(root, view, lay, built, tokens, composed,
                                     registry=registry, payload=payload, plan=plan,
                                     records_digest=records, resolution_digest=judged,
-                                    amber=amber)
+                                    amber=amber, figures=figures.found, warnings=warnings)
+    # The figures (issue #15, B.5) are held against the figures the bound pass
+    # resolved and the files it keeps: a page that links a file the cleaner
+    # removes below, or says another currency, is refused whole.
     problems_found = page_logic.status_problems(
         map_doc, page_doc, view, composed, tokens, amber=amber,
-        feeds=page_logic.live_feeds(lay, built, tokens))
+        feeds=page_logic.live_feeds(lay, built, tokens),
+        figures=page_logic.figure_facts(root, resolution, payload, view, composed, registry,
+                                        kept=figures.keep, shown=figures.found))
     if problems_found:
         raise NopekitError(
             f"the page would say more than the resolution, so nothing under "
             f"{SITE_DIR}/{DATA_DIR}/ was written: {problems_found[0]}. This is a defect in "
             f"nopekit; report it.")
 
-    written: list[str] = []
+    # The figures the bound pass published (issue #15), before the page that
+    # links them, as the evidence below.
+    written: list[str] = list(figures.written)
     # Evidence first: a copy the page links must be on disk before the page is.
     copied = kept = 0
     keep_evidence: list[str] = []
@@ -2155,6 +3293,16 @@ def build(
             target = os.path.join(site, *item.dest.split("/"))
             with open(item.source, "rb") as fh:
                 payload_bytes = fh.read()
+            if hashlib.sha256(payload_bytes).hexdigest() != item.sha256:
+                # Planned at the bytes the entry's run cited, read now as
+                # others: a run between the plan and the copy. The page links
+                # the copy an earlier build made, if any; nothing is written.
+                warnings.append(f"evidence {item.path} of {item.gate} moved while the page "
+                                f"was built, so it was not copied; build again")
+                if os.path.isfile(target):
+                    kept += 1
+                    keep_evidence.append(item.dest)
+                continue
             try:
                 with open(target, "rb") as fh:
                     same = fh.read() == payload_bytes
@@ -2178,14 +3326,28 @@ def build(
     for row in payload["views"]:
         view_id = str(row.get("id") or "")
         inline = row.get("data") or {}
-        if not inline:
+        chart = row.get("chart") or {}
+        if not inline and not chart.get("spec"):
             continue
         try:
             _require_view_id(view_id)
         except NopekitError as exc:
             warnings.append(f"view {view_id!r} kept inline: {exc}")
             continue
-        if _rough_size(inline) <= VIEW_INLINE_MAX:
+        # A chart's spec holds its series once more (and its points twice), so
+        # it is split on its own size, into `<id>~chart.json` (P2.5): a bound
+        # chart has no inline data, and its spec alone can be the size of a
+        # settling history. *Rejected:* the spec inline beside a split payload
+        # (state.json would carry the largest chart twice over).
+        if chart.get("spec") and _rough_size(chart) > VIEW_INLINE_MAX:
+            relative = posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX)
+            if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)),
+                                     chart):
+                written.append(posixpath.join(SITE_DIR, relative))
+            row["chart"] = {}
+            row["chart_url"] = relative
+            kept_view_files.append(view_id + CHART_FILE_SUFFIX)
+        if not inline or _rough_size(inline) <= VIEW_INLINE_MAX:
             continue
         relative = posixpath.join(VIEWS_DIR, f"{view_id}.json")
         if write_json_if_changed(os.path.join(site, relative.replace("/", os.sep)), inline):
@@ -2194,13 +3356,22 @@ def build(
         row["data"] = {}
         row["data_url"] = relative
         kept_view_files.append(f"{view_id}.json")
+    # What each view row is as written, its view file included, sealed into
+    # page.json: the next build keeps a row only at these bytes
+    # (`_kept_from_last_build`), and `site status` reads any other as edited.
+    page_doc["meta"]["views"] = {str(row.get("id") or ""): view_digest(
+        row, _views_file_payload(site, row)) for row in payload["views"]}
 
     # Keep every asset a view still points at, not merely the ones written this
-    # run: a viewgen that skipped because its exporter is missing did not rewrite
-    # its GLB, and deleting the previous one would turn a missing dependency into
-    # a missing picture with no explanation. And every evidence copy the plan
-    # links.
-    keep = list(ctx.written) + keep_evidence
+    # run, and every evidence copy the plan links. A viewgen that is unavailable
+    # or crashed is among them through the row its id had in the last build
+    # (`_kept_from_last_build`). What slipped through (issue #15): this comment
+    # said so before the code did; such a viewgen returned no view, its `src`
+    # left this list, and the cleaner deleted the picture it drew last time.
+    # And every file of each bound figure the page shows (issue #15, B.2.4): the
+    # one the view resolved to, current, stale or older, and the live 3D file
+    # of the served entry. An older folder no view resolves to is not kept.
+    keep = list(ctx.written) + keep_evidence + list(figures.keep)
     for row in payload["views"]:
         src = str(row.get("src") or "")
         if src.startswith(ASSETS_DIR + "/"):
@@ -2278,7 +3449,8 @@ def build(
     verdict_ages = ages(resolution, now)
     build_json = write_build_json(root, now=now, id=_baked_id(site), ok=True, live=live,
                                   verdicts=verdict_ages,
-                                  tracing=trace_logic.live_holder(root) is not None)
+                                  tracing=trace_logic.live_holder(root) is not None,
+                                  live_figures=figures.live)
     stamps = [r["stamp"] for r in prose_rows if r["subject"] is not None]
     return {
         "root": root,
@@ -2308,7 +3480,10 @@ def build(
             "claims": len(payload["claims"]),
             "verdicts": len(payload["verdicts"]),
             "locator_problems": len(problems),
-            "assets": len(ctx.written),
+            # A bound figure's files count as assets a viewgen drew (issue
+            # #15), its sidecars not: what the page shows, not how it is bound.
+            "assets": len(ctx.written) + sum(
+                1 for p in figures.keep if not p.endswith(page_logic.SIDECAR_SUFFIX)),
         },
         "map": {"lines": len(lay.lines), "boards": len(lay.boards), "zones": len(lay.zones),
                 "stations": len(lay.stations), "traced": built.trace is not None,
@@ -2325,6 +3500,171 @@ def build(
         "evidence": {"copied": copied, "kept": kept, "missing": not_shown},
         "warnings": warnings,
     }
+
+
+def view_digest(row: Mapping[str, Any], data: Any) -> str:
+    """sha256 of a view's ``state.json`` row and the payload of its view file
+    (``data/views/<id>.json``; None when it has none), canonical JSON: what
+    ``page.json``'s ``meta.views`` holds per view. ``""`` for a row JSON cannot
+    write (the build refuses such a row before here)."""
+    try:
+        text = json.dumps({"row": row, "data": data}, sort_keys=True,
+                          separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(("nopekit-view-v1\n" + text).encode("utf-8")).hexdigest()
+
+
+def _views_file_payload(site: str, row: Mapping[str, Any]) -> Any:
+    """The payload of ``row``'s view file under ``data/views/`` (`VIEWS_DIR`),
+    as the build split it out; None for a row with no such file (inline data,
+    or a bound view's chart under ``assets/figures/``); the string
+    ``"unreadable"`` when the file is missing or does not parse, which no
+    payload the build writes (a dict) equals. A row whose chart spec was split
+    out (``chart_url``) gives ``{"data": that, "chart": the spec}``."""
+    view_id = str(row.get("id") or "")
+    data = None
+    if view_id and row.get("data_url") == posixpath.join(VIEWS_DIR, f"{view_id}.json"):
+        data = _view_file(site, row["data_url"])
+    if not row.get("chart_url"):
+        return data
+    # A chart's spec split out (P2.5) is sealed with its row too: a number
+    # edited into it by hand reads *edited by hand*, as one in the payload does,
+    # and a row that names another file reads so as well.
+    chart = (_view_file(site, row["chart_url"]) if view_id and row["chart_url"] ==
+             posixpath.join(VIEWS_DIR, view_id + CHART_FILE_SUFFIX) else "unreadable")
+    return {"data": data, "chart": chart}
+
+
+def _view_file(site: str, rel: str) -> Any:
+    """The JSON of the site file ``rel``, or ``"unreadable"``."""
+    try:
+        with open(os.path.join(site, *rel.split("/")), "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return "unreadable"
+
+
+def view_problems(site: str, state_doc: Mapping[str, Any],
+                  page_doc: Mapping[str, Any]) -> list[str]:
+    """Each view row of ``state_doc`` (with its view file) whose digest is not
+    the one ``page_doc``'s ``meta.views`` holds, as a sentence; [] when the page
+    holds no digests (a page built before them). The page's own seal is the
+    caller's to check: a resealed page that names the edited bytes is the
+    forged-page class (SPINE_CONTRACT's limits)."""
+    digests = (page_doc.get("meta") or {}).get("views")
+    if not isinstance(digests, dict):
+        return []
+    out = []
+    for row in state_doc.get("views") or ():
+        if not isinstance(row, dict):
+            continue
+        view_id = str(row.get("id") or "")
+        if digests.get(view_id) != view_digest(row, _views_file_payload(site, row)):
+            out.append(f"view {view_id}: its row in {DATA_DIR}/{STATE_NAME} or its file "
+                       f"{VIEWS_DIR}/{view_id}.json is not what the build wrote")
+    return out
+
+
+def _kept_from_last_build(site: str, registry: ViewRegistry,
+                          notes: Iterable[Mapping[str, Any]],
+                          warnings: list[str] | None = None) -> dict[str, View]:
+    """``{view id: View}`` for each viewgen of ``notes`` that is unavailable or
+    crashed this build: the row its id had in the last ``data/state.json``,
+    with its payload read back from its ``data_url`` file, as a view again
+    (its identity forced from its spec, `_stamp_view`).
+
+    A view is page furniture, never a truth input: no view reaches the
+    resolution (`build` resolves against the ledger it was handed), so a row
+    kept here moves no status. The row is kept only while every file it names
+    is on disk and its payload parses; otherwise the view leaves the page, as
+    before, and the page links no file that is gone. Nothing machine-specific
+    is added to the row, so a clone without the tool bakes the same
+    ``state.json``. What slipped through (issue #15): an unavailable viewgen
+    returned no view, so a build on a computer without its tool removed the
+    view from the page and deleted its committed picture.
+    *Rejected:* keeping every file under ``assets/`` that the last state named
+    (a view whose viewgen was removed or returned nothing would never go);
+    keeping the file and dropping the row (the cleaner's job is to remove what
+    no page links, and a picture nobody links is that).
+
+    A row is kept only at the bytes the last build wrote: its digest, with its
+    view file, must be the one the last ``page.json`` holds under its intact
+    seal (``meta.views``, `view_digest`). What slipped through (review of P1):
+    a number added by hand to ``data/views/<id>.json`` was read back here and
+    baked into the new page, where it vouched for a prose number, and the
+    build resealed the page, so `site status` no longer said *edited by hand*.
+    *Rejected:* leaving a kept row's numbers out of the prose pool (a clone
+    without the tool would then mark numbers the page built with the tool
+    matched, and the two computers would bake two pages from one set of
+    records). What it cannot close: a hand edit that also writes the digest
+    into ``page.json`` and seals it again (the forged-page class,
+    SPINE_CONTRACT's limits).
+    """
+    wanted = {str(n.get("view") or "") for n in notes
+              if n.get("status") in ("unavailable", "error")}
+    if not wanted:
+        return {}
+    try:
+        with open(os.path.join(site, DATA_DIR, STATE_NAME), "r", encoding="utf-8") as fh:
+            last = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    try:
+        with open(os.path.join(site, DATA_DIR, PAGE_NAME), "r", encoding="utf-8") as fh:
+            last_page = json.load(fh)
+    except (OSError, ValueError):
+        last_page = None
+    digests = ((last_page.get("meta") or {}).get("views")
+               if isinstance(last_page, dict) and last_page.get("self") == page_logic.seal(
+                   last_page) else None)
+    if not isinstance(digests, dict):
+        digests = {}
+    rows = last.get("views") if isinstance(last, dict) else None
+    held: dict[str, View] = {}
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict) or row.get("id") not in wanted or row["id"] in held:
+            continue
+        found = registry.get(row["id"])
+        if found is None:
+            continue
+        spec = found[0]
+        named = [str(row.get(key) or "") for key in ("src", "data_url", "chart_url")]
+        if not all(_site_file(site, rel) for rel in named if rel):
+            continue
+        if digests.get(row["id"]) != view_digest(row, _views_file_payload(site, row)):
+            if warnings is not None:
+                warnings.append(f"view {row['id']}: its row in {DATA_DIR}/{STATE_NAME} or "
+                                f"its file {VIEWS_DIR}/{row['id']}.json is not what the last "
+                                f"build wrote, so it is not kept")
+            continue
+        body = {k: v for k, v in row.items() if k != "data_url"}
+        if row.get("data_url"):
+            if row["data_url"] != posixpath.join(VIEWS_DIR, f"{row['id']}.json"):
+                continue
+            try:
+                with open(os.path.join(site, *row["data_url"].split("/")), "r",
+                          encoding="utf-8") as fh:
+                    body["data"] = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(body["data"], dict):
+                continue
+        try:
+            view = View.from_dict(body)
+        except (TypeError, ValueError):
+            continue
+        held[spec.id], _note = _stamp_view(view, spec)
+    return held
+
+
+def _site_file(site: str, rel: str) -> bool:
+    """Whether ``rel`` is a plain relative path to a file under ``site``."""
+    text = str(rel).replace("\\", "/")
+    if (not text or text.startswith("/") or ":" in text
+            or ".." in text.split("/")):
+        return False
+    return os.path.isfile(os.path.join(site, *text.split("/")))
 
 
 def _merge_views(declared: Iterable[View], generated: Iterable[View]) -> tuple[list, list]:
@@ -2539,6 +3879,7 @@ def state(
     cover = report_logic._coverage(view, registry)
     stale_reasons = {gid: (resolution.rows[gid].stale_reason if gid in resolution.rows
                            else "") for gid in stale_gates}
+    unseen = claim_logic.unseen_gates(resolution)
 
     from . import packs as pack_logic             # a reader's module: not at import
     found_proposers = (pack_logic.proposers(root)
@@ -2575,7 +3916,15 @@ def state(
         row["cached"] = bool(how is not None and how.cached)
         row["fresh"] = bool(how is not None and how.fresh) and not everything
         reason = how.stale_reason if how is not None else ""
+        if verdict.gate in unseen and not everything:
+            # Issue #15, D1: in its own words, a count and one example — the
+            # whole channel list (often 2 KB of solver paths) is `doctor`'s.
+            reason = report_logic.unseen_words("meta", resolution, {verdict.gate})
         row["stale_reason"] = reason or (_MARKED_STALE if everything else "")
+        # Which of the two: the technical page's flag reads the resolver's word
+        # for each (review of D1: every unseen row there read "≈ invalidated"),
+        # and the engineering page's Failing cause text, for a fail of one.
+        row["unseen"] = bool(verdict.gate in unseen and not everything)
         # No clock here (architecture phase 5, SPEC 32): a verdict's `when` and
         # age go to `data/build.json` (`ages`), which git ignores, so a rebuild
         # that judged nothing new changes no tracked byte. What slipped through
@@ -2720,6 +4069,18 @@ def state(
             "stale": everything or bool(stale_gates),
             "stale_reason": (_MARKED_STALE if everything
                              else _stale_reason(resolution, stale_gates)),
+            # Review of issue #15's D1: every gate not current is not current
+            # only for a channel nopekit cannot see. The page's notice reads it
+            # (not its Stale claims: a Failing claim's unseen fail read "Some
+            # results are older than the design"), and the technical page's
+            # banner. `stale_check` is the command that reaches the stale gates
+            # — a plain `nopekit check` is tier 0 — which `site status` and the
+            # banner print (each said a plain `nopekit check` for a tier-2
+            # solver).
+            "stale_unseen": bool(not everything and stale_gates
+                                 and set(stale_gates) <= set(unseen)),
+            "stale_check": ("nopekit check" + report_logic._tier_flag(registry, stale_gates)
+                            if everything or stale_gates else ""),
             # Which records this page was built from: `store.records_digest`,
             # over the record files' paths and bytes and `project.json`. The
             # page's own staleness (`cli._site_state`) compares it with the
@@ -2823,7 +4184,8 @@ def _composed(view: Any, registry: Any, resolution: Any, everything: bool = Fals
     """The compositions `state` and the front page share — one
     `claims.compositions` call per build."""
     return claim_logic.compositions(view, registry=registry, stale=everything,
-                                    stale_gates=frozenset(resolution.stale_gates))
+                                    stale_gates=frozenset(resolution.stale_gates),
+                                    unseen_gates=claim_logic.unseen_gates(resolution))
 
 
 def _chart_margins(row: dict) -> dict:
@@ -2850,11 +4212,13 @@ def _chart_margins(row: dict) -> dict:
         if axis != "x" and _finite(value):
             limit = (float(value), comparator)
             break
-    key = next((k for k in ("current", "marker", "now") if k in data), None)
+    key = next((k for k in page_logic.CHART_CURRENT_KEYS if k in data), None)
     if limit is None or key is None:
         return row
-    y_axis = data.get("y") if isinstance(data.get("y"), dict) else {}
-    units = str(y_axis.get("units") or meta.get("y_units") or "")
+    # The y axis as the chart reads it (`page._view_axis`): the payload's, else
+    # the meta's, where the three analytic packs put it.
+    units = str(page_logic._view_axis(data, meta if isinstance(meta, dict) else {},
+                                      "y").get("units") or "")
     said = report_logic.HUMAN["site"]["chart_margin"]
 
     def one(item: Any) -> Any:
@@ -3115,13 +4479,22 @@ def _stale_reason(resolution: Any, stale_gates: frozenset) -> str:
     which result it touched, and was the same sentence for a comment edit and a
     changed load case.
     """
+    unseen = claim_logic.unseen_gates(resolution)
     named = [(gid, resolution.rows[gid].stale_reason)
-             for gid in resolution.rows if gid in stale_gates]
-    named += [(gid, "") for gid in sorted(stale_gates - {gid for gid, _ in named})]
+             for gid in resolution.rows if gid in stale_gates and gid not in unseen]
+    named += [(gid, "") for gid in sorted(stale_gates - unseen - {gid for gid, _ in named})]
     shown = [f"{gid}: {why}" if why else gid
              for gid, why in named[:verdict_logic.MAX_STALE_REASONS]]
     more = len(named) - len(shown)
-    return "; ".join(shown) + (f" (+{more} more)" if more > 0 else "")
+    text = "; ".join(shown) + (f" (+{more} more)" if more > 0 else "")
+    if unseen:
+        # Issue #15, D1: the gates not current only for a channel nopekit
+        # cannot see, in one clause of their own — a count and one example.
+        # What slipped through: each gate's whole channel list (~2 KB of
+        # solver paths) under "verdicts are STALE", for an untouched design.
+        clause = report_logic.unseen_words("meta", resolution, unseen)
+        text = f"{text}; {clause}" if text else clause
+    return text
 
 
 def _parse_iso(text: str) -> datetime | None:
@@ -3172,6 +4545,24 @@ THREE_VERSION = "0.169.0"
 #: changing what they are.
 _THREE_BASE = f"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}"
 
+#: Vega, Vega-Lite and vega-embed, which draw a bound figure's chart from the
+#: spec the spine bakes (`page.chart_spec`; issue #15, rule 0.1 of its design:
+#: draw with a trusted library and build as little as possible). Pinned exactly,
+#: as three.js is, and each at least two weeks old when it was chosen
+#: (2026-10-21): vega 6.2.0 (2025-09-16), vega-lite 6.4.1 (2025-09-23),
+#: vega-embed 7.1.0 (2025-10-09). The UMD builds, each one self-contained file
+#: (``vega.min.js`` 512 KB, ``vega-lite.min.js`` 249 KB, ``vega-embed.min.js``
+#: 60 KB), loaded by `lib/figures.js` in that order, from ``vendor/vega/`` when
+#: it is there, else from the CDN; `lib/figures.js` holds the same three URLs
+#: and a test holds the two lists equal. *Rejected:* the ESM builds through the
+#: import map (``vega.module.js`` imports 27 bare package names and
+#: ``vega-lite``'s ``build/index.js`` four more, each an import-map line; and
+#: jsdelivr's ``+esm`` of vega-embed 7.1.0 resolves vega-lite to 6.4.3, a
+#: version nobody pinned); an import-map entry in the page shells (they are
+#: the project's own and never regenerated, so a site made before this change
+#: would never get the line, while ``lib/`` is refreshed by every build).
+VEGA_VERSIONS = {"vega": "6.2.0", "vega-lite": "6.4.1", "vega-embed": "7.1.0"}
+
 
 def vendor_urls() -> dict:
     """``{site-relative path: URL}`` for ``nopekit site vendor``. Offline three.js.
@@ -3215,4 +4606,10 @@ def vendor_urls() -> dict:
         # copy alone (the one situation vendoring exists for would 404 on it).
         posixpath.join(VENDOR_DIR, "jsm/libs/meshopt_decoder.module.js"):
             f"{_THREE_BASE}/examples/jsm/libs/meshopt_decoder.module.js",
+        # Issue #15: the chart library (`VEGA_VERSIONS`), under vendor/vega/,
+        # so an offline site draws its charts too and does not fall back to
+        # the table of numbers.
+        **{posixpath.join(VENDOR_DIR, "vega", f"{name}.min.js"):
+           f"https://cdn.jsdelivr.net/npm/{name}@{version}/build/{name}.min.js"
+           for name, version in VEGA_VERSIONS.items()},
     }

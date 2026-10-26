@@ -1,0 +1,12 @@
+{
+  "statement": "The wheels do not turn in the model, and the drag of turning wheels is not part of the drag area",
+  "kind": "assumption",
+  "owner": "Eric Neuman",
+  "rationale": "in the tutorial's case the wheels are still walls: the ground moves with the air at 20 m/s, as the road does under the bike, but the wheels do not turn. A turning wheel changes the flow under the bike and the drag",
+  "mechanism": {
+    "how": "A run with a rotating-wall condition on each wheel (the case's ground already moves with the air), compared with this one; or a coast-down test of the real bike"
+  },
+  "requirements": [
+    "R1"
+  ]
+}

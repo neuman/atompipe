@@ -698,7 +698,8 @@ def tokens(view: Any, resolution: Any, registry: Any, *,
     from . import report                         # a reader's module: not at import
     stale = getattr(resolution, "stale_gates", frozenset())
     if composed is None:
-        composed = claims.compositions(view, registry=registry, stale_gates=stale)
+        composed = claims.compositions(view, registry=registry, stale_gates=stale,
+                                       unseen_gates=claims.unseen_gates(resolution))
     cover = claims.effective_gates(view, registry)
     claim_tokens = {cid: _token(c.status, c.errored)
                     for cid, c in sorted(composed.items(), key=lambda kv: _natural(kv[0]))}

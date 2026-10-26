@@ -103,7 +103,15 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_requirements.ARequirementIsNeverMoreResolvedThanItsClaims",
         "test_mechanism.AMechanismNeverMovesAStatus",
         # Architecture phase 2: an evaluator's declared basis moves no status.
-        "test_basis.ABasisNeverChangesAStatus"],
+        "test_basis.ABasisNeverChangesAStatus",
+        # Review of the motorBike design's P3-P5: guards that judge other
+        # quantities covered the drag-area tag, and a drag-area claim read
+        # Checked with its limit read by no evaluator.
+        "test_aero_openfoam.NoGuardSpeaksForTheDragArea",
+        # The motorBike design's P6: the drag area is judged at the top of its
+        # band, in the gate's own units, against the one claim it reads.
+        "test_aero_openfoam.TheDragAreaIsJudgedAtTheTopOfItsBand",
+        "test_aero_openfoam.TheDragGateStatesItsOwnUnits"],
     5: "test_packs.ControlsAreSealed",
     6: "test_packs.NegativeControlsFire",
     # 7, and P2.4: a goalpost edit re-keys exactly the gates that read it.
@@ -146,7 +154,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_round.RoundsCommitOnlyAsAListedPerson",
         "test_record_commands.InitStartsARepository",
         # Architecture phase 3b: a trace file is written once, whole.
-        "test_derivation.TheTraceIsWrittenOnce"],
+        "test_derivation.TheTraceIsWrittenOnce",
+        # Issue #15: the evidence manifest `check` writes is scratch git ignores,
+        # and `site build` writes nothing outside `site/` but what git ignores.
+        "test_figures.TheEvidenceManifestIsScratch"],
     # 9 is the paired rule from P2.3: both controls (QualificationIsPaired), and
     # every conclusive mutation a fail for an evaluator outside the bundled packs
     # (EveryConclusiveMutationMustFail); the known-bad half's guards stay where
@@ -165,7 +176,10 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
         "test_context.AMutationPassingOutsideStillCounts",
         "test_goalposts.AGoalpostIsNeverAKey",
         # Architecture phase 2: a declared basis is never a qualification route.
-        "test_basis.ABasisNeverQualifies"],
+        "test_basis.ABasisNeverQualifies",
+        # The motorBike design's P6: the drag gate's goalpost moves move
+        # nothing but its outcome.
+        "test_aero_openfoam.TheDragAreasGoalpostMovesNothingElse"],
     # 10 (P2.2): the rule in the run loop, the resolver and the composition; a
     # cached pass behind a failed guard, end to end in process; and the graph
     # the rule walks — a cycle or an inversion refused at registration.
@@ -217,7 +231,13 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # Architecture phase 5: next steps on the page are the predicate's.
          "test_site_truth.NextStepsAreThePredicate",
          # Architecture phase 3b: amber is display only.
-         "test_derivation.AmberChangesNoStatus"],
+         "test_derivation.AmberChangesNoStatus",
+         # Issue #15, D1: a claim Stale only for inputs nopekit cannot see has
+         # its own cause, which moves no status, readiness or blocking.
+         "test_unseen.UnseenMovesNoStatus",
+         # The motorBike design's P6: a ladder is judged twice but solved once
+         # a process, so the boundary still solves it.
+         "test_aero_openfoam.ALadderRecordIsReadOnlyByItsProcess"],
     # 13 (architecture phase 2, reserved in SPEC §8): a preference counts only
     # through the person's channel — never from an agent session or a pipe,
     # never by `by` alone, never from a file that is not sealed and chained, and
@@ -237,7 +257,26 @@ INVARIANT_CLASSES: dict[int, str | list[str]] = {
          # reading order or an age.
          "test_site_truth.TheBrowserComputesNoTruth",
          # Architecture phase 3b: the map's feeds, stops and amber are the trace's.
-         "test_derivation.TheMapDrawsWhatTheTraceObserved"],
+         "test_derivation.TheMapDrawsWhatTheTraceObserved",
+         # Issue #15: evidence on the page is the bytes its entry's run cited,
+         # bound by content, never another run's under the same name.
+         "test_figures.EvidenceIsBoundByContent",
+         # Issue #15, P1.2: no file the page links is deleted by the build that
+         # links it, and a renderer that is missing or crashes moves no status
+         # and keeps the picture its last build drew.
+         "test_figures.NothingTheBuildDeletesIsLinked",
+         "test_figures.AMissingRendererMovesNoStatus",
+         # Issue #15, P1.3: a bound figure is drawn only from its entry's
+         # verified evidence, published under that entry, and shown only at
+         # the bytes its sidecar names, under an entry the cache holds.
+         "test_figures.AFigureIsItsEntrysEvidence",
+         # Issue #15, P1.4: a figure on the page says which result it is and
+         # sits beside the chips of every claim its gate covers, a chart's
+         # limit and point are the floor's, and a colour range is a pack
+         # constant, never a limit.
+         "test_figures.AFigureSaysWhichResultItIs",
+         "test_figures.TheClaimsStatusSitsBesideEveryFigure",
+         "test_figures.TheScaleIsAPackConstant"],
     # 15 (P2.3): the mutation pass's seal, over the real walk and every planted
     # runner — moved here from PLANNED_INVARIANT_CLASSES with CLAUDE.md's item.
     15: ["test_mutation.MutationIsSealed",

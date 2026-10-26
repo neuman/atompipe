@@ -37,6 +37,7 @@ import { renderProse } from "./lib/sections.js";
 import { readBuild, watchBuild } from "./lib/live.js";
 import { createViewer } from "./lib/viewer3d.js";
 import { renderImage, renderDiagram } from "./lib/stage.js";
+import { figureTag, figureLegends, figureStill } from "./lib/figures.js";
 import { leadOf, tallyList } from "./lib/verdict.js";
 import { themeButton, menuName } from "./lib/theme.js";
 import { paintBuild } from "./lib/banner.js";
@@ -78,7 +79,9 @@ const mk = {
   build: null,        // build.json, or null
   viewer: null,       // the viewer's api, once loaded
   viewId: null,       // the view the stage shows now
-  repView: null,      // the representation's view, as baked
+  repView: null,      // the representation's key: its view, and its figure as baked
+  repFigure: null,    // the representation's figure (issue #15), or null
+  repControls: null,  // a figure hero's baked controls, or null
   popover: null,      // { panel, button } of the popover on screen
   observer: null,     // the IntersectionObserver that pauses the viewer
   visible: true,
@@ -148,7 +151,7 @@ function render({ again = false } = {}) {
   mount($("#mk-copy-rest"), ...verdictRest(doc, words));
 
   const rep = doc.representation || {};
-  if (!again || mk.repView !== rep.view) stage(rep);
+  if (!again || mk.repView !== repKeyOf(rep)) stage(rep);
 
   section($("#story"), storySection(doc, words));
   section($("#asked"), askedSection(doc, words));
@@ -187,9 +190,13 @@ function verdictHead(verdict, words) {
           el("span", { text: headline }))
       : null,
     tallyList(verdict, { cls: "tally mk-tally" }),
-    verdict.stale && notices.stale_public
+    // The notice is baked (`verdict.notice_public`, issue #15 D1): "older than
+    // the design" is false of a solver's result on an untouched design. A
+    // page.json from before it falls back to the one sentence it had.
+    verdict.stale && (verdict.notice_public || notices.stale_public)
       ? el("p", { class: "nk-notice mk-stale", role: "status" },
-          el("span", { class: "nk-glyph", "aria-hidden": "true", text: "≈" }), notices.stale_public)
+          el("span", { class: "nk-glyph", "aria-hidden": "true", text: "≈" }),
+          verdict.notice_public || notices.stale_public)
       : null,
     verdict.limits ? el("p", { class: "limits mk-limits", text: verdict.limits }) : null,
   ];
@@ -243,13 +250,25 @@ const openClaim = (id) => location.assign(`engineering/#claim=${encodeURICompone
 // --------------------------------------------------------------------------- //
 // the stage: the representation, and the customizer around a 3D view
 // --------------------------------------------------------------------------- //
+/** A hero's key: its view and, for a figure, the whole baked figure, so a
+ *  live rebuild that moves a figure's chips or its sentence draws it again. */
+const repKeyOf = (rep) => `${rep.view}|${JSON.stringify(rep.figure || null)}`;
+
+/** The hero. A figure as the hero (issue #15) says which result it is under
+ *  the picture, with the chips of the claims its gate covers, and as a 3D
+ *  field it turns its committed GLB in field mode with the baked `controls`
+ *  alone (spin): parts, colours, wireframe and explode act on a model's
+ *  parts, and a solved field has none. */
 function stage(rep) {
   const host = $("#mk-stage");
   const hero = $("#top");
   closePopover();
   disposeViewer();
-  mk.repView = rep.view;
+  mk.repView = repKeyOf(rep);
+  mk.repFigure = rep.figure || null;
+  mk.repControls = Array.isArray(rep.controls) ? rep.controls : null;
   const view = findView(rep.view);
+  const words = (mk.doc && mk.doc.words) || {};
   // No representation: a hero of text alone. No box, no controls and no
   // author's notice: the notice is for the person who builds the site, and
   // the build says it there.
@@ -263,9 +282,15 @@ function stage(rep) {
   hero.classList.add("mk-hero--flat");
   const caption = rep.title ? el("figcaption", { class: "mk-caption", text: rep.title }) : null;
   withData(view).then(() => {
-    if (mk.repView !== rep.view) return;            // a rebuild moved on meanwhile
+    if (mk.repView !== repKeyOf(rep)) return;       // a rebuild moved on meanwhile
     if (rep.kind === "image") {
-      mount(host, el("figure", { class: "mk-flat" }, renderImage(view, [], null), caption));
+      // A figure still is drawn as on its card, with its plane words and
+      // caption (review of P2: two unnamed black lines on the hero).
+      const fig = rep.figure;
+      mount(host, el("figure", { class: fig ? "mk-flat mk-figure" : "mk-flat" },
+        fig ? figureStill(fig, view.src) : renderImage(view, [], null), caption,
+        fig ? figureTag(fig, words) : null, fig ? figureLegends(fig) : null,
+        fig && fig.caption ? el("p", { class: "fig-caption", text: fig.caption }) : null));
       return;
     }
     const flat = el("div", { class: "mk-flat-svg" });
@@ -277,7 +302,13 @@ function stage(rep) {
 
 function findView(id) {
   if (!id) return null;
-  return ((mk.state && mk.state.views) || []).find((v) => v.id === id) || null;
+  const view = ((mk.state && mk.state.views) || []).find((v) => v.id === id) || null;
+  const fig = mk.repFigure;
+  // A figure hero as a 3D field: its committed GLB, never the still's PNG.
+  if (view && fig && fig.view === id && fig.field_src) {
+    return { ...view, kind: "field", src: fig.field_src };
+  }
+  return view;
 }
 
 async function withData(view) {
@@ -353,8 +384,13 @@ function startViewer(view, box, canvas, size) {
   const expected = Number(choice.bytes) || 0;
   const pressed = { spin: !(CALM && CALM.matches) };
   let spinButton = null;
+  const fig = mk.repFigure && mk.repFigure.view === view.id ? mk.repFigure : null;
+  if (fig) {
+    const words = (mk.doc && mk.doc.words) || {};
+    box.after(el("div", { class: "mk-figure-tag" }, figureTag(fig, words), figureLegends(fig)));
+  }
   mk.viewer = createViewer({
-    host: canvas, view,
+    host: canvas, view, field: !!fig, light: fig ? (fig.light || "") : undefined,
     onProgress: (loaded, total) => {
       const whole = total || expected;
       if (whole > 0) bar.style.width = `${Math.min(100, (loaded / whole) * 100).toFixed(1)}%`;
@@ -365,7 +401,8 @@ function startViewer(view, box, canvas, size) {
       api.setFrameShift(WIDE && WIDE.matches ? FRAME_SHIFT : 0);
       restoreTints(view, api);
       api.setSpin(pressed.spin);
-      spinButton = controls(view, api, box, pressed);
+      spinButton = controls(view, api, box, pressed, fig ? mk.repControls : null,
+        fig ? ((fig.turn || {}).flat_word || "") : "");
       watchSight(api);
     },
     onSpinStop: () => { pressed.spin = false; if (spinButton) spinButton.setAttribute("aria-pressed", "false"); },
@@ -412,6 +449,7 @@ const ICONS = {
   wire: "M12 3l8 5v8l-8 5-8-5V8l8-5zm0 0v18M4 8l16 8M20 8L4 16",
   reset: "M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4",
   full: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  flat: "M4 4h16v16H4zM4 20L20 4",
 };
 
 function icon(name) {
@@ -430,9 +468,33 @@ function ctl(name, label, spec = {}) {
  *  baked model views), wireframe, reset and full screen (where the browser
  *  has it). Returns the spin button, which the viewer turns off when a hand
  *  stops the model. */
-function controls(view, api, box, pressed) {
+function controls(view, api, box, pressed, only = null, flatWord = "") {
   const tools = [];
   let slider = null;
+  // A figure hero's baked `controls` (spin): nothing else applies to a field.
+  if (only) {
+    const spinOnly = ctl("spin", "Spin", { "aria-pressed": String(pressed.spin) });
+    spinOnly.addEventListener("click", () => {
+      pressed.spin = spinOnly.getAttribute("aria-pressed") !== "true";
+      spinOnly.setAttribute("aria-pressed", String(pressed.spin));
+      api.setSpin(pressed.spin);
+    });
+    if (only.includes("spin")) tools.push(spinOnly);
+    // A lit figure's flat colours (design P2), as the engineering card's
+    // toggle (`flatToggle` in lib/figures.js) in the pill's look.
+    if (api.lit && flatWord) {
+      const flat = ctl("flat", flatWord, { "aria-pressed": "false" });
+      flat.addEventListener("click", () => {
+        const on = flat.getAttribute("aria-pressed") !== "true";
+        flat.setAttribute("aria-pressed", String(on));
+        api.setFlat(on);
+      });
+      tools.push(flat);
+    }
+    box.appendChild(el("div", { class: "mk-pill", role: "toolbar", "aria-label": "Viewer controls" }, ...tools));
+    box.appendChild(el("p", { class: "mk-hint", text: "Drag to turn. Scroll to zoom." }));
+    return spinOnly;
+  }
   if (api.canExplode && api.movers.length >= 2) {
     slider = el("input", { class: "explode-slider mk-slider", type: "range", min: "0", max: "100",
       value: "0", "aria-label": "Explode the model",
